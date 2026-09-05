@@ -165,6 +165,8 @@ Before Phase 2 starts, confirm:
 - [ ] An attempt to cross the boundary — from the API, from a worker with no context, from storage, from a raw SQL session — fails in all four places.
 - [ ] Every table created in this phase appears in `docs/PHASE-1-SCHEMA.md` with the columns actually shipped. If the code drifted from the document, update the document.
 - [ ] `docs/DECISIONS.md` records every choice made where the architecture was silent.
+- [ ] **D-029 answered** — the client-policy-year representation (recommended: `policy_periods`) is decided before any Phase 2 schema is written. Architecture v3.1 §3A.
+- [ ] **D-026 revisited** — denied-attempt audit gap: accept, or change the 0014 functions to return structured refusals so the audit row commits.
 
 ---
 

@@ -1,6 +1,6 @@
 # ASAP
 
-A multi-tenant AI operating system for insurance brokerages. Read `CLAUDE.md` first; the controlling reference is `docs/ASAP-Architecture-v3.0.md`.
+A multi-tenant AI operating system for insurance brokerages. Read `CLAUDE.md` first; the controlling reference is `docs/ASAP-Architecture-v3.1.md`.
 
 ## Status
 

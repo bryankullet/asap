@@ -8,7 +8,32 @@ Instructions for Claude Code working in this repository. Read this first, every 
 
 A multi-tenant AI operating system for insurance brokerages. Each brokerage ("organization") gets a private workspace over its own clients, policies, documents and email. The user talks to it; the system generates workspaces ("Spaces") and prepares actions for approval. It is **not** a chatbot bolted onto insurance software, and it is **not** a menu-driven insurance CRM.
 
-The controlling reference is `docs/ASAP-Architecture-v3.0.md`. When this file and the architecture disagree, the architecture wins — tell the user, don't silently pick one.
+The controlling reference is `docs/ASAP-Architecture-v3.1.md`. When this file and the architecture disagree, the architecture wins — tell the user, don't silently pick one.
+
+**The hierarchy of truth** (architecture §0). Three documents, one model, five layers:
+
+```
+Economic model     docs/research/…Economic-State-Machine.pdf + architecture §3A, §8A, §8B, §24A
+                   "What is happening to business value?"
+Intelligence model docs/skill-map.md + architecture §3, §16, §17, §3B
+                   "What needs to happen next, and which capability can do it?"
+Experience model   architecture §18, §25, §26, §27, §36 + docs/ui
+                   "What should the employee see and do?"
+Execution model    architecture §15, §20, §21, §28, §29, §45
+                   "How does ASAP safely perform it?"
+Evidence + audit   architecture §23, §40 + audit_log, events
+                   "How do we prove what happened?"
+```
+
+Underneath the conversation, ASAP tracks one **economic unit** — a client, a policy, a period of cover — through the states that turn work into cover, commission, cash and a retained client. User intent is the human interaction model; economic state is the business operating model. Do not confuse them, and do not show the second to the user.
+
+**Economic-model rules that bite in code** (architecture §3A, §3B; D-027, D-028, D-029):
+- Economic position is a **vector of dimensions computed from facts and evidence**, never a stored status. There is no `economic_state` column or enum, anywhere. The only written record is `economic_transitions`: a verified transition with its evidence.
+- The model may explain, detect, recommend and prepare. It may not set, infer or invent a state value. Same rule as workflow status, one level down.
+- The eight economic states and the S/M codes **never appear in UI copy, tooltips or alt text**. Spaces speak plain brokerage language from the recipe phrasebook.
+- Kenyan legal and market values (commission deadline, document clock, WHT rate, class caps, claims reference) are **per-organization `company_rules` with a source and a verified-at date**. Never a constant.
+- Anything the research labels a hypothesis (staff hours, conversion, waiting times, service-load thresholds) is configurable, measured, or displayed as an estimate with its basis — see `docs/research/OPERATOR-VALIDATION.md`.
+- The client-policy-year representation is decided in D-029 **before any Phase 2 schema is written**.
 
 **Insurance terms you will meet:**
 - **Policy** — the insurer's contract with the client.
@@ -18,6 +43,8 @@ The controlling reference is `docs/ASAP-Architecture-v3.0.md`. When this file an
 - **Levy** — a statutory charge added on top of premium (training levy, policyholder compensation fund). Not the broker's money.
 - **Binder** — delegated authority letting the broker commit the insurer to cover.
 - **Loss ratio** — claims paid ÷ premium earned. Drives renewal pricing.
+- **Client-policy-year** — one client, one policy, one period of cover. The primary economic unit (architecture §3A). Representation pending D-029.
+- **WHT** — withholding tax deducted from commission before it reaches the broker. A tax credit, not a cost, but it changes the cash received and needs a certificate.
 
 ---
 
@@ -59,12 +86,19 @@ supabase/
 ├── tests/        pgTAP tests
 └── seed.sql      Two-brokerage fixture
 docs/
-├── ASAP-Architecture-v3.0.md
+├── ASAP-Architecture-v3.1.md
 ├── PHASE-1-WORK-ORDER.md
 ├── PHASE-1-SCHEMA.md
 ├── SECRETS.md
 ├── DECISIONS.md
-├── skill-map.md
+├── skill-map.md               Intent & Skill Map + economic purpose addendum
+├── research/
+│   ├── ASAP-Kenyan-Insurance-Brokerages-Economic-State-Machine.pdf   the economic model (source)
+│   ├── economic-state-machine.md                                     its extracted text
+│   ├── ESM-INTEGRATION-AUDIT.md                                      how it was integrated into v3.1
+│   └── OPERATOR-VALIDATION.md                                        hypotheses, thresholds, legal values
+├── evaluation/
+│   └── SCENARIOS.md           ten economic stress tests as evaluation fixtures
 └── ui/
     ├── spec.txt                113 screens
     ├── ASAP-UI-Changes.md      change list on top of the spec
@@ -156,7 +190,7 @@ ASAP will not:
 | `docs/ui/spec.txt` | 113-screen UI specification in generator-contract format | The screen inventory |
 | `docs/ui/ASAP-UI-Changes.md` | Consolidated change list on top of the spec | **Wins where it conflicts with spec.txt** — it is newer |
 | `docs/ui/prototype/` | Static HTML/CSS/JS prototype of the Intent OS | Look and feel only |
-| `docs/ASAP-Architecture-v3.0.md` §18, §34, §36, §37 | Generative UI contract, permissions, system states, responsive rules | Wins over all three above |
+| `docs/ASAP-Architecture-v3.1.md` §18, §34, §36, §37 | Generative UI contract, permissions, system states, responsive rules | Wins over all three above |
 
 The prototype is a **built demo with hardcoded seed data**, not source. Do not import from it, do not extend it, do not port its DOM. Read it to see what a Space should feel like, then build the real thing in React.
 

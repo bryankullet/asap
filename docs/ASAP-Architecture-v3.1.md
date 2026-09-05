@@ -2,7 +2,33 @@
 
 ## Technical Architecture for an AI Operating System for Insurance Brokers
 
-### Version 3.0
+### Version 3.1
+
+---
+
+## Changes from Version 3.0
+
+Version 3.0 described the intelligence loop — intent → skills → retrieval → reasoning → generated Space → action → approval → execution → evidence — and the platform that runs it. Version 3.1 keeps all of it and adds the **economic operating model** beneath it, from `docs/research/ASAP-Kenyan-Insurance-Brokerages-Economic-State-Machine.pdf` (the Economic State Machine report, 5 September 2026) and the integration audit in `docs/research/ESM-INTEGRATION-AUDIT.md`.
+
+The thesis: insurance work exists because an economic unit — one client, one policy, one period of cover — is somewhere in its lifecycle and something is preventing it from moving safely forward, with money, time, retention, service cost, evidence or professional risk attached to the blockage. User intent remains the human interaction model. Economic state becomes the business operating model underneath the product. The two are not confused: the employee says what they need done; ASAP works out where value sits and what unblocks it.
+
+Added in v3.1:
+
+* **The hierarchy of truth** (§0): economic model → intelligence model → experience model → execution model → evidence and audit.
+* **§3A — the economic operating model**: the unified loop that begins at a trigger and ends at a verified transition; the client-policy-year as the primary economic unit; economic position as a vector of dimensions computed from facts, never a stored status; the eight-state management view as an internal summary that never reaches the UI.
+* **§3B — the Economic State Service**: the deterministic resolver that turns facts, evidence, money, workflow, clocks and exceptions into a state vector, blockers, value at stake and next transitions. The model may explain it; it may not author it.
+* **§8A — the money state machine** M0–M8 as a defined projection over money tables, and the trapped-value gap as a named detector.
+* **§8B — contribution and service load**: profitability per unit as a progressively measured estimate.
+* **§22 — regulatory and market values** as per-organization configuration with a source reference, never constants.
+* **§23 — the evidence-to-transition map**: a transition is verified only when its required evidence resolves.
+* **§24A — the exception state machine**: fourteen loops, each with signal → consequence → evidence → recovery → skills → Space → Job → resolution evidence.
+* **§25, §26, §27, §28** — Spaces answer nine economic questions in plain language; Jobs bind to a transition goal and complete only when completion evidence resolves; Discover becomes the economic attention engine with a declared weighted score; automations move or protect economic state.
+* **§32 — management control loop** (daily / weekly / monthly) as parameterised analysis feeding Discover, Report and Investigation Spaces.
+* **§39 — economic evaluation set**: the report's ten stress-test scenarios as fixtures (`docs/evaluation/SCENARIOS.md`).
+* **§43 — phase annotations** placing each piece of the economic layer in the phase that already owns its parts. Phase 1 is unchanged.
+* **§17 — skill contracts** gain economic purpose (applicable states, transition served, blockers resolved, required and success evidence, money / service-cost / retention / risk effect). Ten new skills and one `unit.*` family fill genuine gaps; see `docs/skill-map.md`.
+
+Research status is preserved throughout: the report labels its claims *observed fact*, *strong inference* or *hypothesis*. Hypotheses are configurable, measured or labelled as estimates in ASAP, never hardcoded (`docs/research/OPERATOR-VALIDATION.md`).
 
 ---
 
@@ -36,6 +62,31 @@ Added in v3.0:
 * **Section 43 — implementation phases re-sliced vertically.** v2.0 built horizontally by layer, which meant the product's *home screen* depended on the *last* phase. v3.0 builds one insurance lifecycle end to end at a time.
 * **Section 4 — the implementation stack is now specified concretely**: monorepo, shared Zod schema package, Hono API, Node workers plus one Python extraction worker, `supabase-js` versus Drizzle, Supabase CLI migrations, Vitest and pgTAP.
 * **Sections 46–48 — API surface and two coverage maps** proving every skill in the Skill Map and every UI requirement has a backend path.
+
+---
+
+# 0. The hierarchy of truth
+
+Three documents used to look like three ideas. They are one model with five layers, and the layers answer different questions.
+
+```text
+ECONOMIC MODEL         What is happening to business value?
+  docs/research/…Economic-State-Machine.pdf · §3A · §8A · §8B · §24A
+        ↓
+INTELLIGENCE MODEL     What needs to happen next, and which capability can do it?
+  docs/skill-map.md · §3 · §16 · §17 · §3B
+        ↓
+EXPERIENCE MODEL       What should the employee see and do?
+  §18 · §25 · §26 · §27 · §36 · docs/ui/*
+        ↓
+EXECUTION MODEL        How does ASAP safely perform it?
+  §15 · §20 · §21 · §28 · §29 · §45
+        ↓
+EVIDENCE + AUDIT       How do we prove what happened?
+  §23 · §40 · supabase/migrations (audit_log, events)
+```
+
+Reading rule: a lower layer never contradicts a higher one. If a Space shows a status that the economic model cannot derive from facts, the Space is wrong. If the economic model needs a fact the execution model cannot record with evidence, the model is not yet implementable, and says so.
 
 ---
 
@@ -186,6 +237,154 @@ Approve     Confirm a prepared action
 Analyze     Surface trends, risks, performance or financial insights
 Automate    Create recurring or event-driven rules
 ```
+
+---
+
+# 3A. The economic operating model
+
+## Why work exists
+
+An insurance broker turns client trust, risk information, insurer access and staff work into placed cover; that cover becomes profitable only when commission is collected, service cost stays controlled, evidence is correct, and the client renews. Every piece of brokerage work is therefore an attempt to move an **economic unit** forward, or to stop it from losing value.
+
+## The unified loop
+
+§3's intelligence loop is the middle of a longer loop. The whole of it:
+
+```text
+TRIGGER   user intent · event (§29) · schedule · detector (§27)
+   ↓
+Identify the economic unit                      → §3A, context service (§33)
+   ↓
+Reconstruct its current economic position       → Economic State Service (§3B)
+   ↓
+Detect the bottleneck, exception or desired transition
+   ↓
+Understand the outcome required                 → intent router (§16)
+   ↓
+Select one or more insurance skills             → skill registry (§17)
+   ↓
+Retrieve records, documents, email, evidence    → §14, §9, §23
+   ↓
+Reason over the situation                       → AI gateway (§15)
+   ↓
+Generate or update the appropriate Space        → §18, §25
+   ↓
+Create or continue a Job where work is required → §26
+   ↓
+Prepare the next action                         → work tools (§20)
+   ↓
+Human approval where required                   → approval engine (§21)
+   ↓
+Execute                                         → secure executor (§20)
+   ↓
+VERIFY that the required evidence now exists    → §23 evidence-to-transition map
+   ↓
+Confirm the economic transition                 → economic_transitions (§26)
+   ↓
+Update Discover, related Spaces, money position, risk
+   ↓
+Record evidence and audit trail                 → §40
+```
+
+Two halves, two owners. The **human interaction model** is still "tell ASAP what you need done" (§3). The **business operating model** is the economic loop. The employee never has to understand the second; the product is built on it.
+
+## The primary economic unit: client-policy-year
+
+```text
+one client + one policy + one period of cover
+Acme Ltd · Motor Fleet · 1 Nov 2026 – 31 Oct 2027
+```
+
+It is the unit because it contains a client need, a defined risk, quotations, a premium, a client decision, evidence that cover exists, commission, service and claims effort, an expiry, a renewal or exit, and a measurable contribution. It becomes economically serious when the broker commits staff time, revenue-producing when premium reaches the insurer and cover is placed, and complete when the period has ended or renewed, obligations are understood, money and adjustments are reconciled, evidence is stored, and no exposure remains.
+
+Secondary units attach to it: the client relationship (many periods), opportunity or tender (may create several), quote request (one insurer path), endorsement or service request, claim-support case, premium item, commission receivable, renewal cycle, complaint or error.
+
+**Representation.** Decision D-029 (pending operator answer before Phase 2 schema): recommended as a thin first-class `policy_periods` row per client-policy-year, with commission, claims, endorsements, documents, premium items and renewal cycles referencing the period. The economic position is **never stored on it**; it is projected (§3B). See `docs/research/ESM-INTEGRATION-AUDIT.md` §G for the alternatives rejected.
+
+## Economic position is a vector, not a status
+
+There is no `economic_state` column, anywhere, ever. A policy can be active, missing its final schedule, waiting on a claim document, owed commission, approaching renewal and generating unusual service cost at the same time. The position is the tuple of these dimensions, each computed from authoritative facts and evidence:
+
+```text
+commitment        none · pursuing · mandated · declined            (opportunity, mandate evidence)
+risk_information  incomplete · conflicting · market_ready           (requirements vs evidence; conflicts)
+market            not_approached · awaiting · terms_usable · declined · re_marketing
+client_decision   none · pending · instructed · changed · expired_terms
+premium           possible · quoted · selected · due · received_by_insurer · failed
+cover             none · confirmed · confirmed_mismatch · cancelled
+policy_evidence   missing · partial · complete · incorrect · overdue
+active_service    quiet · open_requests · open_claim · blocked
+commission        not_due · due · stated · variance · paid · settled · disputed · overdue
+renewal           not_started · started · at_risk · retained · lost · lapsed
+exceptions        [] or a list of open exception loops (§24A)
+service_load      unmeasured · normal · elevated · abnormal        (estimate until operator-validated)
+```
+
+Each value is defined by a rule over records and evidence, documented with the dimension. Values are computed on read (SQL projections, cached in `entity_summaries` with `computed_at`), not written by users, jobs or models.
+
+## The eight-state management view
+
+The report reduces the business to eight questions and eight states: possible business → broker committed → market-ready risk → decision-ready options → placed cover → active service → cash and renewal → economic closure. In ASAP this is a **derived summary for management analysis** (§32) and for reasoning inside the gateway. It is never a column, never an enum, and never appears in UI copy, tooltips or alt text (D-028). Spaces speak plain brokerage language instead: not "S7 transition blocked", but "Cover cannot safely start yet. Premium receipt has not been matched to this policy."
+
+## Rules
+
+* State is calculated from records, rules and evidence. The model may explain a state, detect likely problems, recommend a transition, select skills and prepare work. It may not set, infer or invent a state value. This is §45 ("the database owns workflow status") applied one level down.
+* A transition is **confirmed** only when its required evidence resolves (§23). Until then it is a hypothesis the Space shows as unproven.
+* Every legal or market value the economic model uses (payment deadlines, document clocks, tax rates, commission caps) is a per-organization configuration with a source reference (§22), never a constant.
+* Every quantity the report labels a hypothesis is configurable, measured or displayed as an estimate (`docs/research/OPERATOR-VALIDATION.md`).
+
+---
+
+# 3B. Economic State Service
+
+The deterministic component that computes §3A's position. It is not an AI component and calls no model.
+
+```text
+authoritative business facts     (policies, periods, quotes, decisions, invoices, receipts, commissions …)
++ evidence state                 (documents, extractions, email links, delivery acknowledgements — §23)
++ money state                    (§8A projection)
++ workflow state                 (work_items, jobs, approvals — §24, §26, §21)
++ time and deadlines             (clocks: expiry, quote validity, payment-before-risk, commission, document, endorsement, claim)
++ exceptions                     (§24A)
++ organization rules             (lead times, thresholds, regulatory values — §22)
+        ↓
+current economic position        (the vector, per unit)
+        ↓
+blocked and available transitions, each with the evidence it needs
+        ↓
+value at stake                   (expected commission, premium, renewal value, recoverability, risk class)
+        ↓
+next transition candidates       (ranked deterministically; the model chooses how to help, not whether they are true)
+```
+
+## Where it lives
+
+* **Projections in PostgreSQL**: one SQL view or function per dimension, tenant-scoped through the same RLS as everything else, readable by the API as the user and by workers as `asap_worker` with organization context. Aggregates are cached in `entity_summaries` and refreshed by events (§29).
+* **A small TypeScript resolver in `apps/api`**, shared with `apps/workers`, that assembles the vector, evaluates clocks against organization rules, lists transitions and computes value at stake. No Drizzle in the API path: it reads through `supabase-js`; the worker variant reads through Drizzle under `withOrganization`.
+
+## Who calls it
+
+| Caller | What it gets |
+| --- | --- |
+| Context service (§33) | `economic_position` in the context envelope: vector, blockers, value at stake, missing evidence, active clocks |
+| Intent router (§16) | the unit and its blockers, so "what's stopping Acme?" resolves without a lookup skill |
+| Skill registry (§17) | which skills apply to the current states and serve the next transition |
+| Space recipes (§25) | the nine answers a Space renders |
+| Jobs (§26) | `transition_goal`, completion requirements, verification of completion evidence |
+| Discover detectors (§27) | signal classes and the deterministic scoring inputs |
+| Automations (§28) | conditions such as "risk information became market-ready" as computed facts |
+| Analysis skills (§32) | the eight-state summary and the money chain for management questions |
+
+## What it must never do
+
+* Accept a state value from a model, a user or a job as input. Inputs are facts; states are outputs.
+* Persist a state value on a business table. Only `economic_transitions` (§26) records that a transition was *verified*, with its evidence.
+* Use a hardcoded legal or market constant. It reads `company_rules`.
+* Present a hypothesis as a fact. Service load, contribution and probability of loss carry `confidence` and `basis` (measured | estimated | configured).
+
+## Phasing
+
+Skeleton and the first two dimensions (`cover`, `policy_evidence` for imported policies) in Phase 4 alongside `jobs` and `spaces`; the full vector for the renewal slice in Phase 7; money dimensions in Phase 11; service load and contribution in Phase 12. Nothing in Phase 1.
 
 ---
 
@@ -799,6 +998,53 @@ skills
 skill_versions
 component_definitions
 ```
+
+---
+
+# 8A. Money state machine
+
+Operational progress and money progress are different. The money chain is a **projection** over the money tables, computed by the Economic State Service, with each stage unlocked by a recorded fact or evidence.
+
+```text
+M0 possible premium          estimate on the opportunity                 → unlocked by usable insurer terms
+M1 quoted premium            insurer_quotes.premium, valid_until          → unlocked by client selection
+M2 selected premium          client_decisions                             → unlocked by a correct payment instruction
+M3 premium due               invoices / premium_transactions              → unlocked by receipt or a permitted payment condition
+M4 premium received by insurer   receipts matched to the period          → unlocked by cover confirmation + commission calculation
+M5 commission due            commission_receivables (expected: premium × class rate per company_rules)   → unlocked by insurer statement
+M6 commission stated         commission_statements lines matched to the period                          → unlocked by matching policy, premium, rate, tax
+M7 net commission paid       payments matched to statement + wht_certificates                           → unlocked by bank match and WHT evidence
+M8 final commission settled  commission_adjustments (refunds, cancellations, clawbacks) cleared          → unlocked by policy-year close
+```
+
+The **trapped-value gap** — premium received by insurer → commission due → correctly stated → cash received and matched — is a named detector family in §27 (`money.commission_aging`, `money.commission_variance`, `money.premium_unlinked`, `money.wht_missing`). The commission payment clock starts when the insurer receives premium and its length is a per-organization regulatory value (§22), not the number 30.
+
+ASAP must be able to state, per unit and per portfolio: premium expected, selected, due, paid; commission expected, due, stated, paid, unmatched, disputed; WHT evidence missing; adjustments and clawbacks unresolved. Every figure is a deterministic calculation reference (§23), never model output.
+
+Schema consequences (Phase 11, see §43): `commission_receivables`, `wht_certificates`, `commission_adjustments`; `receipts` and `commission_statements` lines reference the policy period.
+
+---
+
+# 8B. Contribution and service load
+
+Premium and gross commission do not indicate profitability. A large account can be poor business if acquisition effort is excessive, servicing is heavy, insurer corrections cause rework, commission is delayed or lost, or the client does not renew.
+
+```text
+contribution per client-policy-year
+  = commission and permitted fees, net of adjustments
+  − direct acquisition effort
+  − placement effort
+  − administration effort
+  − claims and service effort
+  − rework and error cost
+```
+
+ASAP does not invent cost data. It builds the measurement path and labels everything until measured:
+
+* `effort_records` (Phase 12): `user_id`, unit reference, activity class (acquisition | placement | administration | service | claims | rework), minutes, `basis` (timer | estimate | inferred from activity), `recorded_at`. Inferred effort (from emails handled, documents processed, job steps run) is a hypothesis with its own confidence.
+* Staff cost rates, "normal" service hours per class, and abnormal-load thresholds are per-organization configuration seeded empty; ASAP proposes values from observed distributions and asks the brokerage to confirm.
+* Every contribution figure carries `basis` and a confidence band and renders as an estimate in Spaces and reports ("Estimated contribution: KSh 30k–45k, based on 14 recorded hours and estimated rates").
+* `analysis.service_load` and `analysis.contribution` (§17) are the skill surface; the *Investigation* Space recipe gains an economic variant ("why is this account unprofitable?").
 
 ---
 
@@ -1649,7 +1895,19 @@ Evidence / sources
 Audit trail
 Failure / missing-data behaviour
 Required permissions
+
+Economic purpose (v3.1 — see docs/skill-map.md addendum)
+  Economic unit it operates on            (client-policy-year · client · opportunity · claim · receivable …)
+  Applicable economic states              (which dimension values it is relevant in)
+  Transition it helps achieve             (dimension: from → to)
+  Blockers it resolves                    (missing evidence, waiting party, conflict, deadline)
+  Required evidence / success evidence    (what must exist before; what proves it worked)
+  Effects                                 (money · service cost · retention · professional/compliance risk)
+  Failure consequence                     (what value is lost if it does not run)
+  Detector and automation opportunities   (which §27 detectors and §28 automations can invoke it)
 ```
+
+The economic block lets the router prefer skills that serve the unit's next transition, lets Discover attach the right action to a card, and lets a Job know which skill's success evidence completes it. It is metadata about existing skills first; only ten new skills and the `unit.*` family were needed to cover the report's transitions and exceptions (`docs/skill-map.md`, `docs/research/ESM-INTEGRATION-AUDIT.md` §F).
 
 ## Skill families
 
@@ -1705,7 +1963,11 @@ analysis.*      production renewals claims insurers clients money commission
 team.*          workload performance assign reassign approvals overdue activity
 
 automation.*    create explain edit pause resume delete test history
+
+unit.*          position blockers next_transition close_check        (v3.1 — the economic unit)
 ```
+
+v3.1 additions to existing families: `opportunity.qualify`, `quote.check_comparability`, `quote.track_validity`, `placement.verify_cover_match`, `money.check_payment_condition`, `commission.check_wht_evidence`, `analysis.service_load`, `analysis.contribution`. Contract extensions without new skills: `commission.outstanding` gains aging buckets; `document.detect_conflict` covers structured facts (list versus schedule).
 
 ## Skill composition
 
@@ -2083,6 +2345,23 @@ Approved brokerage rules:
 * Previous tool results
 * Current Space state
 
+### Regulatory and market values (v3.1)
+
+Kenyan legal and market values the economic model depends on — the commission payment deadline after the insurer receives premium, the policy-document clock, the withholding-tax rate on commission, commission caps by class of business, the claims-settlement reference period, licensing amounts — are **per-organization configuration**, never constants in code or SQL. They live in `company_rules` with `rule_class = 'regulatory'` and carry:
+
+```text
+key                 e.g. commission_payment_deadline_days
+value               e.g. 30
+unit                days | percent | KES | …
+applies_to          class of business, where relevant
+source              citation (statute, regulation, guideline, regulator publication) and URL
+effective_from
+verified_at         when the brokerage last confirmed it
+verified_by
+```
+
+ASAP ships the report's sourced values (`docs/research/economic-state-machine.md`, sources S3, S4, S5, S8, S15) as **proposals** in the onboarding review, marked unverified until the brokerage confirms them. A rule with no `verified_at` renders as "unconfirmed" wherever it drives a clock or a calculation. Laws change; the report itself says to confirm before commercial use (D-027).
+
 A casual chat message does not automatically become permanent brokerage policy.
 
 The AI may propose a memory (`memory_proposals`), but sensitive operating rules require approval.
@@ -2156,6 +2435,32 @@ evidence_refs: [
 
 A calculation reference stores the inputs and the deterministic formula, so "KSh 840,000 outstanding" can be expanded into the invoices and receipts that produced it. Financial figures are never model output.
 
+## Evidence unlocks transitions (v3.1)
+
+A major economic transition is `STATE + REQUIRED FACTS + REQUIRED EVIDENCE + DECISION/APPROVAL → VERIFIED TRANSITION`. The Economic State Service (§3B) treats a transition as *proven* only when each required evidence reference resolves; otherwise the Space shows it as unproven and the Job stays `needs_you`.
+
+| Evidence | Created by | Transition it unlocks | If missing | Recreatable later? |
+| --- | --- | --- | --- | --- |
+| Client mandate / appointment | client + broker | commitment: pursuing → mandated (authorised work) | dispute over authority; free work | weakly |
+| Current policy schedule | previous insurer / client | risk_information → market_ready | wrong comparison, missed cover changes | usually |
+| Proposal / risk-information form | client with broker | risk facts → insurer quote | decline, conditions, liability avoidance | before placement |
+| Asset / member / vehicle list | client | complete exposure → accurate terms | items uninsured or mispriced | yes, at a cost |
+| Claims history | insurer / client | risk assessment → fair quote | premium or terms wrong | usually |
+| Insurer quotation | insurer | market → terms_usable → client decision | no defensible recommendation | must be re-issued if expired |
+| Comparison and explanation record | broker | terms → informed choice | mis-selling, complaint risk | weak if reconstructed |
+| Written client instruction | client | client_decision → instructed (placement authority) | wrong insurer or cover dispute | hard after a loss |
+| Premium receipt / payment confirmation | insurer / bank | premium → received_by_insurer; commission → due | risk may not start; commission not due | bank evidence may surface later |
+| Cover note / written confirmation | insurer / broker | cover → confirmed | client cannot rely on cover | yes, but delay is risky |
+| Schedule and wording | insurer | policy_evidence → complete | limits and exclusions unclear | yes |
+| Delivery acknowledgement | client / broker | policy_evidence → delivered | conduct and complaint exposure | hard to recreate honestly |
+| Endorsement instruction + document | client / insurer | active_service change → confirmed | asset or value stays wrong | sometimes |
+| Claim notification + documents | client / broker / providers | incident → insurer claim process | delay or denial | some evidence decays |
+| Commission statement | insurer | commission → stated | missing income invisible | usually |
+| WHT certificate | insurer / KRA | commission → paid (tax credit evidence) | tax credit lost or delayed | with effort |
+| Renewal instruction | client | renewal → retained (next policy-year) | lapse or client loss | not after the deadline without a gap |
+
+Every row is a `document`, `email`, `record` or `extraction` reference in `evidence_refs`. Verifying a transition writes `economic_transitions` (§26) with those references and emits `transition.confirmed` (§29).
+
 ---
 
 # 24. Work engine
@@ -2199,6 +2504,33 @@ Work types include:
 * Client service request
 
 The database owns work status. The AI may recommend or request a transition, but it does not invent workflow state.
+
+---
+
+# 24A. Exception state machine
+
+Exceptions are the product's main job, not edge cases. ASAP is most useful when the normal path breaks. Each loop below is a first-class pattern: a detector produces the **signal**, the Economic State Service states the **consequence** and the **evidence** required to recover, the router selects the **skills**, the result is a **Space** with a **Job** or prepared action, and the loop closes only on **resolution evidence**.
+
+| Exception | Starts from | Signal | Economic consequence | Recovery evidence | Skills | Space |
+| --- | --- | --- | --- | --- | --- | --- |
+| Bad-fit opportunity | commitment: pursuing | low expected commission vs service need; effort accumulating | pursuit cost only | decline recorded | `opportunity.qualify` | Quote |
+| Lost quote | market → client_decision | client silent past validity; appointment elsewhere | all quotation work earns nothing | loss reason recorded | `quote.follow_up`, `quote.record_client_choice` | Quote |
+| Insurer decline | market | decline received | placement work grows, sale may fail | improved submission or new market terms | `quote.select_insurers`, `quote.prepare_request` | Quote |
+| Missing information | risk_information: incomplete | requirements unmet near expiry | poor terms, lost renewal | requested evidence received | `quote.check_completeness`, `document.check_missing`, `renewal.request_terms` | Renewal / Quote |
+| Conflicting information | risk_information: conflicting | list ≠ schedule | rework, wrong cover, liability | resolved value with source | `document.detect_conflict` → job interrupt | Quote / Renewal |
+| Quote expiry | client_decision: pending | validity approaching or passed | re-quote, price change, cover gap | fresh terms and instruction | `quote.track_validity`, `quote.follow_up` | Quote |
+| Late client decision | client_decision: pending | inception approaching | lapse or emergency placement | written instruction | `quote.prepare_client_options`, `renewal.prepare_recommendation` | Renewal |
+| Premium failure | premium: due / failed | inception without insurer receipt | no cover, no commission, complaint exposure | receipt or revised inception | `money.check_payment_condition`, `money.prepare_follow_up` | Placement |
+| Incorrect cover confirmation | cover: confirmed_mismatch | confirmation ≠ instruction | client believes wrong cover | corrected confirmation | `placement.verify_cover_match`, `service.prepare_insurer_request` | Placement |
+| Delayed policy evidence | policy_evidence: overdue | document clock exceeded | follow-up cost, conduct risk | delivered and acknowledged documents | `policy.documents`, `document.validate`, follow-up | Policy |
+| Claim blockage | active_service: open_claim | no movement beyond threshold | retention and relationship risk | insurer response or document | `claim.detect_blocker`, `claim.follow_up` | Claim |
+| Endorsement / TOR blockage | active_service: blocked | past requested effective date | wrong active cover | insurer confirmation of exact change | `service.track`, `service.review_response`, `tor.prepare` | Servicing |
+| Cancellation / refund | cover: cancelled | cancellation recorded | commission reduced or returned | earned-period and clawback reconciled | `money.reconcile`, `commission.reconcile` | Reconciliation |
+| Commission dispute | commission: variance / overdue | statement missing or differs | cash and reported income wrong | premium, policy, rate, WHT and payment matched | `commission.reconcile`, `commission.check_wht_evidence` | Reconciliation |
+| Renewal lost / lapsed | renewal: lost / lapsed | no instruction by expiry | future commission disappears | win-back or closure recorded | `renewal.assess_risk`, `renewal.follow_up` | Renewal |
+| Complaint / professional error | any | complaint, wrong document, missed deadline, breach | legal, licence, reputation cost | investigation, correction, notification recorded | `unit.position`, `document.validate`, `work.explain` | Investigation |
+
+Each exception is an `exceptions` row (§24) linked to the unit and the dimension, so the same table that records job failures records economic exceptions, and Discover treats both as one class of signal.
 
 ---
 
@@ -2263,6 +2595,30 @@ Mechanics:
 
 Spaces are linked, not nested. `related_entity_refs` and `space_events` make the graph navigable: a Claim Space links to the Policy Space, the Client Space, the Communication Space for its thread, and any Money Space holding its recovery. Back-navigation is a stack of Space IDs, not a URL hierarchy of modules.
 
+## Spaces are economic workspaces (v3.1)
+
+Whatever its recipe, a Space helps the user answer nine questions about the economic unit it presents:
+
+```text
+1. What are we trying to accomplish?          transition goal, in plain words
+2. Where is this unit right now?               position, per relevant dimension
+3. What is preventing it from moving?          blockers
+4. What information or evidence is missing?    unmet requirements, each with a way to get it
+5. Who or what are we waiting on?              waiting_on · waiting_since · clock
+6. What money or value is at stake?            expected commission, premium, renewal value (estimates labelled)
+7. What risk exists if nothing happens?        cover gap, professional or compliance exposure, lost renewal
+8. What is the most useful next action?        one prepared action
+9. What proof will tell us it is resolved?     completion evidence
+```
+
+Existing components carry the answers: `Checklist` for requirements, `WaitingCard` and `ExceptionCard` for blockers, `Metric` for value at stake, `Alert` for risk, `RecommendationCard` for the next action, `SourceEvidence` for proof. The answers come from the Economic State Service (§3B), not from the model; the model narrates.
+
+**Plain language.** The eight-state view and the S/M codes never reach the interface — not in copy, tooltips, alt text or debug panes visible to brokers (D-028). Each dimension value has a phrasebook entry in the recipe, e.g. `premium: due` → "Cover cannot safely start yet. Premium receipt has not been matched to this policy."
+
+**Workflow state versus economic position.** `spaces.state` (`active | waiting | needs_you | completed | archived`) is the workflow state of the Space and stays as defined below. A Space can be `active` while its unit is economically blocked; the block that answers question 3 says so.
+
+**Recipes.** Enrich the existing recipes rather than add new ones. The only addition is an economic variant of *Investigation* ("why is this account unprofitable?", "where is commission trapped?").
+
 ## Core Space recipes
 
 These are recipes, not fixed screens. ASAP composes the appropriate components for the situation.
@@ -2280,6 +2636,56 @@ Report · Team · Automation · Investigation · Import Review
 ## Purpose
 
 Jobs answer one question: **what is ASAP doing for me?** They are not a manual task manager. Human to-dos live in `work_items` and `tasks`; Jobs expose machine work so that AI activity is observable and therefore trustworthy.
+
+## Work, Jobs and transitions (v3.1)
+
+```text
+WORK ITEM            work somebody needs to perform
+JOB                  what ASAP is doing
+ECONOMIC TRANSITION  why the work matters to the brokerage
+```
+
+A Job binds to a **transition goal**, computed by the Economic State Service when the Job is created and frozen with it:
+
+```text
+jobs.transition_goal (jsonb, Phase 4)
+├── unit_ref                 { type: "policy_period", id }        (or client, opportunity, claim, receivable)
+├── dimension                e.g. "cover"
+├── from_snapshot            the vector at creation
+├── target                   e.g. { cover: "confirmed", premium: "received_by_insurer" }
+├── blocked_by               [ { kind: "missing_evidence", evidence: "premium_receipt" }, … ]
+├── value_at_stake           { expected_commission, premium, renewal_value, basis }
+└── risk_at_stake            [ "cover_gap", "professional_liability" ]
+
+jobs.completion_requirements (jsonb)   the evidence that must resolve (§23 map)
+jobs.completion_evidence_refs (jsonb)  what actually resolved
+```
+
+Example — a placement Job:
+
+```text
+Position now      decision-ready options          (client_decision: instructed, premium: due, cover: none)
+Desired           placed cover                    (premium: received_by_insurer, cover: confirmed)
+Blocked because   client instruction exists; premium receipt missing
+Skills            placement.check_requirements · money.check_payment_condition · document.find · email.find · follow-up
+If unresolved     cover may not safely start; commission does not become due; liability exposure
+Completion        premium receipt + insurer cover confirmation matching the instruction
+```
+
+**Completion.** Progress is still derived from `job_steps`. A Job may reach `completed` only when its `completion_requirements` resolve; a final `unit.verify_transition` step checks them, writes `economic_transitions` and emits `transition.confirmed`. If evidence is missing the Job ends `needs_you` with the unmet requirement, never `completed`.
+
+```text
+economic_transitions (Phase 4)
+├── id · organization_id
+├── unit_type · unit_id
+├── dimension · from_value · to_value
+├── verified_at · verified_by (user | job | automation)
+├── evidence_refs (jsonb)
+├── job_id · automation_run_id
+└── created_at
+```
+
+This is the only place a state *value* is ever written, and it is a record that a transition was verified with evidence — not the current state, which remains a projection. `work_items` gain `economic_reason` (plain-language why plus the unit and dimension) so a human to-do explains itself on a card.
 
 ## States
 
@@ -2338,19 +2744,42 @@ attention_items
 Realtime push to Discover
 ```
 
-## Scoring
+## The economic attention engine (v3.1)
 
-Ranking is deterministic and inspectable, not a model judgement:
+Discover surfaces where value is **blocked, deteriorating, at risk, waiting, missing evidence, consuming excessive effort, likely to be lost, or ready to unlock**. Every card names the unit, the blocker in plain words, the value at stake (labelled estimate where estimated) and one next action:
 
 ```text
-score = severity
-      × urgency(deadline_at, waiting_since)
-      × ownership(is this user's client or work?)
-      × money_at_stake
-      × staleness_penalty(acknowledged items decay)
+Commission on 14 policies should already have been received.               (commission: overdue)
+Acme renewal: KSh 84k expected commission at risk; no client instruction with 8 days to expiry.
+Cover is active but the final schedule is still missing.                   (policy_evidence: overdue)
+Three insurer quotations cannot safely be compared: exclusions incomplete. (quote comparability)
+Client selected terms but payment has not been confirmed.                  (premium: due)
+This medical account has generated unusually high servicing work relative to commission. (estimate)
+Renewal approaching: current exposure data conflicts with last year's schedule.
 ```
 
-A model may write the *summary sentence* on a card. It does not decide the order.
+## Scoring
+
+Ranking is deterministic and inspectable, not a model judgement. v3.1 replaces the multiplicative formula (a zero in any factor hid a card) with a **declared weighted composition** of deterministic inputs, each normalised to 0–1 with a documented default when unknown:
+
+```text
+score = Σ weight_i × input_i          weights per organization, inspectable on the card
+
+inputs   severity                     detector-declared
+         deadline_urgency             from the active clock (§22 regulatory values, renewal lead time)
+         waiting_duration             waiting_since vs configured acceptable time (hypothesis until measured)
+         ownership                    this user's client or work
+         expected_commission          from the money projection (§8A); default 0.5 when unknown
+         value_at_risk                premium / renewal value; default 0.5 when unknown
+         recoverability               1 − recoverability (unrecoverable losses rank higher)
+         compliance_risk              conduct / professional-liability class of the blocker
+         service_cost_deterioration   from effort_records (estimate; default 0)
+         evidence_completeness        1 − share of required evidence present
+         loss_probability             where measured (renewal risk model); default 0
+         staleness_penalty            acknowledged items decay
+```
+
+A model may write the *summary sentence* on a card. It does not decide the order, the inputs or the weights.
 
 ## Detector catalogue
 
@@ -2367,6 +2796,12 @@ Documents        failed ingestion · low-confidence extraction pending review ·
 Work             overdue work item · unassigned work · approval pending beyond N hours
 Portfolio        cover gap · expiring certificate · lapsed policy still on cover note
 Patterns         anomaly detection (see below)
+
+Economic (v3.1) commission aging beyond the configured deadline · premium received but unlinked to a period ·
+                 client instruction missing near inception · quote validity expiring · cover confirmation ≠ instruction ·
+                 policy document beyond the configured clock · endorsement past effective date · cancellation clawback
+                 unmatched · service load abnormal (estimate) · renewal started late for its class · compliance evidence
+                 missing (delivery, disclosure, approval) · bad-fit pursuit consuming effort · economic closure blocked
 ```
 
 ## Pattern detection
@@ -2455,6 +2890,34 @@ Flag exception         Start workflow
 ```
 
 Note the deliberate limits: automations may **update safe internal fields**, but external sending and consequential changes route through the approval engine regardless of what the automation says.
+
+## Automations move or protect economic state (v3.1)
+
+Default automations shipped **paused** with every new brokerage (§7), each expressed as TRIGGER + CONDITIONS + SKILLS + ACTIONS + APPROVAL + EXCEPTION HANDLING:
+
+```text
+WHEN risk information is still incomplete at (expiry − configured lead time)
+  → document.check_missing → prepare request to client                       (approval: external send)
+WHEN all required risk evidence is present
+  → Economic State Service confirms risk_information = market_ready          (deterministic, not a model judgement)
+  → create placement work · prepare insurer submission
+WHEN quote validity is within the configured window
+  → quote.track_validity → surface client-decision risk · prepare follow-up
+WHEN a premium receipt arrives
+  → money.match_payment → commission.expected → wait for cover confirmation
+WHEN a cover confirmation arrives
+  → placement.verify_cover_match → exception if it differs from the instruction
+WHEN a policy document is still missing after the configured document clock
+  → attention item · prepare insurer follow-up
+WHEN commission has been due longer than the configured payment deadline
+  → commission.reconcile · commission.check_wht_evidence → flag variance
+WHEN service load for a unit exceeds the configured threshold (estimate)
+  → analysis.contribution → Investigation Space
+WHEN a policy period reaches its renewal lead time
+  → renewal.prepare (readiness) → create renewal work
+```
+
+Two rules. A transition an automation "marks" is a check by the Economic State Service, never a model judgement. External communication and consequential actions route through the approval engine exactly as before, whatever the automation says.
 
 ## Required properties
 
@@ -2645,6 +3108,21 @@ saved_reports
 
 Drilling from any figure to its underlying rows is required. A number a broker cannot open is a number they will not trust.
 
+## Management control loop (v3.1)
+
+Management questions have a daily, weekly and monthly shape. They are parameterised `analysis.*` queries over the Economic State Service's projections, and they feed Discover, Report Spaces and Investigation Spaces — not a dashboard.
+
+```text
+DAILY    what expires soon · what waits on client decisions · what waits on payment ·
+         what is blocked on insurers · what is missing required evidence · which claims or service work is stuck
+WEEKLY   which renewals are at risk · which opportunities have consumed effort but are unlikely to convert ·
+         who is overloaded · which documents and endorsements are overdue · which commissions should already have arrived
+MONTHLY  expected vs stated vs received commission · commission aging · conversion · retention · service load ·
+         exception volume · contribution margin where measured · insurer-caused rework · client profitability (estimate)
+```
+
+The biggest management delay the report identifies is between a real event and management knowing its economic meaning. The event bus (§29) plus the state service closes it: a receipt matched today raises the commission clock today, not at month-end reconciliation.
+
 ---
 
 # 33. Context model
@@ -2678,7 +3156,9 @@ context_envelope
 ├── recent_conversation_summary
 ├── recent_activity          (last N entities touched)
 ├── open_approvals_for_user
-└── company_rules_version
+├── company_rules_version
+└── economic_position        (v3.1, from the Economic State Service §3B, for the primary entity's unit:
+                              vector · blockers · missing_evidence · value_at_stake · active_clocks)
 ```
 
 Context feeds three things: entity resolution in the router (§16), the pre-search filter in retrieval (§14), and default arguments for skills (§17). A user in the Acme Renewal Space who types "compare the terms" needs no further specification.
@@ -2847,6 +3327,7 @@ Mandatory accuracy rules:
 * Consequential external actions require approval.
 * A retrieval evaluation set of 100–200 real broker questions with known answers and source pages is maintained. Any change to chunking, embeddings, prompts, re-ranking or models must hold or improve the score before release.
 * **A routing evaluation set** of real utterances with expected intent, skills and response shape is maintained alongside it. Routing regressions are as damaging as retrieval regressions and are invisible without measurement.
+* **An economic evaluation set** (v3.1): the ten stress-test scenarios in `docs/evaluation/SCENARIOS.md`, each with expected state vectors per step, blockers, detectors, skills and Spaces. State computation is deterministic and must match exactly; routing on economically phrased utterances must select the expected skills. Fixtures are phase-tagged and run from Phase 4.
 
 ---
 
@@ -3003,19 +3484,27 @@ Organizations · authentication · memberships · roles · RLS including worker 
 ### Phase 2: Records and email
 Clients · contacts · insurers · policies · policy documents · imports · duplicate detection · **mailboxes, threads, emails, attachments, entity links**
 
+v3.1: the client-policy-year representation (D-029) is decided **before** this schema is written; recommended `policy_periods`. `company_rules` gains the `regulatory` rule class (§22) with the report's sourced values as unverified proposals.
+
 ### Phase 3: Document intelligence
 Private storage and versions · ingestion queue on TypeScript workers, extraction on the Python extractor service (Edge Functions only enqueue) · classification · text and table extraction with page positions · contextual chunking · embeddings, `document_chunks` and indexes · hybrid search and re-ranking · `search_documents` · **extraction review interface (required)** · retrieval evaluation set and scoring harness
 
 ### Phase 4: Experience layer skeleton
 `spaces` · `space_blocks` · `jobs` · `job_steps` · `attention_items` · **component registry and UI-plan validator** · realtime channels · streaming protocol
 
+v3.1: Economic State Service skeleton (§3B) with the `cover` and `policy_evidence` dimensions; `jobs.transition_goal`, `completion_requirements`, `completion_evidence_refs`; `economic_transitions`; `work_items.economic_reason`; the Discover weighted score; the first economic evaluation fixtures.
+
 ### Phase 5: Ask ASAP
 Model-agnostic gateway · context service · **intent router (data + shape)** · skill registry · streaming conversation · database tools · agentic document retrieval · enforced citations with page highlight · **evidence resolution API** · conversation summaries · routing evaluation set
+
+v3.1: `economic_position` in the context envelope (§33); `skill_versions` economic-purpose columns (§17); `unit.position` and `unit.blockers` as read-only skills.
 
 Ask ASAP is read-only at this point: it can answer, and it can create read-only Spaces.
 
 ### Phase 6: Work, approvals and controlled actions
 Work items · tasks · deadlines · waiting states · notifications · exceptions · draft communications · approval requests · tool executor · idempotency · external sending · audit verification
+
+v3.1: `unit.verify_transition` as a job step; exceptions (§24A) as first-class `exceptions` rows linked to unit and dimension; `client_instructions` / `cover_confirmations` as evidence entities if `client_decisions` proves insufficient.
 
 ## Vertical slices
 
@@ -3024,6 +3513,8 @@ Each slice ships its skills, its Space recipes, its components, its Jobs, its au
 ### Phase 7: Renewals slice
 The highest-volume, highest-value brokerage workflow, and the one the interface was designed around.
 `renewal.*` skills · Renewal Space · Quote Comparison Space · `RenewalReadiness`, `TermComparison`, `InsurerResponseTracker` · renewal preparation Job with external waits · renewal detectors in Discover · the 30/60-day renewal automations.
+
+v3.1: the full state vector for the renewal path (commitment → risk_information → market → client_decision → premium → cover → policy_evidence → renewal); `quote.check_comparability`, `quote.track_validity`, `placement.verify_cover_match`, `money.check_payment_condition`; scenarios 1, 3, 4, 5, 6 pass.
 
 ### Phase 8: Claims slice
 `claim.*` skills · Claim Space and timeline · missing-document tracking · insurer follow-up · claim detectors · claim-from-email automation.
@@ -3037,11 +3528,17 @@ The highest-volume, highest-value brokerage workflow, and the one the interface 
 ### Phase 11: Money slice
 `money.*`, `commission.*` · Money and Reconciliation Spaces · payment matching · statement reconciliation · debtor follow-up · money detectors.
 
+v3.1: the M0–M8 money chain (§8A); `commission_receivables`, `wht_certificates`, `commission_adjustments`; `commission.check_wht_evidence`; commission aging; the trapped-value detectors; scenario 8 passes.
+
 ### Phase 12: Analysis and management
 `analysis.*`, `team.*` · Report, Investigation and Team Spaces · saved and scheduled reports · workload and approval views.
 
+v3.1: `effort_records`, `analysis.service_load`, `analysis.contribution` (§8B); the management control loop (§32); the eight-state summary for reports; `unit.close_check`; scenarios 2, 7, 9 pass.
+
 ### Phase 13: Full proactivity
 Pattern and anomaly detection · portfolio risk alerts · premium leakage · suggested automations · cross-slice detector tuning.
+
+v3.1: the economic leakage map as pattern detectors; operator-validated thresholds replace defaults (`docs/research/OPERATOR-VALIDATION.md`); scenario 10 and the full economic evaluation set pass.
 
 ## Ordering rule
 
@@ -3337,4 +3834,4 @@ The 32 design deliverables, and what serves each.
                           Audit history
 ```
 
-> ASAP is a secure multi-tenant AI operating system for insurance brokers. Supabase owns brokerage identity, permissions, business records, workflows, memory, original documents, the searchable document index, email, and audit history. Models from any provider are called only for reasoning, interpretation and drafting, through a gateway that can swap them freely. The intent router turns what a broker says into insurance skills; skills compose validated components into Spaces where work lives; Jobs make machine work observable; Discover surfaces what matters before it is asked for; automations let a brokerage teach ASAP how it operates. Each brokerage receives a private workspace protected by database-level isolation. AI assists and acts only through permission-checked tools, cites every document claim to its source page, renders only components the system defines, and leaves consequential insurance and financial decisions with authorized people.
+> ASAP is a secure multi-tenant AI operating system for insurance brokers. Underneath the conversation it tracks one economic unit — a client, a policy, a period of cover — through the states that turn work into cover, commission, cash and a retained client, computing each position from facts and evidence and never from a model. Supabase owns brokerage identity, permissions, business records, workflows, memory, original documents, the searchable document index, email, and audit history. Models from any provider are called only for reasoning, interpretation and drafting, through a gateway that can swap them freely. The intent router turns what a broker says into insurance skills; skills compose validated components into Spaces where work lives; Jobs make machine work observable; Discover surfaces what matters before it is asked for; automations let a brokerage teach ASAP how it operates. Each brokerage receives a private workspace protected by database-level isolation. AI assists and acts only through permission-checked tools, cites every document claim to its source page, renders only components the system defines, and leaves consequential insurance and financial decisions with authorized people.

@@ -177,3 +177,53 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Decision.** `supabase/config.toml` `[db] major_version = 17`, matching the hosted project.
 
 **Reason.** Local and hosted must run the same major version, or `db reset` proves nothing about production behaviour.
+
+## D-026 · 2026-09-05 · Known limitation: denied attempts are audited by the API, not inside the database function
+
+**Decision.** The 0014 security-definer functions raise on a permission failure. A row inserted into `audit_log` inside the same function is rolled back with the exception, so it cannot persist. Denied attempts are therefore written by the API (`recordAudit`, `result = 'denied'`) after the failed call.
+
+**Limitation.** If the API crashes between the failed database call and the audit write, the denial goes unlogged. The work order says failed access attempts are exactly what the audit trail is for, so this is a gap, accepted for now because the window is a few milliseconds inside one request and every denial still surfaces as a 403 in the structured request log.
+
+**Revisit at the Phase 1 exit review.** Options: (a) the function records the denial in a subtransaction-safe way by returning a structured refusal instead of raising, so the audit insert commits and the API maps the refusal to 403; (b) a `pg_background`/queue-based audit sink; (c) accept the gap and document it in `docs/SECRETS.md` incident guidance. Option (a) is the likely answer and changes the function contract, so it is a deliberate migration, not a patch.
+
+## D-027 · 2026-09-05 · Kenyan legal and market values are per-organization configuration with a source, never constants
+
+**Decision.** The 30-day commission payment deadline, the 14-day policy-document rule, the 5% withholding tax, commission caps by class, the 90-day claims reference and licensing amounts live in `company_rules` (Phase 2) with `rule_class = 'regulatory'`, `value`, `source`, `effective_from`, `verified_at`. ASAP ships the report's sourced values as unverified proposals shown during onboarding. No code, SQL, detector or fixture may embed the number.
+
+**Reason.** Laws change, and the Economic State Machine report says to confirm each value before commercial use. A number in code is a number nobody re-checks.
+
+**Consequence.** Every clock and calculation that depends on such a value renders "unconfirmed" until the brokerage verifies it. Evaluation fixtures must pass under different configured values (`docs/evaluation/SCENARIOS.md`).
+
+## D-028 · 2026-09-05 · The eight economic states and the S/M codes are internal and never appear in the UI
+
+**Decision.** The report's eight irreducible states, the S0–S13 operational states and the M0–M8 money states are a management summary and a reasoning model. They are not stored as a column or enum, and they never appear in UI copy, tooltips, alt text or broker-visible debug output. Spaces use plain brokerage language from a per-recipe phrasebook ("Cover cannot safely start yet. Premium receipt has not been matched to this policy.").
+
+**Reason.** The product principle: the employee should not have to understand an economic state machine. The economic position is a vector computed from facts (Architecture §3A); a single stored state would be both wrong and tempting to edit.
+
+**Enforcement.** A UI-plan validator rule (Phase 4) rejects any narration or prop containing the code patterns; the phrasebook is the only source of dimension copy.
+
+## D-029 · 2026-09-05 · Client-policy-year representation — RECOMMENDATION, AWAITING OPERATOR ANSWER
+
+**Status.** Open. Must be answered **before Phase 2 schema work starts**; it is now a Phase 1 exit-review gate.
+
+**Recommendation.** Option B: a thin first-class `policy_periods` table — one row per client-policy-year (`policy_id`, `sequence`, `inception_at`, `expiry_at`, `predecessor_period_id`, `origin`, factual `outcome`, `deleted_at`). Commission, claims, endorsements, documents, premium items and renewal cycles reference the period. The economic position is projected over it, never stored on it.
+
+**Why not A (policies + dates).** A renewal either creates a new policy row, losing the continuing client-policy identity that loss ratio and retention need, or extends the same row, losing the period as the anchor commission, claims and documents attach to. Date-range joins break on backdated endorsements, mid-term TOR, short-period covers and split instalments.
+
+**Why not C (a view).** Every downstream table would still need to know which period a claim or commission belongs to; a view would reconstruct at read time a fact that should be recorded at write time.
+
+**Cost.** One thin table and one foreign key on each Phase 2+ business table that would otherwise reference `policies`. Retrofitting later is a data migration across every business table, which is why the answer is needed now. Full reasoning: `docs/research/ESM-INTEGRATION-AUDIT.md` §G.
+
+## D-030 · 2026-09-05 · Architecture becomes v3.1; filename carries the version
+
+**Decision.** `docs/ASAP-Architecture-v3.0.md` is renamed `docs/ASAP-Architecture-v3.1.md` with the economic operating model integrated (§0, §3A, §3B, §8A, §8B, §22, §23, §24A, §25–§28, §32, §39, §43). All repository references are updated. There is no v3.0 file in the tree; git history holds it.
+
+**Reason.** The repo convention already puts the version in the filename, and CLAUDE.md names the file as the controlling reference. Two files would both look authoritative. One renamed file with a "Changes from 3.0" section is the cleanest single truth.
+
+## D-031 · 2026-09-05 · The build container cannot reach the hosted Supabase project
+
+**Finding.** From the Claude Code container, HTTPS to `abdkpcppmlqnwvxloqsb.supabase.co` is refused by the egress proxy with 403 (policy denial, the same as `supabase.com`), and TCP to `aws-0-ap-south-1.pooler.supabase.com` on 5432 and 6543 times out (no raw outbound TCP). DNS resolves correctly. This is a **network restriction of the environment**, not a wrong connection string. `pnpm verify:live` therefore has not run; it runs from any machine or CI runner with normal egress.
+
+**Note on the connection string.** The supplied `DATABASE_URL` carries an unencoded `@` inside the password. libpq and node-postgres require it percent-encoded (`%40`); the verify script's worker-URL builder already encodes the worker password. Use the encoded form in `.env.local`.
+
+**Consequence.** Live verification of the auth trigger, storage isolation, the automatic-RLS event trigger facts and the hosted worker login is pending until run outside this container (or from GitHub Actions in work item 9, with the credentials as repository secrets).

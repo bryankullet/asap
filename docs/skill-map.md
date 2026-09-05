@@ -153,3 +153,71 @@ The Intent & Skill Map determines how the AI understands what the user wants.
 The Generative UI layer determines what they see next.
 
 ```
+
+---
+
+# Economic purpose addendum (Architecture v3.1)
+
+The map above says what users want and what ASAP can do. The Economic State Machine (`docs/research/ASAP-Kenyan-Insurance-Brokerages-Economic-State-Machine.pdf`) says *why the work matters*: an economic unit — one client, one policy, one period of cover — is somewhere in its lifecycle and something blocks it. This addendum connects the two. Audit and reasoning: `docs/research/ESM-INTEGRATION-AUDIT.md` §F.
+
+## 1. Skill contract extension
+
+Every skill (existing and new) gains an economic block in its contract (`skill_versions`, Phase 5 — Architecture §17):
+
+```text
+economic_unit            client_policy_year | client | opportunity | quote_request | service_request |
+                         claim | premium_item | commission_receivable | renewal_cycle | portfolio
+applicable_states        which dimension values make this skill relevant
+transition_served        dimension: from → to           (may be none for pure read skills)
+blockers_resolved        missing_evidence | waiting_party | conflict | deadline | decision
+required_evidence        what must exist before the skill can do its job
+success_evidence         what proves it worked           (feeds Job completion, §26)
+effects                  money · service_cost · retention · compliance_risk   (+ / − / 0, with basis)
+failure_consequence      value lost if the skill does not run
+detector_opportunities   §27 detectors that should invoke it
+automation_opportunities §28 automation candidates it belongs in
+```
+
+This is metadata about skills, not a change to how they execute. A read-only skill such as `policy.expiry` has `transition_served: none` and still declares its unit and applicable states.
+
+## 2. New skills (genuine gaps only)
+
+| Skill | Family | Transition or blocker | Why no existing skill covers it |
+| --- | --- | --- | --- |
+| `opportunity.qualify` | opportunity | commitment: pursuing → mandated, or → declined | `opportunity.create` records an opportunity; nothing judges whether expected commission justifies the service need and risk class |
+| `quote.check_comparability` | quote | market: terms_received → terms_usable | `quote.compare_cover` compares; nothing checks that exclusions, excesses, subjectivities and validity are present so a comparison is safe |
+| `quote.track_validity` | quote | client_decision: pending → instructed before terms expire | quote expiry has no owner; `quote.track_responses` tracks insurers, not the clock |
+| `placement.verify_cover_match` | placement | cover: confirmed vs confirmed_mismatch | `placement.confirm` records confirmation; nothing compares it field by field to the client instruction |
+| `money.check_payment_condition` | money | premium: due → received_by_insurer (cover may start) | `money.match_payment` matches receipts; the *legal payment condition for this unit* (receipt, permitted guarantee, deposit, exception) is a distinct question |
+| `commission.check_wht_evidence` | commission | commission: paid → settled | no skill knows about withholding-tax certificates |
+| `analysis.service_load` | analysis | service_load (measurement) | `analysis.workload` is people-centred; this is effort per unit |
+| `analysis.contribution` | analysis | contribution estimate per unit | no profitability skill exists |
+| `unit.position` | unit | — (reads the state vector and story) | the economic story of a period spans every family |
+| `unit.blockers` | unit | — (what prevents the next transition) | as above |
+| `unit.next_transition` | unit | — (candidates with value at stake) | as above |
+| `unit.close_check` | unit | → economic closure | nothing asks "can this policy-year close without hidden exposure?" |
+
+Contract extensions without new skills: `commission.outstanding` gains aging buckets (30/60/90 days against the configured deadline); `document.detect_conflict` covers structured facts (client list vs previous schedule), not only documents; `renewal.assess_risk` consumes the state vector.
+
+The `unit.*` family is the skill surface of the Economic State Service (Architecture §3B). It composes existing skills, reads computed state, and never authors state.
+
+## 3. Transition coverage map
+
+Which skills serve each transition of the primary path. All existing unless marked **new**.
+
+| Transition | Skills |
+| --- | --- |
+| Possible business → broker committed | `opportunity.detect_from_email`, `client.find`, **`opportunity.qualify`**, `opportunity.create` |
+| Broker committed → market-ready risk | `quote.extract_requirements`, `quote.check_completeness`, `renewal.check_documents`, `document.check_missing`, `document.detect_conflict`, `document.extract` |
+| Market-ready risk → decision-ready options | `quote.select_insurers`, `quote.prepare_request`, `quote.track_responses`, `quote.extract_terms`, **`quote.check_comparability`**, `quote.compare`, `quote.compare_cover`, `quote.prepare_client_options`, `renewal.request_terms`, `renewal.track_terms`, `renewal.extract_terms`, `renewal.compare`, `renewal.explain_change`, `renewal.prepare_recommendation` |
+| Decision-ready options → placed cover | `quote.record_client_choice`, `renewal.record_client_choice`, **`quote.track_validity`**, `placement.prepare`, `placement.check_requirements`, `placement.prepare_submission`, `underwriting.track_requirements`, `underwriting.record_terms`, `underwriting.resolve_queries`, **`money.check_payment_condition`**, `money.record_payment`, `money.match_payment`, `placement.confirm`, **`placement.verify_cover_match`**, `placement.track_policy_issuance`, `policy.documents`, `document.validate` |
+| Placed cover → active service | `service.*`, `tor.prepare`, `endorsement.prepare`, `certificate.request`, `claim.*`, `email.*`, `work.*` |
+| Active service → cash and renewal | `commission.expected`, `commission.received`, `commission.reconcile`, `commission.outstanding` (aging), **`commission.check_wht_evidence`**, `money.reconcile`, `money.insurer_balance`, `renewal.find`, `renewal.list_upcoming`, `renewal.assess_risk`, `renewal.prepare`, `renewal.follow_up`, `renewal.complete` |
+| Cash and renewal → economic closure | **`unit.close_check`**, `money.reconcile`, `commission.reconcile`, `document.check_missing` |
+| Cross-cutting | **`unit.position`**, **`unit.blockers`**, **`unit.next_transition`**, **`analysis.service_load`**, **`analysis.contribution`**, `analysis.*`, `search.*`, `automation.*` |
+
+Exception loops and the skills that recover them are in Architecture §24A.
+
+## 4. Language rule
+
+Skill names, detector keys and dimension values are internal identifiers. The eight economic states and the S0–S13 / M0–M8 codes never appear in UI copy, tooltips or alt text (D-028). Every Space recipe carries plain-language phrasing for the dimension values it shows.
