@@ -12,6 +12,10 @@ end $$;
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 create extension if not exists pgtap;
+-- Supabase grants API roles usage on the extensions schema (digest, crypt, gen_salt...).
+grant usage on schema extensions to anon, authenticated, service_role;
+alter default privileges in schema extensions grant execute on functions to anon, authenticated, service_role;
+grant execute on all functions in schema extensions to anon, authenticated, service_role;
 
 -- auth -----------------------------------------------------------------------
 create schema if not exists auth;

@@ -8,11 +8,14 @@ port = 54321
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
 max_rows = 1000
+# Matches the hosted project: new public tables get no Data API grants until a migration grants
+# them explicitly (docs/DECISIONS.md D-020). Requires Supabase CLI >= 2.102.
+auto_expose_new_tables = false
 
 [db]
 port = 54322
 shadow_port = 54320
-major_version = 15
+major_version = 17   # matches the hosted project (Postgres 17)
 
 [db.pooler]
 enabled = false

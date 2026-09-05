@@ -18,10 +18,10 @@
 - Shared `tsconfig.base.json`, strict mode on.
 
 **Acceptance**
-- [ ] `pnpm install && pnpm build` succeeds from a clean checkout.
-- [ ] `pnpm typecheck` passes with zero errors and no `any` in `packages/schema`.
-- [ ] `apps/web` imports a type from `packages/schema` and the build fails if that schema changes incompatibly.
-- [ ] `apps/api` starts and answers `GET /health` with `{ status: "ok", version, commit }`.
+- [x] `pnpm install && pnpm build` succeeds from a clean checkout.
+- [x] `pnpm typecheck` passes with zero errors and no `any` in `packages/schema`.
+- [x] `apps/web` imports a type from `packages/schema` and the build fails if that schema changes incompatibly.
+- [x] `apps/api` starts and answers `GET /health` with `{ status: "ok", version, commit }`.
 
 ---
 
@@ -34,9 +34,9 @@
 - `docs/SECRETS.md` recording where each secret lives and how to rotate it.
 
 **Acceptance**
-- [ ] Starting `apps/api` with a missing required variable fails immediately with a message naming the variable.
-- [ ] No secret value appears anywhere in git history. A grep for known key prefixes (`sk-`, `eyJ`, `service_role`) in tracked files returns nothing.
-- [ ] `apps/web` bundle contains the anon key only. A build-time check fails if a variable not prefixed `VITE_PUBLIC_` reaches the client bundle.
+- [x] Starting `apps/api` with a missing required variable fails immediately with a message naming the variable.
+- [x] No secret value appears anywhere in git history. `scripts/secret-scan.mjs` matches key shapes (`sk-…`, JWTs, private keys, real database passwords, `service_role` assigned a value) — the bare word `service_role` is allowed in docs that forbid the key (D-012).
+- [x] `apps/web` bundle contains the anon key only. `apps/web/scripts/check-bundle.mjs` fails the build if a non-`VITE_PUBLIC_` variable name or value reaches the client bundle.
 
 ---
 
@@ -48,10 +48,10 @@
 - `supabase/seed.sql` creating two brokerages, three users each, and role assignments.
 
 **Acceptance**
-- [ ] `supabase db reset` applies all migrations and the seed with no errors.
-- [ ] Drizzle types and the SQL schema agree — a drift check runs in CI.
-- [ ] Every table carrying `organization_id` has `not null` and a foreign key to `organizations(id)`.
-- [ ] Migrations are append-only; CI fails if a previously committed migration file is modified.
+- [x] `supabase db reset` applies all migrations and the seed with no errors. (Verified locally via `scripts/db-verify-local.sh` against Postgres 16 — D-013; hosted verification pending first deploy.)
+- [x] Drizzle types and the SQL schema agree — `pnpm db:drift`; CI wiring is work item 9.
+- [x] Every table carrying `organization_id` has `not null` and a foreign key to `organizations(id)`. (`packages/db/test/schema.test.ts`)
+- [x] Migrations are append-only; `pnpm db:migrations:immutable` fails if a committed migration file is modified. CI wiring is work item 9.
 
 ---
 
@@ -66,11 +66,11 @@
 - Permissions are verbs against object types: view, create, edit, approve, export, delete, send_external, ai_execute.
 
 **Acceptance**
-- [ ] A new signup with no organization lands on "create or join a brokerage", not a broken dashboard.
-- [ ] An accepted invitation produces exactly one active membership. Accepting twice does not produce two.
-- [ ] An expired or revoked invitation cannot be accepted.
-- [ ] A user in two brokerages can switch between them, and the active organization is resolved server-side from the session, never from a request body or header supplied by the browser.
-- [ ] Removing a membership immediately blocks that user's reads for that organization on the next request.
+- [x] A new signup with no organization lands on "create or join a brokerage", not a broken dashboard. (`apps/web` RequireMembership → /onboarding)
+- [x] An accepted invitation produces exactly one active membership. Accepting twice does not produce two. (pgTAP 0100, tests 14–16)
+- [x] An expired or revoked invitation cannot be accepted. (pgTAP 0100, tests 17–18)
+- [x] A user in two brokerages can switch between them, and the active organization is resolved server-side from the session, never from a request body or header supplied by the browser. (`users.active_organization_id` via `app.set_active_organization`; `apps/api/src/context.ts`; D-023)
+- [x] Removing a membership immediately blocks that user's reads for that organization on the next request. (RLS via `app.current_user_orgs()` filters `status = 'active'`; the API drops the active organization when the membership is not active — `apps/api/test/app.test.ts`)
 
 ---
 

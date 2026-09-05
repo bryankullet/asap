@@ -1,53 +1,71 @@
-import { useQuery } from "@tanstack/react-query";
-import { Button } from "@asap/ui";
-import type { HealthResponse } from "@asap/schema";
-import { fetchHealth } from "./api.js";
-import { env } from "./env.js";
+import { Notice } from "@asap/ui";
+import { Navigate, Outlet, Route, Routes, useLocation } from "react-router";
+import { Shell } from "./components/Shell.js";
+import { useAuth } from "./lib/auth.js";
+import { useMe } from "./lib/me.js";
+import { AcceptInvitation } from "./pages/AcceptInvitation.js";
+import { AuthCallback } from "./pages/AuthCallback.js";
+import { CreateOrganization } from "./pages/CreateOrganization.js";
+import { Home } from "./pages/Home.js";
+import { Members } from "./pages/Members.js";
+import { Onboarding } from "./pages/Onboarding.js";
+import { SignIn } from "./pages/SignIn.js";
+import { SignUp } from "./pages/SignUp.js";
 
-/**
- * Phase 1 placeholder shell. Sign-in, create-brokerage, invitations and the organization
- * switcher arrive with work item 4. This screen exists to prove the web → schema → API path.
- */
+/** Requires a session; sends visitors to sign-in and back again afterwards. */
+function RequireSession() {
+  const { session, loading } = useAuth();
+  const location = useLocation();
+  if (loading)
+    return (
+      <Notice tone="info" className="m-6">
+        Loading…
+      </Notice>
+    );
+  if (!session) return <Navigate to="/sign-in" replace state={{ from: location.pathname }} />;
+  return <Outlet />;
+}
+
+/** Requires at least one active membership; otherwise the create-or-join screen. */
+function RequireMembership() {
+  const me = useMe();
+  if (me.isPending)
+    return (
+      <Notice tone="info" className="m-6">
+        Loading your workspace…
+      </Notice>
+    );
+  if (me.isError)
+    return (
+      <Notice tone="error" className="m-6">
+        We could not load your account. Refresh, or sign in again.
+      </Notice>
+    );
+  const active = me.data.memberships.filter((m) => m.status === "active");
+  if (active.length === 0) return <Navigate to="/onboarding" replace />;
+  return <Outlet />;
+}
+
 export function App() {
-  const health = useQuery<HealthResponse>({ queryKey: ["health"], queryFn: fetchHealth });
-
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 p-6">
-      <header>
-        <h1 className="text-3xl font-semibold">ASAP</h1>
-        <p className="text-ink-secondary">Insurance work, understood.</p>
-      </header>
+    <Routes>
+      <Route path="/sign-in" element={<SignIn />} />
+      <Route path="/sign-up" element={<SignUp />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      <Route path="/invite/:token" element={<AcceptInvitation />} />
 
-      <section className="rounded-card bg-paper p-6 shadow-card">
-        <h2 className="mb-3 text-lg font-semibold">API</h2>
-        {health.isPending && <p className="text-ink-muted">Checking…</p>}
-        {health.isError && (
-          <p role="alert" className="rounded-control bg-accent-red-soft p-3 text-accent-red">
-            The API is not reachable at {env.VITE_PUBLIC_API_BASE_URL}.
-          </p>
-        )}
-        {health.data && (
-          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-            <dt className="text-ink-muted">Status</dt>
-            <dd>
-              <span className="rounded-pill bg-accent-green-soft px-2 py-0.5 text-accent-green">
-                {health.data.status}
-              </span>
-            </dd>
-            <dt className="text-ink-muted">Version</dt>
-            <dd>{health.data.version}</dd>
-            <dt className="text-ink-muted">Commit</dt>
-            <dd className="font-mono">{health.data.commit}</dd>
-          </dl>
-        )}
-        <div className="mt-4">
-          <Button variant="outline" size="sm" onClick={() => void health.refetch()}>
-            Re-check
-          </Button>
-        </div>
-      </section>
+      <Route element={<RequireSession />}>
+        <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/onboarding/create" element={<CreateOrganization />} />
+        <Route element={<RequireMembership />}>
+          <Route element={<Shell />}>
+            <Route index element={<Home />} />
+            <Route path="/members" element={<Members />} />
+          </Route>
+        </Route>
+      </Route>
 
-      <p className="text-xs text-ink-muted">Environment: {env.VITE_PUBLIC_APP_ENV}</p>
-    </main>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

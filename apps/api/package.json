@@ -2,7 +2,7 @@
   "name": "@asap/api",
   "version": "0.1.0",
   "private": true,
-  "description": "Hono API — AI gateway, intent router, skills, REST. Resolves organization and role server-side from the session.",
+  "description": "Hono API \u2014 AI gateway, intent router, skills, REST. Resolves organization and role server-side from the session.",
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=../../.env.local src/server.ts",
@@ -17,7 +17,8 @@
     "@hono/node-server": "^2.1.1",
     "hono": "^4.13.7",
     "pino": "^10.3.1",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "@supabase/supabase-js": "^2.115.0"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",

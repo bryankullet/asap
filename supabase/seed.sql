@@ -74,61 +74,16 @@ values
   ('10000000-0000-4000-8000-00000000000b', 'Beta Risk Partners',     'Beta Risk Partners Ltd',     'KE', 'Africa/Nairobi', 'KES', 'trial', 'b0000000-0000-4000-8000-000000000001');
 
 -- ---------------------------------------------------------------------------
--- the nine system roles, per organization
+-- the nine system roles and the permission matrix — single source: app.seed_default_roles (0014)
 -- ---------------------------------------------------------------------------
-insert into roles (organization_id, key, name, description, is_system)
-select o.id, r.key, r.name, r.description, true
-from organizations o
-cross join (values
-  ('brokerage_admin',      'Brokerage administrator', 'Full control of the brokerage workspace, members and roles.'),
-  ('account_executive',    'Account executive',       'Owns client relationships, opportunities and renewals.'),
-  ('placement_officer',    'Placement officer',       'Arranges cover with insurers.'),
-  ('policy_administrator', 'Policy administrator',    'Maintains policy records, endorsements and certificates.'),
-  ('claims_officer',       'Claims officer',          'Registers and follows up claims.'),
-  ('renewals_officer',     'Renewals officer',        'Prepares and tracks renewals.'),
-  ('finance_officer',      'Finance officer',         'Invoices, payments, commissions and reconciliation.'),
-  ('manager',              'Manager',                 'Oversees the team, approvals and workload.'),
-  ('read_only',            'Read-only user',          'Can view, cannot change or send.')
-) as r(key, name, description);
-
--- ---------------------------------------------------------------------------
--- role → permission matrix (PROVISIONAL — docs/DECISIONS.md D-009)
--- ---------------------------------------------------------------------------
--- brokerage_admin: everything.
-insert into role_permissions (role_id, permission_id)
-select r.id, p.id from roles r cross join permissions p where r.key = 'brokerage_admin';
-
--- manager: everything except delete.
-insert into role_permissions (role_id, permission_id)
-select r.id, p.id from roles r cross join permissions p
-where r.key = 'manager' and p.verb <> 'delete';
-
--- read_only: view everything except audit.
-insert into role_permissions (role_id, permission_id)
-select r.id, p.id from roles r cross join permissions p
-where r.key = 'read_only' and p.verb = 'view' and p.object_type <> 'audit';
-
--- operational roles: view everything (except audit); create/edit on business objects, spaces and
--- jobs; no organization/role/user administration; no send_external (the approval engine's
--- boundary) until a brokerage grants it.
-insert into role_permissions (role_id, permission_id)
-select r.id, p.id from roles r cross join permissions p
-where r.key in ('account_executive','placement_officer','policy_administrator',
-                'claims_officer','renewals_officer','finance_officer')
-  and (
-    (p.verb = 'view' and p.object_type <> 'audit')
-    or (p.verb in ('create','edit','ai_execute')
-        and p.object_type in ('client','policy','claim','document','email','quote','placement',
-                              'invoice','payment','commission','space','job','report'))
-  );
-
--- finance_officer additionally approves and exports money objects.
-insert into role_permissions (role_id, permission_id)
-select r.id, p.id from roles r cross join permissions p
-where r.key = 'finance_officer'
-  and p.verb in ('approve','export')
-  and p.object_type in ('invoice','payment','commission','report')
-on conflict do nothing;
+do $$
+declare o record;
+begin
+  for o in select id from organizations loop
+    perform app.seed_default_roles(o.id);
+  end loop;
+end
+$$;
 
 -- ---------------------------------------------------------------------------
 -- memberships

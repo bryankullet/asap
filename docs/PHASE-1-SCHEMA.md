@@ -28,6 +28,7 @@ Canonical column-level definition for the eleven Phase 1 tables. The architectur
 0011_rls_policies.sql
 0012_storage.sql
 0013_worker_role.sql
+0014_data_api_grants_and_membership_flows.sql   (work item 4)
 ```
 
 ---
@@ -221,7 +222,7 @@ create table role_permissions (
 
 Migration 0005 also inserts the full permission catalogue (18 object types × 8 verbs = 144 rows), because production needs it and seeds do not run there (D-009).
 
-**Seeded role keys** (created for every new organization): `brokerage_admin`, `account_executive`, `placement_officer`, `policy_administrator`, `claims_officer`, `renewals_officer`, `finance_officer`, `manager`, `read_only`.
+**Seeded role keys** (created for every new organization by `app.seed_default_roles`, migration 0014): `brokerage_admin`, `account_executive`, `placement_officer`, `policy_administrator`, `claims_officer`, `renewals_officer`, `finance_officer`, `manager`, `read_only`.
 
 Two verbs deserve attention. `send_external` controls whether a user can dispatch anything to a client or insurer — the boundary the approval engine defends. `ai_execute` controls whether the user may ask ASAP to *perform* an action rather than only answer.
 
@@ -578,6 +579,18 @@ export async function withOrganization<T>(
 The `true` third argument scopes the setting to the transaction, so it cannot leak into the next job on a pooled connection. **Every worker database call goes through this helper.** A direct `db.select()` in a worker is a bug.
 
 ---
+
+## 0014 — Data API grants and membership flows (work item 4)
+
+Added by work item 4; not in the original eleven-table plan. Three parts:
+
+1. **Explicit Data API grants.** The hosted project has "Automatically expose new tables" off (D-020), so `authenticated` receives an explicit allowlist: `select` on every Phase 1 table; `insert/update/delete` on `teams` and `user_team_memberships`; `insert` on `audit_log` and `events`; column-level `update` on `users` profile fields only. `anon` receives nothing. `service_role` keeps the standard full grant (API server-side only) minus `update/delete` on `audit_log`.
+2. **`users.active_organization_id`** (new column) plus `app.set_active_organization(org)`, the only way it is written (D-023).
+3. **Security-definer flows** (D-024): `app.seed_default_roles(org)` — the nine roles and the permission matrix, including `send_external` per D-022; `app.create_organization(...)`; `app.create_invitation(org, email, role_id, token_hash, ttl_hours)`; `app.revoke_invitation(id)`; `app.invitation_preview(token_hash)` (anon-callable; the token is the credential); `app.accept_invitation(token_hash)` (idempotent; expired/revoked refused; email must match); `app.update_membership(id, role_id, status)` (owner protected; self-removal refused). Each writes its audit row and `user.action` event on success. Denied attempts are audited by the API, because a row inserted inside a function that then raises is rolled back with it.
+
+Errors are raised with a stable token as the message (`invitation_expired`, `permission_denied`, …) and an SQLSTATE the API maps to HTTP: `28000` → 401, `42501` → 403, `P0002` → 404, `23505` → 409, `22023` → 422.
+
+`supabase/tests/0100_membership_flows.sql` covers create-organization validation, the role seed, the `send_external` matrix, invitation permission, email mismatch, double accept, expired and revoked.
 
 ## Seed fixture
 

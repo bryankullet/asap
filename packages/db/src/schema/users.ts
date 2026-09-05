@@ -23,6 +23,12 @@ export const users = pgTable(
     timezone: text("timezone"),
     lastSeenAt: timestamptz("last_seen_at"),
     status: text("status").notNull().default("active"),
+    /**
+     * Migration 0014. The organization the API resolves for this user on every request.
+     * Written only by app.set_active_organization (verifies membership); the browser has no
+     * update grant on this column.
+     */
+    activeOrganizationId: uuid("active_organization_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

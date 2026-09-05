@@ -4,7 +4,7 @@ A multi-tenant AI operating system for insurance brokerages. Read `CLAUDE.md` fi
 
 ## Status
 
-Phase 1 — secure brokerage workspace. Work items 1–3 (monorepo, environment separation, schema and migrations) are in place. Work items 4–9 follow. See `docs/PHASE-1-WORK-ORDER.md`.
+Phase 1 — secure brokerage workspace. Work items 1–4 (monorepo, environment separation, schema and migrations, authentication and membership) are in place. Work items 5–9 follow. See `docs/PHASE-1-WORK-ORDER.md`.
 
 ## Layout
 
@@ -44,4 +44,5 @@ pnpm test           # vitest
 pnpm test:rls       # pgTAP isolation suite (work item 5)
 pnpm db:drift       # Drizzle ↔ database agreement (needs DATABASE_URL)
 pnpm db:migrations:immutable
+pnpm verify:live    # against the hosted project: auth trigger, storage isolation, worker login (needs .env.local)
 ```
