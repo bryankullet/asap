@@ -1,0 +1,179 @@
+# Phase 1 Work Order — Secure Brokerage Workspace
+
+**Goal:** a monorepo where two brokerages can exist side by side, users can sign in and be assigned roles, every tenant table is isolated by Row Level Security, files are private, every change is audited, and events are emitted. No insurance features yet.
+
+**Done means:** every acceptance criterion below passes in CI, on a fresh `supabase db reset`.
+
+**Not in this phase:** clients, policies, documents, email, AI, Spaces, Jobs. Resist adding them.
+
+---
+
+## Work item 1 — Monorepo skeleton
+
+**Build**
+- pnpm workspace + Turborepo at the root.
+- `apps/web` (Vite + React + TS + Tailwind + shadcn/ui), `apps/api` (Hono on Node), `apps/workers` (Node/TS), `apps/extractor` (Python, stub only — a health endpoint and a queue consumer that does nothing yet).
+- `packages/schema` (Zod), `packages/db` (Drizzle), `packages/ui` (empty component library with a build).
+- Root scripts: `dev`, `build`, `typecheck`, `lint`, `test`, `test:rls`.
+- Shared `tsconfig.base.json`, strict mode on.
+
+**Acceptance**
+- [ ] `pnpm install && pnpm build` succeeds from a clean checkout.
+- [ ] `pnpm typecheck` passes with zero errors and no `any` in `packages/schema`.
+- [ ] `apps/web` imports a type from `packages/schema` and the build fails if that schema changes incompatibly.
+- [ ] `apps/api` starts and answers `GET /health` with `{ status: "ok", version, commit }`.
+
+---
+
+## Work item 2 — Environment separation
+
+**Build**
+- Three Supabase projects: `local` (CLI), `staging`, `production`. Local is the only one used for development.
+- `.env.example` at the repo root listing every variable. Real values never committed.
+- Config loader in `packages/schema` that parses `process.env` through a Zod schema and **throws at startup** if a required variable is missing. No `process.env.FOO ?? "default"` scattered through the code.
+- `docs/SECRETS.md` recording where each secret lives and how to rotate it.
+
+**Acceptance**
+- [ ] Starting `apps/api` with a missing required variable fails immediately with a message naming the variable.
+- [ ] No secret value appears anywhere in git history. A grep for known key prefixes (`sk-`, `eyJ`, `service_role`) in tracked files returns nothing.
+- [ ] `apps/web` bundle contains the anon key only. A build-time check fails if a variable not prefixed `VITE_PUBLIC_` reaches the client bundle.
+
+---
+
+## Work item 3 — Database schema and migrations
+
+**Build**
+- Migrations for every table in `docs/PHASE-1-SCHEMA.md`, in the order given there.
+- Drizzle schema in `packages/db` matching the SQL exactly, with generated types exported.
+- `supabase/seed.sql` creating two brokerages, three users each, and role assignments.
+
+**Acceptance**
+- [ ] `supabase db reset` applies all migrations and the seed with no errors.
+- [ ] Drizzle types and the SQL schema agree — a drift check runs in CI.
+- [ ] Every table carrying `organization_id` has `not null` and a foreign key to `organizations(id)`.
+- [ ] Migrations are append-only; CI fails if a previously committed migration file is modified.
+
+---
+
+## Work item 4 — Authentication and membership
+
+**Build**
+- Supabase Auth email + password, plus magic link. Email confirmation on.
+- `users` profile row created by a trigger on `auth.users` insert.
+- Create-brokerage flow (§7 Step 1): the first user creates the organization, enters country / currency / timezone, becomes the initial administrator, accepts terms. On creation the system inserts the organization, the nine default roles, the storage namespace and the audit configuration.
+- Invite flow (§7 Step 2): administrator invites by email with a role, invitation expires, acceptance creates the membership.
+- Nine role templates seeded per organization: brokerage administrator, account executive, placement officer, policy administrator, claims officer, renewals officer, finance officer, manager, read-only user.
+- Permissions are verbs against object types: view, create, edit, approve, export, delete, send_external, ai_execute.
+
+**Acceptance**
+- [ ] A new signup with no organization lands on "create or join a brokerage", not a broken dashboard.
+- [ ] An accepted invitation produces exactly one active membership. Accepting twice does not produce two.
+- [ ] An expired or revoked invitation cannot be accepted.
+- [ ] A user in two brokerages can switch between them, and the active organization is resolved server-side from the session, never from a request body or header supplied by the browser.
+- [ ] Removing a membership immediately blocks that user's reads for that organization on the next request.
+
+---
+
+## Work item 5 — Row Level Security
+
+This is the phase's centre of gravity. Everything else is scaffolding around it.
+
+**Build**
+- `app.current_user_orgs()` and `app.worker_org()` helper functions as specified in the schema document.
+- RLS enabled and a policy written on every tenant table.
+- `asap_worker` database role that does **not** bypass RLS, for worker connections. Workers do not use the `service_role` key for tenant reads.
+- Worker helper `withOrganization(orgId, fn)` in `apps/workers` that sets `app.organization_id` inside a transaction and clears it after, so a job cannot leak context into the next one.
+
+**Acceptance — proven by pgTAP, not by API tests**
+- [ ] A user in Brokerage A selecting from every tenant table as Brokerage B's session returns zero rows.
+- [ ] A user in Brokerage A cannot insert a row carrying Brokerage B's `organization_id`.
+- [ ] A user in Brokerage A cannot update a Brokerage B row's `organization_id` to their own.
+- [ ] A worker connection with **no** `app.organization_id` set reads zero rows from every tenant table.
+- [ ] A worker with `app.organization_id` set to A reads A's rows and zero of B's.
+- [ ] The suite enumerates tables from `information_schema` and **fails if any table with an `organization_id` column has no RLS policy**. This test is what stops Phase 2 from silently introducing a leak.
+
+---
+
+## Work item 6 — Storage security
+
+**Build**
+- Private bucket `insurance-documents`. Path convention: `organization_id/entity_type/entity_id/document_id/filename`.
+- Storage RLS policies keyed on the first path segment matching a membership.
+- Signed-URL endpoint on the API that checks permission server-side before issuing a URL, with a short expiry.
+- Upload endpoint that derives the path from the session's organization. The client never supplies the organization segment.
+
+**Acceptance**
+- [ ] A signed URL request for another brokerage's object returns 403 and writes an audit row.
+- [ ] Direct anon-key access to a bucket object returns 403.
+- [ ] A signed URL expires and stops working.
+- [ ] An upload attempting a path outside the caller's organization is rejected.
+
+---
+
+## Work item 7 — Audit foundation
+
+**Build**
+- `audit_log` table per the schema document.
+- A database trigger on audited tables writing `record.changed` with before/after payloads.
+- An application-level `recordAudit()` used for anything a trigger cannot see: who acted, what, which brokerage, which record, previous state, new state, evidence, approval, automation run, result, timestamp.
+- Redaction: document contents and credentials never enter the audit payload or ordinary logs.
+- A read API for audit history, permission-filtered.
+
+**Acceptance**
+- [ ] Creating, updating and deleting an organization member each produce an audit row with correct before/after.
+- [ ] Audit rows are insert-only. An update or delete against `audit_log` fails at the database level for every application role.
+- [ ] Audit rows are tenant-isolated under the same RLS tests as work item 5.
+- [ ] A seeded credential string does not appear anywhere in `audit_log` or the application logs.
+
+---
+
+## Work item 8 — Event bus
+
+**Build**
+- `events` table per the schema document.
+- Emission: database triggers emit `record.changed` for audited tables; application code emits semantic events; Supabase Cron emits `schedule.fired`.
+- A dispatcher worker that reads unprocessed events and fans out to registered consumers. Phase 1 ships one consumer: an audit echo, purely to prove the path.
+- Per-consumer idempotency — a consumer records `processed_at` for its own handling, so a redelivered event does not double-act.
+- Dead-letter handling: after N failed attempts, the event is parked and surfaced, not silently dropped.
+
+**Acceptance**
+- [ ] Updating an audited row emits exactly one `record.changed` event with a before/after payload.
+- [ ] Delivering the same event twice results in one consumer effect, not two.
+- [ ] A consumer that throws does not block other consumers or other events.
+- [ ] Events are tenant-isolated under the work item 5 tests.
+- [ ] A failing event lands in the dead-letter view after its retry budget.
+
+---
+
+## Work item 9 — CI
+
+**Build**
+- GitHub Actions: install, typecheck, lint, unit tests, spin up Supabase, apply migrations, run pgTAP, run the "no table without a policy" check, run the migration-immutability check, run the secret-scan.
+
+**Acceptance**
+- [ ] A pull request that adds a tenant table without an RLS policy fails CI.
+- [ ] A pull request that edits an existing migration file fails CI.
+- [ ] The whole pipeline runs in under ten minutes.
+
+---
+
+## Phase 1 exit review
+
+Before Phase 2 starts, confirm:
+
+- [ ] Two brokerages exist in a live staging environment with real user accounts.
+- [ ] An attempt to cross the boundary — from the API, from a worker with no context, from storage, from a raw SQL session — fails in all four places.
+- [ ] Every table created in this phase appears in `docs/PHASE-1-SCHEMA.md` with the columns actually shipped. If the code drifted from the document, update the document.
+- [ ] `docs/DECISIONS.md` records every choice made where the architecture was silent.
+
+---
+
+## Open questions to settle before starting
+
+These need a human answer. Claude Code should ask rather than assume.
+
+1. Supabase region — data residency matters if brokerage clients are Kenyan.
+2. GitHub organization and repository name.
+3. Staging domain and production domain.
+4. Whether staging holds real brokerage data or synthetic only. This changes the secret-handling rules.
+5. Password policy and whether 2FA is required for the brokerage administrator role at launch.
