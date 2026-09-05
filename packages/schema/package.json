@@ -1,0 +1,40 @@
+{
+  "name": "@asap/schema",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zod definitions shared across ASAP: environment, API contracts, component props.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./env/server": {
+      "types": "./dist/env/server.d.ts",
+      "default": "./dist/env/server.js"
+    },
+    "./env/worker": {
+      "types": "./dist/env/worker.d.ts",
+      "default": "./dist/env/worker.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.0"
+  }
+}

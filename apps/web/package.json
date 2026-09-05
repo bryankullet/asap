@@ -1,0 +1,48 @@
+{
+  "name": "@asap/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ASAP React PWA. Receives the anon key only; everything else is server-side.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && node scripts/check-bundle.mjs",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@asap/schema": "workspace:*",
+    "@asap/ui": "workspace:*",
+    "@tanstack/react-query": "^5.102.8",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./env/server": {
+      "types": "./dist/env/server.d.ts",
+      "default": "./dist/env/server.js"
+    },
+    "./env/worker": {
+      "types": "./dist/env/worker.d.ts",
+      "default": "./dist/env/worker.js"
+    }
+  }
+}

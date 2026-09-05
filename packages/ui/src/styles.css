@@ -1,0 +1,34 @@
+/*
+ * ASAP design tokens, taken from the prototype (CLAUDE.md → Design tokens).
+ * Consumed by Tailwind v4 through @theme in apps/web. Status colours are semantic and fixed:
+ * green = running/active, gold = waiting, red = needs review, grey = done.
+ */
+@theme {
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Outfit", ui-sans-serif, system-ui, sans-serif;
+
+  --color-ink: #102a43;
+  --color-ink-secondary: #334e68;
+  --color-ink-muted: #66788a;
+
+  --color-paper: #ffffff;
+  --color-wash: #f6f8f9;
+
+  --color-line-strong: #dfe6ea;
+  --color-line-soft: #edf1f3;
+
+  --color-accent-green: #0f7b5a;
+  --color-accent-green-soft: #e7f5ef;
+  --color-accent-gold: #d9a62e;
+  --color-accent-gold-soft: #fbf4dc;
+  --color-accent-red: #b94a48;
+  --color-accent-red-soft: #fff0ef;
+
+  --radius-card: 18px;
+  --radius-control: 12px;
+  --radius-pill: 99px;
+
+  --shadow-card: 0 14px 44px rgba(16, 42, 67, 0.09);
+
+  --spacing-sidebar: 224px;
+}

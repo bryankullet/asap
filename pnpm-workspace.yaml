@@ -1,0 +1,4 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+# apps/extractor is Python and is deliberately not a pnpm workspace package.

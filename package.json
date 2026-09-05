@@ -1,0 +1,42 @@
+{
+  "name": "asap",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "ASAP — a multi-tenant AI operating system for insurance brokerages",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint && pnpm run lint:secrets",
+    "lint:secrets": "node scripts/secret-scan.mjs",
+    "test": "turbo run test",
+    "test:rls": "bash scripts/test-rls.sh",
+    "db:reset": "supabase db reset",
+    "db:verify:local": "bash scripts/db-verify-local.sh",
+    "db:drift": "pnpm --filter @asap/db run drift",
+    "db:migrations:immutable": "bash scripts/check-migrations-immutable.sh",
+    "db:worker-password": "bash scripts/set-worker-password.sh",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.12",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}

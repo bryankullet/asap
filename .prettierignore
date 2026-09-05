@@ -1,0 +1,7 @@
+node_modules
+dist
+.turbo
+pnpm-lock.yaml
+docs/ui/prototype
+supabase/migrations
+*.md
