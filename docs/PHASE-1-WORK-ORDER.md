@@ -165,7 +165,9 @@ Before Phase 2 starts, confirm:
 - [ ] An attempt to cross the boundary — from the API, from a worker with no context, from storage, from a raw SQL session — fails in all four places.
 - [ ] Every table created in this phase appears in `docs/PHASE-1-SCHEMA.md` with the columns actually shipped. If the code drifted from the document, update the document.
 - [ ] `docs/DECISIONS.md` records every choice made where the architecture was silent.
-- [ ] **D-029 answered** — the client-policy-year representation (recommended: `policy_periods`) is decided before any Phase 2 schema is written. Architecture v3.1 §3A.
+- [x] **D-029 answered** — client-policy-year is a thin `policy_periods` table, designed in Phase 2 (approved 2026-09-05). Architecture v3.1 §3A.
+- [ ] **Live verification outstanding** — `pnpm verify:live` has not run (D-031: the build container cannot reach the project). Until it runs from a machine with normal egress, the `on_auth_user_created` trigger and the storage policies are **not proven** on the hosted project, only on the local shim. Do not treat work items 4 and 6 as verified until this is ticked.
+- [ ] **GitHub → Supabase deployment proven** — the integration has deployed at least one migration on a push to `main` (see D-032) before any future migration relies on it.
 - [ ] **D-026 revisited** — denied-attempt audit gap: accept, or change the 0014 functions to return structured refusals so the audit row commits.
 
 ---

@@ -202,9 +202,9 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 
 **Enforcement.** A UI-plan validator rule (Phase 4) rejects any narration or prop containing the code patterns; the phrasebook is the only source of dimension copy.
 
-## D-029 · 2026-09-05 · Client-policy-year representation — RECOMMENDATION, AWAITING OPERATOR ANSWER
+## D-029 · 2026-09-05 · Client-policy-year representation — option B, `policy_periods`
 
-**Status.** Open. Must be answered **before Phase 2 schema work starts**; it is now a Phase 1 exit-review gate.
+**Status.** **Approved by the operator, 5 September 2026.** Reasoning accepted: commission, claims and renewal need a per-year anchor, and retrofitting foreign keys across every business table later is the migration most worth avoiding. Designed in Phase 2 with `policies`, not now.
 
 **Recommendation.** Option B: a thin first-class `policy_periods` table — one row per client-policy-year (`policy_id`, `sequence`, `inception_at`, `expiry_at`, `predecessor_period_id`, `origin`, factual `outcome`, `deleted_at`). Commission, claims, endorsements, documents, premium items and renewal cycles reference the period. The economic position is projected over it, never stored on it.
 
@@ -227,3 +227,21 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Note on the connection string.** The supplied `DATABASE_URL` carries an unencoded `@` inside the password. libpq and node-postgres require it percent-encoded (`%40`); the verify script's worker-URL builder already encodes the worker password. Use the encoded form in `.env.local`.
 
 **Consequence.** Live verification of the auth trigger, storage isolation, the automatic-RLS event trigger facts and the hosted worker login is pending until run outside this container (or from GitHub Actions in work item 9, with the credentials as repository secrets).
+
+## D-032 · 2026-09-05 · GitHub → Supabase deployment has not run; diagnosis and acceptance test
+
+**Observation.** `main` was fast-forwarded to `5d64ecb` and then `500912f`, both carrying `supabase/migrations/0001…0014`. The project shows "No migrations" and "No branches". Nothing was pushed manually; the integration must prove itself before any migration depends on it.
+
+**Ruled out from the repository side.**
+- Migration file names: the CLI's pattern is `^([0-9]+)_(.*)\.sql$` (`apps/cli-go/pkg/migration/file.go` in `supabase/cli`), so `0001_extensions.sql` is valid; no timestamp requirement.
+- Directory layout: `supabase/config.toml`, `supabase/migrations/`, `supabase/seed.sql` at the repository root, which the integration expects with **Working directory = `.`**.
+- `config.toml` needs nothing extra for production deploys; only migrations, functions and buckets declared there are deployed. Auth, API and seed settings are ignored by design.
+
+**Likely causes, in order (from the integration docs, `github-integration.mdx`).**
+1. The GitHub connection was authorised at the account level but the integration was never **enabled on this project**: Project Settings → Integrations → GitHub Integration → choose `bryankullet/asap` → Working directory `.` → **Enable integration**. An account-level authorisation alone deploys nothing.
+2. **Deploy to production** is off, or the production branch is not `main`. It is a per-project option on the same page.
+3. The Supabase GitHub App was not granted access to the repository: GitHub → Settings → Applications → Installed GitHub Apps → Supabase → Repository access includes `bryankullet/asap`.
+4. Working directory set to `supabase` rather than `.`, so the runner looks for `supabase/supabase/migrations`.
+5. The integration only reacts to pushes made **after** it is enabled. Migrations already on `main` at enablement time are picked up by the next push to `main`, not retroactively.
+
+**Acceptance test.** After the settings above are correct, one push to `main` (a documentation commit is enough) must produce a "Supabase" check run on the commit and a run under the project's Branches → View logs, and the Migrations page must list 0001–0014. Until then, no future migration relies on the integration, and `pnpm db:push`-style manual pushes stay forbidden for this project.
