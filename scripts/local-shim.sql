@@ -112,8 +112,24 @@ end $$;
 grant usage on schema storage to anon, authenticated, service_role;
 grant all on storage.objects, storage.buckets to anon, authenticated, service_role;
 
--- Supabase grants the API roles access to public by default privileges. Mirror that.
+-- Mirror the hosted project's default privileges for tables created by `postgres` in public, as
+-- observed on 7 September 2026 with "automatically expose new tables" OFF: anon and authenticated
+-- receive only TRUNCATE, REFERENCES, TRIGGER, MAINTAIN (no SELECT/INSERT/UPDATE/DELETE);
+-- service_role receives everything; functions grant nothing to the API roles. Migration 0015
+-- removes the API-role defaults. A superset here would hide a missing grant in a migration.
 grant usage on schema public to anon, authenticated, service_role;
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
-alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+do $$
+begin
+  if current_setting('server_version_num')::int >= 170000 then
+    execute 'alter default privileges in schema public grant truncate, references, trigger, maintain on tables to anon, authenticated';
+  else
+    execute 'alter default privileges in schema public grant truncate, references, trigger on tables to anon, authenticated';
+  end if;
+end $$;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+
+-- Stand-in for the dashboard's "enable automatic RLS" function, so migration 0017 and its test
+-- exercise the same object locally. Executable by PUBLIC by Postgres default, as on hosted.
+create or replace function public.rls_auto_enable() returns event_trigger
+language plpgsql security definer as $$ begin end $$;
