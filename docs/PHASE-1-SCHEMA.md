@@ -14,21 +14,23 @@ Canonical column-level definition for the eleven Phase 1 tables. The architectur
 
 ## Migration order
 
+Files are named `<version>_<nnnn>_<name>.sql`. The 14-digit version is what the Supabase migration ledger records and what every environment must agree on (D-034); the `nnnn` sequence and name are how the documents below refer to them. Append-only: a new migration takes a fresh timestamp that sorts after the last one.
+
 ```
-0001_extensions.sql
-0002_app_schema_and_helpers.sql
-0003_organizations.sql
-0004_users.sql
-0005_roles_and_permissions.sql
-0006_memberships.sql
-0007_teams.sql
-0008_invitations.sql
-0009_audit_log.sql
-0010_events.sql
-0011_rls_policies.sql
-0012_storage.sql
-0013_worker_role.sql
-0014_data_api_grants_and_membership_flows.sql   (work item 4)
+20260907114924_0001_extensions.sql
+20260907115449_0002_app_schema_and_helpers.sql
+20260907115531_0003_organizations.sql
+20260907115745_0004_users.sql
+20260907115802_0005_roles_and_permissions.sql
+20260907115820_0006_memberships.sql
+20260907120611_0007_teams.sql
+20260907120628_0008_invitations.sql
+20260907134159_0009_audit_log.sql
+20260907134224_0010_events.sql
+20260907134623_0011_rls_policies.sql
+20260907134639_0012_storage.sql
+20260907140717_0013_worker_role.sql
+20260907140829_0014_data_api_grants_and_membership_flows.sql
 ```
 
 ---

@@ -247,3 +247,23 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Acceptance test.** After the settings above are correct, one push to `main` (a documentation commit is enough) must produce a "Supabase" check run on the commit and a run under the project's Branches → View logs, and the Migrations page must list 0001–0014. Until then, no future migration relies on the integration, and `pnpm db:push`-style manual pushes stay forbidden for this project.
 
 **Update, 6 September 2026 — probable external cause.** Supabase has an active, unresolved incident (reported 2 September 2026): a stale time cache in their platform API. The operator judges this the likely cause of the branch-list failure ("No branches") rather than repository permissions or integration settings, since the dashboard's branch and migration views are served by that API. Consequence: the causes listed above are not to be re-litigated until the incident is resolved. The operator is restarting the project and retrying both the GitHub integration and the claude.ai Supabase connector authorisation. The acceptance test is unchanged: one push to `main` producing a Supabase check run and 0001–0014 listed on the Migrations page. If it still fails after the incident closes, the list above is the diagnosis order.
+
+## D-033 · 2026-09-07 · Edited committed migration 0013: removed the role-level GUC default
+
+**Decision.** The statement `alter role asap_worker set app.organization_id = ''` was removed from `0013_worker_role.sql`. This is an edit to a committed migration, which the append-only rule normally forbids.
+
+**Why the exception is safe.** 0013 had never applied anywhere except the throwaway local verification database (D-013). On the hosted project it failed on that statement with `42501: permission denied to set parameter "app.organization_id"`: hosted Supabase's `postgres` role is not a superuser and cannot set role-level defaults for custom GUCs. The migration rolled back cleanly, so no environment carries a partial 0013.
+
+**Why the statement was redundant.** `app.worker_org()` reads `current_setting('app.organization_id', true)` — the two-argument form with `missing_ok` — verified on the project before the edit. An unset parameter returns null, which `app.can_access` treats as no access. The role default added nothing.
+
+**Lesson recorded.** The local shim runs as a real superuser and cannot catch hosted privilege differences. Any migration touching roles, GUCs or default privileges must be applied to the disposable project before it is relied on.
+
+## D-034 · 2026-09-07 · One-time rename of the fourteen migration files to the ledger's timestamp versions
+
+**Decision.** Every file in `supabase/migrations/` is renamed from `nnnn_name.sql` to `<version>_nnnn_name.sql`, where `<version>` is the 14-digit version the Supabase migration ledger recorded when the migration was applied to project `abdkpcppmlqnwvxloqsb` through the connector (0001–0012 on 7 September 2026 11:49–13:46 UTC, 0013 at 14:07, 0014 at 14:08). The `nnnn` sequence stays in the name so documents can keep referring to "0013".
+
+**Reason.** The connector's `apply_migration` records a timestamp version and our filename as the name. The CLI and the GitHub integration match on version, so `0001…0014` would have been treated as unapplied and re-run. Renaming makes the repository match the project ledger, and every future environment (local `db reset`, a production project, preview branches) records identical versions from the same files.
+
+**Alternative rejected.** `supabase migration repair` fixes only this project's ledger; a later environment applying the files would still record `0001…0014`, and the two ledgers would diverge for good.
+
+**Rules from here.** New migrations use `supabase migration new <name>` (which produces the timestamp form) or a hand-written timestamp that sorts after the last file. The immutability check treats this rename as the one permitted rewrite; it happened before the GitHub integration was wired up and before any other environment existed.

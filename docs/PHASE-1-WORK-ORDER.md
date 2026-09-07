@@ -84,6 +84,14 @@ This is the phase's centre of gravity. Everything else is scaffolding around it.
 - `asap_worker` database role that does **not** bypass RLS, for worker connections. Workers do not use the `service_role` key for tenant reads.
 - Worker helper `withOrganization(orgId, fn)` in `apps/workers` that sets `app.organization_id` inside a transaction and clears it after, so a job cannot leak context into the next one.
 
+**Additional items from the hosted-project advisors (7 September 2026; each is its own migration + test, none done yet)**
+- [ ] 5a. `alter default privileges in schema public revoke all on tables from anon, authenticated;` and revoke REFERENCES, TRIGGER and TRUNCATE on every existing public table from both roles. Hosted Supabase grants these three by default even with "automatically expose new tables" off, and TRUNCATE is not stopped by RLS. pgTAP test: no public table grants any of the three to anon or authenticated.
+- [ ] 5b. `set search_path = ''` on `app.worker_org` and `app.can_access` (advisor: function_search_path_mutable).
+- [ ] 5c. Revoke execute on `public.rls_auto_enable` from anon and authenticated (Supabase's automatic-RLS function is SECURITY DEFINER and RPC-callable).
+- [ ] 5d. Scope `tenant_write` to insert, update, delete instead of `for all`, so `tenant_read` is the only permissive SELECT policy (advisor: multiple_permissive_policies on roles, organization_memberships, teams, invitations, events).
+- [ ] 5e. Wrap `auth.uid()` as `(select auth.uid())` in `user_self` and `user_update_self` (advisor: auth_rls_initplan).
+- [ ] 5f. Index the ten unindexed foreign keys the advisor lists (audit_log.actor_user_id, events.actor_user_id, invitations.accepted_by / invited_by / role_id, organization_memberships.invited_by / role_id, role_permissions.permission_id, teams.lead_user_id, user_team_memberships.user_id). Leave the unused-index warnings until there is data.
+
 **Acceptance — proven by pgTAP, not by API tests**
 - [ ] A user in Brokerage A selecting from every tenant table as Brokerage B's session returns zero rows.
 - [ ] A user in Brokerage A cannot insert a row carrying Brokerage B's `organization_id`.

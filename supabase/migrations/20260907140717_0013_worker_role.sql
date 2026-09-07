@@ -35,6 +35,7 @@ revoke update, delete, truncate on audit_log from asap_worker;
 create policy permissions_read_worker on permissions
   for select to asap_worker using (true);
 
--- Connection defaults: a worker that forgets to set context must see nothing, and the setting
--- must never be inherited from the role. Reset it to the empty string at role level.
-alter role asap_worker set app.organization_id = '';
+-- No role-level default for app.organization_id: hosted Supabase does not allow a role-level
+-- custom GUC default without superuser (D-033), and none is needed — app.worker_org() reads the
+-- setting with missing_ok = true and returns null when it is unset, which every policy treats
+-- as "no access".
