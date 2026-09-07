@@ -85,21 +85,21 @@ This is the phase's centre of gravity. Everything else is scaffolding around it.
 - Worker helper `withOrganization(orgId, fn)` in `apps/workers` that sets `app.organization_id` inside a transaction and clears it after, so a job cannot leak context into the next one.
 
 **Additional items from the hosted-project advisors (7 September 2026; each is its own migration + test, none done yet)**
-- [ ] 5a. `alter default privileges in schema public revoke all on tables from anon, authenticated;` and revoke REFERENCES, TRIGGER and TRUNCATE on every existing public table from both roles. Hosted Supabase grants these three by default even with "automatically expose new tables" off, and TRUNCATE is not stopped by RLS. pgTAP test: no public table grants any of the three to anon or authenticated.
-- [ ] 5b. `set search_path = ''` on `app.worker_org` and `app.can_access` (advisor: function_search_path_mutable).
-- [ ] 5c. Revoke execute on `public.rls_auto_enable` from anon and authenticated (Supabase's automatic-RLS function is SECURITY DEFINER and RPC-callable).
-- [ ] 5d. Scope `tenant_write` to insert, update, delete instead of `for all`, so `tenant_read` is the only permissive SELECT policy (advisor: multiple_permissive_policies on roles, organization_memberships, teams, invitations, events).
-- [ ] 5e. Wrap `auth.uid()` as `(select auth.uid())` in `user_self` and `user_update_self` (advisor: auth_rls_initplan).
-- [ ] 5g. Grant execute on `app.current_user_orgs()` to `anon`. Found during live verification: `anon` may call `app.can_access` (0002 grants it) but not `app.current_user_orgs()`, which `can_access` calls and which 0002 restricted to `authenticated` and `service_role`. Under the `anon` role any policy-protected query therefore fails with `42501 permission denied for function current_user_orgs` instead of returning zero rows. Denied either way, but the storage API and PostgREST return an error where they should return nothing. The function is SECURITY DEFINER and returns no rows when `auth.uid()` is null, so the grant is safe. pgTAP test: as `anon`, selecting from every tenant table and from `storage.objects` returns zero rows without error.
-- [ ] 5f. Index the ten unindexed foreign keys the advisor lists (audit_log.actor_user_id, events.actor_user_id, invitations.accepted_by / invited_by / role_id, organization_memberships.invited_by / role_id, role_permissions.permission_id, teams.lead_user_id, user_team_memberships.user_id). Leave the unused-index warnings until there is data.
+- [x] 5a. `alter default privileges in schema public revoke all on tables from anon, authenticated;` and revoke REFERENCES, TRIGGER and TRUNCATE on every existing public table from both roles. Hosted Supabase grants these three by default even with "automatically expose new tables" off, and TRUNCATE is not stopped by RLS. pgTAP test: no public table grants any of the three to anon or authenticated.
+- [x] 5b. `set search_path = ''` on `app.worker_org` and `app.can_access` (advisor: function_search_path_mutable).
+- [x] 5c. Revoke execute on `public.rls_auto_enable` from anon and authenticated (Supabase's automatic-RLS function is SECURITY DEFINER and RPC-callable).
+- [x] 5d. Scope `tenant_write` to insert, update, delete instead of `for all`, so `tenant_read` is the only permissive SELECT policy (advisor: multiple_permissive_policies on roles, organization_memberships, teams, invitations, events).
+- [x] 5e. Wrap `auth.uid()` as `(select auth.uid())` in `user_self` and `user_update_self` (advisor: auth_rls_initplan).
+- [x] 5g. Grant execute on `app.current_user_orgs()` to `anon`. Found during live verification: `anon` may call `app.can_access` (0002 grants it) but not `app.current_user_orgs()`, which `can_access` calls and which 0002 restricted to `authenticated` and `service_role`. Under the `anon` role any policy-protected query therefore fails with `42501 permission denied for function current_user_orgs` instead of returning zero rows. Denied either way, but the storage API and PostgREST return an error where they should return nothing. The function is SECURITY DEFINER and returns no rows when `auth.uid()` is null, so the grant is safe. pgTAP test: as `anon`, selecting from every tenant table and from `storage.objects` returns zero rows without error.
+- [x] 5f. Index the ten unindexed foreign keys the advisor lists (audit_log.actor_user_id, events.actor_user_id, invitations.accepted_by / invited_by / role_id, organization_memberships.invited_by / role_id, role_permissions.permission_id, teams.lead_user_id, user_team_memberships.user_id). Leave the unused-index warnings until there is data.
 
 **Acceptance — proven by pgTAP, not by API tests**
-- [ ] A user in Brokerage A selecting from every tenant table as Brokerage B's session returns zero rows.
-- [ ] A user in Brokerage A cannot insert a row carrying Brokerage B's `organization_id`.
-- [ ] A user in Brokerage A cannot update a Brokerage B row's `organization_id` to their own.
-- [ ] A worker connection with **no** `app.organization_id` set reads zero rows from every tenant table.
-- [ ] A worker with `app.organization_id` set to A reads A's rows and zero of B's.
-- [ ] The suite enumerates tables from `information_schema` and **fails if any table with an `organization_id` column has no RLS policy**. This test is what stops Phase 2 from silently introducing a leak.
+- [x] A user in Brokerage A selecting from every tenant table as Brokerage B's session returns zero rows. (`supabase/tests/0200_rls_isolation.sql`)
+- [x] A user in Brokerage A cannot insert a row carrying Brokerage B's `organization_id`. (0200)
+- [x] A user in Brokerage A cannot update a Brokerage B row's `organization_id` to their own. (0200: the row is invisible, so the update affects nothing; re-stamping an own row into B is refused by `with check`)
+- [x] A worker connection with **no** `app.organization_id` set reads zero rows from every tenant table. (0200)
+- [x] A worker with `app.organization_id` set to A reads A's rows and zero of B's. (0200)
+- [x] The suite enumerates tables from `information_schema` and **fails if any table with an `organization_id` column has no RLS policy**. (0200 coverage guard; it also requires RLS on every public table, D-010)
 
 ---
 

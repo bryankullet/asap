@@ -267,3 +267,15 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Alternative rejected.** `supabase migration repair` fixes only this project's ledger; a later environment applying the files would still record `0001…0014`, and the two ledgers would diverge for good.
 
 **Rules from here.** New migrations use `supabase migration new <name>` (which produces the timestamp form) or a hand-written timestamp that sorts after the last file. The immutability check treats this rename as the one permitted rewrite; it happened before the GitHub integration was wired up and before any other environment existed.
+
+## D-035 · 2026-09-07 · Anon evaluates no policy; the local shim mirrors hosted default privileges exactly
+
+**Decision.** Every policy on public tables and on the `insurance-documents` bucket is scoped `to authenticated, asap_worker` (0021). `anon` holds no EXECUTE on `app.can_access`, `app.worker_org` or `app.current_user_orgs`. `app.invitation_preview` stays anon-callable because the token is the credential. The RLS test convention is: a policy must evaluate to false for anon, never raise (`supabase/tests/README.md` rule 3).
+
+**Reason.** Live verification found `42501 permission denied for function current_user_orgs` under anon. Granting the function to anon was rejected: nothing anon may do needs tenancy helpers. Scoping policies away from anon means RLS yields zero rows without evaluating any expression, which is both the cheapest and the least leaky outcome.
+
+**Grant layer versus policy layer.** On hosted, anon holds no SELECT on any public table (D-020, 0014, 0015), so anon is refused at the grant layer with `permission denied for table …` before any policy runs. That is correct and the test accepts it. Only tables anon may SELECT (today `storage.objects`) exercise the policy layer, and there the result must be zero rows without error.
+
+**Shim.** `scripts/local-shim.sql` previously granted anon and authenticated ALL on new public tables by default, a superset of hosted that hid a missing grant and made the anon test pass for the wrong reason. It now mirrors the observed hosted defaults exactly (TRUNCATE, REFERENCES, TRIGGER, MAINTAIN on Postgres 17; no SELECT/INSERT/UPDATE/DELETE; service_role everything), so 0014's explicit grants are what `authenticated` has locally too.
+
+**Related.** 0015 revokes the API-role default privileges and the three (four on PG17) implicit privileges on every existing table, with a pgTAP test that creates a throwaway table to prove the rule holds for future tables.

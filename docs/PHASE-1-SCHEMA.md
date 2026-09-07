@@ -31,6 +31,13 @@ Files are named `<version>_<nnnn>_<name>.sql`. The 14-digit version is what the 
 20260907134639_0012_storage.sql
 20260907140717_0013_worker_role.sql
 20260907140829_0014_data_api_grants_and_membership_flows.sql
+20260907143557_0015_revoke_default_table_privileges.sql
+20260907143634_0016_function_search_path.sql
+20260907143652_0017_rls_auto_enable_not_rpc.sql
+20260907143711_0018_tenant_write_scope.sql
+20260907143740_0019_users_policies_initplan.sql
+20260907143920_0020_foreign_key_indexes.sql
+20260907143932_0021_anon_never_evaluates_policies.sql
 ```
 
 ---
