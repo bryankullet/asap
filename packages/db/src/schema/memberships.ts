@@ -44,6 +44,8 @@ export const organizationMemberships = pgTable(
       sql`${t.status} in ('active','suspended','removed')`,
     ),
     unique("organization_memberships_organization_id_user_id_key").on(t.organizationId, t.userId),
+    index("organization_memberships_invited_by_idx").on(t.invitedBy),
+    index("organization_memberships_role_id_idx").on(t.roleId),
     index("organization_memberships_user_id_idx")
       .on(t.userId)
       .where(sql`${t.status} = 'active'`),

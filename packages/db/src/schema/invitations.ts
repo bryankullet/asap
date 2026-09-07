@@ -35,6 +35,9 @@ export const invitations = pgTable(
       "invitations_status_check",
       sql`${t.status} in ('pending','accepted','revoked','expired')`,
     ),
+    index("invitations_accepted_by_idx").on(t.acceptedBy),
+    index("invitations_invited_by_idx").on(t.invitedBy),
+    index("invitations_role_id_idx").on(t.roleId),
     index("invitations_organization_id_status_idx").on(t.organizationId, t.status),
     // One live invitation per email per organization.
     uniqueIndex("invitations_one_pending_per_email_idx")

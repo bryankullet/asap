@@ -41,6 +41,7 @@ export const auditLog = pgTable(
   (t) => [
     check("audit_log_actor_type_check", sql`${t.actorType} in ('user','ai','automation','system')`),
     check("audit_log_result_check", sql`${t.result} in ('success','failure','denied')`),
+    index("audit_log_actor_user_id_idx").on(t.actorUserId),
     index("audit_log_organization_id_occurred_at_idx").on(t.organizationId, t.occurredAt.desc()),
     index("audit_log_organization_id_object_type_object_id_idx").on(
       t.organizationId,

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { check, index, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { createdAt, timestamptz, updatedAt } from "./_shared.js";
 
 export const USER_STATUSES = ["active", "disabled"] as const;
@@ -32,7 +32,10 @@ export const users = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("users_status_check", sql`${t.status} in ('active','disabled')`)],
+  (t) => [
+    check("users_status_check", sql`${t.status} in ('active','disabled')`),
+    index("users_active_organization_id_idx").on(t.activeOrganizationId),
+  ],
 );
 
 export type User = typeof users.$inferSelect;

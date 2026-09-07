@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  check,
+  index,
+  pgTable,
+  primaryKey,
+  text,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { createdAt, updatedAt, uuidPrimaryKey } from "./_shared.js";
 import { organizations } from "./organizations.js";
 
@@ -98,7 +107,10 @@ export const rolePermissions = pgTable(
       .notNull()
       .references(() => permissions.id, { onDelete: "cascade" }),
   },
-  (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })],
+  (t) => [
+    primaryKey({ columns: [t.roleId, t.permissionId] }),
+    index("role_permissions_permission_id_idx").on(t.permissionId),
+  ],
 );
 
 export type Role = typeof roles.$inferSelect;

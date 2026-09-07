@@ -33,6 +33,7 @@ export const events = pgTable(
   },
   (t) => [
     check("events_actor_check", sql`${t.actor} in ('user','ai','automation','system')`),
+    index("events_actor_user_id_idx").on(t.actorUserId),
     index("events_organization_id_occurred_at_idx").on(t.organizationId, t.occurredAt.desc()),
     index("events_organization_id_event_type_occurred_at_idx").on(
       t.organizationId,

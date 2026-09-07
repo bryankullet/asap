@@ -1,4 +1,4 @@
-import { pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
+import { index, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, deletedAt, updatedAt, uuidPrimaryKey } from "./_shared.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
@@ -18,7 +18,10 @@ export const teams = pgTable(
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
   },
-  (t) => [unique("teams_organization_id_name_key").on(t.organizationId, t.name)],
+  (t) => [
+    unique("teams_organization_id_name_key").on(t.organizationId, t.name),
+    index("teams_lead_user_id_idx").on(t.leadUserId),
+  ],
 );
 
 export const userTeamMemberships = pgTable(
@@ -32,7 +35,10 @@ export const userTeamMemberships = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     createdAt: createdAt(),
   },
-  (t) => [primaryKey({ columns: [t.teamId, t.userId] })],
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.userId] }),
+    index("user_team_memberships_user_id_idx").on(t.userId),
+  ],
 );
 
 export type Team = typeof teams.$inferSelect;
