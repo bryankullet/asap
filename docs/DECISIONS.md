@@ -313,3 +313,28 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 ## D-041 · 2026-09-08 · ComponentId diff: §18 registry versus the v1 catalogue
 
 **Finding, no change yet.** Only in Architecture §18: `RelationshipSummary`. Only in the catalogue's shared-components table (27): `AppShell, AskComposer, ContextChip, SpaceHeader, RelatedSpaceLink, ActionMenu, ServiceProgress, BeforeAfterChange, EffectiveDateReview, AllocationEditor, TaxEvidenceCard, EffortEntry, CompletionChecklist, JobProgress, StepOutcome, TriggerConditionEditor, ApprovalRule, TestResult, AutomationRunHistory, EmptyState, LoadingStep, MissingData, ConflictReview, PartialSuccess, StaleData, PermissionNotice, ErrorRecovery`. The v3 additions (X08, K01–K03, G01–G02, T01–T02, N01–N04) could not be diffed: Screen Map v3 is not in the repository and the build spec names those screens without naming their components. **Closed 2026-09-08 by the operator.** Two enums. `ComponentId` = the catalogue table + `RelationshipSummary` + twelve v3-surface components (`PremiumBreakdown` X08, `ClientFileStatus` K01, `DueDiligenceChecklist` K02, `ScreeningMatchReview` K03, `AgreementCard` G01, `RateTable` G02, `CertificateStockTable` T01, `CertificateCard` T02, `UnidentifiedReceiptsTable` N01, `InsurerAccountSummary` N02, `SettlementRunTable` N03, `TaxCertificateTable` N04). `AskComponentId` is the strict subset the model may return: shell, shared-state, AI-and-rules and the twelve v3 components are excluded. `UiIntent.panel` and validation step 2 use `AskComponentId`; a test proves the subset relation.
+
+## D-042 · 2026-09-08 · Engine writes are API-only, enforced in the database by a hashed request key (0023)
+
+**Decision.** `work_items`, `runs`, `run_events` and `drafts` keep SELECT-only grants for `authenticated`. Every write goes through a SECURITY DEFINER function in `public` that first calls `app.require_api_caller()`, which reads the `x-asap-api-key` request header PostgREST exposes and compares its sha256 against `app.api_keys`. The API sends the key (env `API_INTERNAL_KEY`, server-only; registered with `scripts/set-api-internal-key.sh`); the browser never holds it, so a signed-in browser calling `/rest/v1/rpc/work_item_apply` is refused with `api_only`. Tenancy is still checked inside each function (`app.current_membership`), so the key widens nothing across brokerages.
+
+**Advisor.** Supabase's `authenticated_security_definer_function_executable` warning fires for the eight engine functions. It is intentional: they must be executable by `authenticated` for the API (which acts under the user's session) to reach them, and the gate is inside. Recorded here so the warning is not "fixed" by revoking EXECUTE.
+
+**Functions live in `public`, not `app`.** The 0014 membership functions are in `app`, which is reachable through supabase-js only if `app` is listed under Exposed schemas in the hosted API settings. That setting is not visible from SQL; the operator should confirm it. New engine functions avoid the question by living in `public`.
+
+## D-043 · 2026-09-08 · Guards that became real in Phase 2, and how the rest behave
+
+Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0023 at execution:
+
+| Guard | Status in Phase 2 |
+|---|---|
+| `evidence_present` | **Real.** record_send / record_evidence need a non-empty reference; complete needs every step's evidence recorded. Names what is missing. |
+| `version_current` | **Real.** The request carries the version the person saw; the API compares and `work_item_apply` / `run_start` compare-and-swap (`version_stale`, SQLSTATE 40001). |
+| `no_duplicate_open` | **Real.** `work_item_create` takes an advisory lock and returns the open item with the same kind and title (`reopened: true`). |
+| `component_declared` | Vacuous: no premium figures exist on any step until Phase 3, so nothing undeclared can be compared. The compare run says so in its events. |
+| `client_file_cleared` | Warns only at renewal step 0 (spec 6.7); would block at placement approval, which is Phase 4. |
+| `authority_sufficient`, `agreed_rate_exists`, `certificate_unissued`, `business_rule_exists`, `stock_available`, `screening_source_configured` | Not evaluable yet. They **block with a reason** saying so; a guard never passes by omission. |
+
+**Task status is derived**, never authored: `deriveTask(steps)` maps the current step's actor to needs_you / in_progress / with_party (party required), and all-done to done. The API passes the derivation to the database; the 0022 row rules still hold.
+
+**Next check after a send** defaults to three days (`DEFAULT_NEXT_CHECK_DAYS`). A hypothesis, listed for OPERATOR-VALIDATION; it will become a company rule.
