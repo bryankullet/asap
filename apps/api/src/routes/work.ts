@@ -8,9 +8,11 @@ import {
   WorkItemRow,
   actRequestSchema,
   actResponseSchema,
+  createPlacementRequestSchema,
   createWorkItemRequestSchema,
   createWorkItemResponseSchema,
   deriveTask,
+  placementSteps,
   markDraftCopiedResponseSchema,
   renewalSteps,
   runEventsResponseSchema,
@@ -23,6 +25,8 @@ import { streamSSE } from "hono/streaming";
 import type { Logger } from "pino";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { applyAction } from "../engine/apply.js";
+import { loadGuardFacts } from "../facts.js";
+import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import type { Executor } from "../runs/executor.js";
 import { parseBody } from "./_parse.js";
@@ -78,6 +82,15 @@ export function workRoutes(deps: WorkDeps) {
     const steps = renewalSteps({ clientName: input.clientName, insurers: input.insurers });
     const task = deriveTask(steps);
     const title = `${input.clientName} — renewal`;
+    // The client record exists first, landing as not_started (0026).
+    const clientR = await db.rpc("client_create", {
+      p_organization_id: org.id,
+      p_name: input.clientName,
+      p_kind: "corporate",
+      p_source: "manual",
+    });
+    if (clientR.error) return sendError(c, mapDatabaseError(clientR.error));
+    const clientId = (clientR.data as { id: string }).id;
     const { data, error } = await db.rpc("work_item_create", {
       p_organization_id: org.id,
       p_kind: input.kind,
@@ -86,6 +99,58 @@ export function workRoutes(deps: WorkDeps) {
       p_steps: steps,
       p_task_status: task.status,
       p_task_party: task.party,
+      p_client_id: clientId,
+      p_insurer_id: null,
+      p_class_of_business: null,
+    });
+    if (error) return sendError(c, mapDatabaseError(error));
+    const { id, reopened } = data as { id: string; reopened: boolean };
+    const item = await loadItem(db, id);
+    return c.json(createWorkItemResponseSchema.parse({ item, reopened }), reopened ? 200 : 201);
+  });
+
+  /** A placement (Part 6.2). The gate is evaluated at approval, not here. */
+  app.post("/placements", async (c) => {
+    const { db, user } = c.get("auth");
+    const input = await parseBody(c, createPlacementRequestSchema);
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const [clientR, insurerR] = await Promise.all([
+      db
+        .from("clients")
+        .select("id, name")
+        .eq("id", input.clientId)
+        .is("deleted_at", null)
+        .maybeSingle(),
+      db
+        .from("insurers")
+        .select("id, name")
+        .eq("id", input.insurerId)
+        .is("deleted_at", null)
+        .maybeSingle(),
+    ]);
+    if (clientR.error) return sendError(c, mapDatabaseError(clientR.error));
+    if (insurerR.error) return sendError(c, mapDatabaseError(insurerR.error));
+    if (!clientR.data || !insurerR.data) return sendError(c, new HttpError(404, "not_found"));
+    const client = clientR.data as { id: string; name: string };
+    const insurer = insurerR.data as { id: string; name: string };
+    const steps = placementSteps({
+      clientName: client.name,
+      insurer: insurer.name,
+      classOfBusiness: input.classOfBusiness,
+    });
+    const task = deriveTask(steps);
+    const { data, error } = await db.rpc("work_item_create", {
+      p_organization_id: org.id,
+      p_kind: "placement",
+      p_title: `${client.name} — ${input.classOfBusiness} placement with ${insurer.name}`,
+      p_client_name: client.name,
+      p_steps: steps,
+      p_task_status: task.status,
+      p_task_party: task.party,
+      p_client_id: client.id,
+      p_insurer_id: insurer.id,
+      p_class_of_business: input.classOfBusiness,
     });
     if (error) return sendError(c, mapDatabaseError(error));
     const { id, reopened } = data as { id: string; reopened: boolean };
@@ -126,8 +191,26 @@ export function workRoutes(deps: WorkDeps) {
     const id = c.req.param("id");
     const req = await parseBody(c, actRequestSchema);
     const item = await loadItem(db, id);
-    const result = applyAction(item, req, { userId: user.id, now: new Date() });
+    const facts = await loadGuardFacts(db, item);
+    const ctx = await resolveContext(db, user.id);
+    const result = applyAction(
+      item,
+      req,
+      { userId: user.id, now: new Date(), roleKey: ctx.activeMembership?.role.key ?? null },
+      facts,
+    );
     if (result.kind === "blocked") {
+      // A guard that refuses is a denied action: audited under the caller's session (D-026).
+      await recordAudit(db, deps.logger, c, {
+        organizationId: item.organization_id,
+        actorUserId: user.id,
+        action: `work_item.${req.verb}`,
+        objectType: "work_item",
+        objectId: item.id,
+        newState: { step_id: req.stepId, guard: result.guard },
+        result: "denied",
+        failureReason: result.guard,
+      });
       const body: ActResponse = {
         outcome: "blocked",
         item,
@@ -150,7 +233,10 @@ export function workRoutes(deps: WorkDeps) {
       const run = await loadRun(db, data as string);
       const fresh = await loadItem(db, id);
       // Fire and forget: the stream carries progress; run_end writes the outcome atomically.
-      void deps.executor(db)(run, fresh, effects.startRun.stepId);
+      void deps.executor(db)(run, fresh, effects.startRun.stepId, {
+        clientFileState: facts.clientFileState,
+        agreedRate: facts.agreedRate,
+      });
       return c.json(actResponseSchema.parse({ outcome: "applied", item: fresh, run, draft: null }));
     }
 
@@ -171,6 +257,52 @@ export function workRoutes(deps: WorkDeps) {
       if (e2) return sendError(c, mapDatabaseError(e2));
       const draft = DraftRow.parse(d);
       return c.json(actResponseSchema.parse({ outcome: "applied", item, run: null, draft }));
+    }
+
+    if (effects.approve || effects.approveWithOverride) {
+      // X01: the database re-checks the gate at execution and, on override, audits and creates the principal's item.
+      const { error } = await db.rpc("work_item_approve", {
+        p_id: id,
+        p_expected_version: req.version,
+        p_steps: derived.steps,
+        p_task_status: derived.task.status,
+        p_task_party: derived.task.party,
+        p_task_since: derived.task.since,
+        p_task_next_check: derived.task.nextCheck,
+        p_override_reason: effects.approveWithOverride?.reason ?? null,
+      });
+      if (error) {
+        const mapped = engineError(error);
+        if (mapped.code === "client_file_not_cleared" || mapped.code === "principal_officer_only") {
+          await recordAudit(db, deps.logger, c, {
+            organizationId: item.organization_id,
+            actorUserId: user.id,
+            action: "placement.approve",
+            objectType: "work_item",
+            objectId: item.id,
+            result: "denied",
+            failureReason: mapped.code,
+          });
+          const current = await loadItem(db, id);
+          return c.json(
+            actResponseSchema.parse({
+              outcome: "blocked",
+              item: current,
+              guard: "client_file_cleared",
+              reason:
+                mapped.code === "principal_officer_only"
+                  ? "Only the principal officer can override the client-file gate."
+                  : `${"We cannot instruct cover for a client whose file is not complete."}`,
+            }),
+            409,
+          );
+        }
+        return sendError(c, mapped);
+      }
+      const fresh = await loadItem(db, id);
+      return c.json(
+        actResponseSchema.parse({ outcome: "applied", item: fresh, run: null, draft: null }),
+      );
     }
 
     if (effects.recordSend) {

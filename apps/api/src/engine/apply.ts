@@ -1,7 +1,12 @@
 import {
+  GATE_MESSAGE,
+  NO_AGREED_RATE,
   deriveTask,
+  fileClearsPlacement,
   type ActRequest,
+  type AgreedRate,
   type EvidenceRecord,
+  type FileStatus,
   type GuardRef,
   type Step,
   type WorkItemRow,
@@ -14,13 +19,29 @@ import {
  * guards are tested without one; the database re-checks version and evidence at execution.
  */
 
-export type Ctx = { userId: string; now: Date };
+export type Ctx = { userId: string; now: Date; roleKey?: string | null | undefined };
+
+/**
+ * Facts the route loads before evaluating guards, so the engine stays pure. Null means "no such
+ * thing on this item" (no client linked, no insurer/class), which is not the same as a passing fact.
+ */
+export type GuardFacts = {
+  /** Effective client file state, or null when the item has no client. */
+  clientFileState: FileStatus | null;
+  /** The confirmed agreed rate for this item's insurer and class, null when none, undefined when not applicable. */
+  agreedRate: AgreedRate | undefined;
+  clientId?: string | null;
+};
+export const NO_FACTS: GuardFacts = { clientFileState: null, agreedRate: undefined };
 
 export type Effects = {
   startRun?: { stepId: string; title: string };
   createDraft?: { stepId: string; to: string; subject: string; body: string };
   recordSend?: { draftId: string; evidence: string; outcomeUnknown: boolean };
   assign?: { ownerId: string };
+  /** approve at X01 with the client file not cleared: the database re-checks, audits, and creates the principal's item. */
+  approveWithOverride?: { reason: string };
+  approve?: true;
 };
 
 export type Derived = {
@@ -63,9 +84,33 @@ export function evaluateGuard(
   item: WorkItemRow,
   step: Step,
   req: ActRequest,
+  facts: GuardFacts = NO_FACTS,
+  ctx?: Ctx,
 ): { guard: string; reason: string } | null {
   const id = guardId(g);
   switch (id) {
+    case "client_file_cleared": {
+      if (facts.clientFileState && fileClearsPlacement(facts.clientFileState)) return null;
+      if (req.override?.reason?.trim()) {
+        if (ctx?.roleKey === "brokerage_admin") return null;
+        return {
+          guard: id,
+          reason:
+            "Only the principal officer (brokerage administrator) can override the client-file gate.",
+        };
+      }
+      const state = facts.clientFileState
+        ? facts.clientFileState.replaceAll("_", " ")
+        : "not on record";
+      const link = facts.clientId ? ` Open the client's file at /files/${facts.clientId}.` : "";
+      return { guard: id, reason: `${GATE_MESSAGE} The file is ${state}.${link}` };
+    }
+    case "agreed_rate_exists": {
+      if (facts.agreedRate === undefined)
+        return { guard: id, reason: "No insurer and class on this item to look a rate up for." };
+      if (facts.agreedRate === null) return { guard: id, reason: NO_AGREED_RATE };
+      return null;
+    }
     case "evidence_present": {
       if (req.verb === "complete") {
         const missing = item.steps.filter(
@@ -99,14 +144,7 @@ export function evaluateGuard(
       return null;
     case "no_duplicate_open":
       return null; // enforced atomically by work_item_create
-    case "client_file_cleared":
-      return {
-        guard: id,
-        reason:
-          "We cannot instruct cover for a client whose file is not complete. Client files arrive in Phase 4.",
-      };
     case "authority_sufficient":
-    case "agreed_rate_exists":
     case "certificate_unissued":
     case "business_rule_exists":
     case "stock_available":
@@ -185,7 +223,12 @@ export function draftFor(
   };
 }
 
-export function applyAction(item: WorkItemRow, req: ActRequest, ctx: Ctx): ApplyResult {
+export function applyAction(
+  item: WorkItemRow,
+  req: ActRequest,
+  ctx: Ctx,
+  facts: GuardFacts = NO_FACTS,
+): ApplyResult {
   if (item.task_status === "done" || item.exception) {
     return blocked(
       "version_current",
@@ -207,8 +250,12 @@ export function applyAction(item: WorkItemRow, req: ActRequest, ctx: Ctx): Apply
     return blocked("version_current", `${step.label} is not the current step.`);
   }
   // Every guard on the action and on the step, re-evaluated now (spec Part 5.3).
-  for (const g of [...(action?.guards ?? []), ...(req.verb === "complete" ? step.guards : [])]) {
-    const fail = evaluateGuard(g, item, step, req);
+  const guards = [
+    ...(action?.guards ?? []),
+    ...(req.verb === "complete" || req.verb === "approve" ? step.guards : []),
+  ];
+  for (const g of new Set(guards.map((g) => JSON.stringify(g)))) {
+    const fail = evaluateGuard(JSON.parse(g) as GuardRef, item, step, req, facts, ctx);
     if (fail) return blocked(fail.guard, fail.reason);
   }
   if (req.version !== item.version) {
@@ -279,9 +326,14 @@ export function applyAction(item: WorkItemRow, req: ActRequest, ctx: Ctx): Apply
         withStep(item.steps, step.id, { recorded: [...step.recorded, evidence(kind)] }),
         step.id,
       );
+      // Cover moves to Confirmed only on the insurer's written confirmation (Part 6.2 step 5).
+      const cover =
+        step.id === "cover_confirmed" && item.kind === "placement"
+          ? ("confirmed" as const)
+          : item.cover_status;
       return {
         kind: "applied",
-        derived: deriveFrom(item, steps, ctx),
+        derived: deriveFrom(item, steps, ctx, { cover }),
         effects: {},
         auditAction: "work_item.record_evidence",
       };
@@ -341,9 +393,38 @@ export function applyAction(item: WorkItemRow, req: ActRequest, ctx: Ctx): Apply
         auditAction: "work_item.assigned",
       };
     }
-    case "approve":
+    case "approve": {
+      const overriding =
+        !(facts.clientFileState && fileClearsPlacement(facts.clientFileState)) &&
+        Boolean(req.override?.reason?.trim());
+      const steps = advance(
+        withStep(item.steps, step.id, {
+          recorded: [
+            ...step.recorded,
+            {
+              kind: "approval",
+              reference: overriding
+                ? `Approved with client-file override: ${req.override!.reason.trim()}`
+                : `Approved by ${ctx.userId}`,
+              recordedBy: ctx.userId,
+              recordedAt: ctx.now.toISOString(),
+            },
+          ],
+        }),
+        step.id,
+      );
+      const effects: Effects = overriding
+        ? { approveWithOverride: { reason: req.override!.reason.trim() } }
+        : { approve: true };
+      return {
+        kind: "applied",
+        derived: deriveFrom(item, steps, ctx),
+        effects,
+        auditAction: overriding ? "placement.approved.override" : "placement.approved",
+      };
+    }
     case "resolve":
-      return blocked("version_current", `${req.verb} is not part of the renewal in this phase.`);
+      return blocked("version_current", `${req.verb} is not part of any workflow in this phase.`);
   }
 }
 
@@ -353,6 +434,8 @@ export function runTitleFor(step: Step): string {
     file_check: "Client file checked",
     review: "Renewal pack prepared",
     compare: "Term comparison prepared",
+    prepare: "Placement prepared",
+    documents: "Policy documents checked",
   };
   return titles[step.id] ?? step.label;
 }

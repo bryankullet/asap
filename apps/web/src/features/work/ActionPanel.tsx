@@ -2,7 +2,9 @@ import type { ActRequest, ActResponse, DraftRow, Step, WorkItemRow } from "@asap
 import { Button, Field, Input, Notice } from "@asap/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { Link } from "@tanstack/react-router";
 import { api, describeApiError } from "../../lib/api.js";
+import { useMe } from "../../lib/me.js";
 import { DraftCard } from "../drafts/DraftCard.js";
 
 type ExceptionKind = NonNullable<ActRequest["exceptionKind"]>;
@@ -23,6 +25,10 @@ export function ActionPanel({
   onRunStarted: (runId: string) => void;
 }) {
   const qc = useQueryClient();
+  const me = useMe();
+  const isPrincipal =
+    me.data?.memberships.find((m) => m.organization.id === me.data?.active_organization?.id)?.role
+      .key === "brokerage_admin";
   const [blocked, setBlocked] = useState<{ guard: string; reason: string } | null>(null);
   const [form, setForm] = useState<ActRequest["verb"] | null>(null);
   const [evidence, setEvidence] = useState("");
@@ -30,6 +36,8 @@ export function ActionPanel({
   const [exceptionKind, setExceptionKind] = useState<ExceptionKind>("lapse");
   const [reason, setReason] = useState("");
   const [told, setTold] = useState("");
+  const [override, setOverride] = useState("");
+  const [inception, setInception] = useState("");
 
   const act = useMutation({
     mutationFn: (input: ActRequest) => api.act(item.id, input),
@@ -65,7 +73,15 @@ export function ActionPanel({
         clientToldEvidence: told || undefined,
       });
     } else {
-      act.mutate({ ...base(form), evidence, party: party || undefined });
+      act.mutate({
+        ...base(form),
+        evidence,
+        party: party || undefined,
+        inceptionAt:
+          step.id === "cover_confirmed" && inception
+            ? new Date(inception).toISOString()
+            : undefined,
+      });
     }
   }
 
@@ -96,7 +112,43 @@ export function ActionPanel({
       {blocked && (
         <Notice tone="waiting">
           <strong>Not yet:</strong> {blocked.reason}
+          {blocked.guard === "client_file_cleared" && item.client_id && (
+            <>
+              {" "}
+              <Link
+                to="/files/$clientId"
+                params={{ clientId: item.client_id }}
+                className="underline"
+              >
+                Open the client's file
+              </Link>
+            </>
+          )}
         </Notice>
+      )}
+      {blocked?.guard === "client_file_cleared" && me.data?.active_organization && isPrincipal && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            act.mutate({ ...base("approve"), override: { reason: override } });
+          }}
+          className="flex flex-col gap-2 rounded-card bg-accent-red-soft p-4"
+        >
+          <p className="text-sm text-ink">
+            Principal-officer override. It is audited permanently and lands on your Today.
+          </p>
+          <Field label="Reason, in your words" htmlFor="override">
+            <Input id="override" value={override} onChange={(e) => setOverride(e.target.value)} />
+          </Field>
+          <Button
+            type="submit"
+            variant="destructive"
+            size="sm"
+            disabled={act.isPending || !override.trim()}
+          >
+            Approve anyway
+          </Button>
+        </form>
       )}
       {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
 
@@ -110,6 +162,19 @@ export function ActionPanel({
               placeholder="Message id, sent-folder reference, document name"
             />
           </Field>
+          {step.id === "cover_confirmed" && form === "record_evidence" && (
+            <Field
+              label="Inception date (cover becomes Active cover from this date, by date)"
+              htmlFor="inception"
+            >
+              <Input
+                id="inception"
+                type="date"
+                value={inception}
+                onChange={(e) => setInception(e.target.value)}
+              />
+            </Field>
+          )}
           {form === "record_send" && (
             <Field label="Sent to" htmlFor="party">
               <Input

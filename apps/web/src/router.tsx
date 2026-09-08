@@ -1,4 +1,4 @@
-import { WorkView } from "@asap/schema";
+import { K01View, WorkView } from "@asap/schema";
 import {
   Outlet,
   createRootRoute,
@@ -10,7 +10,11 @@ import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 import { AuthCallback } from "./pages/AuthCallback.js";
+import { AgreementVersion } from "./pages/AgreementVersion.js";
+import { Agreements } from "./pages/Agreements.js";
 import { AutomationDetail, Automations } from "./pages/Automations.js";
+import { ClientFile } from "./pages/ClientFile.js";
+import { Files } from "./pages/Files.js";
 import { CreateOrganization } from "./pages/CreateOrganization.js";
 import { Members } from "./pages/Members.js";
 import { Onboarding } from "./pages/Onboarding.js";
@@ -106,6 +110,27 @@ const record = createRoute({
   component: Record,
   validateSearch: z.object({ panel: z.string().optional().catch(undefined) }),
 });
+const files = createRoute({
+  getParentRoute: () => shell,
+  path: "/files",
+  component: Files,
+  validateSearch: z.object({ view: K01View.catch("blocking") }),
+});
+const clientFile = createRoute({
+  getParentRoute: () => shell,
+  path: "/files/$clientId",
+  component: ClientFile,
+});
+const agreements = createRoute({
+  getParentRoute: () => shell,
+  path: "/settings/agreements",
+  component: Agreements,
+});
+const agreementVersion = createRoute({
+  getParentRoute: () => shell,
+  path: "/settings/agreements/$agreementId",
+  component: AgreementVersion,
+});
 const settingsMembers = createRoute({
   getParentRoute: () => shell,
   path: "/settings/members",
@@ -135,6 +160,10 @@ export const routeTree = rootRoute.addChildren([
         automations,
         automationDetail,
         record,
+        files,
+        clientFile,
+        agreements,
+        agreementVersion,
         settingsMembers,
         legacyMembers,
       ]),

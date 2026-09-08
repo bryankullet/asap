@@ -31,6 +31,8 @@ export function mapDatabaseError(err: PostgrestErrorLike): HttpError {
       return new HttpError(401, "not_authenticated");
     case "42501": // permission_denied, not_a_member, invitation_email_mismatch, RLS violations
       return new HttpError(403, token || "permission_denied");
+    case "23514": // check constraints: client_must_land_not_started, vocabulary violations
+      return new HttpError(422, token && !token.includes(" ") ? token : "invalid_request");
     case "P0002": // not_found
       return new HttpError(404, "not_found");
     case "23505": // already_a_member, unique violations

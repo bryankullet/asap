@@ -20,7 +20,16 @@ export type RunPlan = {
   note: string | null;
 };
 
-export function planRun(item: WorkItemRow, stepId: string): RunPlan {
+export type RunFacts = {
+  clientFileState: string | null;
+  agreedRate: { rate_basis_points: number } | null | undefined;
+};
+
+export function planRun(
+  item: WorkItemRow,
+  stepId: string,
+  facts: RunFacts = { clientFileState: null, agreedRate: undefined },
+): RunPlan {
   const step = item.steps.find((s) => s.id === stepId);
   if (!step)
     return {
@@ -31,15 +40,45 @@ export function planRun(item: WorkItemRow, stepId: string): RunPlan {
     };
   const client = item.title.split(" — ")[0] ?? item.title;
   switch (step.id) {
-    case "file_check":
+    case "file_check": {
+      const state = facts.clientFileState
+        ? facts.clientFileState.replaceAll("_", " ")
+        : "not on record";
       return {
         events: [
           `Looking for a client file for ${client}`,
-          "No client file on record yet — noted as a warning, not a block",
+          facts.clientFileState === "cleared"
+            ? "Client file is cleared"
+            : `Client file is ${state} — noted as a warning here; it blocks at placement approval`,
         ],
         pause: null,
         drafts: [],
-        note: "Client file: not started. Warns here; blocks at placement approval.",
+        note: `Client file: ${state}. Warns here; blocks at placement approval.`,
+      };
+    }
+    case "prepare": {
+      const rate =
+        facts.agreedRate === undefined
+          ? "No insurer and class on this item to look a rate up for"
+          : facts.agreedRate === null
+            ? "No agreed rate on file for this class — commission will read as undocumented until one is confirmed"
+            : `Agreed rate on file: ${(facts.agreedRate.rate_basis_points / 100).toFixed(2)}% of the commission basis`;
+      return {
+        events: ["Collecting the chosen quote and the client file state", rate],
+        pause: null,
+        drafts: [],
+        note: null,
+      };
+    }
+    case "documents":
+      return {
+        events: [
+          "Listing the documents received",
+          "No policy documents are attached yet — nothing was compared",
+        ],
+        pause: null,
+        drafts: [],
+        note: "Document comparison arrives with extraction.",
       };
     case "review": {
       const requestStep = item.steps.find((s) => s.id === "request_terms");
@@ -106,7 +145,12 @@ export function stepsAfterRun(
   return { steps, status: task.status, party: task.party };
 }
 
-export type Executor = (run: RunRow, item: WorkItemRow, stepId: string) => Promise<void>;
+export type Executor = (
+  run: RunRow,
+  item: WorkItemRow,
+  stepId: string,
+  facts?: RunFacts,
+) => Promise<void>;
 
 export function createExecutor(deps: {
   logger: Logger;
@@ -114,8 +158,8 @@ export function createExecutor(deps: {
 }): (db: SupabaseClient) => Executor {
   const sleep = (ms: number) =>
     ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
-  return (db) => async (run, item, stepId) => {
-    const plan = planRun(item, stepId);
+  return (db) => async (run, item, stepId, facts) => {
+    const plan = planRun(item, stepId, facts);
     try {
       for (const message of plan.events) {
         const { error } = await db.rpc("run_event_append", {

@@ -40,11 +40,20 @@ export const actRequestSchema = z.object({
   draftId: uuidSchema.optional(),
   outcomeUnknown: z.boolean().optional(),
   assigneeId: uuidSchema.optional(),
+  /** record_evidence on cover confirmation: the inception date; Confirmed reads as Active cover from then. */
+  inceptionAt: z.string().datetime({ offset: true }).optional(),
+  /** approve: principal-officer override of client_file_cleared, with a typed reason (audited). */
+  override: z.object({ reason: z.string().trim().min(1).max(1000) }).optional(),
 });
 export type ActRequest = z.infer<typeof actRequestSchema>;
 
 export const actResponseSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("applied"), item: WorkItemRow, run: RunRow.nullable(), draft: DraftRow.nullable() }),
+  z.object({
+    outcome: z.literal("applied"),
+    item: WorkItemRow,
+    run: RunRow.nullable(),
+    draft: DraftRow.nullable(),
+  }),
   z.object({
     outcome: z.literal("blocked"),
     item: WorkItemRow,
@@ -63,7 +72,11 @@ export const workItemResponseSchema = z.object({
 export type WorkItemResponse = z.infer<typeof workItemResponseSchema>;
 
 /** `POST /runs` starts a run for a step whose action is `prepare`. */
-export const startRunRequestSchema = z.object({ workItemId: uuidSchema, stepId: z.string().min(1), version: z.number().int() });
+export const startRunRequestSchema = z.object({
+  workItemId: uuidSchema,
+  stepId: z.string().min(1),
+  version: z.number().int(),
+});
 export type StartRunRequest = z.infer<typeof startRunRequestSchema>;
 
 export const runEventsResponseSchema = z.object({ run: RunRow, events: z.array(RunEventRow) });

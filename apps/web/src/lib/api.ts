@@ -2,6 +2,12 @@ import {
   acceptInvitationResponseSchema,
   apiErrorSchema,
   actResponseSchema,
+  agreementResponseSchema,
+  agreementsResponseSchema,
+  clientFileActionResponseSchema,
+  clientFileResponseSchema,
+  clientFilesResponseSchema,
+  placementCreatedSchema,
   askResponseSchema,
   createWorkItemResponseSchema,
   markDraftCopiedResponseSchema,
@@ -15,6 +21,9 @@ import {
   membersResponseSchema,
   rolesResponseSchema,
   type ActRequest,
+  type AgreementAction,
+  type ClientFileAction,
+  type K01View,
   type CreateInvitationRequest,
   type CreateWorkItemRequest,
   type CreateOrganizationRequest,
@@ -84,6 +93,21 @@ export const api = {
   markDraftCopied: (id: string) =>
     request("POST", `/drafts/${id}/copied`, markDraftCopiedResponseSchema, {}),
   runEvents: (id: string) => request("GET", `/runs/${id}/events`, runEventsResponseSchema),
+  clientFiles: (view: K01View) =>
+    request("GET", `/clients?view=${view}`, clientFilesResponseSchema),
+  clientFile: (id: string) => request("GET", `/clients/${id}`, clientFileResponseSchema),
+  createClient: (input: { name: string; kind: "individual" | "corporate" }) =>
+    request("POST", "/clients", clientFileResponseSchema, input),
+  clientFileAct: (id: string, input: ClientFileAction) =>
+    request("POST", `/clients/${id}/file`, clientFileActionResponseSchema, input, {
+      auth: true,
+      allow: [409],
+    }),
+  agreements: () => request("GET", "/agreements", agreementsResponseSchema),
+  agreement: (id: string) => request("GET", `/agreements/${id}`, agreementResponseSchema),
+  agreementAct: (input: AgreementAction) => request("POST", "/agreements/actions", null, input),
+  createPlacement: (input: { clientId: string; insurerId: string; classOfBusiness: string }) =>
+    request("POST", "/placements", placementCreatedSchema, { kind: "placement", ...input }),
   setActiveOrganization: (organization_id: string) =>
     request("POST", "/me/active-organization", null, { organization_id }),
   createOrganization: (input: CreateOrganizationRequest) =>
@@ -131,6 +155,11 @@ export function describeApiError(err: unknown): string {
     evidence_required: "Say where the evidence is.",
     already_sent: "This was already recorded as sent.",
     run_already_working: "ASAP is already working on this item.",
+    client_file_not_cleared: "We cannot instruct cover for a client whose file is not complete.",
+    principal_officer_only: "Only the principal officer can override the client-file gate.",
+    file_incomplete: "The file is missing documents it needs before it can be cleared.",
+    reason_required: "Type a reason.",
+    client_must_land_not_started: "A client always lands as Not started.",
   };
   return messages[err.code] ?? `Request failed (${err.code}).`;
 }

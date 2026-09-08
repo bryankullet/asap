@@ -38,7 +38,7 @@ reset role;
 -- api_only
 select pg_temp.login('a0000000-0000-4000-8000-000000000002', false);
 select throws_ok(
-  $$select work_item_create('10000000-0000-4000-8000-00000000000a', 'renewal', 'Acme Motors — 2027 renewal', 'Acme Motors', '[]', 'needs_you', null)$$,
+  $$select work_item_create('10000000-0000-4000-8000-00000000000a', 'renewal', 'Acme Motors — 2027 renewal', 'Acme Motors', '[]', 'needs_you', null, null, null, null)$$,
   '42501', 'api_only', 'a member without the API key cannot create a work item');
 reset role;
 
@@ -60,7 +60,7 @@ reset role;
 -- gate: a valid key on rows the acting user cannot access (Acme AE against Beta rows)
 select pg_temp.login('a0000000-0000-4000-8000-000000000002', true);
 select throws_ok(
-  $$select work_item_apply('30000000-0000-4000-8000-00000000000b', 1, '[]', 'needs_you', null, null, null, null, null, null, null, 'x', '{}')$$,
+  $$select work_item_apply('30000000-0000-4000-8000-00000000000b', 1, '[]', 'needs_you', null, null, null, null, null, null, null, 'x', '{}', null)$$,
   '42501', 'not_a_member', 'valid key, Beta item: work_item_apply refuses a non-member (the key widens no tenancy)');
 select throws_ok(
   $$select run_event_append('40000000-0000-4000-8000-00000000000b', 'step', 'x')$$,
@@ -73,18 +73,18 @@ reset role;
 select pg_temp.login('a0000000-0000-4000-8000-000000000002', true);
 select is((work_item_create('10000000-0000-4000-8000-00000000000a', 'renewal', 'Acme Motors — 2027 renewal', 'Acme Motors',
             '[{"id":"s1","label":"x","actor":"you","state":"now","guards":[],"evidence":[],"actions":[],"party":null,"reason":null,"recorded":[],"runId":null}]',
-            'needs_you', null) ->> 'reopened')::boolean, false, 'first ask creates');
+            'needs_you', null, null, null, null) ->> 'reopened')::boolean, false, 'first ask creates');
 select is((work_item_create('10000000-0000-4000-8000-00000000000a', 'renewal', 'Acme Motors — 2027 renewal', 'Acme Motors',
-            '[]', 'needs_you', null) ->> 'reopened')::boolean, true, 'asking twice reopens the same item');
+            '[]', 'needs_you', null, null, null, null) ->> 'reopened')::boolean, true, 'asking twice reopens the same item');
 select is((select count(*) from work_items where title = 'Acme Motors — 2027 renewal'), 1::bigint, 'exactly one open item exists');
 select throws_ok(
-  $$select work_item_create('10000000-0000-4000-8000-00000000000b', 'renewal', 'x', 'x', '[]', 'needs_you', null)$$,
+  $$select work_item_create('10000000-0000-4000-8000-00000000000b', 'renewal', 'x', 'x', '[]', 'needs_you', null, null, null, null)$$,
   '42501', 'not_a_member', 'the API key does not widen tenancy: Acme user cannot create in Beta');
 
 -- version_current: a stale version is refused
 create temp table t_item as select id, version from work_items where title = 'Acme Motors — 2027 renewal';
 select throws_ok(
-  $$select work_item_apply((select id from t_item), 99, '[]', 'needs_you', null, null, null, null, null, null, null, 'x', '{}')$$,
+  $$select work_item_apply((select id from t_item), 99, '[]', 'needs_you', null, null, null, null, null, null, null, 'x', '{}', null)$$,
   '40001', 'version_stale', 'work_item_apply refuses a stale version');
 
 -- run that could not finish, on an existing item → needs_you in the same call

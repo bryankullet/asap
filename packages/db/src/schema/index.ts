@@ -7,3 +7,4 @@ export * from "./invitations.js";
 export * from "./audit.js";
 export * from "./events.js";
 export * from "./work.js";
+export * from "./compliance.js";

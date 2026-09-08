@@ -1,4 +1,5 @@
-import type { RunRow, WorkItemRow } from "@asap/schema";
+import { effectiveCoverStatus, type RunRow, type WorkItemRow } from "@asap/schema";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Card, CardTitle } from "@asap/ui";
 import {
@@ -41,6 +42,15 @@ export function WorkItemView({
     <article className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold text-ink">{item.title}</h1>
+        {item.client_id && (
+          <Link
+            to="/files/$clientId"
+            params={{ clientId: item.client_id }}
+            className="text-sm text-accent-green underline"
+          >
+            Client file
+          </Link>
+        )}
         <RecordHeaderTask>
           <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
             <TaskStatus status={item.task_status} party={item.task_party} since={item.task_since} />
@@ -52,7 +62,7 @@ export function WorkItemView({
         {item.cover_status && (
           <PolicyPeriodLine>
             <span>Cover</span>
-            <CoverStatus status={item.cover_status} />
+            <CoverStatus status={effectiveCoverStatus(item) ?? item.cover_status} />
           </PolicyPeriodLine>
         )}
         {item.money_status && (

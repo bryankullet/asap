@@ -198,4 +198,53 @@ values
   ('40000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000b', '30000000-0000-4000-8000-00000000000b',
    'Quote comparison prepared', 'finished', null, 'b0000000-0000-4000-8000-000000000002', now() - interval '40 minutes', now() - interval '31 minutes');
 
+-- ---------------------------------------------------------------------------
+-- Phase 4: insurers, clients (every one lands not_started), agreements and rates
+-- ---------------------------------------------------------------------------
+insert into insurers (id, organization_id, name) values
+  ('60000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', 'Jubilee'),
+  ('60000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', 'CIC'),
+  ('60000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-00000000000b', 'CIC');
+
+insert into clients (id, organization_id, name, kind, source, created_by) values
+  ('70000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', 'Acme Motors', 'corporate', 'seed', 'a0000000-0000-4000-8000-000000000001'),
+  ('70000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', 'Jane Wanjiku', 'individual', 'seed', 'a0000000-0000-4000-8000-000000000001'),
+  ('70000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-00000000000b', 'Otieno household', 'individual', 'seed', 'b0000000-0000-4000-8000-000000000001');
+
+-- Jane's identity document has been received; her file is incomplete, not cleared.
+insert into client_file_documents (organization_id, client_id, kind, label, reference, received_at, recorded_by) values
+  ('10000000-0000-4000-8000-00000000000a', '70000000-0000-4000-8000-00000000000b', 'identity', 'National ID', 'Scan received 2 Sep', now() - interval '6 days', 'a0000000-0000-4000-8000-000000000002');
+update clients set file_status = 'incomplete', file_owner_id = 'a0000000-0000-4000-8000-000000000002' where id = '70000000-0000-4000-8000-00000000000b';
+
+update work_items set client_id = '70000000-0000-4000-8000-00000000000a', insurer_id = '60000000-0000-4000-8000-00000000000a', class_of_business = 'Motor commercial'
+ where id in ('30000000-0000-4000-8000-000000000001', '30000000-0000-4000-8000-000000000004');
+update work_items set client_id = '70000000-0000-4000-8000-00000000000a', insurer_id = '60000000-0000-4000-8000-00000000000a', class_of_business = 'Motor private'
+ where id = '30000000-0000-4000-8000-000000000002';
+update work_items set client_id = '70000000-0000-4000-8000-00000000000b' where id = '30000000-0000-4000-8000-000000000003';
+update work_items set client_id = '70000000-0000-4000-8000-00000000000c', insurer_id = '60000000-0000-4000-8000-00000000000c', class_of_business = 'Domestic package'
+ where id = '30000000-0000-4000-8000-00000000000b';
+
+-- A placement for Acme Motors sitting at approval: the gate blocks it (file not started).
+insert into work_items (id, organization_id, title, kind, client_id, insurer_id, class_of_business, owner_id, task_status, cover_status, reason, steps)
+values ('30000000-0000-4000-8000-000000000005', '10000000-0000-4000-8000-00000000000a',
+  'Acme Motors — Motor commercial placement with Jubilee', 'placement', '70000000-0000-4000-8000-00000000000a', '60000000-0000-4000-8000-00000000000a', 'Motor commercial',
+  'a0000000-0000-4000-8000-000000000002', 'needs_you', 'requested',
+  'Approval is blocked until Acme Motors'' client file is cleared.',
+  '[{"id":"prepare","label":"Placement prepared","actor":"asap","state":"done","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Prepare the placement","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null},
+    {"id":"approve","label":"Placement approved","actor":"you","state":"now","guards":["client_file_cleared","version_current"],"evidence":[{"kind":"approval","label":"Approval record"}],"actions":[{"verb":"approve","label":"Approve","guards":["client_file_cleared","version_current"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null},
+    {"id":"instruct","label":"Jubilee instructed","actor":"you","state":"todo","guards":[],"evidence":[{"kind":"record_send","label":"The instruction as sent"}],"actions":[{"verb":"draft","label":"Draft the instruction","guards":[],"disabledReason":null},{"verb":"record_send","label":"I sent this","guards":["evidence_present"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null},
+    {"id":"requirements","label":"Underwriting requirements","actor":"insurer","state":"todo","guards":[],"evidence":[{"kind":"document","label":"Each requirement and its response"}],"actions":[{"verb":"record_evidence","label":"Record the requirements","guards":["evidence_present"],"disabledReason":null}],"party":"Jubilee","reason":null,"recorded":[],"runId":null},
+    {"id":"cover_confirmed","label":"Cover confirmed","actor":"insurer","state":"todo","guards":[],"evidence":[{"kind":"confirmation","label":"Cover note or written confirmation"}],"actions":[{"verb":"record_evidence","label":"Record the confirmation","guards":["evidence_present"],"disabledReason":null}],"party":"Jubilee","reason":null,"recorded":[],"runId":null},
+    {"id":"documents","label":"Policy documents checked","actor":"asap","state":"todo","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Check the documents","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null},
+    {"id":"complete","label":"Acme Motors — Motor commercial placed","actor":"you","state":"todo","guards":[],"evidence":[],"actions":[{"verb":"complete","label":"Complete","guards":["evidence_present","version_current"],"disabledReason":null},{"verb":"exception","label":"Record an exception","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null}]');
+
+-- Jubilee: an agreement with one confirmed rate and one proposed by ASAP awaiting confirmation. CIC: no agreement.
+insert into agreements (id, organization_id, insurer_id, document_reference, created_by) values
+  ('80000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '60000000-0000-4000-8000-00000000000a', 'Jubilee agency agreement 2026.pdf', 'a0000000-0000-4000-8000-000000000001');
+insert into agreement_versions (id, organization_id, agreement_id, version, effective_from, payment_terms_days, document_reference, created_by) values
+  ('81000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '80000000-0000-4000-8000-00000000000a', 1, '2026-01-01', 60, 'Jubilee agency agreement 2026.pdf', 'a0000000-0000-4000-8000-000000000001');
+insert into agreement_rates (organization_id, version_id, class_of_business, rate_basis_points, clause_reference, proposed_by, proposed_by_user, confirmed_by, confirmed_at) values
+  ('10000000-0000-4000-8000-00000000000a', '81000000-0000-4000-8000-00000000000a', 'Motor private', 1000, 'Schedule A, clause 4.1', 'person', 'a0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', now() - interval '30 days'),
+  ('10000000-0000-4000-8000-00000000000a', '81000000-0000-4000-8000-00000000000a', 'Motor commercial', 1250, 'Schedule A, clause 4.2', 'asap', null, null, null);
+
 commit;

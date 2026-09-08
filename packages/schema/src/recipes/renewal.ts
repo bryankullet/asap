@@ -66,7 +66,12 @@ export function renewalSteps(input: { clientName: string; insurers: string[] }):
       id: "exposure",
       label: "Renewed exposure confirmed",
       actor: "you",
-      evidence: [{ kind: "confirmation", label: `${input.clientName}'s confirmation of what is being renewed` }],
+      evidence: [
+        {
+          kind: "confirmation",
+          label: `${input.clientName}'s confirmation of what is being renewed`,
+        },
+      ],
       actions: [a("record_evidence", "Record the client's confirmation", ["evidence_present"])],
     }),
     step({
@@ -74,7 +79,10 @@ export function renewalSteps(input: { clientName: string; insurers: string[] }):
       label: "Terms requested",
       actor: "you",
       evidence: [{ kind: "record_send", label: "The request as sent, per insurer" }],
-      actions: [a("draft", "Draft the request"), a("record_send", "I sent this", ["evidence_present"])],
+      actions: [
+        a("draft", "Draft the request"),
+        a("record_send", "I sent this", ["evidence_present"]),
+      ],
     }),
     step({
       id: "terms_return",
@@ -96,7 +104,10 @@ export function renewalSteps(input: { clientName: string; insurers: string[] }):
       label: "Options presented",
       actor: "you",
       evidence: [{ kind: "record_send", label: "What was actually sent to the client" }],
-      actions: [a("draft", "Draft the recommendation"), a("record_send", "I sent this", ["evidence_present"])],
+      actions: [
+        a("draft", "Draft the recommendation"),
+        a("record_send", "I sent this", ["evidence_present"]),
+      ],
     }),
     step({
       id: "instruction",
@@ -111,14 +122,19 @@ export function renewalSteps(input: { clientName: string; insurers: string[] }):
       label: "New period's cover confirmed",
       actor: "insurer",
       party: insurers,
-      evidence: [{ kind: "confirmation", label: "Cover note or written confirmation for the new period" }],
+      evidence: [
+        { kind: "confirmation", label: "Cover note or written confirmation for the new period" },
+      ],
       actions: [a("record_evidence", "Record the confirmation", ["evidence_present"])],
     }),
     step({
       id: "complete",
       label: "Renewal completed",
       actor: "you",
-      actions: [a("complete", "Complete", ["evidence_present", "version_current"]), a("exception", "Record a lapse or loss")],
+      actions: [
+        a("complete", "Complete", ["evidence_present", "version_current"]),
+        a("exception", "Record a lapse or loss"),
+      ],
     }),
   ];
 }

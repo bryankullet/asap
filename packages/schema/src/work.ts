@@ -95,12 +95,16 @@ export const WorkItemRow = z
     kind: WorkItemKind,
     client_id: uuidSchema.nullable(),
     policy_period_id: uuidSchema.nullable(),
+    insurer_id: uuidSchema.nullable(),
+    class_of_business: z.string().nullable(),
     owner_id: uuidSchema.nullable(),
     task_status: TaskStatus,
     task_party: z.string().nullable(),
     task_since: isoDate.nullable(),
     task_next_check: isoDate.nullable(),
     cover_status: CoverStatus.nullable(),
+    /** Set when cover is confirmed; Confirmed reads as Active cover once this date passes (Part 6.2 step 6). */
+    cover_inception_at: isoDate.nullable(),
     money_status: MoneyStatus.nullable(),
     reason: z.string().nullable(),
     steps: z.array(Step),
@@ -148,7 +152,7 @@ export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */
 export const WORK_ITEM_COLUMNS =
-  "id, organization_id, title, kind, client_id, policy_period_id, owner_id, task_status, task_party, task_since, task_next_check, cover_status, money_status, reason, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
+  "id, organization_id, title, kind, client_id, policy_period_id, insurer_id, class_of_business, owner_id, task_status, task_party, task_since, task_next_check, cover_status, cover_inception_at, money_status, reason, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
 export const RUN_COLUMNS =
   "id, organization_id, work_item_id, title, status, next_step, started_by, boot_token, started_at, ended_at, created_at, updated_at";
 
@@ -173,7 +177,8 @@ export function deriveTask(steps: Step[]): {
   status: TaskStatus;
   party: string | null;
 } {
-  if (steps.length > 0 && steps.every((s) => s.state === "done")) return { status: "done", party: null };
+  if (steps.length > 0 && steps.every((s) => s.state === "done"))
+    return { status: "done", party: null };
   const now = steps.find((s) => s.state === "now" || s.state === "blocked");
   if (!now) return { status: "needs_you", party: null };
   if (now.state === "blocked") return { status: "needs_you", party: null };
@@ -181,4 +186,18 @@ export function deriveTask(steps: Step[]): {
   if (now.actor === "asap") return { status: "in_progress", party: null };
   if (!now.party) throw new Error(`step ${now.id} is with an outside party but names none`);
   return { status: "with_party", party: now.party };
+}
+
+/** Confirmed → Active cover at inception, by date, not by anyone clicking (Part 6.2 step 6). */
+export function effectiveCoverStatus(
+  item: Pick<WorkItemRow, "cover_status" | "cover_inception_at">,
+  now = new Date(),
+): WorkItemRow["cover_status"] {
+  if (
+    item.cover_status === "confirmed" &&
+    item.cover_inception_at &&
+    new Date(item.cover_inception_at) <= now
+  )
+    return "active";
+  return item.cover_status;
 }

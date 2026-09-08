@@ -354,3 +354,21 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 ## D-047 · 2026-09-08 · The API registers its own key on boot (0025)
 
 **Decision.** On boot, before run recovery and before serving, the API hashes `API_INTERNAL_KEY` and calls `api_key_register` with the service client. An active matching row means nothing changes; otherwise every other active row is revoked and the new hash inserted. Registration failure is fatal, because no engine write could succeed. `scripts/set-api-internal-key.sh` is removed. On Render the value is `generateValue: true`, so no person ever sees it. Standing rule: no key value appears in a reply, a file or a log; the logger redacts `API_INTERNAL_KEY` and `RESEND_API_KEY`. Hosted: every previously registered key is revoked; the first boot of the API registers the live one.
+
+## D-048 · 2026-09-09 · Client files, agreements and the placement gate (0026, UI Build Spec Phase 4)
+
+**Tables.** `insurers`, `clients`, `client_file_documents`, `agreements`, `agreement_versions`, `agreement_rates`. `work_items` gains its `client_id` foreign key (promised in 0022) plus `insurer_id`, `class_of_business` and `cover_inception_at`. `clients` is the first business-record table; it exists because Phase 4 of the UI spec is the client file, not because the work order's import phase started. Import (Phase 2 of the work order) will populate it with `source = 'imported'`.
+
+**Every client lands as not_started.** A `before insert` trigger refuses any other value, from any path; pgTAP `0304` proves an imported row cannot be created as cleared or incomplete. Only `client_file_clear()` sets cleared, after a named person types a reason and the file holds what the client's kind needs (an identity document; for a company also a beneficial-ownership declaration). Cleared past `refresh_due_at` reads as refresh_due (`client_file_state()`), which is the derived state, not a stored one.
+
+**Screening (K03) is parked.** No screening source exists (spec Part 13 item 3). The file screen says "Cannot be screened yet" with the reason, and the `screen` action returns the `screening_source_configured` guard as a blocked outcome. No function can record a screen.
+
+**Agreements.** One per insurer, versioned; a new version closes the previous one the day before. A rate proposed by ASAP or a person is unusable until a person confirms it; `agreed_rate()` returns confirmed rates only, for the version effective on the date. G01's headline number is live items whose class has no confirmed rate with the insurer.
+
+**Guards that became real.** `client_file_cleared`: evaluated by the API from the effective file state, re-checked by `work_item_approve()` at execution. Blocked approvals say the gate's sentence and link to K02. `agreed_rate_exists`: real, confirmed rates only; it warns in the placement-prepare run and will gate commission expectations in Phase 3.
+
+**The override.** Only `brokerage_admin` (the principal officer; there is no separate role yet) may override the gate, with a typed reason. The database writes the permanent audit entry `placement.client_file_gate_overridden` and creates a needs_you item owned by the overriding principal, which is how it reaches their Today. Denied approvals are audited by the API under the caller's session (D-026: a raising function cannot keep its own denial row).
+
+**Not on the placement recipe.** `authority_sufficient` is listed by spec Part 6.2 on the approval step; authority limits do not exist yet, and a guard that blocks by omission would make every placement unapprovable, so it is left off the recipe and recorded here. It joins the recipe when authority limits are designed.
+
+**Cover.** Moves to Confirmed only when the insurer's written confirmation is recorded; Confirmed reads as Active cover once `cover_inception_at` passes, by date, computed on read (`effectiveCoverStatus`).

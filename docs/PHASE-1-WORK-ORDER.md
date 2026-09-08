@@ -206,4 +206,5 @@ These need a human answer. Claude Code should ask rather than assume.
 - [x] Phase 1 — shell, Work's four views, `/r/:recordId`, Activity chip, Ask that only searches; real reads through RLS over seeded `work_items` and `runs` (0022, D-039). Branch `claude/ui-phase1`.
 - [x] Phase 2 — work item engine (0023, D-042, D-043), renewal end to end (Part 6.7), draft/send (Part 7), runs with SSE and the Activity chip (Part 8). Runs and draft tests un-skipped. Branch `claude/ui-phase2`.
 - [ ] Phase 3 — money: X08, invoicing, receipts, N01, reconciliation with the comparison guard. Blocked on spec Part 13 items 1 and 2.
+- [x] Phase 4 — client files K01–K02 (K03 parked), agreements G01–G02, the placement gate at X01 with the audited principal-officer override; `client_file_cleared` and `agreed_rate_exists` real (0026, D-048). Branch `claude/ui-phase4`.
 - [ ] Not in Phase 1 by design: personal pins, realtime invalidation, `?panel=` panels (URL reserved), the mobile bottom bar is present but untested on device.

@@ -49,7 +49,17 @@ export function Shell() {
       </span>
       <div className="flex gap-2">
         <Link to="/settings/members" className="text-ink-secondary hover:text-ink">
-          Settings
+          Members
+        </Link>
+        <Link to="/settings/agreements" className="text-ink-secondary hover:text-ink">
+          Agreements
+        </Link>
+        <Link
+          to="/files"
+          search={{ view: "blocking" }}
+          className="text-ink-secondary hover:text-ink"
+        >
+          Client files
         </Link>
         <Button variant="ghost" size="sm" onClick={() => void supabase.auth.signOut()}>
           Sign out

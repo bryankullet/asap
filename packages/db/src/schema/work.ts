@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, deletedAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
+import { clients, insurers } from "./compliance.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
 
@@ -27,14 +28,17 @@ export const workItems = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     kind: text("kind").notNull(),
-    clientId: uuid("client_id"),
+    clientId: uuid("client_id").references(() => clients.id),
     policyPeriodId: uuid("policy_period_id"),
+    insurerId: uuid("insurer_id").references(() => insurers.id),
+    classOfBusiness: text("class_of_business"),
     ownerId: uuid("owner_id").references(() => users.id),
     taskStatus: text("task_status").notNull(),
     taskParty: text("task_party"),
     taskSince: timestamptz("task_since"),
     taskNextCheck: timestamptz("task_next_check"),
     coverStatus: text("cover_status"),
+    coverInceptionAt: timestamptz("cover_inception_at"),
     moneyStatus: text("money_status"),
     reason: text("reason"),
     steps: jsonb("steps")
@@ -54,6 +58,8 @@ export const workItems = pgTable(
     index("work_items_organization_id_task_status_idx").on(t.organizationId, t.taskStatus),
     index("work_items_organization_id_updated_at_idx").on(t.organizationId, t.updatedAt),
     index("work_items_owner_id_idx").on(t.ownerId),
+    index("work_items_client_id_idx").on(t.clientId),
+    index("work_items_insurer_id_idx").on(t.insurerId),
   ],
 );
 
