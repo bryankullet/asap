@@ -279,3 +279,9 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Shim.** `scripts/local-shim.sql` previously granted anon and authenticated ALL on new public tables by default, a superset of hosted that hid a missing grant and made the anon test pass for the wrong reason. It now mirrors the observed hosted defaults exactly (TRUNCATE, REFERENCES, TRIGGER, MAINTAIN on Postgres 17; no SELECT/INSERT/UPDATE/DELETE; service_role everything), so 0014's explicit grants are what `authenticated` has locally too.
 
 **Related.** 0015 revokes the API-role default privileges and the three (four on PG17) implicit privileges on every existing table, with a pgTAP test that creates a throwaway table to prove the rule holds for future tables.
+
+## D-036 · 2026-09-07 · Frontend framework: React + Vite + TypeScript PWA — PENDING OPERATOR CONFIRMATION
+
+**Status.** Open. The UI Build Spec v1 (Part 13, item 7) makes this the assumption to confirm before the first UI commit; it blocks every UI phase from Phase 1 of that spec onward. Phase 0 of the spec (`packages/schema` contracts) does not depend on it and proceeds.
+
+**Current state of the repository.** `apps/web` is already React 19 + Vite 8 + TypeScript with Tailwind 4 and the Phase 1 (work order) screens, which matches the assumption. If the operator confirms, nothing changes; if not, spec Parts 1, 3 and 11 change and `apps/web` is rebuilt.

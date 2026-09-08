@@ -190,3 +190,12 @@ These need a human answer. Claude Code should ask rather than assume.
 3. Staging domain and production domain.
 4. Whether staging holds real brokerage data or synthetic only. This changes the secret-handling rules.
 5. Password policy and whether 2FA is required for the brokerage administrator role at launch.
+
+---
+
+## Documentation still to land in `docs/` (not blocking)
+
+- [ ] `docs/ui/screen-map-v3.md` — Screen Map v3, the screen inventory the UI Build Spec is written against. To be attached by the operator.
+- [ ] The Intent & Skill Map as the UI Build Spec references it (163 skills). `docs/skill-map.md` holds the earlier extraction (~150 skills) plus the economic addendum; reconcile when the current version is attached.
+- [x] `docs/ui-build-spec-v1.md` — added 7 September 2026, as delivered.
+- [x] `docs/ui/screen-map-v1-catalogue.md` and `docs/ui/ASAP-Space-and-Screen-Map.pdf` — added as delivered; placement provisional until Screen Map v3 arrives.
