@@ -1,0 +1,92 @@
+import { describe, expect, it } from "vitest";
+import { ComponentId, UiIntent, uiIntentJsonSchema } from "./intent.js";
+
+type JsonSchema = { [key: string]: unknown };
+
+/** Every object schema reachable from the root, wherever it sits. */
+function objectSchemas(node: unknown, path = "$"): [string, JsonSchema][] {
+  if (typeof node !== "object" || node === null) return [];
+  const out: [string, JsonSchema][] = [];
+  const obj = node as JsonSchema;
+  const type = obj["type"];
+  if (type === "object" || (Array.isArray(type) && type.includes("object"))) out.push([path, obj]);
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v))
+      v.forEach((item, i) => out.push(...objectSchemas(item, `${path}.${k}[${i}]`)));
+    else if (typeof v === "object" && v !== null) out.push(...objectSchemas(v, `${path}.${k}`));
+  }
+  return out;
+}
+
+describe("UiIntent JSON schema", () => {
+  it("has additionalProperties false at every object level", () => {
+    const objects = objectSchemas(uiIntentJsonSchema);
+    expect(objects.length).toBeGreaterThan(0);
+    for (const [path, schema] of objects) {
+      expect(schema["additionalProperties"], `${path} must forbid additional properties`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("requires every field, so the model cannot omit view or suggestions", () => {
+    expect(uiIntentJsonSchema["required"]).toEqual([
+      "type",
+      "target",
+      "panel",
+      "view",
+      "answer",
+      "suggestions",
+    ]);
+  });
+
+  it("constrains type, view and panel to closed enums and suggestions to four", () => {
+    const props = uiIntentJsonSchema["properties"] as Record<string, JsonSchema>;
+    expect(props["type"]!["enum"]).toEqual([
+      "answer",
+      "open_record",
+      "work_list",
+      "draft",
+      "automation",
+      "panel",
+    ]);
+    expect(props["view"]!["enum"]).toEqual([
+      "summary",
+      "blocker",
+      "comparison",
+      "money",
+      "documents",
+      "timeline",
+    ]);
+    expect(props["suggestions"]!["maxItems"]).toBe(4);
+    const panel = props["panel"]!;
+    const panelEnum = (panel["enum"] ??
+      (panel["anyOf"] as JsonSchema[] | undefined)?.find((s) => s["enum"])?.["enum"]) as
+      string[] | undefined;
+    expect(panelEnum).toBeDefined();
+    expect(panelEnum).toEqual(expect.arrayContaining(ComponentId.options));
+  });
+});
+
+describe("UiIntent parsing", () => {
+  const valid = {
+    type: "open_record",
+    target: "pol_991",
+    panel: "PolicyCard",
+    view: "summary",
+    answer: "Opening the policy.",
+    suggestions: ["Show the schedule"],
+  };
+
+  it("accepts the spec's shape", () => {
+    expect(UiIntent.parse(valid)).toEqual(valid);
+  });
+
+  it("rejects markup-bearing extras, unknown components and more than four suggestions", () => {
+    expect(UiIntent.safeParse({ ...valid, html: "<div/>" }).success).toBe(false);
+    expect(UiIntent.safeParse({ ...valid, panel: "RawHtml" }).success).toBe(false);
+    expect(UiIntent.safeParse({ ...valid, suggestions: ["a", "b", "c", "d", "e"] }).success).toBe(
+      false,
+    );
+  });
+});

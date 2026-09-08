@@ -285,3 +285,11 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Status.** Open. The UI Build Spec v1 (Part 13, item 7) makes this the assumption to confirm before the first UI commit; it blocks every UI phase from Phase 1 of that spec onward. Phase 0 of the spec (`packages/schema` contracts) does not depend on it and proceeds.
 
 **Current state of the repository.** `apps/web` is already React 19 + Vite 8 + TypeScript with Tailwind 4 and the Phase 1 (work order) screens, which matches the assumption. If the operator confirms, nothing changes; if not, spec Parts 1, 3 and 11 change and `apps/web` is rebuilt.
+
+## D-037 · 2026-09-08 · UiIntent JSON Schema is generated with Zod 4's native `z.toJSONSchema`
+
+**Decision.** UI Build Spec v1 Part 4.1 says the strict JSON Schema for `UiIntent` is produced "via zod-to-json-schema". The repository is on Zod 4.5, which ships `z.toJSONSchema` natively; the separate `zod-to-json-schema` package targets Zod 3 and is not installed. `packages/schema/src/intent.ts` uses the native generator, and `intent.test.ts` proves `additionalProperties: false` at every object level, every field required, closed enums and `maxItems: 4` — the properties the spec's step 1 validation relies on. No new dependency.
+
+**Also in Phase 0.** The spec references a `ComponentId` type without defining it. Pending spec Part 13 item 6 (whether the §18 registry collapses into the intent), `ComponentId` is a Zod enum mirroring the Architecture v3.1 §18 registry names exactly. When `component_definitions` exists (Phase 4 of the work order) the enum should be derived from or checked against it.
+
+**Not implemented as written.** Part 0's port of `docs/interaction-contract.md` → `docs/ui-contract.md` could not be done: the prototype delivered to the repo is a built bundle with no `docs/` or test sources, so the four tests were written from the spec's descriptions and the contract document is outstanding. Part 6.4's `business_rule_exists('tor_meaning')` and 6.5's "stock available" are guards the spec uses but does not list in 5.3; `GuardId` holds the eight from 5.3 only, so those two will need adding before the TOR and certificate cards ship.
