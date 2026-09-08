@@ -30,6 +30,7 @@ import { parseBody } from "./_parse.js";
 export type WorkDeps = {
   logger: Logger;
   executor: (db: SupabaseClient) => Executor;
+  bootToken: string;
   /** How long the SSE stream polls for new events between checks. */
   streamPollMs: number;
 };
@@ -143,6 +144,7 @@ export function workRoutes(deps: WorkDeps) {
         p_expected_version: req.version,
         p_title: effects.startRun.title,
         p_steps: derived.steps,
+        p_boot_token: deps.bootToken,
       });
       if (error) return sendError(c, engineError(error));
       const run = await loadRun(db, data as string);

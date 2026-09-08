@@ -338,3 +338,11 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Task status is derived**, never authored: `deriveTask(steps)` maps the current step's actor to needs_you / in_progress / with_party (party required), and all-done to done. The API passes the derivation to the database; the 0022 row rules still hold.
 
 **Next check after a send** defaults to three days (`DEFAULT_NEXT_CHECK_DAYS`). A hypothesis, listed for OPERATOR-VALIDATION; it will become a company rule.
+
+## D-044 · 2026-09-08 · Public wrappers for the membership flows; the `app` schema stays unexposed (0024)
+
+**Decision.** The seven 0014 functions the API calls through `rpc()` (accept_invitation, create_invitation, create_organization, invitation_preview, revoke_invitation, set_active_organization, update_membership) each get a SECURITY INVOKER wrapper in `public` with the same signature and the same grants. The API code is unchanged: `rpc("name")` now resolves in `public`. `app` is not added to Exposed schemas. `app.handle_new_auth_user` loses the PUBLIC execute grant it carried by default; only `supabase_auth_admin` (the role that inserts into `auth.users`) holds it. pgTAP `0302` proves anon can execute `public.invitation_preview` and nothing else in `public` or `app`.
+
+## D-045 · 2026-09-08 · Run recovery on boot (0024)
+
+**Decision.** `runs.boot_token` records the API process that started a run (`<pid>-<uuid>`, new on every boot). On boot, before accepting traffic, the API calls `runs_recover(token)` with the service client: every run still `working` under another token, or with no token, becomes `could_not_finish` through `app.run_end_internal`, the same path as `run_end`, so its step is blocked with a plain reason and its work item is created or moved to needs_you in the same transaction. Audit rows are `actor_type = 'system'`. `runs_recover` is executable by `service_role` only. This is the one admin path that uses the service client; it reads no tenant data on a user's behalf. Recovery failure is logged, not fatal.

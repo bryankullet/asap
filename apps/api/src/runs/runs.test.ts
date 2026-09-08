@@ -54,6 +54,7 @@ const run = (workItemId: string | null): RunRow => ({
   status: "working",
   next_step: null,
   started_by: null,
+  boot_token: "test-boot",
   started_at: NOW,
   ended_at: null,
   created_at: NOW,

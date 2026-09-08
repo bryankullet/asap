@@ -26,6 +26,8 @@ export type AppDeps = {
   exposeAcceptUrl: boolean;
   /** Runs a work item run in-process; tests inject an immediate one. */
   executor: (db: SupabaseClient) => Executor;
+  /** Identifies this process on every run it starts; recovery on boot ends runs from other tokens. */
+  bootToken: string;
   streamPollMs?: number;
 };
 
@@ -87,7 +89,12 @@ export function createApp(deps: AppDeps) {
   app.route("/", askRoutes());
   app.route(
     "/",
-    workRoutes({ logger, executor: deps.executor, streamPollMs: deps.streamPollMs ?? 500 }),
+    workRoutes({
+      logger,
+      executor: deps.executor,
+      bootToken: deps.bootToken,
+      streamPollMs: deps.streamPollMs ?? 500,
+    }),
   );
   app.route("/", organizationRoutes(logger));
   app.route(

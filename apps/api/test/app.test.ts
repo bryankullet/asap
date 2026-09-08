@@ -164,6 +164,7 @@ beforeEach(() => {
     invitationTtlHours: 168,
     exposeAcceptUrl: true,
     executor: () => async () => {},
+    bootToken: "test-boot",
   });
 });
 

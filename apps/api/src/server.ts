@@ -5,6 +5,7 @@ import { resolveBuildInfo } from "./build-info.js";
 import { createLogger } from "./logger.js";
 import { LogMailer, PostmarkMailer } from "./mail/index.js";
 import { createExecutor } from "./runs/executor.js";
+import { newBootToken, recoverOrphanedRuns } from "./runs/recovery.js";
 import { createSupabaseFactory } from "./supabase.js";
 
 // Fails immediately, naming the variable, if the environment is incomplete.
@@ -33,6 +34,8 @@ const mailer =
       )
     : new LogMailer(logger);
 
+const bootToken = newBootToken();
+
 const app = createApp({
   logger,
   build,
@@ -42,7 +45,12 @@ const app = createApp({
   invitationTtlHours: env.INVITATION_TOKEN_TTL_HOURS,
   exposeAcceptUrl: env.APP_ENV === "local",
   executor: createExecutor({ logger, delayMs: 400 }),
+  bootToken,
 });
+
+// Before accepting traffic: runs a previous process left working become could_not_finish, and
+// their work items need a person (0024). Failure is logged, not fatal.
+await recoverOrphanedRuns(supabase.service(), bootToken, logger);
 
 const server = serve({ fetch: app.fetch, port: env.API_PORT }, (info) => {
   logger.info(

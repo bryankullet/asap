@@ -111,6 +111,7 @@ const RUNS: RunRow[] = [
     status: "could_not_finish",
     next_step: "Check this file",
     started_by: null,
+    boot_token: null,
     started_at: daysAgo(0),
     ended_at: daysAgo(0),
     created_at: daysAgo(0),

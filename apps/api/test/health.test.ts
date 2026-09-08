@@ -13,6 +13,7 @@ const app = createApp({
   invitationTtlHours: 168,
   exposeAcceptUrl: false,
   executor: () => async () => {},
+  bootToken: "test-boot",
 });
 
 describe("GET /health", () => {

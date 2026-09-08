@@ -69,6 +69,8 @@ export const runs = pgTable(
     status: text("status").notNull(),
     nextStep: text("next_step"),
     startedBy: uuid("started_by").references(() => users.id),
+    /** The API process that started it (0024). Recovery on boot ends runs from other tokens. */
+    bootToken: text("boot_token"),
     startedAt: timestamptz("started_at").notNull().defaultNow(),
     endedAt: timestamptz("ended_at"),
     createdAt: createdAt(),

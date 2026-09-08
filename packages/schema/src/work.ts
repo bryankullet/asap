@@ -127,6 +127,7 @@ export const RunRow = z.object({
   status: RunStatus,
   next_step: z.string().nullable(),
   started_by: uuidSchema.nullable(),
+  boot_token: z.string().nullable(),
   started_at: isoDate,
   ended_at: isoDate.nullable(),
   created_at: isoDate,
@@ -149,7 +150,7 @@ export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
 export const WORK_ITEM_COLUMNS =
   "id, organization_id, title, kind, client_id, policy_period_id, owner_id, task_status, task_party, task_since, task_next_check, cover_status, money_status, reason, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
 export const RUN_COLUMNS =
-  "id, organization_id, work_item_id, title, status, next_step, started_by, started_at, ended_at, created_at, updated_at";
+  "id, organization_id, work_item_id, title, status, next_step, started_by, boot_token, started_at, ended_at, created_at, updated_at";
 
 /** Run events as persisted for SSE (Part 8): `step`, `paused`, `finished`, `error`. */
 export const RunEventKind = z.enum(["step", "paused", "finished", "error"]);
