@@ -26,7 +26,9 @@ export const workItems = pgTable(
     coverStatus: text("cover_status"),
     moneyStatus: text("money_status"),
     reason: text("reason"),
-    steps: jsonb("steps").notNull().default(sql`'[]'::jsonb`),
+    steps: jsonb("steps")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     search: tsvector("search").generatedAlwaysAs(
       sql`to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(task_party, ''))`,
     ),
