@@ -26,10 +26,9 @@ describe.skip("runs — a run is never the only place something lives (Phase 2: 
     expect.fail("runs engine not built");
   });
 
-  it("finishing a run sets finished and never changes cover (checks.mjs line 24, cover part NOT adopted)", async () => {
-    // The prototype also asserted the record's cover became "Active cover" when the terms run
-    // finished. That contradicts the contract ("never infer cover from a run result"), so only the
-    // status assertion is kept: finishRun("run-terms") → status "finished".
+  it("finishing a run sets finished and leaves cover exactly as it was (checks.mjs line 24)", async () => {
+    // The prototype's seed already had the record at "Active cover"; the assertion is that
+    // finishRun("run-terms") left it unchanged. A run result never moves cover.
     expect(RunStatus.options).toContain("finished");
     expect.fail("runs engine not built");
   });

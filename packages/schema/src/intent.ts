@@ -3,59 +3,77 @@ import { z } from "zod";
 /**
  * The generative UI contract — UI Build Spec v1, Part 4.1.
  *
- * Ask returns an intent, never markup. The JSON Schema generated here is what the model is
- * constrained to; the seven-step validation pipeline (Part 4.2) runs server-side on top of it.
- *
- * `ComponentId` is the component registry as named by Architecture v3.1 §18. Whether that
- * registry collapses into this narrower intent is open (spec Part 13, item 6); until decided, the
- * registry list is the source and this enum mirrors it.
+ * `ComponentId` is the full component library: the v1 catalogue's "Shared reusable components"
+ * table, plus `RelationshipSummary` from Architecture §18, plus the twelve components for the
+ * Screen Map v3 surfaces (X08, K01–K03, G01–G02, T01–T02, N01–N04). `AskComponentId` is the
+ * strict subset the model may return: shell, shared-state, run and the twelve v3 components are
+ * excluded, because Ask opens and prepares things and never renders an approval, a settlement or
+ * a compliance decision by itself. Validation step 2 (Part 4.2) checks against `AskComponentId`.
+ * Decided by the operator on 2026-09-08 (D-041).
  */
-export const ComponentId = z.enum([
-  // Client
+const SHELL = [
+  "AppShell",
+  "AskComposer",
+  "ContextChip",
+  "SpaceHeader",
+  "RelatedSpaceLink",
+  "ActionMenu",
+] as const;
+const CLIENT_POLICY = [
   "ClientHeader",
   "ContactCard",
   "RelationshipSummary",
-  // Policy
   "PolicyCard",
   "CoverageTable",
   "PolicyTimeline",
   "PolicySchedule",
   "ExpiryIndicator",
-  // Quote
+  "ClaimPartyCard",
+] as const;
+const QUOTE_RENEWAL = [
   "QuoteCard",
   "QuoteComparison",
   "CoverageComparison",
   "InsurerResponseTracker",
-  // Renewal
   "RenewalReadiness",
   "RenewalTimeline",
   "TermComparison",
-  // Claim
+] as const;
+const CLAIMS_SERVICE = [
   "ClaimStatus",
   "ClaimTimeline",
   "MissingDocuments",
-  "ClaimPartyCard",
-  // Document
+  "ServiceProgress",
+  "BeforeAfterChange",
+  "EffectiveDateReview",
+] as const;
+const DOCUMENTS_EMAIL = [
   "DocumentCard",
   "DocumentViewer",
   "DocumentChecklist",
   "ExtractionReview",
-  // Email
   "EmailThread",
   "DraftEmail",
   "CommunicationSummary",
-  // Money
+] as const;
+const MONEY_EFFORT = [
   "OutstandingPremiumCard",
   "InvoiceTable",
   "PaymentTimeline",
   "CommissionReconciliation",
-  // Work
+  "AllocationEditor",
+  "TaxEvidenceCard",
+  "EffortEntry",
+] as const;
+const HUMAN_WORK = [
   "WorkCard",
   "WaitingCard",
   "ExceptionCard",
   "ApprovalCard",
   "AssignmentCard",
-  // Generic
+  "CompletionChecklist",
+] as const;
+const ANALYSIS = [
   "RecommendationCard",
   "Metric",
   "Table",
@@ -65,8 +83,67 @@ export const ComponentId = z.enum([
   "Alert",
   "ActivityFeed",
   "SourceEvidence",
+] as const;
+const AI_RULES = [
+  "JobProgress",
+  "StepOutcome",
+  "TriggerConditionEditor",
+  "ApprovalRule",
+  "TestResult",
+  "AutomationRunHistory",
+] as const;
+const SHARED_STATES = [
+  "EmptyState",
+  "LoadingStep",
+  "MissingData",
+  "ConflictReview",
+  "PartialSuccess",
+  "StaleData",
+  "PermissionNotice",
+  "ErrorRecovery",
+] as const;
+/** Screen Map v3 surfaces: X08, K01–K03, G01–G02, T01–T02, N01–N04. */
+const V3_SURFACES = [
+  "PremiumBreakdown",
+  "ClientFileStatus",
+  "DueDiligenceChecklist",
+  "ScreeningMatchReview",
+  "AgreementCard",
+  "RateTable",
+  "CertificateStockTable",
+  "CertificateCard",
+  "UnidentifiedReceiptsTable",
+  "InsurerAccountSummary",
+  "SettlementRunTable",
+  "TaxCertificateTable",
+] as const;
+
+export const ComponentId = z.enum([
+  ...SHELL,
+  ...CLIENT_POLICY,
+  ...QUOTE_RENEWAL,
+  ...CLAIMS_SERVICE,
+  ...DOCUMENTS_EMAIL,
+  ...MONEY_EFFORT,
+  ...HUMAN_WORK,
+  ...ANALYSIS,
+  ...AI_RULES,
+  ...SHARED_STATES,
+  ...V3_SURFACES,
 ]);
 export type ComponentId = z.infer<typeof ComponentId>;
+
+/** What the model may return. Everything else is the shell's or a person's to render. */
+export const AskComponentId = z.enum([
+  ...CLIENT_POLICY,
+  ...QUOTE_RENEWAL,
+  ...CLAIMS_SERVICE,
+  ...DOCUMENTS_EMAIL,
+  ...MONEY_EFFORT,
+  ...HUMAN_WORK,
+  ...ANALYSIS,
+]);
+export type AskComponentId = z.infer<typeof AskComponentId>;
 
 export const UiIntentType = z.enum([
   "answer",
@@ -90,7 +167,7 @@ export const UiIntent = z.strictObject({
   /** Must resolve to a record the caller can read, checked server-side under RLS (Part 4.2 step 3). */
   target: z.string().nullable(),
   /** Must exist in the registry at the requested version (Part 4.2 step 2). */
-  panel: ComponentId.nullable(),
+  panel: AskComponentId.nullable(),
   view: UiIntentView,
   answer: z.string(),
   suggestions: z.array(z.string()).max(4),

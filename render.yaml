@@ -1,0 +1,35 @@
+# Render blueprint for the ASAP web app as a static site (UI Build Spec v1, Part 12: "each phase
+# ends somewhere previewable on Render"). The browser receives the Supabase anon key only
+# (Architecture §45 rule 4); the build fails if anything else reaches the bundle
+# (apps/web/scripts/check-bundle.mjs). Values are set in the Render dashboard, never here.
+services:
+  - type: web
+    name: asap-web
+    runtime: static
+    rootDir: .
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @asap/web... build
+    staticPublishPath: apps/web/dist
+    pullRequestPreviewsEnabled: true
+    routes:
+      # Client-side routing: every path serves the app shell (TanStack Router).
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+    envVars:
+      - key: VITE_PUBLIC_APP_ENV
+        value: staging
+      - key: VITE_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: VITE_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_PUBLIC_API_BASE_URL
+        sync: false
+      - key: NODE_VERSION
+        value: "22.12.0"

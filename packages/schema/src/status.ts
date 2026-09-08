@@ -66,7 +66,7 @@ export const RUN_LABELS: Readonly<Record<RunStatus, string>> = {
   working: "Working",
   paused: "Paused",
   finished: "Finished",
-  could_not_finish: "Could not finish",
+  could_not_finish: "Couldn't finish",
   stopped: "Stopped",
 };
 

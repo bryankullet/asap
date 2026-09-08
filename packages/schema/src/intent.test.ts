@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ComponentId, UiIntent, uiIntentJsonSchema } from "./intent.js";
+import { AskComponentId, ComponentId, UiIntent, uiIntentJsonSchema } from "./intent.js";
 
 type JsonSchema = { [key: string]: unknown };
 
@@ -64,7 +64,7 @@ describe("UiIntent JSON schema", () => {
       (panel["anyOf"] as JsonSchema[] | undefined)?.find((s) => s["enum"])?.["enum"]) as
       string[] | undefined;
     expect(panelEnum).toBeDefined();
-    expect(panelEnum).toEqual(expect.arrayContaining(ComponentId.options));
+    expect(panelEnum).toEqual(expect.arrayContaining(AskComponentId.options));
   });
 });
 
@@ -88,5 +88,54 @@ describe("UiIntent parsing", () => {
     expect(UiIntent.safeParse({ ...valid, suggestions: ["a", "b", "c", "d", "e"] }).success).toBe(
       false,
     );
+  });
+});
+
+describe("component registry (D-041)", () => {
+  it("AskComponentId is a strict subset of ComponentId", () => {
+    const all = new Set<string>(ComponentId.options);
+    for (const id of AskComponentId.options) expect(all.has(id), id).toBe(true);
+    expect(AskComponentId.options.length).toBeLessThan(ComponentId.options.length);
+  });
+
+  it("Ask may not return shell, state, run or v3-surface components", () => {
+    const ask = new Set<string>(AskComponentId.options);
+    for (const id of [
+      "AppShell",
+      "AskComposer",
+      "EmptyState",
+      "PermissionNotice",
+      "JobProgress",
+      "StepOutcome",
+      "PremiumBreakdown",
+      "ClientFileStatus",
+      "DueDiligenceChecklist",
+      "ScreeningMatchReview",
+      "AgreementCard",
+      "RateTable",
+      "CertificateStockTable",
+      "CertificateCard",
+      "UnidentifiedReceiptsTable",
+      "InsurerAccountSummary",
+      "SettlementRunTable",
+      "TaxCertificateTable",
+    ]) {
+      expect(ComponentId.options).toContain(id);
+      expect(ask.has(id), id).toBe(false);
+    }
+    expect(
+      UiIntent.safeParse({
+        type: "panel",
+        target: null,
+        panel: "AppShell",
+        view: "summary",
+        answer: "",
+        suggestions: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("has no duplicate ids", () => {
+    expect(new Set(ComponentId.options).size).toBe(ComponentId.options.length);
   });
 });

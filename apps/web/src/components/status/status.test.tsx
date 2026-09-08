@@ -59,7 +59,7 @@ describe("status components refuse the wrong slot", () => {
         <RunStatus status="could_not_finish" />
       </ActivityPanelSlot>,
     );
-    expect(screen.getByText("Could not finish")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't finish")).toBeInTheDocument();
     expect(() =>
       render(
         <CardHeadline>
