@@ -54,10 +54,23 @@ describe("loadServerEnv", () => {
     );
   });
 
-  it("requires Sentry and Postmark outside local", () => {
-    expect(() => loadServerEnv({ ...validServer, APP_ENV: "staging" })).toThrow(
-      /SENTRY_DSN[\s\S]*POSTMARK_SERVER_TOKEN/,
+  it("boots in staging without Sentry or email: both are optional (D-046)", () => {
+    const env = loadServerEnv({ ...validServer, APP_ENV: "staging" });
+    expect(env.SENTRY_DSN).toBeUndefined();
+    expect(env.RESEND_API_KEY).toBeUndefined();
+  });
+
+  it("requires RESEND_API_KEY and RESEND_FROM_EMAIL together", () => {
+    expect(() => loadServerEnv({ ...validServer, RESEND_API_KEY: "re_x" })).toThrow(
+      /RESEND_FROM_EMAIL/,
     );
+    expect(
+      loadServerEnv({
+        ...validServer,
+        RESEND_API_KEY: "re_x",
+        RESEND_FROM_EMAIL: "no-reply@asap.example",
+      }).RESEND_FROM_EMAIL,
+    ).toBe("no-reply@asap.example");
   });
 
   it("rejects a password minimum below 12", () => {
@@ -83,7 +96,7 @@ describe("loadWorkerEnv", () => {
       APP_ENV: "local",
       WORKER_DATABASE_URL: "postgresql://asap_worker:pw@127.0.0.1:54322/postgres",
       ENCRYPTION_KEY: KEY,
-  API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
+      API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
     });
     expect(env.LOG_LEVEL).toBe("info");
   });

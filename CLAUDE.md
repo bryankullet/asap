@@ -61,7 +61,7 @@ Underneath the conversation, ASAP tracks one **economic unit** — a client, a p
 | User-path data access | `supabase-js` — RLS applies |
 | Worker data access | Drizzle, service connection, after organization context is set |
 | Background work | Supabase Queues + Node/TS workers; one Python extractor service |
-| Email | Gmail OAuth, Microsoft 365 OAuth, Postmark for platform transactional mail |
+| Email | Gmail OAuth, Microsoft 365 OAuth, Resend for platform transactional mail (D-046) |
 | Testing | Vitest (TS), pgTAP (RLS policies, against a real database) |
 | Monitoring | Sentry, PostHog, structured logs |
 

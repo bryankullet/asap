@@ -59,8 +59,9 @@ export const monitoringShape = {
 };
 
 /**
- * Phase 1 requires Sentry and Postmark. Locally neither is useful, so they become required
- * when APP_ENV is staging or production. See docs/DECISIONS.md D-007.
+ * Marks variables as required when APP_ENV is staging or production. Since D-046 the list for the
+ * API is empty (email and Sentry are optional with a startup log line); the helper stays for
+ * workers and future services.
  */
 export function requireInDeployedEnvironments<T extends { APP_ENV: AppEnv }>(
   keys: readonly (keyof T & string)[],

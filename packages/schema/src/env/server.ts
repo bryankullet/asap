@@ -40,7 +40,7 @@ export const serverEnvSchema = z
     ENCRYPTION_KEY: encryptionKey,
     /**
      * Sent as `x-asap-api-key` on every database call the API makes; migration 0023's engine
-     * functions refuse writes without it. Registered with scripts/set-api-internal-key.sh.
+     * functions refuse writes without it. The API registers its hash itself on boot (0025).
      */
     API_INTERNAL_KEY: z.string().min(32),
     INVITATION_TOKEN_TTL_HOURS: z.coerce
@@ -53,9 +53,9 @@ export const serverEnvSchema = z
     /** D-005: never below 12. Mirrors supabase/config.toml auth.minimum_password_length. */
     PASSWORD_MIN_LENGTH: z.coerce.number().int().min(12).default(12),
 
-    POSTMARK_SERVER_TOKEN: optionalNonEmpty,
-    POSTMARK_FROM_EMAIL: z.string().email().optional(),
-    POSTMARK_MESSAGE_STREAM: nonEmpty.default("outbound"),
+    /** Resend, platform transactional mail only. Absent → email disabled with a startup log line (D-046). */
+    RESEND_API_KEY: optionalNonEmpty,
+    RESEND_FROM_EMAIL: z.string().email().optional(),
 
     ...monitoringShape,
 
@@ -83,9 +83,13 @@ export const serverEnvSchema = z
     FEATURE_AUTOMATIONS_ENABLED: envBoolean.default(false),
     FEATURE_EXTERNAL_SEND_ENABLED: envBoolean.default(false),
   })
-  .superRefine(
-    requireInDeployedEnvironments(["SENTRY_DSN", "POSTMARK_SERVER_TOKEN", "POSTMARK_FROM_EMAIL"]),
-  );
+  // Email and Sentry are optional everywhere (D-046): absence disables the feature at boot with a
+  // log line. What stays required in deployed environments is what the API cannot run without.
+  .superRefine(requireInDeployedEnvironments([]))
+  .refine((v) => (v.RESEND_API_KEY === undefined) === (v.RESEND_FROM_EMAIL === undefined), {
+    message: "RESEND_API_KEY and RESEND_FROM_EMAIL must be set together",
+    path: ["RESEND_FROM_EMAIL"],
+  });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 

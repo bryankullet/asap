@@ -68,7 +68,8 @@ Keep separate keys per environment so a staging leak does not touch production s
 |---|---|---|---|
 | `GOOGLE_OAUTH_CLIENT_SECRET` | High | `apps/api` | App-level, not per-brokerage. |
 | `MICROSOFT_OAUTH_CLIENT_SECRET` | High | `apps/api` | Microsoft expires these — calendar the expiry. |
-| `POSTMARK_SERVER_TOKEN` | Medium | `apps/api` | Platform mail only: invitations, resets, system notices. |
+| `RESEND_API_KEY` | Medium | `apps/api` | Platform mail only: invitations, resets, system notices. Optional; absent disables email. |
+| `API_INTERNAL_KEY` | High | `apps/api` | Lets the API write through the engine functions. Registered by hash on boot (0025); the value is never logged or written anywhere. |
 
 **Per-brokerage OAuth refresh tokens are the sharpest edge in the system.** Each one is standing access to a brokerage's entire mailbox. They live in the database, encrypted with `ENCRYPTION_KEY`, never in environment variables, never in logs, never in an audit payload, never in an error message. A crash trace containing a refresh token is a reportable incident.
 

@@ -13,56 +13,62 @@ export interface Mailer {
   sendInvitation(mail: InvitationMail): Promise<void>;
 }
 
-/** Local development: log the link (the token is the credential; local logs stay on the laptop). */
+/**
+ * Email is not configured. Invitations are recorded and the accept link is logged at info
+ * level (the token is the credential, so this is only acceptable where logs stay private).
+ * Used locally, and in staging when RESEND_API_KEY is absent (D-046).
+ */
 export class LogMailer implements Mailer {
   constructor(private readonly logger: Logger) {}
   async sendInvitation(mail: InvitationMail): Promise<void> {
     this.logger.info(
       { to: mail.to, organization: mail.organizationName, accept_url: mail.acceptUrl },
-      "invitation email (not sent: APP_ENV=local)",
+      "invitation email not sent: email transport disabled",
     );
   }
 }
 
-/** Platform transactional mail through Postmark. Invitations, resets, notices — never client or insurer mail. */
-export class PostmarkMailer implements Mailer {
+/**
+ * Platform transactional mail through Resend: invitations, resets, notices. Never client or
+ * insurer mail — those are drafted and sent by a person (UI Build Spec v1 Part 7). The only
+ * automatic external messages are the informational ones a brokerage explicitly turns on.
+ */
+export class ResendMailer implements Mailer {
   constructor(
-    private readonly config: { serverToken: string; from: string; messageStream: string },
+    private readonly config: { apiKey: string; from: string },
     private readonly logger: Logger,
   ) {}
 
   async sendInvitation(mail: InvitationMail): Promise<void> {
     const expires = mail.expiresAt.toUTCString();
-    const res = await fetch("https://api.postmarkapp.com/email", {
+    const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        Accept: "application/json",
+        Authorization: `Bearer ${this.config.apiKey}`,
         "Content-Type": "application/json",
-        "X-Postmark-Server-Token": this.config.serverToken,
       },
       body: JSON.stringify({
-        From: this.config.from,
-        To: mail.to,
-        MessageStream: this.config.messageStream,
-        Subject: `${mail.inviterName} invited you to ${mail.organizationName} on ASAP`,
-        TextBody:
+        from: this.config.from,
+        to: [mail.to],
+        subject: `${mail.inviterName} invited you to ${mail.organizationName} on ASAP`,
+        text:
           `${mail.inviterName} has invited you to join ${mail.organizationName} on ASAP as ${mail.roleName}.\n\n` +
           `Accept the invitation:\n${mail.acceptUrl}\n\n` +
           `This link expires on ${expires}. If you were not expecting it, ignore this email.\n`,
-        HtmlBody:
+        html:
           `<p>${escapeHtml(mail.inviterName)} has invited you to join <strong>${escapeHtml(mail.organizationName)}</strong> on ASAP as ${escapeHtml(mail.roleName)}.</p>` +
           `<p><a href="${mail.acceptUrl}">Accept the invitation</a></p>` +
           `<p>This link expires on ${expires}. If you were not expecting it, ignore this email.</p>`,
-        Tag: "invitation",
+        tags: [{ name: "kind", value: "invitation" }],
       }),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       this.logger.error(
         { status: res.status, body: text.slice(0, 500) },
-        "postmark rejected the email",
+        "resend rejected the email",
       );
-      throw new Error(`postmark_error_${res.status}`);
+      throw new Error(`resend_error_${res.status}`);
     }
   }
 }
