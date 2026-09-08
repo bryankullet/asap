@@ -32,15 +32,29 @@ export const GuardId = z.enum([
   "evidence_present", //      blocks record_send, record_evidence, complete; names the missing evidence
   "no_duplicate_open", //     blocks automation create; names the existing item
   "certificate_unissued", //  blocks certificate issue; prevents a second issue on one number
+  "business_rule_exists", //  blocks any step depending on a configured company rule (TOR meaning, levy rate); carries the rule name
+  "stock_available", //       blocks certificate allocation: "No unallocated certificate numbers for this insurer."
+  "screening_source_configured", // blocks kyc.screen: "No screening list is connected. Files can be collected but not screened."
 ]);
 export type GuardId = z.infer<typeof GuardId>;
+
+/**
+ * A guard as attached to an action. `business_rule_exists` is parameterised by the company rule it
+ * needs (D-027 keeps those per organization), so it must be written with its rule name; every other
+ * guard is a bare id.
+ */
+export const GuardRef = z.union([
+  GuardId.exclude(["business_rule_exists"]),
+  z.strictObject({ id: z.literal("business_rule_exists"), rule: z.string().min(1) }),
+]);
+export type GuardRef = z.infer<typeof GuardRef>;
 
 /** An action as it may appear on a step or a card. Anything else is not a button. */
 export const Action = z.strictObject({
   verb: ActionVerb,
   label: z.string().min(1),
   /** Guards that must all pass at execution time (not only at render). */
-  guards: z.array(GuardId).default([]),
+  guards: z.array(GuardRef).default([]),
   /** Part 4.2 step 7: an action the caller lacks authority for renders disabled with the reason, never hidden. */
   disabledReason: z.string().nullable().default(null),
 });

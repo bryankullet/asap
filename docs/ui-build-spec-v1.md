@@ -260,6 +260,9 @@ Guards are named, server-evaluated, and re-evaluated **at execution time**, not 
 | `evidence_present` | record_send, record_evidence, complete | names the missing evidence |
 | `no_duplicate_open` | automation create | names the existing item |
 | `certificate_unissued` | certificate issue | prevents a second issue on one number |
+| `business_rule_exists(<rule>)` | any step depending on a configured rule (TOR meaning, levy rate) | "This needs a company rule that hasn't been set. Set it once in Business rules." |
+| `stock_available` | certificate allocation | "No unallocated certificate numbers for this insurer." |
+| `screening_source_configured` | kyc.screen | "No screening list is connected. Files can be collected but not screened." |
 
 ## 5.4 Two invariants the engine must guarantee
 
