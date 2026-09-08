@@ -5,13 +5,20 @@
 --    including a run with no work item at all (the prototype's "missing-record" case)
 --  - a draft cannot be marked sent without evidence, at the function and at the row
 begin;
-select plan(16);
+select plan(22);
 
 create or replace function pg_temp.login(p_user uuid, p_with_key boolean) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', 'authenticated')::text, true);
   perform set_config('request.headers',
     case when p_with_key then '{"x-asap-api-key":"pgtap-internal-key-0123456789abcdef"}' else '{}' end, true);
+  perform set_config('role', 'authenticated', true);
+end $$;
+-- The same, with an explicit headers document (no header at all, or a wrong key).
+create or replace function pg_temp.login_headers(p_user uuid, p_headers text) returns void language plpgsql as $$
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', p_user, 'role', 'authenticated')::text, true);
+  perform set_config('request.headers', p_headers, true);
   perform set_config('role', 'authenticated', true);
 end $$;
 
@@ -33,6 +40,33 @@ select pg_temp.login('a0000000-0000-4000-8000-000000000002', false);
 select throws_ok(
   $$select work_item_create('10000000-0000-4000-8000-00000000000a', 'renewal', 'Acme Motors — 2027 renewal', 'Acme Motors', '[]', 'needs_you', null)$$,
   '42501', 'api_only', 'a member without the API key cannot create a work item');
+reset role;
+
+-- gate: no request.headers at all (a direct database session), and a wrong key
+select pg_temp.login_headers('a0000000-0000-4000-8000-000000000002', '');
+select throws_ok(
+  $$select run_event_append('40000000-0000-4000-8000-000000000001', 'step', 'x')$$,
+  '42501', 'api_only', 'no headers at all: refused');
+reset role;
+select pg_temp.login_headers('a0000000-0000-4000-8000-000000000002', '{"x-asap-api-key":"wrong-key-wrong-key-wrong-key-wrong"}');
+select throws_ok(
+  $$select run_event_append('40000000-0000-4000-8000-000000000001', 'step', 'x')$$,
+  '42501', 'api_only', 'wrong key: refused');
+select throws_ok(
+  $$select draft_mark_copied('50000000-0000-4000-8000-000000000000')$$,
+  '42501', 'api_only', 'wrong key is refused before existence is revealed');
+reset role;
+
+-- gate: a valid key on rows the acting user cannot access (Acme AE against Beta rows)
+select pg_temp.login('a0000000-0000-4000-8000-000000000002', true);
+select throws_ok(
+  $$select work_item_apply('30000000-0000-4000-8000-00000000000b', 1, '[]', 'needs_you', null, null, null, null, null, null, null, 'x', '{}')$$,
+  '42501', 'not_a_member', 'valid key, Beta item: work_item_apply refuses a non-member (the key widens no tenancy)');
+select throws_ok(
+  $$select run_event_append('40000000-0000-4000-8000-00000000000b', 'step', 'x')$$,
+  '42501', 'not_a_member', 'valid key, Beta run: run_event_append refuses a non-member');
+select is((select count(*) from run_events where run_id = '40000000-0000-4000-8000-00000000000b'), 0::bigint,
+  'no event was written to the Beta run');
 reset role;
 
 -- no_duplicate_open

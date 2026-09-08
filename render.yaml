@@ -3,6 +3,50 @@
 # (Architecture §45 rule 4); the build fails if anything else reaches the bundle
 # (apps/web/scripts/check-bundle.mjs). Values are set in the Render dashboard, never here.
 services:
+  # Hono API. Node, not an edge runtime: SSE run streams need a long-lived process (spec Part 1.2).
+  - type: web
+    name: asap-api
+    runtime: node
+    rootDir: .
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @asap/api... build
+    startCommand: node apps/api/dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: APP_ENV
+        value: staging
+      - key: API_PORT
+        fromService:
+          type: web
+          name: asap-api
+          envVarKey: PORT
+      # Everything below is set in the dashboard; values never live in this file.
+      - key: API_BASE_URL
+        sync: false
+      - key: WEB_BASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: API_INTERNAL_KEY
+        sync: false
+      - key: POSTMARK_SERVER_TOKEN
+        sync: false
+      - key: POSTMARK_FROM_EMAIL
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
   - type: web
     name: asap-web
     runtime: static
