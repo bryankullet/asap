@@ -59,7 +59,7 @@ export const TASK_LABELS: Readonly<Record<TaskStatus, string>> = {
   needs_you: "Needs you",
   with_party: "With",
   in_progress: "In progress",
-  done: "Completed",
+  done: "Done",
 };
 
 export const RUN_LABELS: Readonly<Record<RunStatus, string>> = {

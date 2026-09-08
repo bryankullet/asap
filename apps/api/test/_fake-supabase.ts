@@ -20,6 +20,7 @@ export type FakeDb = {
 class Query {
   private filters: ((row: Record<string, unknown>) => boolean)[] = [];
   private single = false;
+  private max: number | null = null;
   constructor(
     private readonly db: FakeDb,
     private readonly table: string,
@@ -33,6 +34,27 @@ class Query {
     this.filters.push((r) => r[col] !== v);
     return this;
   }
+  is(col: string, v: unknown) {
+    this.filters.push((r) => r[col] === v);
+    return this;
+  }
+  ilike(col: string, pattern: string) {
+    // %term% only, unescaped — enough for the Ask route's contains-search.
+    const needle = pattern
+      .replace(/^%|%$/g, "")
+      .replace(/\\([\\%_])/g, "$1")
+      .toLowerCase();
+    this.filters.push((r) =>
+      String(r[col] ?? "")
+        .toLowerCase()
+        .includes(needle),
+    );
+    return this;
+  }
+  limit(n: number) {
+    this.max = n;
+    return this;
+  }
   order() {
     return this;
   }
@@ -41,7 +63,8 @@ class Query {
     return this;
   }
   then<T>(resolve: (v: { data: unknown; error: null }) => T) {
-    const rows = (this.db.tables[this.table] ?? []).filter((r) => this.filters.every((f) => f(r)));
+    let rows = (this.db.tables[this.table] ?? []).filter((r) => this.filters.every((f) => f(r)));
+    if (this.max !== null) rows = rows.slice(0, this.max);
     void this.selectSpec;
     return Promise.resolve(resolve({ data: this.single ? (rows[0] ?? null) : rows, error: null }));
   }

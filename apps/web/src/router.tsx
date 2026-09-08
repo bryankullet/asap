@@ -1,0 +1,156 @@
+import { WorkView } from "@asap/schema";
+import {
+  Outlet,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  redirect,
+} from "@tanstack/react-router";
+import { z } from "zod";
+import { RequireMembership, RequireSession } from "./lib/guards.js";
+import { AcceptInvitation } from "./pages/AcceptInvitation.js";
+import { AuthCallback } from "./pages/AuthCallback.js";
+import { AutomationDetail, Automations } from "./pages/Automations.js";
+import { CreateOrganization } from "./pages/CreateOrganization.js";
+import { Members } from "./pages/Members.js";
+import { Onboarding } from "./pages/Onboarding.js";
+import { Record } from "./pages/Record.js";
+import { SignIn } from "./pages/SignIn.js";
+import { SignUp } from "./pages/SignUp.js";
+import { Today } from "./pages/Today.js";
+import { Work } from "./pages/Work.js";
+import { Shell } from "./shell/Shell.js";
+
+/** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
+const rootRoute = createRootRoute({ component: Outlet });
+
+const nextSearch = z.object({ next: z.string().startsWith("/").optional().catch(undefined) });
+
+const signIn = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sign-in",
+  component: SignIn,
+  validateSearch: nextSearch,
+});
+const signUp = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sign-up",
+  component: SignUp,
+  validateSearch: z.object({
+    email: z.string().optional().catch(undefined),
+    next: z.string().startsWith("/").optional().catch(undefined),
+  }),
+});
+const authCallback = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/auth/callback",
+  component: AuthCallback,
+  validateSearch: nextSearch,
+});
+const invite = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invite/$token",
+  component: AcceptInvitation,
+});
+
+const authed = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "authed",
+  component: RequireSession,
+});
+const onboarding = createRoute({
+  getParentRoute: () => authed,
+  path: "/onboarding",
+  component: Onboarding,
+});
+const onboardingCreate = createRoute({
+  getParentRoute: () => authed,
+  path: "/onboarding/create",
+  component: CreateOrganization,
+});
+
+const member = createRoute({
+  getParentRoute: () => authed,
+  id: "member",
+  component: RequireMembership,
+});
+const shell = createRoute({ getParentRoute: () => member, id: "shell", component: Shell });
+
+const index = createRoute({
+  getParentRoute: () => shell,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/today", replace: true });
+  },
+});
+const today = createRoute({ getParentRoute: () => shell, path: "/today", component: Today });
+const work = createRoute({
+  getParentRoute: () => shell,
+  path: "/work",
+  component: Work,
+  validateSearch: z.object({ view: WorkView.catch("needs") }),
+});
+const automations = createRoute({
+  getParentRoute: () => shell,
+  path: "/automations",
+  component: Automations,
+});
+const automationDetail = createRoute({
+  getParentRoute: () => shell,
+  path: "/automations/$id",
+  component: AutomationDetail,
+});
+const record = createRoute({
+  getParentRoute: () => shell,
+  path: "/r/$recordId",
+  component: Record,
+  validateSearch: z.object({ panel: z.string().optional().catch(undefined) }),
+});
+const settingsMembers = createRoute({
+  getParentRoute: () => shell,
+  path: "/settings/members",
+  component: Members,
+});
+const legacyMembers = createRoute({
+  getParentRoute: () => shell,
+  path: "/members",
+  beforeLoad: () => {
+    throw redirect({ to: "/settings/members", replace: true });
+  },
+});
+
+export const routeTree = rootRoute.addChildren([
+  signIn,
+  signUp,
+  authCallback,
+  invite,
+  authed.addChildren([
+    onboarding,
+    onboardingCreate,
+    member.addChildren([
+      shell.addChildren([
+        index,
+        today,
+        work,
+        automations,
+        automationDetail,
+        record,
+        settingsMembers,
+        legacyMembers,
+      ]),
+    ]),
+  ]),
+]);
+
+export const router = createRouter({
+  routeTree,
+  defaultNotFoundComponent: () => (
+    <p className="m-6 text-sm text-ink-secondary">There is nothing at this address.</p>
+  ),
+});
+
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}

@@ -1,5 +1,5 @@
 import { Button, Card, CardDescription, CardTitle } from "@asap/ui";
-import { Link } from "react-router";
+import { Link } from "@tanstack/react-router";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { supabase } from "../lib/supabase.js";
 

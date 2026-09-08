@@ -199,3 +199,10 @@ These need a human answer. Claude Code should ask rather than assume.
 - [ ] The Intent & Skill Map as the UI Build Spec references it (163 skills). `docs/skill-map.md` holds the earlier extraction (~150 skills) plus the economic addendum; reconcile when the current version is attached.
 - [x] `docs/ui-build-spec-v1.md` — added 7 September 2026, as delivered.
 - [x] `docs/ui/screen-map-v1-catalogue.md` and `docs/ui/ASAP-Space-and-Screen-Map.pdf` — added as delivered; placement provisional until Screen Map v3 arrives.
+
+## UI Build Spec v1 progress (docs/ui-build-spec-v1.md Part 12)
+
+- [x] Phase 0 — `packages/schema` contracts and ported tests (branch `claude/ui-phase0`).
+- [x] Phase 1 — shell, Work's four views, `/r/:recordId`, Activity chip, Ask that only searches; real reads through RLS over seeded `work_items` and `runs` (0022, D-039). Branch `claude/ui-phase1`.
+- [ ] Phase 2 — work item engine, renewal end to end, draft/send, runs and the chip driven by real runs. The skipped runs and draft tests un-skip here.
+- [ ] Not in Phase 1 by design: personal pins, realtime invalidation, `?panel=` panels (URL reserved), the mobile bottom bar is present but untested on device.

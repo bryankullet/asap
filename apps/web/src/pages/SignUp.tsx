@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button, Card, Field, Input, Notice } from "@asap/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useSearchParams } from "react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { supabase } from "../lib/supabase.js";
@@ -21,18 +21,18 @@ const schema = z
 type Form = z.infer<typeof schema>;
 
 export function SignUp() {
-  const [params] = useSearchParams();
+  const params = useSearch({ strict: false }) as { email?: string; next?: string };
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const form = useForm<Form>({
     resolver: zodResolver(schema),
-    defaultValues: { email: params.get("email") ?? "" },
+    defaultValues: { email: params.email ?? "" },
   });
 
   async function onSubmit(values: Form) {
     setError(null);
     // After email confirmation the user lands back here; `next` carries an invitation link through.
-    const next = params.get("next");
+    const next = params.next;
     const redirect = new URL("/auth/callback", window.location.origin);
     if (next) redirect.searchParams.set("next", next);
     const { error } = await supabase.auth.signUp({

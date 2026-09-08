@@ -9,6 +9,8 @@ const TENANT_TABLES = [
   schema.invitations,
   schema.auditLog,
   schema.events,
+  schema.workItems,
+  schema.runs,
 ];
 
 describe("Drizzle schema conventions", () => {
@@ -26,7 +28,7 @@ describe("Drizzle schema conventions", () => {
     }
   });
 
-  it("lists exactly the eleven Phase 1 tables plus event_deliveries", () => {
+  it("lists exactly the eleven Phase 1 tables, event_deliveries, and the 0022 work tables", () => {
     const names = Object.values(schema)
       .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:Name") in v)
       .map((t) => getTableConfig(t as never).name)
@@ -41,9 +43,11 @@ describe("Drizzle schema conventions", () => {
       "permissions",
       "role_permissions",
       "roles",
+      "runs",
       "teams",
       "user_team_memberships",
       "users",
+      "work_items",
     ]);
   });
 });

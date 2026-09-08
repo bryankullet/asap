@@ -144,4 +144,58 @@ select o.id, 'user.action', 'organization', o.id, 'user', o.created_by,
        jsonb_build_object('action', 'organization.created')
 from organizations o;
 
+-- ---------------------------------------------------------------------------
+-- work items and runs (UI Build Spec Phase 1): enough for Today, the four Work views and the
+-- Activity chip to show real rows. Titles name the record or outcome, never a recipe.
+-- ---------------------------------------------------------------------------
+insert into work_items (id, organization_id, title, kind, owner_id, task_status, task_party, task_since, task_next_check, cover_status, money_status, reason, steps, completed_at, updated_at)
+values
+  -- Acme
+  ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-00000000000a',
+   'Acme Motors — renewal terms from Jubilee', 'renewal', 'a0000000-0000-4000-8000-000000000002',
+   'with_party', 'Jubilee', now() - interval '3 days', now() + interval '2 days', 'active', 'unpaid',
+   'Terms were requested from Jubilee three days ago; the next check is in two days.',
+   '[{"id":"s1","label":"Request terms","actor":"you","state":"done"},{"id":"s2","label":"Terms received","actor":"insurer","state":"now"},{"id":"s3","label":"Compare and recommend","actor":"asap","state":"todo"}]',
+   null, now() - interval '1 hour'),
+  ('30000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-00000000000a',
+   'KDA 482A — motor certificate', 'certificate', 'a0000000-0000-4000-8000-000000000002',
+   'needs_you', null, null, null, 'confirmed', null,
+   'Cover is confirmed but no certificate number has been allocated for this vehicle.',
+   '[{"id":"s1","label":"Cover confirmed","actor":"insurer","state":"done"},{"id":"s2","label":"Allocate a number","actor":"you","state":"now"},{"id":"s3","label":"Issue","actor":"you","state":"todo"}]',
+   null, now() - interval '20 minutes'),
+  ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-00000000000a',
+   'Jane Wanjiku — claim review pack', 'claim', 'a0000000-0000-4000-8000-000000000002',
+   'in_progress', null, null, null, 'active', null,
+   'ASAP is assembling the missing-document list from the claim form.',
+   '[{"id":"s1","label":"Claim form received","actor":"client","state":"done"},{"id":"s2","label":"List missing documents","actor":"asap","state":"now"}]',
+   null, now() - interval '5 minutes'),
+  ('30000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-00000000000a',
+   'Acme Motors — Q2 statement reconciled', 'reconciliation', 'a0000000-0000-4000-8000-000000000003',
+   'done', null, null, null, null, 'reconciled',
+   null, '[{"id":"s1","label":"Statement imported","actor":"finance","state":"done"},{"id":"s2","label":"Lines matched","actor":"asap","state":"done"}]',
+   now() - interval '2 days', now() - interval '2 days'),
+  -- Beta
+  ('30000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000b',
+   'Otieno household — new business quote', 'new_business', 'b0000000-0000-4000-8000-000000000002',
+   'needs_you', null, null, null, 'draft', 'not_invoiced',
+   'Three quotes are back; a recommendation is waiting for you.',
+   '[{"id":"s1","label":"Quotes requested","actor":"you","state":"done"},{"id":"s2","label":"Choose and recommend","actor":"you","state":"now"}]',
+   null, now() - interval '30 minutes'),
+  ('30000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-00000000000b',
+   'Beta Risk — CIC premium statement', 'money_in', 'b0000000-0000-4000-8000-000000000003',
+   'with_party', 'CIC', now() - interval '6 days', now() + interval '1 day', null, 'part_paid',
+   'CIC has acknowledged the query and owes a reply by tomorrow.',
+   '[]', null, now() - interval '6 days');
+
+insert into runs (id, organization_id, work_item_id, title, status, next_step, started_by, started_at, ended_at)
+values
+  ('40000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-00000000000a', '30000000-0000-4000-8000-000000000003',
+   'Missing-document list', 'working', null, 'a0000000-0000-4000-8000-000000000002', now() - interval '5 minutes', null),
+  ('40000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-00000000000a', '30000000-0000-4000-8000-000000000001',
+   'Renewal pack prepared', 'finished', null, 'a0000000-0000-4000-8000-000000000002', now() - interval '3 days', now() - interval '3 days' + interval '4 minutes'),
+  ('40000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-00000000000a', '30000000-0000-4000-8000-000000000002',
+   'Certificate extraction', 'could_not_finish', 'Check this file', 'a0000000-0000-4000-8000-000000000002', now() - interval '1 hour', now() - interval '55 minutes'),
+  ('40000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000b', '30000000-0000-4000-8000-00000000000b',
+   'Quote comparison prepared', 'finished', null, 'b0000000-0000-4000-8000-000000000002', now() - interval '40 minutes', now() - interval '31 minutes');
+
 commit;

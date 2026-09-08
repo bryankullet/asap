@@ -299,3 +299,17 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 ## D-038 · 2026-09-08 · Rule names in `business_rule_exists` are free strings until `company_rules` lands
 
 **Decision.** `GuardRef` for `business_rule_exists` carries `rule: string`. When the per-organization `company_rules` table is designed in Phase 2 (D-027), the rule name becomes a Zod enum of known keys (`tor_meaning`, levy rates, and so on) and the free string is removed. Agreed with the operator; recorded so the loosening is not mistaken for a design.
+
+## D-039 · 2026-09-08 · `work_items` and `runs` exist as readable tables before the engine (migration 0022)
+
+**Decision.** UI Build Spec Phase 1 ships Work's four views, `/r/:recordId` and the Activity chip over real Supabase reads with RLS on. Those reads need the two tables spec Part 1.2 names, so 0022 creates `work_items` and `runs` in the Part 5.1 shape with the Part 2.1 vocabularies checked in SQL, the `with_party` rule enforced at the row, and explicit grants (`authenticated` may only SELECT). The work item *engine* (guards, actions, in-transaction run outcomes, the write grants) is Phase 2 and is deliberately absent. `client_id` and `policy_period_id` are nullable uuids without foreign keys until the Phase 2 schema (D-029) exists; a later migration adds the keys. This is not the work order's Phase 2 (import, clients, policies) arriving early; it is the UI spec's read surface.
+
+**Applied.** Hosted ledger version `20260908160320`; six work items and four runs seeded on hosted with the same rows as `supabase/seed.sql`. pgTAP `0300_work_items_and_runs.sql` covers isolation, counts, the grant layer and the row rules (113 tests pass).
+
+## D-040 · 2026-09-08 · Task `done` renders as "Done", not "Completed"
+
+**Decision.** The spec bans "Completed" outside the task layer, which allows it inside. The prototype's checks.mjs (line 23) is stricter: no record render may contain `>Completed<` at all, and its task group (line 16) used "Done". Per the reconciliation rule (adopt the original where it is more specific) the task label is "Done". `BANNED_STRINGS` keeps "Completed" with the task-layer exemption exactly as the spec lists it, so the exemption exists but nothing uses it.
+
+## D-041 · 2026-09-08 · ComponentId diff: §18 registry versus the v1 catalogue
+
+**Finding, no change yet.** Only in Architecture §18: `RelationshipSummary`. Only in the catalogue's shared-components table (27): `AppShell, AskComposer, ContextChip, SpaceHeader, RelatedSpaceLink, ActionMenu, ServiceProgress, BeforeAfterChange, EffectiveDateReview, AllocationEditor, TaxEvidenceCard, EffortEntry, CompletionChecklist, JobProgress, StepOutcome, TriggerConditionEditor, ApprovalRule, TestResult, AutomationRunHistory, EmptyState, LoadingStep, MissingData, ConflictReview, PartialSuccess, StaleData, PermissionNotice, ErrorRecovery`. The v3 additions (X08, K01–K03, G01–G02, T01–T02, N01–N04) could not be diffed: Screen Map v3 is not in the repository and the build spec names those screens without naming their components. `ComponentId` stays as the §18 list until Part 13 item 6 is decided.

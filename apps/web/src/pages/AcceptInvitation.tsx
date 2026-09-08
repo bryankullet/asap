@@ -1,6 +1,6 @@
 import { Badge, Button, Card, CardDescription, CardTitle, Notice } from "@asap/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useAuth } from "../lib/auth.js";
@@ -11,7 +11,7 @@ import { useInvalidateMe } from "../lib/me.js";
  * accepts. Accepting twice is harmless (the database function is idempotent).
  */
 export function AcceptInvitation() {
-  const { token = "" } = useParams();
+  const { token = "" } = useParams({ strict: false }) as { token?: string };
   const { session, loading } = useAuth();
   const navigate = useNavigate();
   const invalidate = useInvalidateMe();
@@ -26,7 +26,7 @@ export function AcceptInvitation() {
     onSuccess: async ({ organization_id }) => {
       await api.setActiveOrganization(organization_id);
       await invalidate();
-      navigate("/", { replace: true });
+      void navigate({ to: "/today", replace: true });
     },
   });
 
@@ -79,14 +79,12 @@ export function AcceptInvitation() {
               ) : (
                 <div className="flex flex-col gap-2">
                   <Button asChild variant="accent">
-                    <Link
-                      to={`/sign-up?email=${encodeURIComponent(preview.data.email)}&next=${encodeURIComponent(here)}`}
-                    >
+                    <Link to="/sign-up" search={{ email: preview.data.email, next: here }}>
                       Create an account to join
                     </Link>
                   </Button>
                   <Button asChild variant="outline">
-                    <Link to="/sign-in" state={{ from: here }}>
+                    <Link to="/sign-in" search={{ next: here }}>
                       I already have an account
                     </Link>
                   </Button>

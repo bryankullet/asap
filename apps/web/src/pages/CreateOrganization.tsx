@@ -3,7 +3,7 @@ import { createOrganizationRequestSchema, type CreateOrganizationRequest } from 
 import { Button, Card, Field, Input, Notice, Select } from "@asap/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
-import { useNavigate } from "react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useInvalidateMe } from "../lib/me.js";
@@ -34,6 +34,7 @@ const TIMEZONES = [
 /** §7 Step 1. Country, currency and timezone; terms accepted; the caller becomes administrator. */
 export function CreateOrganization() {
   const navigate = useNavigate();
+  const router = useRouter();
   const invalidate = useInvalidateMe();
   const form = useForm<CreateOrganizationRequest>({
     resolver: zodResolver(createOrganizationRequestSchema),
@@ -43,7 +44,7 @@ export function CreateOrganization() {
     mutationFn: api.createOrganization,
     onSuccess: async () => {
       await invalidate();
-      navigate("/", { replace: true });
+      void navigate({ to: "/today", replace: true });
     },
   });
   const errors = form.formState.errors;
@@ -119,7 +120,7 @@ export function CreateOrganization() {
           <Button type="submit" variant="accent" disabled={create.isPending}>
             {create.isPending ? "Creating…" : "Create brokerage"}
           </Button>
-          <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
+          <Button type="button" variant="ghost" onClick={() => router.history.back()}>
             Back
           </Button>
         </form>

@@ -14,7 +14,7 @@ Each status word belongs to one layer only (`packages/schema/src/status.ts`; the
 
 | Layer | Allowed labels | Position |
 |---|---|---|
-| Task | Needs you · With {party} since {date} · In progress · Completed | Card headline, record header |
+| Task | Needs you · With {party} since {date} · In progress · Done | Card headline, record header |
 | Run | Working · Paused · Finished · Could not finish · Stopped | Activity panel, run detail |
 | Cover | Draft · Requested · Submitted · Confirmed · Active cover · Expired · Cancelled | Policy period line |
 | Money | Not invoiced · Unpaid · Part paid · Paid · Received · Reconciled · Disputed · Due to insurer · Settled | Money row |

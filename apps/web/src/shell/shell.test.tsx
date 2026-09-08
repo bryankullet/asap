@@ -1,23 +1,148 @@
 /**
- * Ported from the prototype: the nav-order assertion (UI Build Spec v1, Part 0, Part 1.1).
- * The shell has three destinations plus Ask and the Activity chip, in this order:
- *   Today · Work · Automations · Ask · Activity chip
- * No insurance module ever appears in navigation (Architecture v3.1 §45).
- *
- * SKIPPED: the shell is UI Build Spec Phase 1; today `apps/web` carries only the Phase 1 work
- * order screens (sign-in, onboarding, members). Un-skip when `apps/web/src/shell` renders.
+ * Ported from the prototype's checks.mjs (UI Build Spec v1 Part 0, Part 1):
+ *   line 26 — the nav order regex `['today','☀','Today'],['work','▣','Work'],['automations'`;
+ *   line 19 — Today with Activity hidden still shows the KDA 482A item and a "Why here?" control;
+ *   line 23 — every record view renders and contains none of
+ *             /Renewal Space|Space:|>Waiting<|>Completed<|>Active</.
+ * Insurance modules are never destinations (Architecture v3.1 §45).
  */
+import type { RunRow, WorkItemRow } from "@asap/schema";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { WorkItemView } from "../views/RecordViews.js";
+import { TodayView } from "../views/TodayView.js";
+import { renderInRouter } from "../test-utils.js";
+import { NAV, NEVER_NAV } from "./nav.js";
+import { ShellNav } from "./ShellNav.js";
 
-describe.skip("shell — navigation order (Phase 1: shell not built)", () => {
-  it("renders Today, Work, Automations, then Ask, then the Activity chip, in that order", () => {
-    // render(<Shell />); const items = screen.getAllByRole("link").map((l) => l.textContent);
-    // expect(items.slice(0, 3)).toEqual(["Today", "Work", "Automations"]);
-    expect.fail("shell not built");
+const ORG = "10000000-0000-4000-8000-00000000000a";
+const iso = (d: Date) => d.toISOString();
+const daysAgo = (n: number) => iso(new Date(Date.now() - n * 86_400_000));
+
+const item = (over: Partial<WorkItemRow>): WorkItemRow => ({
+  id: "30000000-0000-4000-8000-000000000002",
+  organization_id: ORG,
+  title: "KDA 482A — motor certificate",
+  kind: "certificate",
+  client_id: null,
+  policy_period_id: null,
+  owner_id: null,
+  task_status: "needs_you",
+  task_party: null,
+  task_since: null,
+  task_next_check: null,
+  cover_status: "confirmed",
+  money_status: null,
+  reason: "Cover is confirmed but no certificate number has been allocated.",
+  steps: [
+    {
+      id: "s1",
+      label: "Cover confirmed",
+      actor: "insurer",
+      state: "done",
+      guards: [],
+      reason: null,
+    },
+    { id: "s2", label: "Allocate a number", actor: "you", state: "now", guards: [], reason: null },
+  ],
+  created_at: daysAgo(1),
+  updated_at: daysAgo(0),
+  completed_at: null,
+  deleted_at: null,
+  ...over,
+});
+
+const FIXTURES: WorkItemRow[] = [
+  item({}),
+  item({
+    id: "30000000-0000-4000-8000-000000000001",
+    title: "Acme Motors — renewal terms from Jubilee",
+    kind: "renewal",
+    task_status: "with_party",
+    task_party: "Jubilee",
+    task_since: daysAgo(3),
+    task_next_check: daysAgo(1),
+    cover_status: "active",
+    money_status: "unpaid",
+  }),
+  item({
+    id: "30000000-0000-4000-8000-000000000003",
+    title: "Jane Wanjiku — claim review pack",
+    kind: "claim",
+    task_status: "in_progress",
+    cover_status: "active",
+  }),
+  item({
+    id: "30000000-0000-4000-8000-000000000004",
+    title: "Acme Motors — Q2 statement reconciled",
+    kind: "reconciliation",
+    task_status: "done",
+    cover_status: null,
+    money_status: "reconciled",
+    completed_at: daysAgo(2),
+  }),
+];
+
+const RUNS: RunRow[] = [
+  {
+    id: "40000000-0000-4000-8000-000000000003",
+    organization_id: ORG,
+    work_item_id: "30000000-0000-4000-8000-000000000002",
+    title: "Certificate extraction",
+    status: "could_not_finish",
+    next_step: "Check this file",
+    started_by: null,
+    started_at: daysAgo(0),
+    ended_at: daysAgo(0),
+    created_at: daysAgo(0),
+    updated_at: daysAgo(0),
+  },
+];
+
+describe("shell navigation", () => {
+  it("renders Today, Work, Automations in that order (checks.mjs line 26)", async () => {
+    expect(NAV.map((n) => [n.to, n.glyph, n.label])).toEqual([
+      ["/today", "☀", "Today"],
+      ["/work", "▣", "Work"],
+      ["/automations", "⟳", "Automations"],
+    ]);
+    await renderInRouter(<ShellNav />);
+    const links = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link");
+    expect(links.map((l) => l.textContent?.trim())).toEqual(["☀Today", "▣Work", "⟳Automations"]);
   });
 
-  it("never renders an insurance module as a destination", () => {
-    // for (const banned of ["Clients", "Policies", "Renewals", "Claims", "Money"]) expect(screen.queryByRole("link", { name: banned })).toBeNull();
-    expect.fail("shell not built");
+  it("never offers an insurance module as a destination", async () => {
+    await renderInRouter(<ShellNav />);
+    for (const banned of NEVER_NAV) {
+      expect(screen.queryByRole("link", { name: new RegExp(`^${banned}$`) })).toBeNull();
+    }
   });
+});
+
+describe("Today with Activity hidden (checks.mjs line 19)", () => {
+  it("shows the item that needs you and a Why here? control", async () => {
+    // TodayView never renders the Activity chip; a run that could not finish reaches Today through its work item.
+    await renderInRouter(<TodayView items={FIXTURES} runs={RUNS} orgName="Acme" />);
+    expect(screen.getByText(/KDA 482A/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Why here?" }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/could not finish: Check this file/)).toBeInTheDocument();
+    // The overdue check with Jubilee is on Today too, named with its party.
+    expect(screen.getByText(/With Jubilee since/)).toBeInTheDocument();
+  });
+});
+
+describe("record views (checks.mjs line 23)", () => {
+  it.each(FIXTURES.map((f) => [f.title, f] as const))(
+    "%s renders without banned words",
+    async (_title, fixture) => {
+      const { container } = await renderInRouter(
+        <WorkItemView item={fixture} runs={RUNS} />,
+        `/r/${fixture.id}`,
+      );
+      const html = container.innerHTML;
+      expect(html.length).toBeGreaterThan(30);
+      expect(html).not.toMatch(/Renewal Space|Space:|>Waiting<|>Completed<|>Active</);
+      expect(html).not.toMatch(/\b(Waiting|Failed|Success|Space|Job)\b/);
+    },
+  );
 });

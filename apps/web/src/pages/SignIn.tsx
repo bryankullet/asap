@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button, Card, Field, Input, Notice } from "@asap/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { supabase } from "../lib/supabase.js";
@@ -15,7 +15,7 @@ type Form = z.infer<typeof schema>;
 
 export function SignIn() {
   const navigate = useNavigate();
-  const location = useLocation() as { state?: { from?: string } };
+  const { next } = useSearch({ strict: false }) as { next?: string };
   const [error, setError] = useState<string | null>(null);
   const [magicSent, setMagicSent] = useState<string | null>(null);
   const form = useForm<Form>({ resolver: zodResolver(schema) });
@@ -31,7 +31,7 @@ export function SignIn() {
       );
       return;
     }
-    navigate(location.state?.from ?? "/", { replace: true });
+    void navigate({ to: next ?? "/today", replace: true });
   }
 
   async function magicLink() {

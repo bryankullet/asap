@@ -109,7 +109,7 @@ describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
 
   it("the prototype's rendered task group shares no word with the other layers", () => {
     const groups = [
-      ["Needs you", "With Jubilee", "In progress", "Completed"],
+      ["Needs you", "With Jubilee", "In progress", "Done"],
       Object.values(RUN_LABELS),
       Object.values(COVER_LABELS),
       Object.values(MONEY_LABELS),

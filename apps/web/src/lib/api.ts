@@ -1,6 +1,7 @@
 import {
   acceptInvitationResponseSchema,
   apiErrorSchema,
+  askResponseSchema,
   createInvitationResponseSchema,
   createOrganizationResponseSchema,
   invitationPreviewSchema,
@@ -64,6 +65,7 @@ async function request<S extends z.ZodTypeAny>(
 
 export const api = {
   me: () => request("GET", "/me", meResponseSchema),
+  ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
   setActiveOrganization: (organization_id: string) =>
     request("POST", "/me/active-organization", null, { organization_id }),
   createOrganization: (input: CreateOrganizationRequest) =>

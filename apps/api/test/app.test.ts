@@ -324,3 +324,82 @@ describe("invitations", () => {
     expect((await readJson(bad)).error).toBe("invitation_expired");
   });
 });
+
+describe("ask (Phase 1: search only) — endpoint gates ported from the prototype's checks.mjs", () => {
+  const ITEM_A = "30000000-0000-4000-8000-000000000001";
+  const ITEM_B = "30000000-0000-4000-8000-000000000002";
+  beforeEach(() => {
+    db.tables["work_items"] = [
+      {
+        id: ITEM_A,
+        organization_id: ORG_A,
+        title: "Acme Motors — renewal terms from Jubilee",
+        deleted_at: null,
+        updated_at: "2026-09-08T00:00:00Z",
+      },
+      {
+        id: ITEM_B,
+        organization_id: ORG_A,
+        title: "KDA 482A — motor certificate",
+        deleted_at: null,
+        updated_at: "2026-09-08T00:00:00Z",
+      },
+      {
+        id: "30000000-0000-4000-8000-00000000000b",
+        organization_id: ORG_B,
+        title: "Otieno household — renewal",
+        deleted_at: null,
+        updated_at: "2026-09-08T00:00:00Z",
+      },
+    ];
+  });
+
+  it("is refused without a session (401), like the prototype's /api/ask/status gate", async () => {
+    expect((await app.request("/ask?q=renewal")).status).toBe(401);
+  });
+
+  it("rejects an empty query", async () => {
+    expect((await app.request("/ask?q=", { headers: auth("tok-admin") })).status).toBe(400);
+  });
+
+  it("returns an open_record intent for a single match and never markup", async () => {
+    const res = await app.request("/ask?q=KDA", { headers: auth("tok-admin") });
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.intent.type).toBe("open_record");
+    expect(body.intent.target).toBe(ITEM_B);
+    expect(body.results).toEqual([
+      {
+        id: ITEM_B,
+        kind: "work_item",
+        title: "KDA 482A — motor certificate",
+        href: `/r/${ITEM_B}`,
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/<[a-z]/i);
+  });
+
+  it("scopes to the active brokerage and returns a work_list for several matches", async () => {
+    db.tables["work_items"]!.push({
+      id: "30000000-0000-4000-8000-000000000009",
+      organization_id: ORG_A,
+      title: "Another renewal",
+      deleted_at: null,
+      updated_at: "2026-09-08T00:00:00Z",
+    });
+    const body = await readJson(
+      await app.request("/ask?q=renewal", { headers: auth("tok-admin") }),
+    );
+    expect(body.intent.type).toBe("work_list");
+    expect(body.results.map((r: { id: string }) => r.id)).not.toContain(
+      "30000000-0000-4000-8000-00000000000b",
+    );
+    expect(body.results).toHaveLength(2);
+  });
+
+  it("answers, without acting, when nothing matches", async () => {
+    const body = await readJson(await app.request("/ask?q=zzz", { headers: auth("tok-admin") }));
+    expect(body.intent.type).toBe("answer");
+    expect(body.results).toEqual([]);
+  });
+});
