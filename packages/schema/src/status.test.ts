@@ -21,6 +21,8 @@ import {
   TaskStatus,
   bannedStringsFor,
   containsBannedString,
+  taskLabel,
+  WITH_PARTY_ERROR,
 } from "./status.js";
 
 const allLabels = [
@@ -94,6 +96,35 @@ describe("status layers", () => {
       "refresh_due",
     ]);
     expect(StockStatus.options).toEqual(["allocated", "issued", "voided", "unaccounted"]);
+  });
+});
+
+describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
+  it("renders a with_party task as With <party>", () => {
+    expect(taskLabel({ status: "with_party", party: "Jubilee", since: "2026-09-03" })).toBe(
+      "With Jubilee",
+    );
+    expect(taskLabel({ status: "needs_you" })).toBe("Needs you");
+  });
+
+  it("the prototype's rendered task group shares no word with the other layers", () => {
+    const groups = [
+      ["Needs you", "With Jubilee", "In progress", "Completed"],
+      Object.values(RUN_LABELS),
+      Object.values(COVER_LABELS),
+      Object.values(MONEY_LABELS),
+      Object.values(FILE_LABELS),
+      Object.values(STOCK_LABELS),
+    ];
+    expect(new Set(groups.flat()).size).toBe(groups.flat().length);
+  });
+
+  it("refuses with_party without a party and a since date, with the prototype's message", () => {
+    expect(() => taskLabel({ status: "with_party" })).toThrow(WITH_PARTY_ERROR);
+    expect(() => taskLabel({ status: "with_party", party: "Jubilee" })).toThrow(WITH_PARTY_ERROR);
+    expect(() => taskLabel({ status: "with_party", since: "2026-09-03" })).toThrow(
+      WITH_PARTY_ERROR,
+    );
   });
 });
 

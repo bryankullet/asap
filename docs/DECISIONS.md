@@ -280,9 +280,11 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 
 **Related.** 0015 revokes the API-role default privileges and the three (four on PG17) implicit privileges on every existing table, with a pgTAP test that creates a throwaway table to prove the rule holds for future tables.
 
-## D-036 · 2026-09-07 · Frontend framework: React + Vite + TypeScript PWA — PENDING OPERATOR CONFIRMATION
+## D-036 · 2026-09-07 · Frontend framework: React + Vite + TypeScript PWA, TanStack Query, TanStack Router
 
-**Status.** Open. The UI Build Spec v1 (Part 13, item 7) makes this the assumption to confirm before the first UI commit; it blocks every UI phase from Phase 1 of that spec onward. Phase 0 of the spec (`packages/schema` contracts) does not depend on it and proceeds.
+**Status.** Decided by the operator on 2026-09-08: React + Vite + TypeScript, TanStack Query for server state, TanStack Router for routing. `apps/web` moves from react-router to TanStack Router in UI Build Spec Phase 1. Original note follows.
+
+**Original status.** Open. The UI Build Spec v1 (Part 13, item 7) makes this the assumption to confirm before the first UI commit; it blocks every UI phase from Phase 1 of that spec onward. Phase 0 of the spec (`packages/schema` contracts) does not depend on it and proceeds.
 
 **Current state of the repository.** `apps/web` is already React 19 + Vite 8 + TypeScript with Tailwind 4 and the Phase 1 (work order) screens, which matches the assumption. If the operator confirms, nothing changes; if not, spec Parts 1, 3 and 11 change and `apps/web` is rebuilt.
 
@@ -293,3 +295,7 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 **Also in Phase 0.** The spec references a `ComponentId` type without defining it. Pending spec Part 13 item 6 (whether the §18 registry collapses into the intent), `ComponentId` is a Zod enum mirroring the Architecture v3.1 §18 registry names exactly. When `component_definitions` exists (Phase 4 of the work order) the enum should be derived from or checked against it.
 
 **Not implemented as written.** Part 0's port of `docs/interaction-contract.md` → `docs/ui-contract.md` could not be done: the prototype delivered to the repo is a built bundle with no `docs/` or test sources, so the four tests were written from the spec's descriptions and the contract document is outstanding. Part 6.4's `business_rule_exists('tor_meaning')` and 6.5's "stock available" were guards the spec used but did not list in 5.3; the operator supplied the missing rows (`business_rule_exists(<rule>)`, `stock_available`, `screening_source_configured`) on 2026-09-08 and they are now in the spec and in `GuardId`. `business_rule_exists` is parameterised, so `GuardRef` requires it to be written with its rule name.
+
+## D-038 · 2026-09-08 · Rule names in `business_rule_exists` are free strings until `company_rules` lands
+
+**Decision.** `GuardRef` for `business_rule_exists` carries `rule: string`. When the per-organization `company_rules` table is designed in Phase 2 (D-027), the rule name becomes a Zod enum of known keys (`tor_meaning`, levy rates, and so on) and the free string is removed. Agreed with the operator; recorded so the loosening is not mistaken for a design.

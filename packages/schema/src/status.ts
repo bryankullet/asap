@@ -139,3 +139,23 @@ export function bannedStringsFor(layer: StatusLayer | "any"): readonly BannedStr
 export function containsBannedString(text: string, layer: StatusLayer | "any" = "any"): boolean {
   return bannedStringsFor(layer).some((word) => new RegExp(`\\b${word}\\b`).test(text));
 }
+
+/** The prototype validated this in a modal; the message is kept so the refusal reads the same. */
+export const WITH_PARTY_ERROR = "Name the outside party and the next check date.";
+
+export type TaskState = {
+  status: TaskStatus;
+  party?: string | null | undefined;
+  since?: string | Date | null | undefined;
+};
+
+/**
+ * The card-headline label for a task. `with_party` is only renderable with the party named; without
+ * it the function throws rather than degrading to a bare "Waiting"-like label. Since dates are
+ * rendered by the component ("With Jubilee since 3 Sep"); this returns the label the tests match.
+ */
+export function taskLabel(task: TaskState): string {
+  if (task.status !== "with_party") return TASK_LABELS[task.status];
+  if (!task.party || !task.since) throw new Error(WITH_PARTY_ERROR);
+  return `${TASK_LABELS.with_party} ${task.party}`;
+}

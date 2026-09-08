@@ -4,7 +4,7 @@
 
 **Read with:** Screen Map v3 (what the screens are), the v1 catalogue (detailed screen entries), the Intent & Skill Map (the 163 skills), and Architecture v3.1 (the backend).
 
-**Assumption to confirm before the first commit:** the web app is React + Vite + TypeScript as a PWA. Everything below assumes that. If it's something else, Parts 1, 3 and 11 change; the rest doesn't.
+**Decided (D-036, 8 September 2026):** the web app is React + Vite + TypeScript as a PWA, with TanStack Query for server state and TanStack Router for routing. Everything below assumes that.
 
 ---
 
@@ -506,4 +506,4 @@ Each phase ends somewhere previewable on Render.
 4. **Certificate system integration** — direct read, or references typed by a person. *Blocks phase 5.*
 5. **Due diligence backfill policy** for imported clients. *Blocks phase 4.*
 6. **Which model powers Ask**, and whether the component registry in Architecture v3.1 collapses into the narrower `UiIntent` in Part 4. These are two different contracts and only one should survive. *Blocks phase 1's Ask beyond search.*
-7. **Frontend framework confirmation.** *Blocks everything.*
+7. ~~Frontend framework confirmation.~~ Decided: D-036.
