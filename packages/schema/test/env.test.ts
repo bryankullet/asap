@@ -15,6 +15,7 @@ const validServer = {
   SUPABASE_JWT_SECRET: "jwt",
   DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
   ENCRYPTION_KEY: KEY,
+  API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
 };
 
 describe("loadServerEnv", () => {
@@ -82,6 +83,7 @@ describe("loadWorkerEnv", () => {
       APP_ENV: "local",
       WORKER_DATABASE_URL: "postgresql://asap_worker:pw@127.0.0.1:54322/postgres",
       ENCRYPTION_KEY: KEY,
+  API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
     });
     expect(env.LOG_LEVEL).toBe("info");
   });

@@ -1,0 +1,174 @@
+import type { ActRequest, ActResponse, DraftRow, Step, WorkItemRow } from "@asap/schema";
+import { Button, Field, Input, Notice } from "@asap/ui";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState, type FormEvent } from "react";
+import { api, describeApiError } from "../../lib/api.js";
+import { DraftCard } from "../drafts/DraftCard.js";
+
+type ExceptionKind = NonNullable<ActRequest["exceptionKind"]>;
+
+/**
+ * The buttons on a record are exactly the step's actions (Part 5.2: nothing else is a button).
+ * A guard that fails is shown as a reason, not a refusal (Screen Map v3 Part 7 check 7).
+ */
+export function ActionPanel({
+  item,
+  step,
+  drafts,
+  onRunStarted,
+}: {
+  item: WorkItemRow;
+  step: Step;
+  drafts: DraftRow[];
+  onRunStarted: (runId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [blocked, setBlocked] = useState<{ guard: string; reason: string } | null>(null);
+  const [form, setForm] = useState<ActRequest["verb"] | null>(null);
+  const [evidence, setEvidence] = useState("");
+  const [party, setParty] = useState("");
+  const [exceptionKind, setExceptionKind] = useState<ExceptionKind>("lapse");
+  const [reason, setReason] = useState("");
+  const [told, setTold] = useState("");
+
+  const act = useMutation({
+    mutationFn: (input: ActRequest) => api.act(item.id, input),
+    onSuccess: (res: ActResponse) => {
+      if (res.outcome === "blocked") {
+        setBlocked({ guard: res.guard, reason: res.reason });
+        return;
+      }
+      setBlocked(null);
+      setForm(null);
+      setEvidence("");
+      void qc.invalidateQueries({ queryKey: ["work_item_full", item.id] });
+      void qc.invalidateQueries({ queryKey: ["work_items"] });
+      void qc.invalidateQueries({ queryKey: ["runs"] });
+      if (res.run) onRunStarted(res.run.id);
+    },
+  });
+
+  const base = (verb: ActRequest["verb"]): ActRequest => ({
+    stepId: step.id,
+    verb,
+    version: item.version,
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    if (form === "exception") {
+      act.mutate({
+        ...base("exception"),
+        exceptionKind,
+        reason,
+        clientToldEvidence: told || undefined,
+      });
+    } else {
+      act.mutate({ ...base(form), evidence, party: party || undefined });
+    }
+  }
+
+  const stepDrafts = drafts.filter((d) => d.step_id === step.id);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap gap-2">
+        {step.actions.map((a) => (
+          <Button
+            key={a.verb}
+            variant={a.verb === "prepare" ? "accent" : "outline"}
+            size="sm"
+            disabled={act.isPending || a.disabledReason !== null}
+            title={a.disabledReason ?? undefined}
+            onClick={() => {
+              setBlocked(null);
+              if (a.verb === "prepare" || a.verb === "draft" || a.verb === "complete")
+                act.mutate(base(a.verb));
+              else setForm(a.verb);
+            }}
+          >
+            {a.label}
+          </Button>
+        ))}
+      </div>
+
+      {blocked && (
+        <Notice tone="waiting">
+          <strong>Not yet:</strong> {blocked.reason}
+        </Notice>
+      )}
+      {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
+
+      {form && form !== "exception" && (
+        <form onSubmit={submit} className="flex flex-col gap-2 rounded-card bg-wash p-4">
+          <Field label={step.evidence[0]?.label ?? "What are you relying on?"} htmlFor="evidence">
+            <Input
+              id="evidence"
+              value={evidence}
+              onChange={(e) => setEvidence(e.target.value)}
+              placeholder="Message id, sent-folder reference, document name"
+            />
+          </Field>
+          {form === "record_send" && (
+            <Field label="Sent to" htmlFor="party">
+              <Input
+                id="party"
+                value={party}
+                onChange={(e) => setParty(e.target.value)}
+                placeholder={step.party ?? "Who received it"}
+              />
+            </Field>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" variant="accent" size="sm" disabled={act.isPending}>
+              Record
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setForm(null)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {form === "exception" && (
+        <form onSubmit={submit} className="flex flex-col gap-2 rounded-card bg-wash p-4">
+          <Field label="What happened" htmlFor="kind">
+            <select
+              id="kind"
+              className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
+              value={exceptionKind}
+              onChange={(e) => setExceptionKind(e.target.value as ExceptionKind)}
+            >
+              <option value="lapse">Lapse — no instruction by the period end</option>
+              <option value="loss">Lost to another broker</option>
+              <option value="cancellation">Cancelled</option>
+              <option value="no_bid">No insurer would quote</option>
+              <option value="complaint">Complaint</option>
+            </select>
+          </Field>
+          <Field label="Reason, in your words" htmlFor="reason">
+            <Input id="reason" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </Field>
+          {exceptionKind === "lapse" && (
+            <Field label="Where is the record that the client was told in writing?" htmlFor="told">
+              <Input id="told" value={told} onChange={(e) => setTold(e.target.value)} />
+            </Field>
+          )}
+          <div className="flex gap-2">
+            <Button type="submit" variant="accent" size="sm" disabled={act.isPending}>
+              Record
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setForm(null)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+
+      {stepDrafts.map((d) => (
+        <DraftCard key={d.id} draft={d} item={item} step={step} />
+      ))}
+    </div>
+  );
+}

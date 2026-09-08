@@ -18,6 +18,8 @@ export function createSupabaseFactory(config: {
   url: string;
   anonKey: string;
   serviceRoleKey: string;
+  /** Sent as x-asap-api-key; 0023's engine functions refuse writes without it. Server-only. */
+  apiInternalKey: string;
 }): SupabaseFactory {
   const base = {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -27,7 +29,12 @@ export function createSupabaseFactory(config: {
     forUser: (accessToken) =>
       createClient(config.url, config.anonKey, {
         ...base,
-        global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        global: {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "x-asap-api-key": config.apiInternalKey,
+          },
+        },
       }),
     service: () => createClient(config.url, config.serviceRoleKey, base),
   };

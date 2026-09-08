@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
@@ -11,6 +12,8 @@ import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
 import { meRoutes } from "./routes/me.js";
 import { organizationRoutes } from "./routes/organizations.js";
+import { workRoutes } from "./routes/work.js";
+import type { Executor } from "./runs/executor.js";
 import type { SupabaseFactory } from "./supabase.js";
 
 export type AppDeps = {
@@ -21,6 +24,9 @@ export type AppDeps = {
   webBaseUrl: string;
   invitationTtlHours: number;
   exposeAcceptUrl: boolean;
+  /** Runs a work item run in-process; tests inject an immediate one. */
+  executor: (db: SupabaseClient) => Executor;
+  streamPollMs?: number;
 };
 
 /**
@@ -70,11 +76,19 @@ export function createApp(deps: AppDeps) {
     "/organizations/*",
     "/invitations/:token/accept",
     "/ask",
+    "/work-items",
+    "/work-items/*",
+    "/drafts/*",
+    "/runs/*",
   ]) {
     app.use(path, guard);
   }
   app.route("/", meRoutes());
   app.route("/", askRoutes());
+  app.route(
+    "/",
+    workRoutes({ logger, executor: deps.executor, streamPollMs: deps.streamPollMs ?? 500 }),
+  );
   app.route("/", organizationRoutes(logger));
   app.route(
     "/",

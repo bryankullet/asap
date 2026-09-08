@@ -19,6 +19,7 @@ describe("api startup", () => {
         SUPABASE_SERVICE_ROLE_KEY: "service",
         DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
         ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
       }),
     ).toThrow(EnvValidationError);
     try {

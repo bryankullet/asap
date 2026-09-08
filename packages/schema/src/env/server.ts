@@ -38,6 +38,11 @@ export const serverEnvSchema = z
     MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52_428_800),
 
     ENCRYPTION_KEY: encryptionKey,
+    /**
+     * Sent as `x-asap-api-key` on every database call the API makes; migration 0023's engine
+     * functions refuse writes without it. Registered with scripts/set-api-internal-key.sh.
+     */
+    API_INTERNAL_KEY: z.string().min(32),
     INVITATION_TOKEN_TTL_HOURS: z.coerce
       .number()
       .int()

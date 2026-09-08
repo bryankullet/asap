@@ -163,6 +163,7 @@ beforeEach(() => {
     webBaseUrl: "http://localhost:5173",
     invitationTtlHours: 168,
     exposeAcceptUrl: true,
+    executor: () => async () => {},
   });
 });
 

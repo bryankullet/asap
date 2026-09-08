@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { resolveBuildInfo } from "./build-info.js";
 import { createLogger } from "./logger.js";
 import { LogMailer, PostmarkMailer } from "./mail/index.js";
+import { createExecutor } from "./runs/executor.js";
 import { createSupabaseFactory } from "./supabase.js";
 
 // Fails immediately, naming the variable, if the environment is incomplete.
@@ -16,6 +17,7 @@ const supabase = createSupabaseFactory({
   url: env.SUPABASE_URL,
   anonKey: env.SUPABASE_ANON_KEY,
   serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+  apiInternalKey: env.API_INTERNAL_KEY,
 });
 
 // Postmark is required outside local (D-007); locally the link is logged instead of sent.
@@ -39,6 +41,7 @@ const app = createApp({
   webBaseUrl: env.WEB_BASE_URL,
   invitationTtlHours: env.INVITATION_TOKEN_TTL_HOURS,
   exposeAcceptUrl: env.APP_ENV === "local",
+  executor: createExecutor({ logger, delayMs: 400 }),
 });
 
 const server = serve({ fetch: app.fetch, port: env.API_PORT }, (info) => {

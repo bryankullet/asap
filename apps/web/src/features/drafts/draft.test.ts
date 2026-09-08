@@ -5,35 +5,78 @@
  * empty; save; sentAt still null. Then check the confirmation, type "Sent folder message 42",
  * save; sentAt is set and the newest audit entry's action is "External send recorded by human".
  *
- * SKIPPED: the Draft type and the drafts feature are UI Build Spec Phase 2. Un-skip when
- * `packages/schema/src/draft.ts` and `apps/web/src/features/drafts` exist.
+ * The audit action is written by the database function draft_record_send (0023) and asserted
+ * here through the shared constant; supabase/tests/0301 proves the row rule on a real database.
  */
+import { DraftRow, EXTERNAL_SEND_AUDIT_ACTION } from "@asap/schema";
 import { describe, expect, it } from "vitest";
+import { canRetry, markCopied, reviewSend } from "./draft.js";
 
-describe.skip("drafts — a draft without evidence stays unsent (Phase 2: Draft not built)", () => {
+const NOW = new Date("2026-09-08T10:00:00Z");
+const draft = (over: Partial<DraftRow> = {}): DraftRow =>
+  DraftRow.parse({
+    id: "50000000-0000-4000-8000-000000000001",
+    organization_id: "10000000-0000-4000-8000-00000000000a",
+    work_item_id: "30000000-0000-4000-8000-000000000001",
+    step_id: "request_terms",
+    to_address: "Jubilee",
+    subject: "Acme Motors — renewal terms request",
+    body: "Please quote.",
+    copied_at: null,
+    sent_at: null,
+    sent_evidence: null,
+    outcome_unknown: false,
+    created_by: null,
+    created_at: NOW.toISOString(),
+    updated_at: NOW.toISOString(),
+    ...over,
+  });
+
+describe("drafts — a draft without evidence stays unsent", () => {
   it("copying sets copiedAt and sentAt stays null", () => {
-    // const d = markCopied(draft, now); expect(d.copiedAt).toEqual(now); expect(d.sentAt).toBeNull();
-    expect.fail("Draft not built");
+    const d = markCopied(draft(), NOW);
+    expect(d.copied_at).toBe(NOW.toISOString());
+    expect(d.sent_at).toBeNull();
+    expect(markCopied(d, new Date("2026-09-09T00:00:00Z")).copied_at).toBe(NOW.toISOString());
   });
 
-  it("recording a send without the confirmation and evidence leaves sentAt null", () => {
-    // recordSend(d, { confirmed: false, evidence: "" }); expect(d.sentAt).toBeNull();
-    expect.fail("Draft not built");
+  it("recording a send without the confirmation and evidence is refused, so sentAt stays null", () => {
+    const d = markCopied(draft(), NOW);
+    expect(reviewSend(d, { confirmed: false, evidence: "" })).toEqual({
+      ok: false,
+      reason: "Confirm that you sent it and say where the evidence is.",
+    });
+    expect(reviewSend(d, { confirmed: true, evidence: "   " }).ok).toBe(false);
+    expect(reviewSend(d, { confirmed: false, evidence: "Sent folder message 42" }).ok).toBe(false);
+    expect(d.sent_at).toBeNull();
   });
 
-  it("recording a send with confirmation and evidence sets sentAt and writes the audit action", () => {
-    // recordSend(d, { confirmed: true, evidence: "Sent folder message 42" });
-    // expect(d.sentAt).toBeTruthy();
-    // expect(audit[0].action).toBe("External send recorded by human");
-    expect.fail("Draft not built");
+  it("recording a send with confirmation and evidence is accepted and names the audit action", () => {
+    const decision = reviewSend(draft(), { confirmed: true, evidence: "Sent folder message 42" });
+    expect(decision).toEqual({
+      ok: true,
+      evidence: "Sent folder message 42",
+      outcomeUnknown: false,
+    });
+    expect(EXTERNAL_SEND_AUDIT_ACTION).toBe("External send recorded by human");
   });
 
   it("sentAt cannot be constructed without sentEvidence", () => {
-    // expect(() => Draft.parse({ ...draft, sentAt: now })).toThrow();
-    expect.fail("Draft not built");
+    expect(() => draft({ sent_at: NOW.toISOString(), sent_evidence: null })).toThrow();
+    expect(() => draft({ sent_at: null, sent_evidence: "x" })).toThrow();
+    expect(
+      draft({ sent_at: NOW.toISOString(), sent_evidence: "Sent folder message 42" }).sent_at,
+    ).toBe(NOW.toISOString());
   });
 
   it("an unknown send outcome disables retry until an outcome check runs", () => {
-    expect.fail("Draft not built");
+    const unknown = draft({
+      sent_at: NOW.toISOString(),
+      sent_evidence: "Sent folder message 42",
+      outcome_unknown: true,
+    });
+    expect(canRetry(unknown)).toBe(false);
+    expect(canRetry({ ...unknown, outcome_unknown: false })).toBe(true);
+    expect(reviewSend(unknown, { confirmed: true, evidence: "again" }).ok).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { GuardRef } from "./actions.js";
+import { Action, GuardRef } from "./actions.js";
 import { CoverStatus, MoneyStatus, RunStatus, TaskStatus } from "./status.js";
 import { uuidSchema } from "./api/common.js";
 
@@ -20,16 +20,51 @@ export const StepActor = z.enum([
 ]);
 export const StepState = z.enum(["done", "now", "blocked", "todo"]);
 
+/** What must exist for a step to be done (Part 5.1 `EvidenceReq`). */
+export const EvidenceReq = z.object({
+  kind: z.enum(["record_send", "document", "instruction", "confirmation", "approval", "reason"]),
+  label: z.string().min(1),
+});
+export type EvidenceReq = z.infer<typeof EvidenceReq>;
+
+/** Evidence as recorded against a step: who, when, and the reference a person supplied. */
+export const EvidenceRecord = z.object({
+  kind: EvidenceReq.shape.kind,
+  reference: z.string().min(1),
+  recordedBy: z.string(),
+  recordedAt: z.string(),
+});
+export type EvidenceRecord = z.infer<typeof EvidenceRecord>;
+
 export const Step = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   actor: StepActor,
   state: StepState,
   guards: z.array(GuardRef).default([]),
+  evidence: z.array(EvidenceReq).default([]),
+  actions: z.array(Action).default([]),
+  /** For steps whose actor is an outside party: the party's name, so with_party can be derived. */
+  party: z.string().nullable().default(null),
   /** Plain-language reason when `state` is `blocked`. */
   reason: z.string().nullable().default(null),
+  /** Evidence recorded so far. */
+  recorded: z.array(EvidenceRecord).default([]),
+  /** Run title while `prepare` is working, so a stopped run is visible on the step. */
+  runId: z.string().nullable().default(null),
 });
 export type Step = z.infer<typeof Step>;
+
+/** Exceptions close an item without completing it (Part 6.14, 6.7 lapse path). */
+export const ExceptionRecord = z.object({
+  kind: z.enum(["lapse", "loss", "cancellation", "complaint", "no_bid"]),
+  reason: z.string().min(1),
+  /** Reference proving the client was told in writing, required for lapse. */
+  clientToldEvidence: z.string().nullable(),
+  recordedBy: z.string(),
+  recordedAt: z.string(),
+});
+export type ExceptionRecord = z.infer<typeof ExceptionRecord>;
 
 /** The fourteen Part 6 workflows. */
 export const WorkItemKind = z.enum([
@@ -69,6 +104,9 @@ export const WorkItemRow = z
     money_status: MoneyStatus.nullable(),
     reason: z.string().nullable(),
     steps: z.array(Step),
+    exception: ExceptionRecord.nullable(),
+    /** Bumped by every write; `version_current` compares against it. */
+    version: z.number().int(),
     created_at: isoDate,
     updated_at: isoDate,
     completed_at: isoDate.nullable(),
@@ -109,6 +147,37 @@ export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */
 export const WORK_ITEM_COLUMNS =
-  "id, organization_id, title, kind, client_id, policy_period_id, owner_id, task_status, task_party, task_since, task_next_check, cover_status, money_status, reason, steps, created_at, updated_at, completed_at, deleted_at";
+  "id, organization_id, title, kind, client_id, policy_period_id, owner_id, task_status, task_party, task_since, task_next_check, cover_status, money_status, reason, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
 export const RUN_COLUMNS =
   "id, organization_id, work_item_id, title, status, next_step, started_by, started_at, ended_at, created_at, updated_at";
+
+/** Run events as persisted for SSE (Part 8): `step`, `paused`, `finished`, `error`. */
+export const RunEventKind = z.enum(["step", "paused", "finished", "error"]);
+export const RunEventRow = z.object({
+  id: z.number().int(),
+  run_id: uuidSchema,
+  seq: z.number().int(),
+  kind: RunEventKind,
+  message: z.string(),
+  created_at: isoDate,
+});
+export type RunEventRow = z.infer<typeof RunEventRow>;
+
+/**
+ * Derive the task from the steps (Architecture §45 rule 10: progress is derived, never authored).
+ * The `now` step's actor decides: you → needs_you; asap → in_progress; any outside party →
+ * with_party, which requires the party's name; every step done → done.
+ */
+export function deriveTask(steps: Step[]): {
+  status: TaskStatus;
+  party: string | null;
+} {
+  if (steps.length > 0 && steps.every((s) => s.state === "done")) return { status: "done", party: null };
+  const now = steps.find((s) => s.state === "now" || s.state === "blocked");
+  if (!now) return { status: "needs_you", party: null };
+  if (now.state === "blocked") return { status: "needs_you", party: null };
+  if (now.actor === "you") return { status: "needs_you", party: null };
+  if (now.actor === "asap") return { status: "in_progress", party: null };
+  if (!now.party) throw new Error(`step ${now.id} is with an outside party but names none`);
+  return { status: "with_party", party: now.party };
+}

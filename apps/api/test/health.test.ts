@@ -12,6 +12,7 @@ const app = createApp({
   webBaseUrl: "http://localhost:5173",
   invitationTtlHours: 168,
   exposeAcceptUrl: false,
+  executor: () => async () => {},
 });
 
 describe("GET /health", () => {

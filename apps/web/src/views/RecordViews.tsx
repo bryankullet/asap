@@ -1,4 +1,5 @@
 import type { RunRow, WorkItemRow } from "@asap/schema";
+import type { ReactNode } from "react";
 import { Card, CardTitle } from "@asap/ui";
 import {
   CoverStatus,
@@ -23,7 +24,19 @@ const ACTOR_LABEL: Record<WorkItemRow["steps"][number]["actor"], string> = {
 };
 
 /** `/r/:recordId` for a work item: titled as itself, task status in the header, steps as they are. */
-export function WorkItemView({ item, runs }: { item: WorkItemRow; runs: RunRow[] }) {
+export function WorkItemView({
+  item,
+  runs,
+  actions = null,
+  live = null,
+}: {
+  item: WorkItemRow;
+  runs: RunRow[];
+  /** The current step's actions, supplied by the page so the view stays pure. */
+  actions?: ReactNode;
+  /** Messages from a run in progress, streamed. */
+  live?: string[] | null;
+}) {
   return (
     <article className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
@@ -75,15 +88,45 @@ export function WorkItemView({ item, runs }: { item: WorkItemRow; runs: RunRow[]
                   </span>
                   <span className="ml-2 text-ink-muted">{ACTOR_LABEL[s.actor]}</span>
                   {s.state === "blocked" && s.reason && (
-                    <span className="ml-2 text-accent-red">{s.reason}</span>
+                    <span className="ml-2 text-accent-red">Blocked — {s.reason}</span>
+                  )}
+                  {s.state === "done" && s.reason && (
+                    <span className="ml-2 text-ink-muted">{s.reason}</span>
+                  )}
+                  {s.recorded.map((r) => (
+                    <span key={r.recordedAt + r.reference} className="ml-2 text-ink-muted">
+                      · {r.reference}
+                    </span>
+                  ))}
+                  {(s.state === "now" || s.state === "blocked") && live && live.length > 0 && (
+                    <ul
+                      className="mt-1 flex flex-col gap-0.5 text-xs text-accent-green"
+                      aria-live="polite"
+                    >
+                      {live.map((m, i) => (
+                        <li key={i}>{m}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {(s.state === "now" || s.state === "blocked") && actions && (
+                    <div className="mt-2">{actions}</div>
                   )}
                 </span>
               </li>
             ))}
           </ol>
         )}
+        {item.exception && (
+          <p className="text-sm text-ink">
+            Closed as {item.exception.kind}: {item.exception.reason}
+            {item.exception.clientToldEvidence
+              ? ` (client told: ${item.exception.clientToldEvidence})`
+              : ""}
+          </p>
+        )}
         <p className="text-xs text-ink-muted">
-          Actions arrive with the work item engine. Nothing here can be sent, approved or paid yet.
+          ASAP prepares and drafts. Sending, approving and paying are recorded by a person, with
+          evidence.
         </p>
       </Card>
 

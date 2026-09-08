@@ -34,6 +34,10 @@ class Query {
     this.filters.push((r) => r[col] !== v);
     return this;
   }
+  gt(col: string, v: number) {
+    this.filters.push((r) => Number(r[col]) > v);
+    return this;
+  }
   is(col: string, v: unknown) {
     this.filters.push((r) => r[col] === v);
     return this;
