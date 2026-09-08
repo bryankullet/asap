@@ -1,7 +1,7 @@
 -- pgTAP: work item 4 membership flows (app.create_organization, invitations, memberships).
 -- Runs against a migrated + seeded database. Rolls back at the end.
 begin;
-select plan(22);
+select plan(23);
 
 create or replace function pg_temp.login(p_user uuid) returns void language plpgsql as $$
 begin
