@@ -21,17 +21,15 @@ services:
           type: web
           name: asap-api
           envVarKey: PORT
-      # Service addresses come from Render itself; the env loader turns a host into https://<host>.
-      - key: API_BASE_HOST
-        fromService:
-          type: web
-          name: asap-api
-          property: host
-      - key: WEB_BASE_HOST
-        fromService:
-          type: web
-          name: asap-web
-          property: host
+      # Public addresses, set in the dashboard (D-049 correction). `fromService … property: host`
+      # hands over a service's private-network hostname, which a browser can never reach: the
+      # API's CORS origin must equal the browser's public origin, and the API's own base URL is
+      # what people receive in links. Both are the `https://….onrender.com` (or custom-domain)
+      # URLs shown on each service's dashboard page, no trailing slash.
+      - key: API_BASE_URL
+        sync: false
+      - key: WEB_BASE_URL
+        sync: false
       # Everything below is set in the dashboard; values never live in this file.
       - key: SUPABASE_URL
         sync: false
@@ -82,10 +80,10 @@ services:
         sync: false
       - key: VITE_PUBLIC_SUPABASE_ANON_KEY
         sync: false
-      - key: VITE_PUBLIC_API_BASE_HOST
-        fromService:
-          type: web
-          name: asap-api
-          property: host
+      # The API's public URL, set in the dashboard (D-049 correction): this is baked into the
+      # bundle at build time and used by browsers, so it can never be the private-network host
+      # that `fromService … property: host` provides.
+      - key: VITE_PUBLIC_API_BASE_URL
+        sync: false
       - key: NODE_VERSION
         value: "22.22.2"
