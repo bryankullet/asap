@@ -405,3 +405,115 @@ describe("ask (Phase 1: search only) — endpoint gates ported from the prototyp
     expect(body.results).toEqual([]);
   });
 });
+
+describe("Ask never creates a client (D-050)", () => {
+  const ACME = "70000000-0000-4000-8000-00000000000a";
+  const rpcCalls: string[] = [];
+  beforeEach(() => {
+    rpcCalls.length = 0;
+    db.tables["clients"] = [
+      {
+        id: ACME,
+        organization_id: ORG_A,
+        name: "Acme Motors",
+        kind: "corporate",
+        deleted_at: null,
+      },
+      {
+        id: "70000000-0000-4000-8000-00000000000d",
+        organization_id: ORG_A,
+        name: "Acme Logistics Ltd",
+        kind: "corporate",
+        deleted_at: null,
+      },
+    ];
+    db.tables["work_items"] = [];
+    db.rpc["work_item_create"] = (args) => {
+      rpcCalls.push("work_item_create");
+      db.tables["work_items"]!.push({
+        id: "30000000-0000-4000-8000-0000000000aa",
+        organization_id: ORG_A,
+        title: args["p_title"],
+        kind: "renewal",
+        client_id: args["p_client_id"],
+        policy_period_id: null,
+        insurer_id: null,
+        class_of_business: null,
+        owner_id: ADMIN.id,
+        task_status: args["p_task_status"],
+        task_party: null,
+        task_since: null,
+        task_next_check: null,
+        cover_status: null,
+        cover_inception_at: null,
+        money_status: null,
+        reason: null,
+        steps: args["p_steps"],
+        exception: null,
+        version: 1,
+        created_at: "2026-09-09T00:00:00Z",
+        updated_at: "2026-09-09T00:00:00Z",
+        completed_at: null,
+        deleted_at: null,
+      });
+      return { data: { id: "30000000-0000-4000-8000-0000000000aa", reopened: false } };
+    };
+    db.rpc["client_create"] = () => {
+      rpcCalls.push("client_create");
+      return { data: { id: "should-never-happen", created: true } };
+    };
+  });
+
+  it("three spellings of one seeded client open a renewal on that client and create zero rows", async () => {
+    for (const clientName of ["acme motors", "ACME MOTORS LTD", "Acme  Motors."]) {
+      const res = await app.request(
+        "/work-items",
+        json({ kind: "renewal", clientName }, "tok-admin"),
+      );
+      expect(res.status, clientName).toBe(201);
+      const body = await readJson(res);
+      expect(body.outcome).toBe("opened");
+      expect(body.item.client_id).toBe(ACME);
+      db.tables["work_items"] = [];
+    }
+    expect(rpcCalls.filter((c) => c === "client_create")).toEqual([]);
+    expect(db.tables["clients"]).toHaveLength(2);
+  });
+
+  it("asks which when more than one client is plausible", async () => {
+    const res = await app.request(
+      "/work-items",
+      json({ kind: "renewal", clientName: "Acme" }, "tok-admin"),
+    );
+    expect(res.status).toBe(409);
+    const body = await readJson(res);
+    expect(body.outcome).toBe("ambiguous");
+    expect(body.candidates.map((c: { name: string }) => c.name)).toEqual([
+      "Acme Motors",
+      "Acme Logistics Ltd",
+    ]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("offers creation as the only action when no client matches, and creates nothing", async () => {
+    const res = await app.request(
+      "/work-items",
+      json({ kind: "renewal", clientName: "Otieno Household" }, "tok-admin"),
+    );
+    expect(res.status).toBe(404);
+    const body = await readJson(res);
+    expect(body.outcome).toBe("no_client");
+    expect(body.intent.suggestions).toEqual(["Create Otieno Household as a new client"]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("the create path reviews duplicates before creating", async () => {
+    const dup = await app.request(
+      "/clients",
+      json({ name: "acme motors ltd", kind: "corporate" }, "tok-admin"),
+    );
+    expect(dup.status).toBe(409);
+    expect((await readJson(dup)).outcome).toBe("possible_duplicates");
+    expect(rpcCalls).toEqual([]);
+  });
+});

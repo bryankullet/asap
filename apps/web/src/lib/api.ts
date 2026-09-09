@@ -7,6 +7,7 @@ import {
   clientFileActionResponseSchema,
   clientFileResponseSchema,
   clientFilesResponseSchema,
+  createClientResponseSchema,
   placementCreatedSchema,
   askResponseSchema,
   createWorkItemResponseSchema,
@@ -83,7 +84,10 @@ export const api = {
   me: () => request("GET", "/me", meResponseSchema),
   ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
   createWorkItem: (input: CreateWorkItemRequest) =>
-    request("POST", "/work-items", createWorkItemResponseSchema, input),
+    request("POST", "/work-items", createWorkItemResponseSchema, input, {
+      auth: true,
+      allow: [404, 409],
+    }),
   workItem: (id: string) => request("GET", `/work-items/${id}`, workItemResponseSchema),
   act: (id: string, input: ActRequest) =>
     request("POST", `/work-items/${id}/actions`, actResponseSchema, input, {
@@ -96,8 +100,8 @@ export const api = {
   clientFiles: (view: K01View) =>
     request("GET", `/clients?view=${view}`, clientFilesResponseSchema),
   clientFile: (id: string) => request("GET", `/clients/${id}`, clientFileResponseSchema),
-  createClient: (input: { name: string; kind: "individual" | "corporate" }) =>
-    request("POST", "/clients", clientFileResponseSchema, input),
+  createClient: (input: { name: string; kind: "individual" | "corporate"; confirmNew?: boolean }) =>
+    request("POST", "/clients", createClientResponseSchema, input, { auth: true, allow: [409] }),
   clientFileAct: (id: string, input: ClientFileAction) =>
     request("POST", `/clients/${id}/file`, clientFileActionResponseSchema, input, {
       auth: true,

@@ -22,16 +22,22 @@ export function Files() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"individual" | "corporate">("individual");
+  const [duplicates, setDuplicates] = useState<{ id: string; name: string }[] | null>(null);
   const create = useMutation({
-    mutationFn: () => api.createClient({ name, kind }),
-    onSuccess: (file) => {
+    mutationFn: (confirmNew: boolean) => api.createClient({ name, kind, confirmNew }),
+    onSuccess: (res) => {
+      if (res.outcome === "possible_duplicates") {
+        setDuplicates(res.candidates);
+        return;
+      }
+      setDuplicates(null);
       void qc.invalidateQueries({ queryKey: ["client_files"] });
-      void navigate({ to: "/files/$clientId", params: { clientId: file.client.id } });
+      void navigate({ to: "/files/$clientId", params: { clientId: res.file.client.id } });
     },
   });
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (name.trim()) create.mutate();
+    if (name.trim()) create.mutate(false);
   }
   return (
     <div className="flex flex-col gap-4">
@@ -92,6 +98,30 @@ export function Files() {
         </Button>
         {create.isError && (
           <span className="text-sm text-accent-red">{describeApiError(create.error)}</span>
+        )}
+        {duplicates && (
+          <div className="flex w-full flex-col gap-1 text-sm" aria-live="polite">
+            <p className="text-ink-secondary">Possibly already on file:</p>
+            {duplicates.map((d) => (
+              <Link
+                key={d.id}
+                to="/files/$clientId"
+                params={{ clientId: d.id }}
+                className="text-ink underline"
+              >
+                Use {d.name}
+              </Link>
+            ))}
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={create.isPending}
+              onClick={() => create.mutate(true)}
+            >
+              Create separately
+            </Button>
+          </div>
         )}
       </form>
     </div>

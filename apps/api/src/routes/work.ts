@@ -12,6 +12,9 @@ import {
   createWorkItemRequestSchema,
   createWorkItemResponseSchema,
   deriveTask,
+  matchClientName,
+  type ClientCandidate,
+  type CreateWorkItemResponse,
   placementSteps,
   markDraftCopiedResponseSchema,
   renewalSteps,
@@ -73,40 +76,85 @@ async function loadEvents(db: SupabaseClient, runId: string, afterSeq: number) {
 export function workRoutes(deps: WorkDeps) {
   const app = new Hono();
 
-  /** Create a renewal. Asking twice reopens the same item (Part 5.4 invariant 1). */
+  /**
+   * Create a renewal. The client is matched by normalised name (one match proceeds, several ask
+   * which, none offers creation through the H05 path) or given by id. Asking twice reopens the
+   * same item (Part 5.4 invariant 1). Ask never creates a client (D-050).
+   */
   app.post("/work-items", async (c) => {
     const { db, user } = c.get("auth");
     const input = await parseBody(c, createWorkItemRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
-    const steps = renewalSteps({ clientName: input.clientName, insurers: input.insurers });
+
+    let client: { id: string; name: string };
+    if (input.clientId) {
+      const r = await db
+        .from("clients")
+        .select("id, name, kind")
+        .eq("id", input.clientId)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+      if (!r.data) return sendError(c, new HttpError(404, "not_found"));
+      client = r.data as { id: string; name: string };
+    } else {
+      const r = await db
+        .from("clients")
+        .select("id, name, kind")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null);
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+      const match = matchClientName(input.clientName!, (r.data ?? []) as ClientCandidate[]);
+      if (match.outcome === "many") {
+        return c.json(
+          createWorkItemResponseSchema.parse({
+            outcome: "ambiguous",
+            name: input.clientName,
+            candidates: match.candidates,
+          }),
+          409,
+        );
+      }
+      if (match.outcome === "none") {
+        const body: CreateWorkItemResponse = {
+          outcome: "no_client",
+          name: input.clientName!,
+          intent: {
+            type: "answer",
+            target: null,
+            panel: null,
+            view: "summary",
+            answer: `No client called "${input.clientName}" is on file in ${org.name}.`,
+            suggestions: [`Create ${input.clientName} as a new client`],
+          },
+        };
+        return c.json(createWorkItemResponseSchema.parse(body), 404);
+      }
+      client = match.client;
+    }
+
+    const steps = renewalSteps({ clientName: client.name, insurers: input.insurers });
     const task = deriveTask(steps);
-    const title = `${input.clientName} — renewal`;
-    // The client record exists first, landing as not_started (0026).
-    const clientR = await db.rpc("client_create", {
-      p_organization_id: org.id,
-      p_name: input.clientName,
-      p_kind: "corporate",
-      p_source: "manual",
-    });
-    if (clientR.error) return sendError(c, mapDatabaseError(clientR.error));
-    const clientId = (clientR.data as { id: string }).id;
     const { data, error } = await db.rpc("work_item_create", {
       p_organization_id: org.id,
       p_kind: input.kind,
-      p_title: title,
-      p_client_name: input.clientName,
+      p_title: `${client.name} — renewal`,
+      p_client_name: client.name,
       p_steps: steps,
       p_task_status: task.status,
       p_task_party: task.party,
-      p_client_id: clientId,
+      p_client_id: client.id,
       p_insurer_id: null,
       p_class_of_business: null,
     });
     if (error) return sendError(c, mapDatabaseError(error));
     const { id, reopened } = data as { id: string; reopened: boolean };
     const item = await loadItem(db, id);
-    return c.json(createWorkItemResponseSchema.parse({ item, reopened }), reopened ? 200 : 201);
+    return c.json(
+      createWorkItemResponseSchema.parse({ outcome: "opened", item, reopened }),
+      reopened ? 200 : 201,
+    );
   });
 
   /** A placement (Part 6.2). The gate is evaluated at approval, not here. */
@@ -155,7 +203,10 @@ export function workRoutes(deps: WorkDeps) {
     if (error) return sendError(c, mapDatabaseError(error));
     const { id, reopened } = data as { id: string; reopened: boolean };
     const item = await loadItem(db, id);
-    return c.json(createWorkItemResponseSchema.parse({ item, reopened }), reopened ? 200 : 201);
+    return c.json(
+      createWorkItemResponseSchema.parse({ outcome: "opened", item, reopened }),
+      reopened ? 200 : 201,
+    );
   });
 
   app.get("/work-items/:id", async (c) => {

@@ -23,6 +23,9 @@ import {
   clientFileResponseSchema,
   clientFilesResponseSchema,
   createClientRequestSchema,
+  createClientResponseSchema,
+  matchClientName,
+  type ClientCandidate,
   effectiveFileStatus,
   type ClientFileResponse,
 } from "@asap/schema";
@@ -120,11 +123,32 @@ export function complianceRoutes(deps: { logger: Logger }) {
     return c.json(clientFilesResponseSchema.parse({ view, items, counts }));
   });
 
+  /** H05: creating a client, with duplicate review. Ask's "Create <name> as a new client" lands here too. */
   app.post("/clients", async (c) => {
     const { db, user } = c.get("auth");
     const input = await parseBody(c, createClientRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
+    if (!input.confirmNew) {
+      const r = await db
+        .from("clients")
+        .select("id, name, kind")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null);
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+      const match = matchClientName(input.name, (r.data ?? []) as ClientCandidate[]);
+      if (match.outcome !== "none") {
+        const candidates = match.outcome === "one" ? [match.client] : match.candidates;
+        return c.json(
+          createClientResponseSchema.parse({
+            outcome: "possible_duplicates",
+            name: input.name,
+            candidates,
+          }),
+          409,
+        );
+      }
+    }
     const { data, error } = await db.rpc("client_create", {
       p_organization_id: org.id,
       p_name: input.name,
@@ -132,7 +156,13 @@ export function complianceRoutes(deps: { logger: Logger }) {
       p_source: "manual",
     });
     if (error) return sendError(c, mapDatabaseError(error));
-    return c.json(await loadFile(db, org.id, (data as { id: string }).id), 201);
+    return c.json(
+      createClientResponseSchema.parse({
+        outcome: "created",
+        file: await loadFile(db, org.id, (data as { id: string }).id),
+      }),
+      201,
+    );
   });
 
   async function loadFile(

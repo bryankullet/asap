@@ -40,10 +40,21 @@ export const clientFileResponseSchema = z.object({
 });
 export type ClientFileResponse = z.infer<typeof clientFileResponseSchema>;
 
+/** H05 create path. Duplicate review: plausible existing clients are returned first; `confirmNew` creates anyway. */
 export const createClientRequestSchema = z.object({
   name: z.string().trim().min(1).max(200),
   kind: ClientKind,
+  confirmNew: z.boolean().default(false),
 });
+export const createClientResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("created"), file: clientFileResponseSchema }),
+  z.object({
+    outcome: z.literal("possible_duplicates"),
+    name: z.string(),
+    candidates: z.array(z.object({ id: uuidSchema, name: z.string(), kind: ClientKind })),
+  }),
+]);
+export type CreateClientResponse = z.infer<typeof createClientResponseSchema>;
 
 export const clientFileActionSchema = z.discriminatedUnion("action", [
   z.object({

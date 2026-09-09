@@ -12,3 +12,4 @@ export * from "./recipes/renewal.js";
 export * from "./compliance.js";
 export * from "./agreements.js";
 export * from "./recipes/placement.js";
+export * from "./clientMatch.js";

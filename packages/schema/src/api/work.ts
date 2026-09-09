@@ -1,23 +1,50 @@
 import { z } from "zod";
 import { ActionVerb } from "../actions.js";
 import { DraftRow } from "../draft.js";
+import { UiIntent } from "../intent.js";
 import { RunEventRow, RunRow, WorkItemKind, WorkItemRow } from "../work.js";
 import { uuidSchema } from "./common.js";
 
-/** `POST /work-items` — Phase 2 creates renewals only. Asking twice reopens the same item. */
-export const createWorkItemRequestSchema = z.object({
-  kind: WorkItemKind.extract(["renewal"]),
-  clientName: z.string().trim().min(1).max(200),
-  /** Insurers to request terms from. May be empty; the review run then pauses and asks. */
-  insurers: z.array(z.string().trim().min(1).max(100)).max(10).default([]),
-});
+/**
+ * `POST /work-items` — Phase 2 creates renewals only. The client is matched by normalised name
+ * or given by id; Ask never creates a client. Asking twice reopens the same item.
+ */
+export const createWorkItemRequestSchema = z
+  .object({
+    kind: WorkItemKind.extract(["renewal"]),
+    clientName: z.string().trim().min(1).max(200).optional(),
+    clientId: uuidSchema.optional(),
+    /** Insurers to request terms from. May be empty; the review run then pauses and asks. */
+    insurers: z.array(z.string().trim().min(1).max(100)).max(10).default([]),
+  })
+  .refine((v) => v.clientName !== undefined || v.clientId !== undefined, {
+    message: "clientName or clientId is required",
+    path: ["clientName"],
+  });
 export type CreateWorkItemRequest = z.infer<typeof createWorkItemRequestSchema>;
 
-export const createWorkItemResponseSchema = z.object({
-  item: WorkItemRow,
-  /** True when an open item already existed and was returned instead (Part 5.4 invariant 1). */
-  reopened: z.boolean(),
+const clientCandidateSchema = z.object({
+  id: uuidSchema,
+  name: z.string(),
+  kind: z.enum(["individual", "corporate"]),
 });
+
+export const createWorkItemResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("opened"),
+    item: WorkItemRow,
+    /** True when an open item already existed and was returned instead (Part 5.4 invariant 1). */
+    reopened: z.boolean(),
+  }),
+  /** More than one plausible client: ask which (v1 catalogue Part 1). */
+  z.object({
+    outcome: z.literal("ambiguous"),
+    name: z.string(),
+    candidates: z.array(clientCandidateSchema),
+  }),
+  /** No client: the only action offered is creating one, through the H05 path with duplicate review. */
+  z.object({ outcome: z.literal("no_client"), name: z.string(), intent: UiIntent }),
+]);
 export type CreateWorkItemResponse = z.infer<typeof createWorkItemResponseSchema>;
 
 /** `POST /work-items/:id/actions` — one verb on one step, with what the verb needs. */
