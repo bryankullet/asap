@@ -13,7 +13,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
-        value: "22.12.0"
+        value: "22.22.2"
       - key: APP_ENV
         value: staging
       - key: API_PORT
@@ -88,4 +88,4 @@ services:
           name: asap-api
           property: host
       - key: NODE_VERSION
-        value: "22.12.0"
+        value: "22.22.2"
