@@ -60,6 +60,8 @@ Format: `D-nnn · date · title` → decision → reason → revisit trigger.
 
 **Decision.** `supabase/seed.sql` creates the seven fixture users with a random bcrypt password nobody knows. Local developers sign in by magic link (Inbucket) or run `scripts/seed-set-passwords.sh`, which refuses to run unless `APP_ENV=local`.
 
+**Superseded in part by D-052 (2026-09-09):** the SQL still writes a random password, but seeding now ends with a documented password set on staging and local through the Auth admin API. Production is still never given one.
+
 **Reason.** The seed also runs on staging (D-003). A known password in git would be a real credential to a real environment.
 
 ## D-009 · 2026-09-05 · Permission catalogue in migration 0005; role → permission matrix in the seed, provisional
@@ -394,3 +396,11 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Not built.** Draft claim detection from a mailbox (no mailbox yet): `source = 'email'` is set by whoever captures it. Additional premium (step 6) records an invoice reference only. Closing and reopening a claim beyond the tenth step. TOR, certificates and stock are Phase 5b.
 
 **Applied.** Hosted ledger version `20260909091723` (file renamed to match, per D-034); two policies, two periods and two version-1 schedules seeded on hosted with the same rows as `supabase/seed.sql`. pgTAP `0306_claims_and_endorsements.sql` (26 tests) passes on hosted, run inside a rolled-back transaction with pgTAP installed for its duration.
+
+## D-052 · 2026-09-09 · Staging fixture users get a documented password, set through the Auth admin API
+
+**Decision.** Seeding ends with `pnpm db:seed:passwords` (`scripts/seed-set-passwords.mjs`), which gives the seven fixture users the password recorded in `docs/staging-users.md` by calling the Supabase Auth admin endpoint (`PUT /auth/v1/admin/users/{id}`) with the server-side service key. The script refuses to run when `APP_ENV` is `production`, and refuses when `APP_ENV` is unset or anything other than `staging` or `local`. `SEED_PASSWORD` can replace the documented value; the minimum stays 12 characters (D-005). `scripts/seed-set-passwords.sh` (psql, local only) is removed.
+
+**Reason.** Staging holds synthetic data only (D-003), so a known password there is a convenience, not a credential to anything real, and it lets people sign in without a mailbox. Going through the admin API rather than writing `auth.users.encrypted_password` keeps GoTrue the owner of how a password is stored. The refusal is by environment name rather than by project URL because the name is what deployments already carry (`appEnvSchema`) and the URL of a future production project is not known here.
+
+**Applied.** The hosted project has no service key reachable from this session, so the same password was set on hosted through the SQL connector with `extensions.crypt(..., gen_salt('bf'))`, which is the hash GoTrue verifies. The script is the path from here on.

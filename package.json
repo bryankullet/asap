@@ -22,6 +22,7 @@
     "db:drift": "pnpm --filter @asap/db run drift",
     "db:migrations:immutable": "bash scripts/check-migrations-immutable.sh",
     "db:worker-password": "bash scripts/set-worker-password.sh",
+    "db:seed:passwords": "node scripts/seed-set-passwords.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify:live": "bash scripts/verify-live.sh"

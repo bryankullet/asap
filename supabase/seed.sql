@@ -2,9 +2,11 @@
 -- ASAP seed fixture — two brokerages, three users each, one cross-brokerage user.
 -- Synthetic data only. This is the only data staging ever receives (docs/DECISIONS.md D-003).
 --
--- Passwords: seeded auth users get a random, unrecoverable password so no credential lives in
--- git. Sign in locally with a magic link (Inbucket at http://127.0.0.1:54324) or set a password
--- with scripts/seed-set-passwords.sh. See docs/DECISIONS.md D-008.
+-- Passwords: this file gives seeded auth users a random bcrypt password so the SQL itself holds
+-- no credential. Seeding finishes with `pnpm db:seed:passwords` (scripts/seed-set-passwords.mjs),
+-- which sets the documented staging password through the Auth admin API on staging and local
+-- stacks only (docs/staging-users.md, D-052). A magic link (Inbucket, http://127.0.0.1:54324)
+-- still works locally.
 --
 -- IDs are fixed so pgTAP tests can reference them.
 -- =============================================================================
