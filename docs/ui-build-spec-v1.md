@@ -507,3 +507,87 @@ Each phase ends somewhere previewable on Render.
 5. **Due diligence backfill policy** for imported clients. *Blocks phase 4.*
 6. **Which model powers Ask**, and whether the component registry in Architecture v3.1 collapses into the narrower `UiIntent` in Part 4. These are two different contracts and only one should survive. *Blocks phase 1's Ask beyond search.*
 7. ~~Frontend framework confirmation.~~ Decided: D-036.
+
+---
+
+# Part 14 — How a record page is composed
+
+Part 1 says detailed fields appear only for the current task. This part says what that means on
+`/r/:recordId`, so it stops being something each screen infers. Nothing here reads new data or
+evaluates a guard: it arranges the step and guard state the engine already produced.
+`packages/schema/src/recipes/record.ts` is the contract; `RecordViews.tsx` renders it.
+
+## 14.1 The focus card
+
+Every record page leads with exactly one focus card. It is the prototype's `.focus-card`: a hairline
+border, a 4px green left rule, generous padding, a ~1.45rem headline.
+
+| Part | What it holds | Where it comes from |
+|---|---|---|
+| Eyebrow | The words "Next step", always | Fixed, so a person learns where to look once |
+| Headline | The next **decision** in business words | `HEADLINES[kind:stepId]`, falling back to the step's label |
+| Why | One sentence | `work_items.reason`, which the engine already wrote |
+| Primary action | The current step's actions | The same action panel the step would have carried |
+| "Why here?" | A ghost control beside the primary | Discloses the reason, the outside party and next check, and every piece of evidence recorded so far |
+
+The headline names the decision; the step's own label names the step. "Placement approved" is a
+step; "Approve this placement" is what a person is being asked to do. Where a step has no phrasing
+the label stands in — inventing a sentence would be worse than a plain one.
+
+**When the step is blocked** the headline gains "— not yet" and the card states the blocker, and its
+action opens the thing that unblocks it rather than the step itself. The blocker text is the step's
+own `reason` where the engine wrote one; otherwise the card names the first guard the step is
+waiting on, from `GUARD_BLOCKERS`. A block discovered by pressing the action appears in the same
+card, because the action panel lives inside it — including the link the guard supplies, such as the
+client's file.
+
+**When nothing is waiting on a person** the card says so: "Everything here is finished" for a
+completed item, "Nothing needs you here" otherwise, and the exception's own reason for an item
+closed without completing. Abstention is a state, not a blank.
+
+## 14.2 The recipe layer
+
+The full step list is no longer the page. It becomes supporting context under the heading **Every
+step**, below the focus card. What sits between them is composed by record kind, following the
+prototype's `recipe()`.
+
+| Kind | Sections, in order |
+|---|---|
+| `renewal`, `new_business` | focus · drafts · steps · activity |
+| `placement` | focus · steps · drafts · activity |
+| `claim` | focus · servicing · drafts · steps · activity |
+| `endorsement` | focus · servicing · steps · activity |
+| `tor` | focus · steps · drafts · activity |
+| `certificate`, `compliance` | focus · steps · activity |
+| `money_in`, `money_out` | focus · drafts · steps · activity |
+| `reconciliation`, `wht` | focus · steps · activity |
+| `import`, `exception` | focus · steps · activity |
+
+- **servicing** is the record behind the item: the claim panel (its documents, what happened, the
+  notification clock, the three settlement facts) or the endorsement panel (the insurer's answer,
+  item by item). Only claims and endorsements have one.
+- **drafts** are the drafts prepared for the current step. They are their own section rather than
+  part of the action area, because a draft is a thing you read, not a control you press.
+- **activity** is what ASAP did on this record, as a chronology. It carries the anchor the footer's
+  Activity control jumps to.
+
+**A section renders only when it has something to put in it.** Passing a servicing panel to a
+reconciliation renders nothing: the kind does not list it. This is the rule that keeps a money
+record from growing a claim's document checklist.
+
+**Not built yet, by phase, not by oversight.** The prototype's record page also carries insurer
+terms on a renewal, outstanding premium lines on a money record, the source excerpt and value
+decision on a document, and the bars on a report. Those need Phase 3 money, Phase 3 extraction and
+Phase 7 reporting. They belong in this table when their phase lands; until then the kind lists what
+it actually has, and no panel is stubbed.
+
+## 14.3 The record footer
+
+Every record page closes with the same three, in this order:
+
+1. **The source chip** — what has actually been recorded against this record, step by step, with who
+   recorded it. When nothing has been, it says so.
+2. **Activity** — jumps to what ASAP did on this record. When there are no runs it says there are
+   none rather than offering a control that goes nowhere.
+3. **History** — the full audit history. C05 is not built, so this states that rather than
+   pretending. It becomes a link when C05 ships.

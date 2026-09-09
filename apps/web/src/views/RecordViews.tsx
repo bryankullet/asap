@@ -1,7 +1,16 @@
-import { effectiveCoverStatus, type RunRow, type WorkItemRow } from "@asap/schema";
+import {
+  RECORD_SECTIONS,
+  currentStep,
+  effectiveCoverStatus,
+  focusCard,
+  type RunRow,
+  type WorkItemRow,
+} from "@asap/schema";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Card, CardTitle, Timeline, TimelineEvent } from "@asap/ui";
+import { FocusCard } from "./FocusCard.js";
+import { RecordFooter } from "./RecordFooter.js";
 import {
   CoverStatus,
   MoneyRow,
@@ -31,6 +40,7 @@ export function WorkItemView({
   actions = null,
   live = null,
   aside = null,
+  drafts = null,
 }: {
   item: WorkItemRow;
   runs: RunRow[];
@@ -38,9 +48,106 @@ export function WorkItemView({
   actions?: ReactNode;
   /** Messages from a run in progress, streamed. */
   live?: string[] | null;
-  /** The record behind the item (claim, endorsement), rendered beside the steps. */
+  /** The record behind the item (claim, endorsement): the "servicing" section of the recipe. */
   aside?: ReactNode;
+  /** Drafts prepared for the current step: the "drafts" section of the recipe. */
+  drafts?: ReactNode;
 }) {
+  const step = currentStep(item);
+  const focus = focusCard(item, step);
+  const sections = RECORD_SECTIONS[item.kind];
+  const stepsSection = (
+    <Card className="flex flex-col gap-3">
+      <CardTitle>Every step</CardTitle>
+      {item.steps.length === 0 ? (
+        <p className="text-sm text-ink-muted">No steps recorded yet.</p>
+      ) : (
+        <ol className="flex flex-col">
+          {item.steps.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-start gap-3 border-b border-line-soft py-2.5 text-sm last:border-b-0"
+            >
+              <span
+                aria-hidden
+                className={
+                  "mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] text-xs font-bold " +
+                  (s.state === "done"
+                    ? "bg-accent-green-soft text-accent-green"
+                    : s.state === "now"
+                      ? "bg-accent-gold-soft text-accent-gold-ink"
+                      : s.state === "blocked"
+                        ? "bg-accent-red-soft text-accent-red"
+                        : "bg-surface-sunken text-ink-muted")
+                }
+              >
+                {s.state === "done"
+                  ? "✓"
+                  : s.state === "now"
+                    ? "●"
+                    : s.state === "blocked"
+                      ? "■"
+                      : "○"}
+              </span>
+              <span className="flex-1">
+                <span
+                  className={s.state === "now" ? "font-semibold text-ink" : "text-ink-secondary"}
+                >
+                  {s.label}
+                </span>
+                <span className="ml-2 text-ink-muted">{ACTOR_LABEL[s.actor]}</span>
+                {s.state === "blocked" && s.reason && (
+                  <span className="ml-2 text-accent-red">Blocked — {s.reason}</span>
+                )}
+                {s.state === "done" && s.reason && (
+                  <span className="ml-2 text-ink-muted">{s.reason}</span>
+                )}
+                {s.recorded.map((r) => (
+                  <span key={r.recordedAt + r.reference} className="ml-2 text-ink-muted">
+                    · {r.reference}
+                  </span>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {item.exception && (
+        <p className="text-sm text-ink">
+          Closed as {item.exception.kind}: {item.exception.reason}
+          {item.exception.clientToldEvidence
+            ? ` (client told: ${item.exception.clientToldEvidence})`
+            : ""}
+        </p>
+      )}
+      <p className="text-xs text-ink-muted">
+        ASAP prepares and drafts. Sending, approving and paying are recorded by a person, with
+        evidence.
+      </p>
+    </Card>
+  );
+
+  const activitySection =
+    runs.length > 0 ? (
+      <Card className="flex flex-col gap-3">
+        <CardTitle>What ASAP did</CardTitle>
+        <RunDetailSlot>
+          <Timeline>
+            {runs.map((r) => (
+              <TimelineEvent
+                key={r.id}
+                current={r.status === "working"}
+                title={r.title}
+                when={<RunStatus status={r.status} />}
+              >
+                {r.next_step && <p className="mt-1 text-sm text-ink-secondary">{r.next_step}</p>}
+              </TimelineEvent>
+            ))}
+          </Timeline>
+        </RunDetailSlot>
+      </Card>
+    ) : null;
+
   return (
     <article className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
@@ -78,109 +185,36 @@ export function WorkItemView({
         )}
       </header>
 
-      <Card className="flex flex-col gap-3">
-        <CardTitle>Steps</CardTitle>
-        {item.steps.length === 0 ? (
-          <p className="text-sm text-ink-muted">No steps recorded yet.</p>
-        ) : (
-          <ol className="flex flex-col">
-            {item.steps.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-start gap-3 border-b border-line-soft py-2.5 text-sm last:border-b-0"
-              >
-                <span
-                  aria-hidden
-                  className={
-                    "mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] text-xs font-bold " +
-                    (s.state === "done"
-                      ? "bg-accent-green-soft text-accent-green"
-                      : s.state === "now"
-                        ? "bg-accent-gold-soft text-accent-gold-ink"
-                        : s.state === "blocked"
-                          ? "bg-accent-red-soft text-accent-red"
-                          : "bg-surface-sunken text-ink-muted")
-                  }
-                >
-                  {s.state === "done"
-                    ? "✓"
-                    : s.state === "now"
-                      ? "●"
-                      : s.state === "blocked"
-                        ? "■"
-                        : "○"}
-                </span>
-                <span className="flex-1">
-                  <span
-                    className={s.state === "now" ? "font-semibold text-ink" : "text-ink-secondary"}
-                  >
-                    {s.label}
-                  </span>
-                  <span className="ml-2 text-ink-muted">{ACTOR_LABEL[s.actor]}</span>
-                  {s.state === "blocked" && s.reason && (
-                    <span className="ml-2 text-accent-red">Blocked — {s.reason}</span>
-                  )}
-                  {s.state === "done" && s.reason && (
-                    <span className="ml-2 text-ink-muted">{s.reason}</span>
-                  )}
-                  {s.recorded.map((r) => (
-                    <span key={r.recordedAt + r.reference} className="ml-2 text-ink-muted">
-                      · {r.reference}
-                    </span>
-                  ))}
-                  {(s.state === "now" || s.state === "blocked") && live && live.length > 0 && (
-                    <ul
-                      className="mt-1 flex flex-col gap-0.5 text-xs text-accent-green"
-                      aria-live="polite"
-                    >
-                      {live.map((m, i) => (
-                        <li key={i}>{m}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {(s.state === "now" || s.state === "blocked") && actions && (
-                    <div className="mt-2">{actions}</div>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-        {item.exception && (
-          <p className="text-sm text-ink">
-            Closed as {item.exception.kind}: {item.exception.reason}
-            {item.exception.clientToldEvidence
-              ? ` (client told: ${item.exception.clientToldEvidence})`
-              : ""}
-          </p>
-        )}
-        <p className="text-xs text-ink-muted">
-          ASAP prepares and drafts. Sending, approving and paying are recorded by a person, with
-          evidence.
-        </p>
-      </Card>
-
-      {aside}
-
-      {runs.length > 0 && (
-        <Card className="flex flex-col gap-3">
-          <CardTitle>What ASAP did</CardTitle>
-          <RunDetailSlot>
-            <Timeline>
-              {runs.map((r) => (
-                <TimelineEvent
-                  key={r.id}
-                  current={r.status === "working"}
-                  title={r.title}
-                  when={<RunStatus status={r.status} />}
-                >
-                  {r.next_step && <p className="mt-1 text-sm text-ink-secondary">{r.next_step}</p>}
-                </TimelineEvent>
-              ))}
-            </Timeline>
-          </RunDetailSlot>
-        </Card>
+      {/* Part 14: every record page leads with the next decision. */}
+      <FocusCard card={focus} item={item} actions={actions} />
+      {live && live.length > 0 && (
+        <ul
+          className="flex flex-col gap-1 rounded-card border border-accent-green/20 bg-accent-green-soft px-4 py-3 text-sm text-accent-green-ink"
+          aria-live="polite"
+        >
+          {live.map((m, i) => (
+            <li key={i}>{m}</li>
+          ))}
+        </ul>
       )}
+
+      {/* Part 14: the rest is composed by kind, and a section renders only if it has content. */}
+      {sections.map((section) => {
+        switch (section) {
+          case "focus":
+            return null;
+          case "servicing":
+            return aside ? <div key={section}>{aside}</div> : null;
+          case "drafts":
+            return drafts ? <div key={section}>{drafts}</div> : null;
+          case "steps":
+            return <div key={section}>{stepsSection}</div>;
+          case "activity":
+            return activitySection ? <div key={section}>{activitySection}</div> : null;
+        }
+      })}
+
+      <RecordFooter item={item} hasRuns={runs.length > 0} />
     </article>
   );
 }

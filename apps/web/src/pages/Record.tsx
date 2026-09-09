@@ -8,6 +8,7 @@ import { Notice } from "@asap/ui";
 import { useRun } from "../lib/queries.js";
 import { useRunStream } from "../lib/runStream.js";
 import { RunView, WorkItemView } from "../views/RecordViews.js";
+import { DraftCard } from "../features/drafts/DraftCard.js";
 import { ClaimPanel } from "../views/ClaimPanel.js";
 import { EndorsementPanel } from "../views/EndorsementPanel.js";
 import { PolicyView } from "../views/PolicyView.js";
@@ -61,6 +62,7 @@ export function Record() {
         pending={endorsementAct.isPending}
       />
     ) : null;
+    const stepDrafts = now ? full.data.drafts.filter((d) => d.step_id === now.id) : [];
     const servicingError = claimAct.isError
       ? claimAct.error
       : endorsementAct.isError
@@ -81,7 +83,17 @@ export function Record() {
                 step={now}
                 drafts={full.data.drafts}
                 onRunStarted={setLiveRun}
+                hideDrafts
               />
+            ) : null
+          }
+          drafts={
+            stepDrafts.length > 0 ? (
+              <div className="flex flex-col gap-3">
+                {stepDrafts.map((d) => (
+                  <DraftCard key={d.id} draft={d} item={item} step={now!} />
+                ))}
+              </div>
             ) : null
           }
         />

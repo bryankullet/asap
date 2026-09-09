@@ -18,12 +18,15 @@ export function ActionPanel({
   step,
   drafts,
   onRunStarted,
+  hideDrafts = false,
   candidatePeriods = [],
 }: {
   item: WorkItemRow;
   step: Step;
   drafts: DraftRow[];
   onRunStarted: (runId: string) => void;
+  /** Part 14: the record page renders drafts as their own section below the focus card. */
+  hideDrafts?: boolean;
   candidatePeriods?: {
     period: { id: string; period_start: string; period_end: string };
     policy: { class_of_business: string; policy_number: string | null };
@@ -286,9 +289,8 @@ export function ActionPanel({
         </form>
       )}
 
-      {stepDrafts.map((d) => (
-        <DraftCard key={d.id} draft={d} item={item} step={step} />
-      ))}
+      {!hideDrafts &&
+        stepDrafts.map((d) => <DraftCard key={d.id} draft={d} item={item} step={step} />)}
     </div>
   );
 }

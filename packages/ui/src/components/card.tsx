@@ -16,6 +16,8 @@ export const cardVariants = cva("rounded-card border p-5", {
       /** Gold left rule: something wants a person's attention. */
       attention: "border-line-strong bg-paper border-l-4 border-l-accent-gold",
       green: "border-[#c8e7da] bg-accent-green-soft",
+      /** The prototype's `.focus-card`: the one panel a record page leads with. */
+      focus: "border-[#b4d2c8] border-l-4 border-l-accent-green bg-paper p-6",
       dark: "border-navy bg-navy text-paper",
     },
     clickable: {

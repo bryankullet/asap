@@ -18,3 +18,4 @@ export * from "./claims.js";
 export * from "./endorsements.js";
 export * from "./recipes/claim.js";
 export * from "./recipes/endorsement.js";
+export * from "./recipes/record.js";
