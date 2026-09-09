@@ -55,7 +55,9 @@ export function ProfileMenu({
         className="flex w-full flex-col items-start rounded-control border border-line-strong bg-paper px-3 py-2 text-left hover:bg-wash focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-green"
       >
         <span className="w-full truncate text-sm font-medium text-ink">
-          {org?.name ?? "Choose a brokerage"}
+          {/* One membership is never a choice: name it even before the server has set it. */}
+          {org?.name ??
+            (memberships.length === 1 ? memberships[0]!.organization.name : "Choose a brokerage")}
         </span>
         <span className="w-full truncate text-xs text-ink-muted" title={me?.user.email}>
           {me?.user.full_name ?? me?.user.email ?? ""}

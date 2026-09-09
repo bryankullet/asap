@@ -1,7 +1,7 @@
 -- pgTAP: work item 4 membership flows (app.create_organization, invitations, memberships).
 -- Runs against a migrated + seeded database. Rolls back at the end.
 begin;
-select plan(25);
+select plan(27);
 
 create or replace function pg_temp.login(p_user uuid) returns void language plpgsql as $$
 begin
@@ -52,6 +52,16 @@ select is(
   'a repeated request key returns the same organization id');
 select is((select count(*) from organizations where name = 'Repeat Cover'), 1::bigint,
   'and exactly one brokerage was created');
+
+-- Every seeded user lands in a workspace (D-055): no fixture signs in to an empty Today.
+select is((select count(*) from users u where u.email like '%.test' and u.active_organization_id is null),
+  0::bigint, 'every seeded user has an active brokerage');
+select is((select count(*) from users u
+           where u.email like '%.test'
+             and not exists (select 1 from organization_memberships m
+                             where m.user_id = u.id and m.status = 'active'
+                               and m.organization_id = u.active_organization_id)),
+  0::bigint, 'and it is a brokerage they are an active member of');
 
 -- 2. send_external matrix (D-022) -------------------------------------------------
 reset role;

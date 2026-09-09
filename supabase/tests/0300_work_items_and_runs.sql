@@ -11,7 +11,7 @@ end $$;
 
 -- Acme account executive
 select pg_temp.login('a0000000-0000-4000-8000-000000000002');
-select is((select count(*) from work_items), 5::bigint, 'Acme AE counts exactly the five Acme work items (hidden rows are not counted)');
+select is((select count(*) from work_items), 6::bigint, 'Acme AE counts exactly the six Acme work items (hidden rows are not counted)');
 select is((select count(*) from work_items where organization_id = '10000000-0000-4000-8000-00000000000b'), 0::bigint,
           'Acme AE sees zero Beta work items');
 select is((select count(*) from runs), 3::bigint, 'Acme AE counts exactly the three Acme runs');

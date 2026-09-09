@@ -14,7 +14,21 @@ export function meRoutes() {
   /** Who am I, where do I belong, which brokerage is active. Everything resolved server-side. */
   app.get("/me", async (c) => {
     const { db, user } = c.get("auth");
-    const ctx = await resolveContext(db, user.id);
+    let ctx = await resolveContext(db, user.id);
+    // Exactly one brokerage and none active: there is nothing to choose, so choose it here, on
+    // the server, through the same function the switcher uses (it refuses any brokerage the
+    // caller is not an active member of). Two or more stay unset and the browser shows the
+    // chooser; zero goes to create-or-join (D-055).
+    if (!ctx.activeOrganization) {
+      const active = ctx.memberships.filter((m) => m.status === "active");
+      if (active.length === 1) {
+        const { error } = await db.rpc("set_active_organization", {
+          p_organization_id: active[0]!.organization.id,
+        });
+        if (error) return sendError(c, mapDatabaseError(error));
+        ctx = await resolveContext(db, user.id);
+      }
+    }
     const body: MeResponse = meResponseSchema.parse({
       user: {
         id: ctx.profile.id,

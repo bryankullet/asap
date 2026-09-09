@@ -107,6 +107,15 @@ from (values
 join organizations o on o.id = m.organization_id
 join roles r on r.organization_id = o.id and r.key = m.role_key;
 
+-- Active brokerage: every seeded user lands in a workspace, never on an empty Today (D-055).
+-- Grace belongs to both; she starts in Acme and switches from the profile control.
+update users set active_organization_id = '10000000-0000-4000-8000-00000000000a'
+ where id in ('a0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000002',
+              'a0000000-0000-4000-8000-000000000003', 'c0000000-0000-4000-8000-000000000001');
+update users set active_organization_id = '10000000-0000-4000-8000-00000000000b'
+ where id in ('b0000000-0000-4000-8000-000000000001', 'b0000000-0000-4000-8000-000000000002',
+              'b0000000-0000-4000-8000-000000000003');
+
 -- ---------------------------------------------------------------------------
 -- teams: one per brokerage
 -- ---------------------------------------------------------------------------
@@ -155,8 +164,8 @@ values
   -- Acme
   ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-00000000000a',
    'Acme Motors — renewal terms from Jubilee', 'renewal', 'a0000000-0000-4000-8000-000000000002',
-   'with_party', 'Jubilee', now() - interval '3 days', now() + interval '2 days', 'active', 'unpaid',
-   'Terms were requested from Jubilee three days ago; the next check is in two days.',
+   'with_party', 'Jubilee', now() - interval '5 days', now() - interval '1 day', 'active', 'unpaid',
+   'Terms were requested from Jubilee five days ago and the check was due yesterday.',
    '[{"id":"s1","label":"Request terms","actor":"you","state":"done"},{"id":"s2","label":"Terms received","actor":"insurer","state":"now"},{"id":"s3","label":"Compare and recommend","actor":"asap","state":"todo"}]',
    null, now() - interval '1 hour'),
   ('30000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-00000000000a',
@@ -166,10 +175,10 @@ values
    '[{"id":"s1","label":"Cover confirmed","actor":"insurer","state":"done"},{"id":"s2","label":"Allocate a number","actor":"you","state":"now"},{"id":"s3","label":"Issue","actor":"you","state":"todo"}]',
    null, now() - interval '20 minutes'),
   ('30000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-00000000000a',
-   'Jane Wanjiku — claim review pack', 'claim', 'a0000000-0000-4000-8000-000000000002',
-   'in_progress', null, null, null, 'active', null,
-   'ASAP is assembling the missing-document list from the claim form.',
-   '[{"id":"s1","label":"Claim form received","actor":"client","state":"done"},{"id":"s2","label":"List missing documents","actor":"asap","state":"now"}]',
+   'Jane Wanjiku — claim, incident 2 September', 'claim', 'a0000000-0000-4000-8000-000000000002',
+   'needs_you', null, null, null, 'active', null,
+   'The incident came in by email and is still a draft. Choose the policy period that covers 2 September before anything is sent to Jubilee.',
+   '[{"state":"done","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Capture the incident","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":"40000000-0000-4000-8000-000000000001","id":"capture","label":"Incident captured","actor":"asap"},{"state":"now","guards":[],"evidence":[{"kind":"confirmation","label":"The schedule, and which policy period this falls in"}],"actions":[{"verb":"record_evidence","label":"Choose the policy period","guards":["evidence_present"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"match","label":"Matched to a policy period","actor":"you"},{"state":"todo","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Review cover on the incident date","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"cover_check","label":"Cover on the incident date reviewed","actor":"asap"},{"state":"todo","guards":[],"evidence":[{"kind":"document","label":"The wording clause and its page"},{"kind":"confirmation","label":"A verified start event with its date"}],"actions":[{"verb":"prepare","label":"Check the notification clock","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"clock","label":"Notification clock","actor":"asap"},{"state":"todo","guards":[],"evidence":[{"kind":"document","label":"Each document, with who holds any outstanding one"}],"actions":[{"verb":"record_evidence","label":"All documents received","guards":["evidence_present"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"documents","label":"Documents collected","actor":"you"},{"state":"todo","guards":[],"evidence":[{"kind":"record_send","label":"The submission as sent"}],"actions":[{"verb":"draft","label":"Draft the submission","guards":[],"disabledReason":null},{"verb":"record_send","label":"I sent this","guards":["evidence_present"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"submit","label":"Submitted to the insurer","actor":"you"},{"state":"todo","guards":[],"evidence":[{"kind":"document","label":"Their email or letter — not a call note"}],"actions":[{"verb":"record_evidence","label":"Record their written response","guards":["evidence_present"],"disabledReason":null}],"party":"Jubilee","reason":null,"recorded":[],"runId":null,"id":"response","label":"Insurer responded","actor":"insurer"},{"state":"todo","guards":[],"evidence":[{"kind":"document","label":"The discharge voucher"}],"actions":[{"verb":"record_evidence","label":"Record the offer","guards":["evidence_present"],"disabledReason":null}],"party":"Jubilee","reason":null,"recorded":[],"runId":null,"id":"offer","label":"Settlement offered","actor":"insurer"},{"state":"todo","guards":[],"evidence":[{"kind":"instruction","label":"The signed acceptance"}],"actions":[{"verb":"record_evidence","label":"Record the client''s acceptance","guards":["evidence_present"],"disabledReason":null}],"party":"Jane Wanjiku","reason":null,"recorded":[],"runId":null,"id":"acceptance","label":"Client accepted","actor":"client"},{"state":"todo","guards":[],"evidence":[{"kind":"confirmation","label":"The receipt"}],"actions":[{"verb":"record_evidence","label":"Record the receipt","guards":["evidence_present"],"disabledReason":null},{"verb":"exception","label":"Record an exception","guards":[],"disabledReason":null}],"party":"the bank","reason":null,"recorded":[],"runId":null,"id":"payment","label":"Payment received","actor":"bank"}]',
    null, now() - interval '5 minutes'),
   ('30000000-0000-4000-8000-000000000004', '10000000-0000-4000-8000-00000000000a',
    'Acme Motors — Q2 statement reconciled', 'reconciliation', 'a0000000-0000-4000-8000-000000000003',
@@ -185,7 +194,9 @@ values
    null, now() - interval '30 minutes'),
   ('30000000-0000-4000-8000-00000000000c', '10000000-0000-4000-8000-00000000000b',
    'Beta Risk — CIC premium statement', 'money_in', 'b0000000-0000-4000-8000-000000000003',
-   'with_party', 'CIC', now() - interval '6 days', now() + interval '1 day', null, 'part_paid',
+   -- Deliberately not due: relative times are evaluated when the seed runs, so a check meant to
+   -- stay in the future needs enough room that it does not drift into "due" (docs/click-through.md).
+   'with_party', 'CIC', now() - interval '6 days', now() + interval '30 days', null, 'part_paid',
    'CIC has acknowledged the query and owes a reply by tomorrow.',
    '[]', null, now() - interval '6 days');
 
@@ -266,5 +277,33 @@ insert into policy_versions (id, organization_id, policy_id, version, effective_
   ('92000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', '90000000-0000-4000-8000-00000000000b', 1, '2026-03-01', 'seed',
    '[{"id":"kdb220j","label":"KDB 220J Mazda Demio","sumInsuredMinor":95000000,"covered":true,"status":"in_force","note":null}]',
    'a0000000-0000-4000-8000-000000000001');
+
+-- An endorsement whose insurer has answered item by item: the policy update needs a person.
+insert into work_items (id, organization_id, title, kind, client_id, insurer_id, class_of_business, owner_id, task_status, cover_status, reason, steps, updated_at)
+values ('30000000-0000-4000-8000-000000000006', '10000000-0000-4000-8000-00000000000a',
+  'Acme Motors — add KDC 900T to the Motor commercial policy', 'endorsement',
+  '70000000-0000-4000-8000-00000000000a', '60000000-0000-4000-8000-00000000000a', 'Motor commercial',
+  'a0000000-0000-4000-8000-000000000002', 'needs_you', 'active',
+  'Jubilee has answered every item: one vehicle accepted, one rejected. Applying the answer writes a new policy version.',
+  '[{"state":"done","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Classify the request","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"classify","label":"Request classified","actor":"asap"},{"state":"done","guards":[],"evidence":[],"actions":[{"verb":"prepare","label":"Check the requirements","guards":[],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"requirements","label":"Requirements checked","actor":"asap"},{"state":"done","guards":[],"evidence":[{"kind":"record_send","label":"The request as sent"}],"actions":[{"verb":"draft","label":"Draft the request","guards":[],"disabledReason":null},{"verb":"record_send","label":"I sent this","guards":["evidence_present"],"disabledReason":null}],"party":null,"reason":null,"recorded":[{"kind":"record_send","reference":"Email to Jubilee underwriting, 4 September","recordedBy":"Brian Kamau","recordedAt":"2026-09-04T08:30:00Z"}],"runId":null,"id":"request","label":"Jubilee asked","actor":"you"},{"state":"done","guards":[],"evidence":[{"kind":"document","label":"Their written response, with a decision recorded on every item"}],"actions":[{"verb":"record_evidence","label":"Record their written response","guards":["evidence_present"],"disabledReason":null}],"party":"Jubilee","reason":null,"recorded":[{"kind":"document","reference":"Jubilee email, 8 September","recordedBy":"Brian Kamau","recordedAt":"2026-09-08T10:15:00Z"}],"runId":null,"id":"response","label":"Insurer responded, item by item","actor":"insurer"},{"state":"now","guards":["version_current"],"evidence":[{"kind":"approval","label":"The new policy version"}],"actions":[{"verb":"approve","label":"Apply the confirmed changes","guards":["evidence_present","version_current"],"disabledReason":null}],"party":null,"reason":null,"recorded":[],"runId":null,"id":"update_policy","label":"Policy updated","actor":"you"},{"state":"todo","guards":["component_declared"],"evidence":[{"kind":"document","label":"The invoice"}],"actions":[{"verb":"record_evidence","label":"Record the invoice","guards":["evidence_present"],"disabledReason":null},{"verb":"exception","label":"Record an exception","guards":[],"disabledReason":null}],"party":"finance","reason":null,"recorded":[],"runId":null,"id":"premium","label":"Additional premium","actor":"finance"}]',
+  now() - interval '2 hours');
+
+insert into endorsements (id, organization_id, work_item_id, policy_id, kind, requested_by, requested_by_name, request_text, effective_on, response_reference, items, created_by) values
+  ('a1000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '30000000-0000-4000-8000-000000000006',
+   '90000000-0000-4000-8000-00000000000a', 'add_item', 'policyholder', 'Acme Motors',
+   'Please add two vehicles to our motor commercial policy from 1 October.', '2026-10-01', 'Jubilee email, 8 September',
+   '[{"id":"kdc900t","label":"KDC 900T Isuzu FRR","before":null,"after":"Add","sumInsuredMinor":520000000,"decision":"accepted","note":"Jubilee email, 8 September"},
+     {"id":"kdd111a","label":"KDD 111A Nissan Caravan","before":null,"after":"Add","sumInsuredMinor":180000000,"decision":"rejected","note":"Vehicle age above the insurer''s limit"}]',
+   'a0000000-0000-4000-8000-000000000002');
+
+-- The draft claim the Phase 5a comment promises: captured from email, not yet registered.
+insert into claims (id, organization_id, work_item_id, client_id, policy_id, status, source, incident_on, incident_summary, reported_on) values
+  ('a2000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '30000000-0000-4000-8000-000000000003',
+   '70000000-0000-4000-8000-00000000000b', '90000000-0000-4000-8000-00000000000b', 'draft', 'email', '2026-09-02',
+   'Rear-ended at the Uhuru Highway roundabout; no injuries reported.', '2026-09-02');
+
+insert into claim_documents (organization_id, claim_id, label, holder, requested_at) values
+  ('10000000-0000-4000-8000-00000000000a', 'a2000000-0000-4000-8000-00000000000a', 'Police abstract', 'police', now() - interval '5 days'),
+  ('10000000-0000-4000-8000-00000000000a', 'a2000000-0000-4000-8000-00000000000a', 'Repair estimate', 'garage', now() - interval '5 days');
 
 commit;

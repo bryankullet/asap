@@ -121,10 +121,16 @@ function makeDb(): FakeDb {
         createdOrganizations.set(key, id);
         return { data: id };
       },
-      set_active_organization: (args) =>
-        args["p_organization_id"] === ORG_A
-          ? {}
-          : { error: { code: "42501", message: "not_a_member" } },
+      set_active_organization: (args) => {
+        // Mirrors app.set_active_organization: a member's brokerage is written to the profile.
+        const member = (db.tables["organization_memberships"] ?? []).some(
+          (m) => m["organization_id"] === args["p_organization_id"] && m["status"] === "active",
+        );
+        if (!member) return { error: { code: "42501", message: "not_a_member" } };
+        for (const u of db.tables["users"] ?? [])
+          u["active_organization_id"] = args["p_organization_id"];
+        return {};
+      },
       create_invitation: (args) =>
         typeof args["p_token_hash"] === "string" && (args["p_token_hash"] as string).length === 64
           ? { data: "50000000-0000-4000-8000-000000000001" }
@@ -205,6 +211,48 @@ describe("GET /me", () => {
     expect(body.active_organization.id).toBe(ORG_A);
     expect(body.memberships).toHaveLength(1);
     expect(body.permissions).toEqual(["user:create", "user:view"]);
+  });
+
+  it("one membership and no active brokerage: sets it on the server (D-055)", async () => {
+    db.tables["users"]![0]!["active_organization_id"] = null;
+    const res = await app.request("/me", { headers: auth("tok-admin") });
+    const body = await readJson(res);
+    expect(body.active_organization.id).toBe(ORG_A);
+    expect(db.tables["users"]![0]!["active_organization_id"]).toBe(ORG_A);
+    expect(body.permissions).toEqual(["user:create", "user:view"]);
+  });
+
+  it("two memberships and no active brokerage: stays unset so the browser shows the chooser", async () => {
+    db.tables["users"]![0]!["active_organization_id"] = null;
+    db.tables["organization_memberships"]!.push({
+      ...db.tables["organization_memberships"]![0]!,
+      id: "60000000-0000-4000-8000-000000000009",
+      organization_id: ORG_B,
+      organization: {
+        id: ORG_B,
+        name: "Beta",
+        country: "KE",
+        currency: "KES",
+        timezone: "Africa/Nairobi",
+      },
+    });
+    const res = await app.request("/me", { headers: auth("tok-admin") });
+    const body = await readJson(res);
+    expect(body.active_organization).toBeNull();
+    expect(body.memberships).toHaveLength(2);
+    expect(db.tables["users"]![0]!["active_organization_id"]).toBeNull();
+  });
+
+  it("zero memberships: no active brokerage and nothing is written", async () => {
+    db.tables["users"]![0]!["active_organization_id"] = null;
+    db.tables["organization_memberships"] = db.tables["organization_memberships"]!.filter(
+      (m) => m["user_id"] !== ADMIN.id,
+    );
+    const res = await app.request("/me", { headers: auth("tok-admin") });
+    const body = await readJson(res);
+    expect(body.active_organization).toBeNull();
+    expect(body.memberships).toHaveLength(0);
+    expect(db.tables["users"]![0]!["active_organization_id"]).toBeNull();
   });
 
   it("drops the active organization when the membership is no longer active", async () => {

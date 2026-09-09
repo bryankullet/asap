@@ -226,3 +226,27 @@ describe("profile control (C01)", () => {
     expect(onSwitch).toHaveBeenCalledWith("10000000-0000-4000-8000-00000000000b");
   });
 });
+
+describe("profile control with one brokerage (D-055)", () => {
+  it("names the only brokerage, never 'Choose a brokerage'", async () => {
+    const one = {
+      user: {
+        id: "a0000000-0000-4000-8000-000000000001",
+        email: "amina@acme.test",
+        full_name: "Amina Otieno",
+      },
+      active_organization: null,
+      memberships: [
+        { organization: { id: ORG, name: "Acme Insurance Brokers" }, status: "active" },
+      ],
+      permissions: [],
+    } as unknown as Parameters<typeof ProfileMenu>[0]["me"];
+    await renderInRouter(
+      <ProfileMenu me={one} switching={false} onSwitch={() => {}} onSignOut={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: /Acme Insurance Brokers/ })).toBeInTheDocument();
+    expect(screen.queryByText("Choose a brokerage")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Acme Insurance Brokers/ }));
+    expect(screen.queryByRole("combobox", { name: "Active brokerage" })).toBeNull();
+  });
+});
