@@ -60,6 +60,20 @@ describe("loadServerEnv", () => {
     expect(env.RESEND_API_KEY).toBeUndefined();
   });
 
+  it("derives a *_URL from a Render-supplied *_HOST when the URL is absent (render.yaml fromService)", () => {
+    const { API_BASE_URL: _a, WEB_BASE_URL: _w, ...rest } = validServer;
+    const env = loadServerEnv({
+      ...rest,
+      API_BASE_HOST: "asap-api.onrender.com",
+      WEB_BASE_HOST: "asap-web.onrender.com",
+    });
+    expect(env.API_BASE_URL).toBe("https://asap-api.onrender.com");
+    expect(env.WEB_BASE_URL).toBe("https://asap-web.onrender.com");
+    expect(loadServerEnv({ ...validServer, API_BASE_HOST: "ignored.example" }).API_BASE_URL).toBe(
+      validServer.API_BASE_URL,
+    );
+  });
+
   it("requires RESEND_API_KEY and RESEND_FROM_EMAIL together", () => {
     expect(() => loadServerEnv({ ...validServer, RESEND_API_KEY: "re_x" })).toThrow(
       /RESEND_FROM_EMAIL/,

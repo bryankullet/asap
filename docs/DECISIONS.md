@@ -372,3 +372,7 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Not on the placement recipe.** `authority_sufficient` is listed by spec Part 6.2 on the approval step; authority limits do not exist yet, and a guard that blocks by omission would make every placement unapprovable, so it is left off the recipe and recorded here. It joins the recipe when authority limits are designed.
 
 **Cover.** Moves to Confirmed only when the insurer's written confirmation is recorded; Confirmed reads as Active cover once `cover_inception_at` passes, by date, computed on read (`effectiveCoverStatus`).
+
+## D-049 · 2026-09-09 · Render supplies service addresses as hosts; ENCRYPTION_KEY is generated
+
+**Decision.** `render.yaml` uses `fromService … property: host` so neither service needs the other's address typed in. Render hands over a hostname, not a URL, so the env loaders accept `API_BASE_HOST`, `WEB_BASE_HOST` and `VITE_PUBLIC_API_BASE_HOST` and derive `https://<host>` when the `*_URL` twin is absent; a set `*_URL` always wins. `ENCRYPTION_KEY` is `generateValue: true` and the schema now requires at least 32 characters rather than exactly 44 base64 characters, because nothing derives a cipher key from it yet; the first consumer must run it through a KDF. Rotation rules in SECRETS.md are unchanged: back it up the day it is generated.

@@ -35,13 +35,17 @@ export const postgresUrl = z
   });
 
 /** 32 bytes, base64: always 44 characters ending in "=". */
+/**
+ * At least 32 characters of key material. Nothing derives a cipher key from it yet; when
+ * something does, it must run the value through a KDF (sha256 at minimum) rather than use it
+ * raw, because Render's generateValue and a 32-byte base64 string are both acceptable here.
+ */
 export const encryptionKey = z
   .string()
-  .length(
-    44,
-    "must be 32 bytes base64-encoded (44 characters); generate with `openssl rand -base64 32`",
-  )
-  .regex(/^[A-Za-z0-9+/]{43}=$/, "must be standard base64 of exactly 32 bytes");
+  .min(
+    32,
+    "at least 32 characters; generate with `openssl rand -base64 32` or let Render generate it",
+  );
 
 export const runtimeShape = {
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -98,6 +102,22 @@ export class EnvValidationError extends Error {
  * variable. Values are never included in the message — a missing or malformed secret must not
  * be echoed into logs.
  */
+/**
+ * Render's `fromService` can hand a service another service's hostname, never a URL. When a
+ * `*_URL` variable is absent and its `*_HOST` twin is present, the URL is `https://<host>`.
+ * Local .env files keep setting the URL directly.
+ */
+export function withHostFallbacks(
+  raw: Record<string, string | undefined>,
+  pairs: readonly (readonly [url: string, host: string])[],
+): Record<string, string | undefined> {
+  const out = { ...raw };
+  for (const [url, host] of pairs) {
+    if (!out[url] && out[host]) out[url] = `https://${out[host]}`;
+  }
+  return out;
+}
+
 export function parseEnv<S extends z.ZodTypeAny>(
   schema: S,
   raw: Record<string, string | undefined>,

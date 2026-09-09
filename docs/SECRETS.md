@@ -79,7 +79,7 @@ Keep separate keys per environment so a staging leak does not touch production s
 
 | Secret | Sensitivity | Allowed in | Notes |
 |---|---|---|---|
-| `ENCRYPTION_KEY` | Critical | `apps/api`, `apps/workers` | 32 bytes base64. Encrypts stored OAuth refresh tokens. |
+| `ENCRYPTION_KEY` | Critical | `apps/api`, `apps/workers` | >= 32 characters of key material (Render may generate it); a KDF derives the cipher key. Encrypts stored OAuth refresh tokens. |
 | `EXTRACTOR_SHARED_SECRET` | Medium | `apps/api`, `apps/extractor` | Service-to-service auth. |
 
 **`ENCRYPTION_KEY` cannot be casually rotated.** Everything encrypted with the old key becomes unreadable. Rotation requires a re-encryption migration that reads with the old key and writes with the new one, with both keys present during the window. Generate it once, correctly, and back it up:

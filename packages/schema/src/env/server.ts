@@ -9,6 +9,7 @@ import {
   postgresUrl,
   requireInDeployedEnvironments,
   runtimeShape,
+  withHostFallbacks,
 } from "./shared.js";
 
 /**
@@ -94,5 +95,12 @@ export const serverEnvSchema = z
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 
 export function loadServerEnv(raw: Record<string, string | undefined> = process.env): ServerEnv {
-  return parseEnv(serverEnvSchema, raw, "apps/api");
+  return parseEnv(
+    serverEnvSchema,
+    withHostFallbacks(raw, [
+      ["API_BASE_URL", "API_BASE_HOST"],
+      ["WEB_BASE_URL", "WEB_BASE_HOST"],
+    ]),
+    "apps/api",
+  );
 }
