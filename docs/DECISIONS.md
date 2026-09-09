@@ -420,3 +420,13 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Links from the API.** Checked on the same click-through: invitation links are built from `WEB_BASE_URL` (`acceptUrl` in `routes/invitations.ts`), and the auth links the browser asks Supabase to send (magic link, sign-up confirmation) are built from `window.location.origin`. No API link is built from localhost. Supabase's own Site URL is set in its dashboard.
 
 **Applied.** Hosted ledger version `20260909192143`. pgTAP `0100` (now 25 tests) proves a repeated key returns the same id and creates one row; the API test proves a concurrent double submit is one brokerage.
+
+## D-054 · 2026-09-09 · The audit log survives organization deletion (0030)
+
+**Decision.** `audit_log.organization_id` is `ON DELETE RESTRICT`. Deleting a brokerage is refused while any audit row references it, and since `create_organization` writes two audit rows in the same transaction, every brokerage has them from birth: deletion is impossible until a deliberate offboarding path exists that decides, on its own terms and with its own audit trail, what happens to history. The Drizzle schema mirrors the rule so the drift check agrees.
+
+**Reason.** Screen Map v1 C05 (Audit log and event detail): "never rewrite historical outcomes". Cascading the audit rows away with their brokerage rewrites them to nothing. This surfaced when the test duplicate from the first click-through was deleted by hand (D-053) and its own creation rows cascaded with it; the deletion record had to be filed under the surviving brokerage to outlive the delete. That workaround is exactly what the constraint now makes unnecessary.
+
+**Alternative rejected.** An organization-independent audit table with a soft reference would let rows outlive the brokerage, but it removes the referential guarantee everywhere else (tenancy policies key on `organization_id`) and gives up the stronger property: with RESTRICT, history is not merely preserved, it is a reason the delete cannot happen. Offboarding (architecture: hard deletes are reserved for it) will need its own decision about retention before it can drop the constraint's protection, and that is the right order.
+
+**Applied.** Hosted ledger version `20260909194947`; pgTAP `0307` (5 tests) passes on hosted.

@@ -15,9 +15,11 @@ export const auditLog = pgTable(
   "audit_log",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    // RESTRICT since 0030: an audit row outlives nothing and blocks the delete of its brokerage
+    // (C05: never rewrite historical outcomes; D-054).
     organizationId: uuid("organization_id")
       .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
+      .references(() => organizations.id, { onDelete: "restrict" }),
     actorType: text("actor_type").notNull(),
     actorUserId: uuid("actor_user_id").references(() => users.id),
     /** 'membership.created', 'role.updated', ... */
