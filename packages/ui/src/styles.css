@@ -1,34 +1,58 @@
 /*
- * ASAP design tokens, taken from the prototype (CLAUDE.md → Design tokens).
- * Consumed by Tailwind v4 through @theme in apps/web. Status colours are semantic and fixed:
- * green = running/active, gold = waiting, red = needs review, grey = done.
+ * ASAP design tokens, ported from the v4 prototype's dist/styles.css :root block. This file is the
+ * single source: apps/web consumes it through Tailwind v4's @theme, and nothing re-declares a
+ * colour, radius or shadow of its own.
+ *
+ * Status colours are semantic and fixed: green = running/active, gold = waiting, red = needs
+ * review, grey = done. The *-ink values are the prototype's darker text tones for soft backgrounds;
+ * the *-dot values are the status pill's leading dot.
+ *
+ * Fonts: Figtree for body, Outfit for headings, both from Google Fonts in apps/web/index.html with
+ * a system stack behind them, so the app is legible before the webfont lands and if it never does.
  */
 @theme {
-  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Outfit", "Figtree", ui-sans-serif, system-ui, sans-serif;
 
   --color-ink: #102a43;
   --color-ink-secondary: #334e68;
   --color-ink-muted: #66788a;
+  --color-ink-done: #5b6e7d;
+
+  /* The prototype names the darkest ink "navy" where it is a surface, not text. */
+  --color-navy: #102a43;
+  --color-navy-hover: #173b5d;
 
   --color-paper: #ffffff;
   --color-wash: #f6f8f9;
 
   --color-line-strong: #dfe6ea;
   --color-line-soft: #edf1f3;
+  --color-line-hover: #b8c6ce;
 
   --color-accent-green: #0f7b5a;
   --color-accent-green-soft: #e7f5ef;
+  --color-accent-green-ink: #096348;
   --color-accent-gold: #d9a62e;
   --color-accent-gold-soft: #fbf4dc;
+  --color-accent-gold-ink: #755509;
+  --color-accent-gold-line: #ead490;
   --color-accent-red: #b94a48;
   --color-accent-red-soft: #fff0ef;
+  --color-accent-red-ink: #963b3a;
+  --color-accent-blue-soft: #eef5ff;
+
+  --color-dot-neutral: #91a0aa;
+  --color-surface-sunken: #e7ecef;
 
   --radius-card: 18px;
   --radius-control: 12px;
+  --radius-compact: 10px;
   --radius-pill: 99px;
 
   --shadow-card: 0 14px 44px rgba(16, 42, 67, 0.09);
+  --shadow-lift: 0 6px 22px rgba(16, 42, 67, 0.06);
+  --shadow-dock: 0 12px 40px rgba(16, 42, 67, 0.13);
 
   --spacing-sidebar: 224px;
 }

@@ -1,5 +1,5 @@
 import { K01View, K01_VIEW_LABELS } from "@asap/schema";
-import { Button, Input } from "@asap/ui";
+import { Button, Card, Field, Input, Notice, PageHead, Select, cn } from "@asap/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
@@ -40,90 +40,101 @@ export function Files() {
     if (name.trim()) create.mutate(false);
   }
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <h1 className="text-2xl font-semibold text-ink">Client files</h1>
-        <p className="text-sm text-ink-muted">
-          Every client lands as Not started. Clearing is a person's decision with a reason.
-        </p>
-      </div>
-      <nav aria-label="Client file views" className="flex flex-wrap gap-2">
-        {K01View.options.map((v) => (
-          <Link
-            key={v}
-            to="/files"
-            search={{ view: v }}
-            aria-current={v === current ? "page" : undefined}
-            className={
-              v === current
-                ? "rounded-pill bg-ink px-3 py-1 text-sm text-paper"
-                : "rounded-pill bg-paper px-3 py-1 text-sm text-ink-secondary hover:text-ink"
-            }
-          >
-            {K01_VIEW_LABELS[v]}
-            {q.data ? ` · ${q.data.counts[v]}` : ""}
-          </Link>
-        ))}
-      </nav>
-      {!org ? (
-        <EmptyState scope="your brokerage" />
-      ) : q.isPending ? (
-        <LoadingList label="Loading client files" />
-      ) : q.isError ? (
-        <ErrorState what="Client files could not load" retry={() => void q.refetch()} />
-      ) : (
-        <FilesView data={q.data} />
-      )}
-      <form
-        onSubmit={submit}
-        className="flex flex-wrap items-end gap-2 rounded-card bg-paper p-4 shadow-card"
-      >
-        <label className="flex flex-col gap-1 text-sm">
-          New client
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Kind
-          <select
-            className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as typeof kind)}
-          >
-            <option value="individual">Individual</option>
-            <option value="corporate">Company</option>
-          </select>
-        </label>
-        <Button type="submit" size="sm" variant="outline" disabled={create.isPending}>
-          Add (lands as Not started)
-        </Button>
-        {create.isError && (
-          <span className="text-sm text-accent-red">{describeApiError(create.error)}</span>
-        )}
-        {duplicates && (
-          <div className="flex w-full flex-col gap-1 text-sm" aria-live="polite">
-            <p className="text-ink-secondary">Possibly already on file:</p>
-            {duplicates.map((d) => (
-              <Link
-                key={d.id}
-                to="/files/$clientId"
-                params={{ clientId: d.id }}
-                className="text-ink underline"
-              >
-                Use {d.name}
-              </Link>
-            ))}
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              disabled={create.isPending}
-              onClick={() => create.mutate(true)}
+    <div>
+      <PageHead
+        title="Client files"
+        description="Every client lands as Not started. Clearing is a person's decision with a reason."
+      />
+      <div className="flex flex-col gap-4">
+        <nav aria-label="Client file views" className="flex flex-wrap gap-2">
+          {K01View.options.map((v) => (
+            <Link
+              key={v}
+              to="/files"
+              search={{ view: v }}
+              aria-current={v === current ? "page" : undefined}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-pill px-3 py-2 text-sm font-semibold transition",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-green focus-visible:ring-offset-1",
+                "motion-reduce:transition-none",
+                v === current
+                  ? "border border-transparent bg-navy text-paper"
+                  : "border border-line-strong bg-paper text-ink hover:border-line-hover",
+              )}
             >
-              Create separately
-            </Button>
-          </div>
+              {K01_VIEW_LABELS[v]}
+              {q.data ? ` · ${q.data.counts[v]}` : ""}
+            </Link>
+          ))}
+        </nav>
+        {!org ? (
+          <EmptyState scope="your brokerage" />
+        ) : q.isPending ? (
+          <LoadingList label="Loading client files" />
+        ) : q.isError ? (
+          <ErrorState what="Client files could not load" retry={() => void q.refetch()} />
+        ) : (
+          <FilesView data={q.data} />
         )}
-      </form>
+        <Card>
+          <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
+            <Field label="New client" htmlFor="new-client-name" className="min-w-[200px] flex-1">
+              <Input
+                id="new-client-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Name"
+              />
+            </Field>
+            <Field label="Kind" htmlFor="new-client-kind" className="w-40">
+              <Select
+                id="new-client-kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as typeof kind)}
+              >
+                <option value="individual">Individual</option>
+                <option value="corporate">Company</option>
+              </Select>
+            </Field>
+            <Button type="submit" size="compact" variant="outline" disabled={create.isPending}>
+              Add (lands as Not started)
+            </Button>
+            {create.isError && (
+              <Notice tone="error" className="w-full">
+                {describeApiError(create.error)}
+              </Notice>
+            )}
+            {duplicates && (
+              <div
+                className="flex w-full flex-col gap-2 border-t border-line-soft pt-3 text-sm"
+                aria-live="polite"
+              >
+                <p className="text-ink-secondary">Possibly already on file:</p>
+                {duplicates.map((d) => (
+                  <Link
+                    key={d.id}
+                    to="/files/$clientId"
+                    params={{ clientId: d.id }}
+                    className="font-semibold text-ink underline underline-offset-2"
+                  >
+                    Use {d.name}
+                  </Link>
+                ))}
+                <Button
+                  type="button"
+                  size="compact"
+                  variant="destructive"
+                  className="self-start"
+                  disabled={create.isPending}
+                  onClick={() => create.mutate(true)}
+                >
+                  Create separately
+                </Button>
+              </div>
+            )}
+          </form>
+        </Card>
+      </div>
     </div>
   );
 }

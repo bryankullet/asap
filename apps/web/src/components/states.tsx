@@ -1,4 +1,4 @@
-import { Card, CardDescription, CardTitle } from "@asap/ui";
+import { Card, CardDescription, CardTitle, EmptyState as EmptyStateShell } from "@asap/ui";
 import type { ReactNode } from "react";
 
 /**
@@ -16,10 +16,10 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <Card role="status" className="flex flex-col gap-2">
-      <CardTitle>Nothing in {scope}</CardTitle>
-      {freshness && <CardDescription>{freshness}</CardDescription>}
-      {action}
+    <Card role="status">
+      <EmptyStateShell title={`Nothing in ${scope}`} action={action}>
+        {freshness}
+      </EmptyStateShell>
     </Card>
   );
 }
@@ -28,7 +28,10 @@ export function LoadingList({ rows = 3, label = "Loading" }: { rows?: number; la
   return (
     <div role="status" aria-label={label} className="flex flex-col gap-3">
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="h-24 animate-pulse rounded-card bg-paper shadow-card" />
+        <div
+          key={i}
+          className="h-24 animate-pulse rounded-card border border-line-strong bg-paper"
+        />
       ))}
       <span className="sr-only">{label}</span>
     </div>
@@ -37,7 +40,7 @@ export function LoadingList({ rows = 3, label = "Loading" }: { rows?: number; la
 
 export function MissingData({ what, why }: { what: string; why: string }) {
   return (
-    <Card role="status" className="flex flex-col gap-1 border border-accent-gold-soft">
+    <Card role="status" variant="attention" className="flex flex-col gap-1">
       <CardTitle>{what}</CardTitle>
       <CardDescription>{why}</CardDescription>
     </Card>
@@ -46,13 +49,13 @@ export function MissingData({ what, why }: { what: string; why: string }) {
 
 export function ErrorState({ what, retry }: { what: string; retry?: () => void }) {
   return (
-    <Card role="alert" className="flex flex-col gap-2 border border-accent-red-soft">
+    <Card role="alert" className="flex flex-col gap-2 border-l-4 border-l-accent-red">
       <CardTitle>{what}</CardTitle>
       <CardDescription>Nothing was changed. Try again, or refresh the page.</CardDescription>
       {retry && (
         <button
           type="button"
-          className="self-start text-sm text-accent-green underline"
+          className="self-start text-sm font-bold text-accent-green underline underline-offset-2"
           onClick={retry}
         >
           Try again

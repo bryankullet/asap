@@ -1,6 +1,7 @@
 import type { RunRow } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { Card } from "@asap/ui";
 import { ActivityPanelSlot, RunStatus } from "../components/status/slots.js";
 
 /** Runs the chip may show: working, paused, or finished since this session began (spec Part 8). */
@@ -26,25 +27,25 @@ export function ActivityChip({ runs, sessionStart }: { runs: RunRow[]; sessionSt
         aria-expanded={open}
         aria-controls="activity-panel"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-2 rounded-pill bg-accent-green-soft px-3 py-1 text-sm text-accent-green"
+        className="inline-flex items-center gap-1.5 rounded-pill border border-line-strong bg-wash px-2.5 py-1.5 text-sm font-semibold text-ink-secondary hover:border-line-hover"
       >
         <span
           aria-hidden
           className={
             working > 0
-              ? "h-2 w-2 animate-pulse rounded-pill bg-accent-green"
-              : "h-2 w-2 rounded-pill bg-ink-muted"
+              ? "h-[7px] w-[7px] animate-pulse rounded-full bg-accent-green"
+              : "h-[7px] w-[7px] rounded-full bg-dot-neutral"
           }
         />
         Activity
-        <span className="text-xs">{visible.length}</span>
+        <span className="text-xs text-ink-muted">{visible.length}</span>
       </button>
       {open && (
-        <div
+        <Card
           id="activity-panel"
           role="region"
           aria-label="Activity"
-          className="mt-2 rounded-card bg-paper p-3 shadow-card"
+          className="absolute right-0 bottom-full mb-2 w-[min(360px,80vw)] p-3 shadow-card"
         >
           <ActivityPanelSlot>
             <ul className="flex flex-col gap-2">
@@ -62,7 +63,7 @@ export function ActivityChip({ runs, sessionStart }: { runs: RunRow[]; sessionSt
               ))}
             </ul>
           </ActivityPanelSlot>
-        </div>
+        </Card>
       )}
     </div>
   );

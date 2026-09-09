@@ -42,7 +42,7 @@ export function ProfileMenu({
   }, [open]);
 
   const linkClass =
-    "rounded-control px-3 py-2 text-sm text-ink-secondary hover:bg-wash hover:text-ink";
+    "rounded-compact px-3 py-2.5 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink";
 
   return (
     <div ref={root} className="relative">
@@ -52,15 +52,23 @@ export function ProfileMenu({
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full flex-col items-start rounded-control border border-line-strong bg-paper px-3 py-2 text-left hover:bg-wash focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-green"
+        className="flex w-full items-center gap-2.5 rounded-control p-2.5 text-left hover:bg-wash focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-green"
       >
-        <span className="w-full truncate text-sm font-medium text-ink">
-          {/* One membership is never a choice: name it even before the server has set it. */}
-          {org?.name ??
-            (memberships.length === 1 ? memberships[0]!.organization.name : "Choose a brokerage")}
+        <span
+          aria-hidden
+          className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-compact bg-accent-gold-soft text-sm font-bold text-[#7b5a09]"
+        >
+          {(me?.user.full_name ?? me?.user.email ?? "?").trim().charAt(0).toUpperCase()}
         </span>
-        <span className="w-full truncate text-xs text-ink-muted" title={me?.user.email}>
-          {me?.user.full_name ?? me?.user.email ?? ""}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[0.95rem] font-semibold text-ink">
+            {/* One membership is never a choice: name it even before the server has set it. */}
+            {org?.name ??
+              (memberships.length === 1 ? memberships[0]!.organization.name : "Choose a brokerage")}
+          </span>
+          <span className="block truncate text-[0.8125rem] text-ink-muted" title={me?.user.email}>
+            {me?.user.full_name ?? me?.user.email ?? ""}
+          </span>
         </span>
       </button>
       {open && (
@@ -68,7 +76,7 @@ export function ProfileMenu({
           id={menuId}
           role="menu"
           aria-label="Profile"
-          className="absolute bottom-full left-0 z-20 mb-2 flex w-full flex-col gap-1 rounded-card border border-line-soft bg-paper p-2 shadow-card"
+          className="absolute bottom-full left-0 z-20 mb-2 flex w-full flex-col gap-1 rounded-card border border-line-strong bg-paper p-2 shadow-card"
         >
           {memberships.length > 1 && (
             <Select

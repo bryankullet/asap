@@ -1,5 +1,6 @@
 import { WORK_VIEW_LABELS, WorkView } from "@asap/schema";
 import { Link, useSearch } from "@tanstack/react-router";
+import { chipVariants } from "@asap/ui";
 import { WorkCard } from "../components/WorkCard.js";
 import { EmptyState, ErrorState, LoadingList } from "../components/states.js";
 import { useMe } from "../lib/me.js";
@@ -15,18 +16,14 @@ export function Work() {
 
   return (
     <div className="flex flex-col gap-4">
-      <nav aria-label="Work views" className="flex flex-wrap gap-2">
+      <nav aria-label="Work views" className="mb-5 flex flex-wrap gap-2">
         {WorkView.options.map((v) => (
           <Link
             key={v}
             to="/work"
             search={{ view: v }}
             aria-current={v === current ? "page" : undefined}
-            className={
-              v === current
-                ? "rounded-pill bg-ink px-3 py-1 text-sm text-paper"
-                : "rounded-pill bg-paper px-3 py-1 text-sm text-ink-secondary hover:text-ink"
-            }
+            className={chipVariants({ selected: v === current })}
           >
             {WORK_VIEW_LABELS[v]}
           </Link>

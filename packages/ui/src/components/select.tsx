@@ -9,7 +9,7 @@ export function Select({ className, invalid, children, ...props }: SelectProps) 
     <select
       aria-invalid={invalid || undefined}
       className={cn(
-        "h-10 w-full rounded-control border bg-paper px-3 text-sm text-ink",
+        "min-h-[46px] w-full rounded-control border bg-paper px-3.5 py-3 text-sm text-ink",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-green focus-visible:ring-offset-1",
         "disabled:cursor-not-allowed disabled:opacity-50",
         invalid ? "border-accent-red" : "border-line-strong",

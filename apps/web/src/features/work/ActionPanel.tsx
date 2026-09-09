@@ -101,8 +101,8 @@ export function ActionPanel({
         {step.actions.map((a) => (
           <Button
             key={a.verb}
-            variant={a.verb === "prepare" ? "accent" : "outline"}
-            size="sm"
+            variant={a.verb === "prepare" ? "green" : "outline"}
+            size="compact"
             disabled={act.isPending || a.disabledReason !== null}
             title={a.disabledReason ?? undefined}
             onClick={() => {
@@ -140,7 +140,7 @@ export function ActionPanel({
             e.preventDefault();
             act.mutate({ ...base("approve"), override: { reason: override } });
           }}
-          className="flex flex-col gap-2 rounded-card bg-accent-red-soft p-4"
+          className="flex flex-col gap-3 rounded-card border border-accent-red/25 bg-accent-red-soft p-4"
         >
           <p className="text-sm text-ink">
             Principal-officer override. It is audited permanently and lands on your Today.
@@ -151,7 +151,7 @@ export function ActionPanel({
           <Button
             type="submit"
             variant="destructive"
-            size="sm"
+            size="compact"
             disabled={act.isPending || !override.trim()}
           >
             Approve anyway
@@ -161,7 +161,10 @@ export function ActionPanel({
       {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
 
       {form && form !== "exception" && (
-        <form onSubmit={submit} className="flex flex-col gap-2 rounded-card bg-wash p-4">
+        <form
+          onSubmit={submit}
+          className="flex flex-col gap-3 rounded-card border border-line-strong bg-wash p-4"
+        >
           <Field label={step.evidence[0]?.label ?? "What are you relying on?"} htmlFor="evidence">
             <Input
               id="evidence"
@@ -235,10 +238,10 @@ export function ActionPanel({
             </Field>
           )}
           <div className="flex gap-2">
-            <Button type="submit" variant="accent" size="sm" disabled={act.isPending}>
+            <Button type="submit" variant="accent" size="compact" disabled={act.isPending}>
               Record
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setForm(null)}>
+            <Button type="button" variant="ghost" size="compact" onClick={() => setForm(null)}>
               Cancel
             </Button>
           </div>
@@ -246,7 +249,10 @@ export function ActionPanel({
       )}
 
       {form === "exception" && (
-        <form onSubmit={submit} className="flex flex-col gap-2 rounded-card bg-wash p-4">
+        <form
+          onSubmit={submit}
+          className="flex flex-col gap-3 rounded-card border border-line-strong bg-wash p-4"
+        >
           <Field label="What happened" htmlFor="kind">
             <select
               id="kind"
@@ -270,10 +276,10 @@ export function ActionPanel({
             </Field>
           )}
           <div className="flex gap-2">
-            <Button type="submit" variant="accent" size="sm" disabled={act.isPending}>
+            <Button type="submit" variant="accent" size="compact" disabled={act.isPending}>
               Record
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setForm(null)}>
+            <Button type="button" variant="ghost" size="compact" onClick={() => setForm(null)}>
               Cancel
             </Button>
           </div>

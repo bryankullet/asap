@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useState } from "react";
+import { Page } from "@asap/ui";
 import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
 import { useRuns } from "../lib/queries.js";
@@ -11,10 +12,12 @@ import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
 
 /**
- * The permanent shell (UI Build Spec v1 Part 1): a 224px sidebar with Today · Work · Automations,
- * Ask, the Activity chip, Search and + New, and the profile control (C01) at the bottom, which
- * opens the brokerage switcher, Members, Agreements, Client files and Sign out. Under 900px the
- * destinations become a bottom bar and Ask stays reachable at the top.
+ * The permanent shell (UI Build Spec v1 Part 1), in the v4 prototype's frame: a 224px sidebar of
+ * white against the wash, Today · Work · Automations, Search and + New, and the profile control
+ * (C01) at the bottom, which opens the brokerage switcher, Members, Agreements, Client files and
+ * Sign out. Ask is the docked bar at the foot of the workspace, reachable from every screen; the
+ * Activity chip sits on its meta row. Under 900px the destinations become a bottom bar and the
+ * dock lifts above it.
  */
 export function Shell() {
   const me = useMe();
@@ -36,25 +39,37 @@ export function Shell() {
     />
   );
 
+  const brand = (
+    <Link
+      to="/today"
+      className="flex items-center gap-2.5 font-heading text-base font-bold tracking-[0.15em] text-ink"
+    >
+      <span
+        aria-hidden
+        className="grid h-[34px] w-[34px] place-items-center rounded-compact bg-navy text-[#f0c75e]"
+      >
+        A
+      </span>
+      ASAP
+    </Link>
+  );
+
   return (
     <div className="min-h-screen bg-wash min-[900px]:grid min-[900px]:grid-cols-[224px_1fr]">
-      <aside className="hidden min-h-screen flex-col gap-6 border-r border-line-soft bg-paper p-4 min-[900px]:flex">
-        <Link to="/today" className="font-heading text-xl font-semibold text-ink">
-          ASAP
-        </Link>
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-sidebar flex-col border-r border-line-soft bg-paper px-3.5 py-5 min-[900px]:flex">
+        <div className="px-2 pb-5">{brand}</div>
         <ShellNav />
-        <AskComposer />
-        <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
-        <div className="flex gap-2 text-sm">
+        <div className="mx-2 my-4 h-px bg-line-soft" />
+        <div className="flex flex-col gap-0.5 px-2">
           <Link
             to="/work"
             search={{ view: "recent" }}
-            className="text-ink-secondary hover:text-ink"
+            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink"
           >
             Search
           </Link>
           <span
-            className="text-ink-muted"
+            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-muted"
             title="Creating records arrives with import in a later phase"
           >
             + New
@@ -63,21 +78,25 @@ export function Shell() {
         <div className="mt-auto">{profile}</div>
       </aside>
 
-      <div className="flex min-h-screen flex-col">
-        <header className="flex items-center gap-3 border-b border-line-soft bg-paper px-4 py-2 min-[900px]:hidden">
-          <Link to="/today" className="font-heading text-lg font-semibold text-ink">
-            ASAP
-          </Link>
-          <div className="flex-1">
-            <AskComposer />
-          </div>
-          <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
-          <div className="w-40">{profile}</div>
+      <div className="flex min-h-screen flex-col min-[900px]:col-start-2">
+        <header className="sticky top-0 z-12 flex h-[58px] items-center gap-3 border-b border-line-soft bg-wash/90 px-4 backdrop-blur-md min-[900px]:hidden">
+          {brand}
+          <div className="ml-auto">{profile}</div>
         </header>
-        <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 pb-24 min-[900px]:px-8 min-[900px]:pb-8">
-          <Outlet />
+        <main className="flex-1 pb-[190px] min-[900px]:pb-[210px]">
+          <Page>
+            <Outlet />
+          </Page>
         </main>
-        <footer className="fixed inset-x-0 bottom-0 border-t border-line-soft bg-paper p-2 min-[900px]:hidden">
+
+        <div className="fixed bottom-[86px] left-1/2 z-25 w-[calc(100vw-1rem)] -translate-x-1/2 min-[900px]:bottom-4 min-[900px]:left-[calc(var(--spacing-sidebar)+(100vw-var(--spacing-sidebar))/2)] min-[900px]:w-[min(800px,calc(100vw-var(--spacing-sidebar)-3rem))]">
+          <div className="mb-2 flex items-center justify-end gap-2">
+            <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
+          </div>
+          <AskComposer />
+        </div>
+
+        <footer className="fixed inset-x-0 bottom-0 z-28 h-16 border-t border-line-strong bg-paper/95 p-1.5 backdrop-blur-sm min-[900px]:hidden">
           <ShellNav orientation="horizontal" />
         </footer>
       </div>

@@ -88,10 +88,10 @@ export function SignIn() {
               />
             </Field>
             {error && <Notice tone="error">{error}</Notice>}
-            <Button type="submit" variant="accent" disabled={form.formState.isSubmitting}>
+            <Button type="submit" variant="green" full disabled={form.formState.isSubmitting}>
               {form.formState.isSubmitting ? "Signing in…" : "Sign in"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => void magicLink()}>
+            <Button type="button" variant="outline" full onClick={() => void magicLink()}>
               Email me a sign-in link instead
             </Button>
           </form>
@@ -100,7 +100,7 @@ export function SignIn() {
       <p className="text-sm text-ink-secondary">
         New here?{" "}
         <Link
-          className="font-medium text-accent-green underline-offset-2 hover:underline"
+          className="font-bold text-accent-green underline-offset-2 hover:underline"
           to="/sign-up"
         >
           Create an account

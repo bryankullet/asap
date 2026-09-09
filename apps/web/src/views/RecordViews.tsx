@@ -1,7 +1,7 @@
 import { effectiveCoverStatus, type RunRow, type WorkItemRow } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Card, CardTitle } from "@asap/ui";
+import { Card, CardTitle, Timeline, TimelineEvent } from "@asap/ui";
 import {
   CoverStatus,
   MoneyRow,
@@ -44,12 +44,14 @@ export function WorkItemView({
   return (
     <article className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold text-ink">{item.title}</h1>
+        <h1 className="font-heading text-[clamp(1.7rem,3vw,2.4rem)] leading-tight font-semibold tracking-tight text-ink">
+          {item.title}
+        </h1>
         {item.client_id && (
           <Link
             to="/files/$clientId"
             params={{ clientId: item.client_id }}
-            className="text-sm text-accent-green underline"
+            className="text-sm font-bold text-accent-green underline underline-offset-2"
           >
             Client file
           </Link>
@@ -81,10 +83,25 @@ export function WorkItemView({
         {item.steps.length === 0 ? (
           <p className="text-sm text-ink-muted">No steps recorded yet.</p>
         ) : (
-          <ol className="flex flex-col gap-2">
+          <ol className="flex flex-col">
             {item.steps.map((s) => (
-              <li key={s.id} className="flex items-start gap-3 text-sm">
-                <span aria-hidden className="mt-0.5 w-4 text-center">
+              <li
+                key={s.id}
+                className="flex items-start gap-3 border-b border-line-soft py-2.5 text-sm last:border-b-0"
+              >
+                <span
+                  aria-hidden
+                  className={
+                    "mt-0.5 grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] text-xs font-bold " +
+                    (s.state === "done"
+                      ? "bg-accent-green-soft text-accent-green"
+                      : s.state === "now"
+                        ? "bg-accent-gold-soft text-accent-gold-ink"
+                        : s.state === "blocked"
+                          ? "bg-accent-red-soft text-accent-red"
+                          : "bg-surface-sunken text-ink-muted")
+                  }
+                >
                   {s.state === "done"
                     ? "✓"
                     : s.state === "now"
@@ -95,7 +112,7 @@ export function WorkItemView({
                 </span>
                 <span className="flex-1">
                   <span
-                    className={s.state === "now" ? "font-medium text-ink" : "text-ink-secondary"}
+                    className={s.state === "now" ? "font-semibold text-ink" : "text-ink-secondary"}
                   >
                     {s.label}
                   </span>
@@ -149,15 +166,18 @@ export function WorkItemView({
         <Card className="flex flex-col gap-3">
           <CardTitle>What ASAP did</CardTitle>
           <RunDetailSlot>
-            <ul className="flex flex-col gap-2">
+            <Timeline>
               {runs.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
-                  <RunStatus status={r.status} />
-                  <span className="text-ink">{r.title}</span>
-                  {r.next_step && <span className="text-ink-secondary">— {r.next_step}</span>}
-                </li>
+                <TimelineEvent
+                  key={r.id}
+                  current={r.status === "working"}
+                  title={r.title}
+                  when={<RunStatus status={r.status} />}
+                >
+                  {r.next_step && <p className="mt-1 text-sm text-ink-secondary">{r.next_step}</p>}
+                </TimelineEvent>
               ))}
-            </ul>
+            </Timeline>
           </RunDetailSlot>
         </Card>
       )}
@@ -168,7 +188,7 @@ export function WorkItemView({
 export function RunView({ run }: { run: RunRow }) {
   return (
     <article className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold text-ink">{run.title}</h1>
+      <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">{run.title}</h1>
       <RunDetailSlot>
         <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
           <RunStatus status={run.status} />

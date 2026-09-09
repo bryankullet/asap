@@ -34,7 +34,7 @@ export function AcceptInvitation() {
 
   return (
     <AuthLayout title="You have been invited">
-      <Card className="flex flex-col gap-3">
+      <Card className="flex flex-col gap-3.5">
         {preview.isPending && <Notice tone="info">Checking the invitation…</Notice>}
         {preview.isError && <Notice tone="error">This invitation link is not valid.</Notice>}
         {preview.data && (
@@ -69,7 +69,8 @@ export function AcceptInvitation() {
                   )}
                   {accept.isError && <Notice tone="error">{describeApiError(accept.error)}</Notice>}
                   <Button
-                    variant="accent"
+                    variant="green"
+                    full
                     disabled={accept.isPending}
                     onClick={() => accept.mutate()}
                   >
@@ -78,12 +79,12 @@ export function AcceptInvitation() {
                 </>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <Button asChild variant="accent">
+                  <Button asChild variant="green" full>
                     <Link to="/sign-up" search={{ email: preview.data.email, next: here }}>
                       Create an account to join
                     </Link>
                   </Button>
-                  <Button asChild variant="outline">
+                  <Button asChild variant="outline" full>
                     <Link to="/sign-in" search={{ next: here }}>
                       I already have an account
                     </Link>

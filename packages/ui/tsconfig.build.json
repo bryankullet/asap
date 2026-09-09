@@ -7,5 +7,5 @@
     "jsx": "react-jsx"
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.tsx"]
+  "exclude": ["src/**/*.test.tsx", "**/*.test.ts", "**/*.test.tsx"]
 }

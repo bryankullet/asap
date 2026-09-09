@@ -8,7 +8,7 @@ import { EmptyState } from "../components/states.js";
 export function FilesView({ data }: { data: ClientFilesResponse }) {
   return (
     <SlotProvider slot="FilesScreen">
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4">
         {data.items.length === 0 ? (
           <EmptyState
             scope={`${K01_VIEW_LABELS[data.view]} client files`}
@@ -16,21 +16,21 @@ export function FilesView({ data }: { data: ClientFilesResponse }) {
           />
         ) : (
           data.items.map((i) => (
-            <Card key={i.client.id} className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <FileStatus status={i.effective_status} />
+            <Card key={i.client.id} clickable className="flex flex-col gap-2.5">
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
                 <Link
                   to="/files/$clientId"
                   params={{ clientId: i.client.id }}
-                  className="font-semibold text-ink hover:underline"
+                  className="font-heading text-base font-semibold tracking-tight text-ink underline-offset-2 hover:underline"
                 >
                   {i.client.name}
                 </Link>
+                <FileStatus status={i.effective_status} />
                 <span className="text-xs text-ink-muted">
                   {i.client.kind === "corporate" ? "Company" : "Individual"} · {i.client.source}
                 </span>
               </div>
-              <p className="text-sm text-ink-secondary">
+              <p className="text-sm leading-relaxed text-ink-muted">
                 {i.documents_held === 0
                   ? "Nothing on file."
                   : `${i.documents_held} document${i.documents_held === 1 ? "" : "s"} received.`}{" "}
@@ -42,11 +42,15 @@ export function FilesView({ data }: { data: ClientFilesResponse }) {
                 .
               </p>
               {i.blocking.length > 0 && (
-                <ul className="text-sm text-accent-red">
+                <ul className="flex flex-col gap-1 border-t border-line-soft pt-2.5 text-sm text-accent-red-ink">
                   {i.blocking.map((b) => (
                     <li key={b.id}>
                       Blocking:{" "}
-                      <Link to="/r/$recordId" params={{ recordId: b.id }} className="underline">
+                      <Link
+                        to="/r/$recordId"
+                        params={{ recordId: b.id }}
+                        className="font-semibold underline underline-offset-2"
+                      >
                         {b.title}
                       </Link>{" "}
                       at {b.step}

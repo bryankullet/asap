@@ -236,7 +236,7 @@ Generic     RecommendationCard · Metric · Table · Chart · Timeline · Checkl
 
 ### Design tokens
 
-Taken from the prototype. Put these in `tailwind.config.ts` and the shadcn theme, so what gets built matches what was designed.
+Ported from the v4 prototype into **`packages/ui/src/styles.css`**, which is the single source: it is consumed through Tailwind v4's `@theme`, and no other file declares a colour, radius or shadow. Values below are the palette; the file also carries the darker `*-ink` text tones for soft backgrounds and the status dot colours (D-056).
 
 ```
 Fonts       Body: Figtree.  Headings: Outfit, letter-spacing -0.02em.
@@ -247,7 +247,8 @@ Accent      #0f7b5a green, #e7f5ef soft  — success, active, "ASAP is working"
             #d9a62e gold,  #fbf4dc soft  — waiting, attention
             #b94a48 red,   #fff0ef soft  — needs review, error
 Radius      18px cards · 12px controls · 99px pills
-Shadow      0 14px 44px rgba(16,42,67,.09)
+Shadow      0 14px 44px rgba(16,42,67,.09) — for things that float only. A card at rest is a
+            hairline border and an 18px radius, never a drop shadow.
 Sidebar     224px, collapses to a bottom bar under 900px
 ```
 

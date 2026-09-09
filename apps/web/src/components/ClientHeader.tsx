@@ -13,7 +13,7 @@ export function ClientHeader({
   return (
     <SlotProvider slot="ClientHeader">
       <header className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-ink">
+        <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">
           <Link to="/files/$clientId" params={{ clientId: client.id }} className="hover:underline">
             {client.name}
           </Link>

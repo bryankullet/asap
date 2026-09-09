@@ -32,7 +32,7 @@ export function WorkCard({
       <Card data-testid="work-card" className="flex flex-col gap-3">
         <CardHeadline>
           <TaskStatus status={item.task_status} party={item.task_party} since={item.task_since} />
-          <h3 className="text-base font-semibold text-ink">
+          <h3 className="font-heading text-[1.15rem] leading-snug font-semibold tracking-tight text-ink">
             <Link to="/r/$recordId" params={{ recordId: item.id }} className="hover:underline">
               {item.title}
             </Link>
@@ -46,29 +46,35 @@ export function WorkCard({
             </span>
           </p>
         )}
-        {item.cover_status && (
-          <PolicyPeriodLine>
-            <span>Cover</span>
-            <CoverStatus status={item.cover_status} />
-          </PolicyPeriodLine>
-        )}
-        {item.money_status && (
-          <MoneyRow>
-            <span>Money</span>
-            <MoneyStatus status={item.money_status} />
-          </MoneyRow>
+        {(item.cover_status || item.money_status) && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line-soft pt-3">
+            {item.cover_status && (
+              <PolicyPeriodLine>
+                <span>Cover</span>
+                <CoverStatus status={item.cover_status} />
+              </PolicyPeriodLine>
+            )}
+            {item.money_status && (
+              <MoneyRow>
+                <span>Money</span>
+                <MoneyStatus status={item.money_status} />
+              </MoneyRow>
+            )}
+          </div>
         )}
         {showWhy && item.reason && (
           <div>
             <button
               type="button"
-              className="text-sm text-accent-green underline"
+              className="text-sm font-bold text-accent-green underline underline-offset-2"
               aria-expanded={why}
               onClick={() => setWhy((v) => !v)}
             >
               Why here?
             </button>
-            {why && <p className="mt-1 text-sm text-ink-secondary">{item.reason}</p>}
+            {why && (
+              <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">{item.reason}</p>
+            )}
           </div>
         )}
         {footer}

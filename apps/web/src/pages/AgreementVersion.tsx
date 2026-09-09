@@ -1,5 +1,5 @@
 import type { AgreementAction, AgreementResponse } from "@asap/schema";
-import { Button, Card, CardTitle, Input, Notice } from "@asap/ui";
+import { Badge, Button, Card, CardTitle, Field, Input, Notice, PageHead } from "@asap/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -22,14 +22,17 @@ export function AgreementVersionView({
   const [from, setFrom] = useState("");
   return (
     <article className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold text-ink">{data.insurer.name}</h1>
-        <p className="text-sm text-ink-secondary">
-          Agency agreement
-          {data.agreement.document_reference ? ` · ${data.agreement.document_reference}` : ""}.
-          Rates apply to the commission basis (base premium, not gross).
-        </p>
-      </header>
+      <PageHead
+        className="mb-0"
+        title={data.insurer.name}
+        description={
+          <>
+            Agency agreement
+            {data.agreement.document_reference ? ` · ${data.agreement.document_reference}` : ""}.
+            Rates apply to the commission basis (base premium, not gross).
+          </>
+        }
+      />
       {data.versions.map(({ version, rates }, i) => (
         <Card key={version.id} className="flex flex-col gap-3">
           <CardTitle>
@@ -40,15 +43,20 @@ export function AgreementVersionView({
               : ""}
           </CardTitle>
           {rates.length === 0 ? (
-            <p className="text-sm text-ink-secondary">
+            <p className="text-sm leading-relaxed text-ink-secondary">
               No rates on this version. Nothing here counts until a rate is proposed and confirmed.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1 text-sm">
+            <ul className="flex flex-col">
               {rates.map((r) => (
-                <li key={r.id} className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-ink">{r.class_of_business}</span>
-                  <span>{(r.rate_basis_points / 100).toFixed(2)}%</span>
+                <li
+                  key={r.id}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line-soft py-3 text-sm last:border-b-0"
+                >
+                  <span className="font-semibold text-ink">{r.class_of_business}</span>
+                  <span className="font-heading font-semibold tracking-tight text-ink">
+                    {(r.rate_basis_points / 100).toFixed(2)}%
+                  </span>
                   {r.clause_reference && (
                     <span className="text-ink-muted">· {r.clause_reference}</span>
                   )}
@@ -56,18 +64,18 @@ export function AgreementVersionView({
                     · proposed by {r.proposed_by === "asap" ? "ASAP" : "a person"}
                   </span>
                   {r.confirmed_at ? (
-                    <span className="rounded-pill bg-accent-green-soft px-2 text-xs text-accent-green">
+                    <Badge tone="active" className="ml-auto">
                       Confirmed
-                    </span>
+                    </Badge>
                   ) : (
                     <>
-                      <span className="rounded-pill bg-accent-gold-soft px-2 text-xs text-ink">
+                      <Badge tone="waiting" className="ml-auto">
                         Not confirmed — never used
-                      </span>
+                      </Badge>
                       {i === 0 && (
                         <Button
-                          size="sm"
-                          variant="accent"
+                          size="compact"
+                          variant="green"
                           disabled={pending}
                           onClick={() => onAct({ action: "confirm_rate", rateId: r.id })}
                         >
@@ -81,34 +89,42 @@ export function AgreementVersionView({
             </ul>
           )}
           {i === 0 && (
-            <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
-              <label className="flex flex-col gap-1 text-xs">
-                Class of business
+            <div className="flex flex-wrap items-end gap-3 rounded-control bg-wash p-4">
+              <Field
+                label="Class of business"
+                htmlFor={`rate-class-${version.id}`}
+                className="min-w-[180px] flex-1"
+              >
                 <Input
+                  id={`rate-class-${version.id}`}
                   value={cls}
                   onChange={(e) => setCls(e.target.value)}
                   placeholder="Motor commercial"
                 />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                Rate %
+              </Field>
+              <Field label="Rate %" htmlFor={`rate-pct-${version.id}`} className="w-28">
                 <Input
+                  id={`rate-pct-${version.id}`}
                   value={pct}
                   onChange={(e) => setPct(e.target.value)}
                   placeholder="12.5"
                   inputMode="decimal"
                 />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                Clause
+              </Field>
+              <Field
+                label="Clause"
+                htmlFor={`rate-clause-${version.id}`}
+                className="min-w-[160px] flex-1"
+              >
                 <Input
+                  id={`rate-clause-${version.id}`}
                   value={clause}
                   onChange={(e) => setClause(e.target.value)}
                   placeholder="Schedule A, 4.2"
                 />
-              </label>
+              </Field>
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 disabled={pending || !cls.trim() || Number.isNaN(Number(pct))}
                 onClick={() =>
@@ -128,13 +144,21 @@ export function AgreementVersionView({
           )}
         </Card>
       ))}
-      <div className="flex flex-wrap items-end gap-2 rounded-card bg-paper p-4 shadow-card">
-        <label className="flex flex-col gap-1 text-sm">
-          New version effective from
-          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
+      <Card className="flex flex-wrap items-end gap-3">
+        <Field
+          label="New version effective from"
+          htmlFor="new-version-from"
+          className="min-w-[220px]"
+        >
+          <Input
+            id="new-version-from"
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </Field>
         <Button
-          size="sm"
+          size="compact"
           variant="outline"
           disabled={pending || !from}
           onClick={() =>
@@ -143,10 +167,10 @@ export function AgreementVersionView({
         >
           Start a new version
         </Button>
-        <p className="text-xs text-ink-muted">
+        <p className="w-full text-xs leading-relaxed text-ink-muted">
           Policies rated under the old version keep it. History is never rewritten.
         </p>
-      </div>
+      </Card>
     </article>
   );
 }

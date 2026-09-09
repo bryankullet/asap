@@ -129,10 +129,10 @@ export function CreateOrganization() {
             </span>
           </label>
           {create.isError && <Notice tone="error">{describeApiError(create.error)}</Notice>}
-          <Button type="submit" variant="accent" disabled={create.isPending}>
+          <Button type="submit" variant="green" full disabled={create.isPending}>
             {create.isPending ? "Creating…" : "Create brokerage"}
           </Button>
-          <Button type="button" variant="ghost" onClick={() => router.history.back()}>
+          <Button type="button" variant="ghost" full onClick={() => router.history.back()}>
             Back
           </Button>
         </form>

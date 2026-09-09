@@ -1,5 +1,15 @@
 import { DocumentKind, type ClientFileAction, type ClientFileResponse } from "@asap/schema";
-import { Button, Card, CardTitle, Input, Notice } from "@asap/ui";
+import {
+  Button,
+  Card,
+  CardTitle,
+  Checklist,
+  ChecklistRow,
+  Field,
+  Input,
+  Notice,
+  Select,
+} from "@asap/ui";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ClientHeader } from "../components/ClientHeader.js";
@@ -32,13 +42,18 @@ export function ClientFileView({
   const received = file.documents.filter((d) => d.received_at);
   const requested = file.documents.filter((d) => !d.received_at);
   return (
-    <article className="flex flex-col gap-6">
+    <article className="flex flex-col gap-5">
       <ClientHeader client={c} status={file.effective_status} />
       {file.blocking.length > 0 && (
         <Notice tone="waiting">
           This file is blocking:{" "}
           {file.blocking.map((b) => (
-            <Link key={b.id} to="/r/$recordId" params={{ recordId: b.id }} className="underline">
+            <Link
+              key={b.id}
+              to="/r/$recordId"
+              params={{ recordId: b.id }}
+              className="font-semibold underline underline-offset-2"
+            >
               {b.title}
             </Link>
           ))}
@@ -53,38 +68,35 @@ export function ClientFileView({
       <Card className="flex flex-col gap-3">
         <CardTitle>Documents</CardTitle>
         {received.length === 0 && requested.length === 0 && (
-          <p className="text-sm text-ink-secondary">Nothing on file.</p>
+          <p className="text-sm text-ink-muted">Nothing on file.</p>
         )}
-        <ul className="flex flex-col gap-1 text-sm">
+        <Checklist>
           {received.map((d) => (
-            <li key={d.id} className="text-ink">
-              ✓ {KIND_LABEL[d.kind]} — {d.label}{" "}
-              <span className="text-ink-muted">
-                · {d.reference} ·{" "}
-                {new Date(d.received_at!).toLocaleDateString("en-KE", {
-                  day: "numeric",
-                  month: "short",
-                })}
-              </span>
-            </li>
+            <ChecklistRow
+              key={d.id}
+              done
+              title={`${KIND_LABEL[d.kind]} — ${d.label}`}
+              detail={`${d.reference} · ${new Date(d.received_at!).toLocaleDateString("en-KE", {
+                day: "numeric",
+                month: "short",
+              })}`}
+            />
           ))}
           {requested.map((d) => (
-            <li key={d.id} className="text-ink-secondary">
-              ○ {KIND_LABEL[d.kind]} — {d.label}{" "}
-              <span className="text-ink-muted">· requested, not received</span>
-            </li>
+            <ChecklistRow
+              key={d.id}
+              title={`${KIND_LABEL[d.kind]} — ${d.label}`}
+              detail="requested, not received"
+            />
           ))}
-        </ul>
+        </Checklist>
         {file.missing.length > 0 && (
-          <p className="text-sm text-accent-red">
-            Still needed before clearing: {file.missing.join("; ")}.
-          </p>
+          <Notice tone="waiting">Still needed before clearing: {file.missing.join("; ")}.</Notice>
         )}
-        <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
-          <label className="flex flex-col gap-1 text-xs">
-            Kind
-            <select
-              className="rounded-control border border-line-strong bg-paper px-2 py-1 text-sm"
+        <div className="flex flex-wrap items-end gap-3 rounded-control border border-line-soft bg-wash p-4">
+          <Field label="Kind" htmlFor="client-file-kind" className="min-w-[12rem]">
+            <Select
+              id="client-file-kind"
               value={kind}
               onChange={(e) => setKind(e.target.value as typeof kind)}
             >
@@ -93,26 +105,30 @@ export function ClientFileView({
                   {KIND_LABEL[k]}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            Document
+            </Select>
+          </Field>
+          <Field label="Document" htmlFor="client-file-label" className="min-w-[16rem] flex-1">
             <Input
+              id="client-file-label"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="National ID, certificate of incorporation…"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-xs">
-            What was received (reference)
+          </Field>
+          <Field
+            label="What was received (reference)"
+            htmlFor="client-file-reference"
+            className="min-w-[14rem] flex-1"
+          >
             <Input
+              id="client-file-reference"
               value={reference}
               onChange={(e) => setReference(e.target.value)}
               placeholder="Scan received 8 Sep"
             />
-          </label>
+          </Field>
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={pending || !label.trim()}
             onClick={() => onAct({ action: "request_document", kind, label })}
@@ -120,7 +136,7 @@ export function ClientFileView({
             Request (draft, you send it)
           </Button>
           <Button
-            size="sm"
+            size="compact"
             variant="accent"
             disabled={pending || !label.trim() || !reference.trim()}
             onClick={() => onAct({ action: "record_document", kind, label, reference })}
@@ -130,13 +146,13 @@ export function ClientFileView({
         </div>
       </Card>
 
-      <Card className="flex flex-col gap-2">
+      <Card className="flex flex-col items-start gap-3">
         <CardTitle>Screening</CardTitle>
-        <p className="text-sm text-ink-secondary">
+        <p className="text-sm leading-relaxed text-ink-muted">
           Cannot be screened yet. {file.screening.reason}
         </p>
         <Button
-          size="sm"
+          size="compact"
           variant="outline"
           disabled={pending}
           onClick={() => onAct({ action: "screen" })}
@@ -148,7 +164,7 @@ export function ClientFileView({
       <Card className="flex flex-col gap-3">
         <CardTitle>Decision</CardTitle>
         {c.file_status === "cleared" ? (
-          <p className="text-sm text-ink">
+          <p className="text-sm leading-relaxed text-ink">
             Cleared on{" "}
             {new Date(c.file_decided_at!).toLocaleDateString("en-KE", {
               day: "numeric",
@@ -164,14 +180,14 @@ export function ClientFileView({
             .
           </p>
         ) : (
-          <p className="text-sm text-ink-secondary">
+          <p className="text-sm leading-relaxed text-ink-muted">
             Not cleared. Clearing is a named decision with a reason; ASAP never clears a file.
           </p>
         )}
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end gap-3">
           {(c.file_status === "incomplete" || c.file_status === "not_started") && (
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={pending}
               onClick={() => onAct({ action: "start_review" })}
@@ -181,22 +197,29 @@ export function ClientFileView({
           )}
           {c.file_status !== "cleared" && (
             <>
-              <label className="flex flex-col gap-1 text-xs">
-                Reason for clearing
-                <Input value={reason} onChange={(e) => setReason(e.target.value)} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs">
-                Refresh after (days)
+              <Field
+                label="Reason for clearing"
+                htmlFor="client-file-clear-reason"
+                className="min-w-[16rem] flex-1"
+              >
                 <Input
+                  id="client-file-clear-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </Field>
+              <Field label="Refresh after (days)" htmlFor="client-file-refresh" className="w-40">
+                <Input
+                  id="client-file-refresh"
                   type="number"
                   min={30}
                   max={1825}
                   value={interval}
                   onChange={(e) => setInterval(Number(e.target.value))}
                 />
-              </label>
+              </Field>
               <Button
-                size="sm"
+                size="compact"
                 variant="accent"
                 disabled={pending || !reason.trim()}
                 onClick={() => onAct({ action: "clear", reason, refreshIntervalDays: interval })}
@@ -207,12 +230,19 @@ export function ClientFileView({
           )}
           {(c.file_status === "cleared" || file.effective_status === "refresh_due") && (
             <>
-              <label className="flex flex-col gap-1 text-xs">
-                Reason for reopening
-                <Input value={reason} onChange={(e) => setReason(e.target.value)} />
-              </label>
+              <Field
+                label="Reason for reopening"
+                htmlFor="client-file-reopen-reason"
+                className="min-w-[16rem] flex-1"
+              >
+                <Input
+                  id="client-file-reopen-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </Field>
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
                 disabled={pending || !reason.trim()}
                 onClick={() => onAct({ action: "reopen", reason })}

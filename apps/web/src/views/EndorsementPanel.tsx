@@ -5,7 +5,7 @@ import {
   type EndorsementAction,
   type EndorsementDetail,
 } from "@asap/schema";
-import { Button, Card, CardTitle, Input } from "@asap/ui";
+import { Button, Card, CardTitle, Field, Input, Notice, Select, cn } from "@asap/ui";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
@@ -33,11 +33,11 @@ export function EndorsementPanel({
     e.kind === "transfer_ownership" &&
     !(e.instruction_from === "policyholder" && e.instruction_reference);
   return (
-    <div className="flex flex-col gap-4">
-      <Card className="flex flex-col gap-2">
+    <div className="flex flex-col gap-5">
+      <Card className="flex flex-col gap-3">
         <CardTitle>Change requested</CardTitle>
-        <p className="text-sm text-ink">{e.request_text}</p>
-        <p className="text-sm text-ink-secondary">
+        <p className="text-sm leading-relaxed text-ink">{e.request_text}</p>
+        <p className="text-sm leading-relaxed text-ink-muted">
           {e.kind ? ENDORSEMENT_KIND_LABELS[e.kind] : "Kind not yet classified"} · requested by{" "}
           {e.requested_by === "policyholder"
             ? "the policyholder"
@@ -45,15 +45,15 @@ export function EndorsementPanel({
           {e.effective_on ? ` · effective ${e.effective_on}` : " · effective date not set"}
         </p>
         {transferBlocked && (
-          <p className="text-sm text-accent-red">
+          <Notice tone="error">
             {TRANSFER_NEEDS_POLICYHOLDER}{" "}
             {e.requested_by === "other"
               ? `This request came from ${e.requested_by_name ?? "someone else"}; it is recorded, not acted on.`
               : ""}
-          </p>
+          </Notice>
         )}
         {e.instruction_reference && (
-          <p className="text-sm text-ink-secondary">
+          <p className="text-sm leading-relaxed text-ink-secondary">
             Instruction on file: {e.instruction_reference}{" "}
             <span className="text-ink-muted">
               · from{" "}
@@ -64,22 +64,21 @@ export function EndorsementPanel({
           </p>
         )}
         {detail.missing.length > 0 && (
-          <p className="text-sm text-accent-red">Still needed: {detail.missing.join("; ")}.</p>
+          <Notice tone="waiting">Still needed: {detail.missing.join("; ")}.</Notice>
         )}
         <Link
           to="/r/$recordId"
           params={{ recordId: e.policy_id }}
-          className="text-sm text-accent-green underline"
+          className="self-start text-sm font-semibold text-accent-green underline-offset-2 hover:underline"
         >
           Open the policy ({detail.versions.length} version{detail.versions.length === 1 ? "" : "s"}
           )
         </Link>
         {!e.applied_version_id && (
-          <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
-            <label className="flex flex-col gap-1 text-xs">
-              Kind
-              <select
-                className="rounded-control border border-line-strong bg-paper px-2 py-1 text-sm"
+          <div className="flex flex-wrap items-end gap-3 rounded-control border border-line-soft bg-wash p-4">
+            <Field label="Kind" htmlFor="endorsement-kind" className="min-w-[14rem]">
+              <Select
+                id="endorsement-kind"
                 value={kind}
                 onChange={(ev) => setKind(ev.target.value as EndorsementKind)}
               >
@@ -88,26 +87,26 @@ export function EndorsementPanel({
                     {ENDORSEMENT_KIND_LABELS[k]}
                   </option>
                 ))}
-              </select>
-            </label>
+              </Select>
+            </Field>
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={pending}
               onClick={() => onAct({ action: "classify", kind })}
             >
               Set kind
             </Button>
-            <label className="flex flex-col gap-1 text-xs">
-              Effective on
+            <Field label="Effective on" htmlFor="endorsement-effective-on">
               <Input
+                id="endorsement-effective-on"
                 type="date"
                 value={effectiveOn}
                 onChange={(ev) => setEffectiveOn(ev.target.value)}
               />
-            </label>
+            </Field>
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={pending || !effectiveOn}
               onClick={() => onAct({ action: "set_details", effectiveOn })}
@@ -117,15 +116,15 @@ export function EndorsementPanel({
           </div>
         )}
         {!e.applied_version_id && (
-          <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
+          <div className="flex flex-wrap items-end gap-3 rounded-control border border-line-soft bg-wash p-4">
             <Input
               className="w-48"
               placeholder="Instruction reference"
               value={instruction.reference}
               onChange={(ev) => setInstruction({ ...instruction, reference: ev.target.value })}
             />
-            <select
-              className="rounded-control border border-line-strong bg-paper px-2 py-1 text-sm"
+            <Select
+              className="w-56"
               value={instruction.from}
               onChange={(ev) =>
                 setInstruction({ ...instruction, from: ev.target.value as typeof instruction.from })
@@ -133,7 +132,7 @@ export function EndorsementPanel({
             >
               <option value="policyholder">From the policyholder</option>
               <option value="other">From someone else</option>
-            </select>
+            </Select>
             {instruction.from === "other" && (
               <Input
                 className="w-40"
@@ -143,7 +142,7 @@ export function EndorsementPanel({
               />
             )}
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={pending || !instruction.reference.trim()}
               onClick={() =>
@@ -161,25 +160,29 @@ export function EndorsementPanel({
         )}
       </Card>
 
-      <Card className="flex flex-col gap-2">
+      <Card className="flex flex-col gap-3">
         <CardTitle>Items — each with its own decision</CardTitle>
         {e.items.length === 0 && <p className="text-sm text-ink-muted">No items yet.</p>}
-        <ul className="flex flex-col gap-2 text-sm">
+        <ul className="flex flex-col">
           {e.items.map((i) => (
-            <li key={i.id} className="flex flex-col gap-1 rounded-card border border-line-soft p-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-ink">{i.label}</span>
+            <li
+              key={i.id}
+              className="flex flex-col gap-2 border-b border-line-soft py-3 text-sm last:border-b-0"
+            >
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="font-semibold text-ink">{i.label}</span>
                 <span className="text-ink-muted">
                   {i.before ?? "—"} → {i.after ?? "—"}
                 </span>
                 <span
-                  className={
+                  className={cn(
+                    "rounded-pill px-2.5 py-1 text-xs font-semibold",
                     i.decision === "accepted"
-                      ? "rounded-pill bg-accent-green-soft px-2 text-xs text-accent-green"
+                      ? "bg-accent-green-soft text-accent-green-ink"
                       : i.decision === "rejected"
-                        ? "rounded-pill bg-accent-red-soft px-2 text-xs text-accent-red"
-                        : "rounded-pill bg-accent-gold-soft px-2 text-xs text-ink"
-                  }
+                        ? "bg-accent-red-soft text-accent-red-ink"
+                        : "bg-accent-gold-soft text-accent-gold-ink",
+                  )}
                 >
                   {i.decision === "pending"
                     ? "No decision yet"
@@ -214,7 +217,7 @@ export function EndorsementPanel({
                     }
                   />
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled={pending || !(decide[i.id]?.reference ?? "").trim()}
                     onClick={() =>
@@ -230,7 +233,7 @@ export function EndorsementPanel({
                     Accepted
                   </Button>
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="destructive"
                     disabled={pending || !(decide[i.id]?.reference ?? "").trim()}
                     onClick={() =>
@@ -251,7 +254,7 @@ export function EndorsementPanel({
           ))}
         </ul>
         {!e.applied_version_id && (
-          <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
+          <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-soft bg-wash p-4">
             <Input
               className="w-48"
               placeholder="Item (e.g. KDC 900T Isuzu FRR)"
@@ -272,7 +275,7 @@ export function EndorsementPanel({
               onChange={(ev) => setItem({ ...item, sum: ev.target.value })}
             />
             <Button
-              size="sm"
+              size="compact"
               variant="outline"
               disabled={pending || !item.label.trim()}
               onClick={() => {

@@ -69,7 +69,9 @@ export function DraftCard({
     <Card className="flex flex-col gap-2 border border-line-soft p-4">
       <p className="text-xs text-ink-muted">Draft to {draft.to_address || "—"}</p>
       <p className="text-sm font-medium text-ink">{draft.subject}</p>
-      <pre className="whitespace-pre-wrap font-sans text-sm text-ink-secondary">{draft.body}</pre>
+      <pre className="border-l-[3px] border-[#adbdc6] bg-wash p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap text-ink-secondary">
+        {draft.body}
+      </pre>
       <p className="text-xs text-ink-muted">
         {draft.sent_at
           ? `Recorded as sent: ${draft.sent_evidence}${draft.outcome_unknown ? " (outcome unknown — retry disabled until checked)" : ""}`
@@ -80,7 +82,7 @@ export function DraftCard({
       {!draft.sent_at && (
         <div className="flex flex-wrap gap-2">
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={copied.isPending}
             onClick={() => copied.mutate()}
@@ -88,7 +90,7 @@ export function DraftCard({
             Copy
           </Button>
           <Button
-            size="sm"
+            size="compact"
             variant="accent"
             onClick={() => setReview((v) => !v)}
             disabled={step.state !== "now"}
@@ -134,10 +136,10 @@ export function DraftCard({
           )}
           {send.isError && <Notice tone="error">{describeApiError(send.error)}</Notice>}
           <div className="flex gap-2">
-            <Button size="sm" variant="accent" onClick={save} disabled={send.isPending}>
+            <Button size="compact" variant="accent" onClick={save} disabled={send.isPending}>
               Record the send
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setReview(false)}>
+            <Button size="compact" variant="ghost" onClick={() => setReview(false)}>
               Cancel
             </Button>
           </div>

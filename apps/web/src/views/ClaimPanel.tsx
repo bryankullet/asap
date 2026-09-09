@@ -1,5 +1,16 @@
 import { HOLDER_LABELS, type ClaimAction, type ClaimDetail } from "@asap/schema";
-import { Button, Card, CardTitle, Input } from "@asap/ui";
+import {
+  Button,
+  Card,
+  CardTitle,
+  Checklist,
+  ChecklistRow,
+  Input,
+  Notice,
+  Select,
+  Timeline,
+  TimelineEvent,
+} from "@asap/ui";
 import { useState } from "react";
 
 /**
@@ -32,8 +43,8 @@ export function ClaimPanel({
     startEvidence: "",
   });
   const fact = (label: string, reference: string | null, at: string | null) => (
-    <li className="flex flex-wrap items-baseline gap-2 text-sm">
-      <span className="w-40 font-medium text-ink">{label}</span>
+    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line-soft py-2.5 text-sm last:border-b-0">
+      <span className="w-40 shrink-0 font-semibold text-ink">{label}</span>
       {reference ? (
         <span className="text-ink">
           {reference}{" "}
@@ -47,36 +58,36 @@ export function ClaimPanel({
     </li>
   );
   return (
-    <div className="flex flex-col gap-4">
-      <Card className="flex flex-col gap-2">
+    <div className="flex flex-col gap-5">
+      <Card className="flex flex-col gap-2.5">
         <CardTitle>Claim</CardTitle>
-        <p className="text-sm text-ink">
+        <p className="text-sm leading-relaxed text-ink">
           Incident on {c.incident_on}: {c.incident_summary}
         </p>
-        <p className="text-sm text-ink-secondary">
+        <p className="text-sm leading-relaxed text-ink-muted">
           {c.status === "draft"
             ? `Draft claim${c.source === "email" ? " captured from email" : ""} — not registered until a person matches it to a policy period.`
             : `Registered${c.registered_at ? ` on ${new Date(c.registered_at).toLocaleDateString("en-KE", { day: "numeric", month: "short" })}` : ""}${c.insurer_reference ? ` · insurer reference ${c.insurer_reference}` : ""}.`}
         </p>
         {c.cover_review && (
-          <p className="text-sm text-ink-secondary">
-            <span className="font-medium text-ink">Cover review:</span> {c.cover_review}
+          <p className="text-sm leading-relaxed text-ink-secondary">
+            <span className="font-semibold text-ink">Cover review:</span> {c.cover_review}
           </p>
         )}
       </Card>
 
-      <Card className="flex flex-col gap-2">
+      <Card className="flex flex-col gap-3">
         <CardTitle>Notification clock</CardTitle>
         {detail.clock.started ? (
-          <p className="text-sm text-ink">
+          <p className="text-sm leading-relaxed text-ink">
             {detail.clock.days} days from {detail.clock.startEvent.replaceAll("_", " ")} on{" "}
             {detail.clock.startOn} ({detail.clock.clause}, page {detail.clock.page}). Due{" "}
             {detail.clock.dueOn}; today is day {detail.clock.dayOf}.
           </p>
         ) : (
           <>
-            <p className="text-sm text-accent-red">{detail.clock.reason}</p>
-            <div className="grid grid-cols-2 gap-2 rounded-card bg-wash p-3 text-xs">
+            <Notice tone="waiting">{detail.clock.reason}</Notice>
+            <div className="grid gap-2.5 rounded-control border border-line-soft bg-wash p-4 sm:grid-cols-2">
               <Input
                 placeholder="Wording clause (e.g. Condition 3)"
                 value={clock.clauseReference}
@@ -94,8 +105,7 @@ export function ClaimPanel({
                 value={clock.clauseDays}
                 onChange={(e) => setClock({ ...clock, clauseDays: e.target.value })}
               />
-              <select
-                className="rounded-control border border-line-strong bg-paper px-2 py-1 text-sm"
+              <Select
                 value={clock.startEvent}
                 onChange={(e) =>
                   setClock({ ...clock, startEvent: e.target.value as typeof clock.startEvent })
@@ -104,7 +114,7 @@ export function ClaimPanel({
                 <option value="incident">Counts from the incident</option>
                 <option value="client_aware">Counts from when the client became aware</option>
                 <option value="notified_to_us">Counts from notification to us</option>
-              </select>
+              </Select>
               <Input
                 type="date"
                 value={clock.startOn}
@@ -116,9 +126,9 @@ export function ClaimPanel({
                 onChange={(e) => setClock({ ...clock, startEvidence: e.target.value })}
               />
               <Button
-                size="sm"
+                size="compact"
                 variant="outline"
-                className="col-span-2"
+                className="sm:col-span-2"
                 disabled={
                   pending ||
                   !clock.clauseReference ||
@@ -146,23 +156,21 @@ export function ClaimPanel({
         )}
       </Card>
 
-      <Card className="flex flex-col gap-2">
+      <Card className="flex flex-col gap-3">
         <CardTitle>Documents</CardTitle>
         {detail.documents.length === 0 && (
           <p className="text-sm text-ink-muted">None listed yet.</p>
         )}
-        <ul className="flex flex-col gap-1 text-sm">
-          {detail.documents.map((d) => (
-            <li key={d.id} className="flex flex-wrap items-center gap-2">
-              {d.received_at ? (
-                <span className="text-ink">
-                  ✓ {d.label} <span className="text-ink-muted">· {d.reference}</span>
-                </span>
-              ) : (
-                <>
-                  <span className="text-ink-secondary">
-                    ○ {d.label} — outstanding, with {HOLDER_LABELS[d.holder]}
-                  </span>
+        <Checklist>
+          {detail.documents.map((d) =>
+            d.received_at ? (
+              <ChecklistRow key={d.id} done title={d.label} detail={d.reference} />
+            ) : (
+              <ChecklistRow
+                key={d.id}
+                title={`${d.label} — outstanding, with ${HOLDER_LABELS[d.holder]}`}
+              >
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Input
                     className="w-48"
                     placeholder="Reference when received"
@@ -170,7 +178,7 @@ export function ClaimPanel({
                     onChange={(e) => setRef({ ...ref, [d.id]: e.target.value })}
                   />
                   <Button
-                    size="sm"
+                    size="compact"
                     variant="outline"
                     disabled={pending || !(ref[d.id] ?? "").trim()}
                     onClick={() =>
@@ -179,20 +187,20 @@ export function ClaimPanel({
                   >
                     Received
                   </Button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-        <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
+                </div>
+              </ChecklistRow>
+            ),
+          )}
+        </Checklist>
+        <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-soft bg-wash p-4">
           <Input
             className="w-56"
             placeholder="Document (police abstract…)"
             value={docLabel}
             onChange={(e) => setDocLabel(e.target.value)}
           />
-          <select
-            className="rounded-control border border-line-strong bg-paper px-2 py-1 text-sm"
+          <Select
+            className="w-56"
             value={holder as string}
             onChange={(e) => setHolder(e.target.value as never)}
           >
@@ -201,9 +209,9 @@ export function ClaimPanel({
                 held by {v}
               </option>
             ))}
-          </select>
+          </Select>
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={pending || !docLabel.trim()}
             onClick={() => {
@@ -218,36 +226,38 @@ export function ClaimPanel({
 
       <Card className="flex flex-col gap-2">
         <CardTitle>Settlement — three facts</CardTitle>
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col">
           {fact("Settlement offered", c.offer_reference, c.offer_recorded_at)}
           {fact("Client accepted", c.acceptance_reference, c.acceptance_recorded_at)}
           {fact("Payment received", c.payment_reference, c.payment_recorded_at)}
         </ul>
-        <p className="text-xs text-ink-muted">
+        <p className="text-xs leading-relaxed text-ink-muted">
           An offer is not an acceptance, and an acceptance is not money received. Each is recorded
           on its own step.
         </p>
       </Card>
 
-      <Card className="flex flex-col gap-2">
+      <Card className="flex flex-col gap-3">
         <CardTitle>Our call notes</CardTitle>
-        <p className="text-xs text-ink-muted">
+        <p className="text-xs leading-relaxed text-ink-muted">
           Our record of conversations. Never the insurer's words; their response is their email or
           letter.
         </p>
-        <ul className="flex flex-col gap-1 text-sm">
+        <Timeline>
           {detail.notes.map((n) => (
-            <li key={n.id} className="text-ink-secondary">
-              <span className="font-medium text-ink">
-                {n.kind === "call_note" ? `Call with ${n.spoke_with ?? "—"}` : "Note"}
-              </span>{" "}
-              ·{" "}
-              {new Date(n.noted_at).toLocaleDateString("en-KE", { day: "numeric", month: "short" })}
-              : {n.body}
-            </li>
+            <TimelineEvent
+              key={n.id}
+              title={n.kind === "call_note" ? `Call with ${n.spoke_with ?? "—"}` : "Note"}
+              when={new Date(n.noted_at).toLocaleDateString("en-KE", {
+                day: "numeric",
+                month: "short",
+              })}
+            >
+              <p className="mt-1 text-sm leading-relaxed text-ink-secondary">{n.body}</p>
+            </TimelineEvent>
           ))}
-        </ul>
-        <div className="flex flex-wrap items-end gap-2 rounded-card bg-wash p-3">
+        </Timeline>
+        <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-soft bg-wash p-4">
           <Input
             className="w-48"
             placeholder="Spoke with"
@@ -261,7 +271,7 @@ export function ClaimPanel({
             onChange={(e) => setNote({ ...note, body: e.target.value })}
           />
           <Button
-            size="sm"
+            size="compact"
             variant="outline"
             disabled={pending || !note.spokeWith.trim() || !note.body.trim()}
             onClick={() => {

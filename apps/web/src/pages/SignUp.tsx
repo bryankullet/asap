@@ -112,7 +112,7 @@ export function SignUp() {
               />
             </Field>
             {error && <Notice tone="error">{error}</Notice>}
-            <Button type="submit" variant="accent" disabled={form.formState.isSubmitting}>
+            <Button type="submit" variant="green" full disabled={form.formState.isSubmitting}>
               {form.formState.isSubmitting ? "Creating…" : "Create account"}
             </Button>
           </form>
@@ -121,7 +121,7 @@ export function SignUp() {
       <p className="text-sm text-ink-secondary">
         Already have an account?{" "}
         <Link
-          className="font-medium text-accent-green underline-offset-2 hover:underline"
+          className="font-bold text-accent-green underline-offset-2 hover:underline"
           to="/sign-in"
         >
           Sign in

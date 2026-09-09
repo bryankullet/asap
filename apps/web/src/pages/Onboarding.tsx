@@ -19,7 +19,7 @@ export function Onboarding() {
         <CardDescription>
           Set up a private workspace for your brokerage. You become its administrator.
         </CardDescription>
-        <Button asChild variant="accent">
+        <Button asChild variant="green" full>
           <Link to="/onboarding/create">Create a brokerage</Link>
         </Button>
       </Card>

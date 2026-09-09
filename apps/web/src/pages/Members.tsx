@@ -7,13 +7,17 @@ import {
 import {
   Badge,
   Button,
-  Card,
-  CardDescription,
-  CardTitle,
+  Count,
+  EmptyState,
   Field,
   Input,
   Notice,
+  PageHead,
+  SectionTitle,
   Select,
+  Table,
+  TD,
+  TH,
 } from "@asap/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -80,128 +84,127 @@ export function Members() {
   if (!canView)
     return <Notice tone="info">Your role does not include viewing the member list.</Notice>;
 
+  const pending = invitations.data?.invitations ?? [];
+
   return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <CardTitle>Members</CardTitle>
-        <CardDescription>
-          People with access to {me.data?.active_organization?.name}.
-        </CardDescription>
-        {members.isPending && <p className="mt-4 text-sm text-ink-muted">Loading…</p>}
-        {members.isError && (
-          <Notice tone="error" className="mt-4">
-            {describeApiError(members.error)}
-          </Notice>
-        )}
-        {members.data && (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-xs uppercase tracking-wide text-ink-muted">
-                <tr>
-                  <th className="py-2 pr-4">Name</th>
-                  <th className="py-2 pr-4">Role</th>
-                  <th className="py-2 pr-4">Status</th>
-                  {canEdit && <th className="py-2 pr-4">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line-soft">
-                {members.data.members.map((m) => (
-                  <tr key={m.membership_id}>
-                    <td className="py-2 pr-4">
-                      <div className="font-medium text-ink">{m.user.full_name ?? m.user.email}</div>
-                      <div className="text-xs text-ink-muted">{m.user.email}</div>
-                    </td>
-                    <td className="py-2 pr-4">
-                      {canEdit && !m.is_owner && roles.data ? (
-                        <Select
-                          aria-label={`Role for ${m.user.email}`}
-                          className="w-auto"
-                          value={m.role.id}
-                          disabled={update.isPending}
-                          onChange={(e) =>
-                            update.mutate({ id: m.membership_id, role_id: e.target.value })
-                          }
-                        >
-                          {roles.data.roles.map((r) => (
-                            <option key={r.id} value={r.id}>
-                              {r.name}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <span>
-                          {m.role.name}
-                          {m.is_owner && <Badge className="ml-2">Owner</Badge>}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <Badge tone={m.status === "active" ? "active" : "waiting"}>{m.status}</Badge>
-                    </td>
-                    {canEdit && (
-                      <td className="py-2 pr-4">
-                        {!m.is_owner && m.user.id !== me.data?.user.id && (
-                          <div className="flex gap-2">
-                            {m.status === "active" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={update.isPending}
-                                onClick={() =>
-                                  update.mutate({ id: m.membership_id, status: "suspended" })
-                                }
-                              >
-                                Suspend
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={update.isPending}
-                                onClick={() =>
-                                  update.mutate({ id: m.membership_id, status: "active" })
-                                }
-                              >
-                                Reactivate
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={update.isPending}
-                              onClick={() => {
-                                if (window.confirm(`Remove ${m.user.email} from this brokerage?`)) {
-                                  update.mutate({ id: m.membership_id, status: "removed" });
-                                }
-                              }}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        )}
-                      </td>
+    <div>
+      <PageHead
+        title="Members"
+        description={`People with access to ${me.data?.active_organization?.name}.`}
+      />
+
+      {members.isPending && <p className="text-sm text-ink-muted">Loading…</p>}
+      {members.isError && <Notice tone="error">{describeApiError(members.error)}</Notice>}
+      {members.data && (
+        <>
+          <Table>
+            <thead>
+              <tr>
+                <TH>Name</TH>
+                <TH>Role</TH>
+                <TH>Status</TH>
+                {canEdit && <TH>Actions</TH>}
+              </tr>
+            </thead>
+            <tbody>
+              {members.data.members.map((m) => (
+                <tr key={m.membership_id}>
+                  <TD>
+                    <span className="block font-semibold text-ink">
+                      {m.user.full_name ?? m.user.email}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-ink-muted">{m.user.email}</span>
+                  </TD>
+                  <TD>
+                    {canEdit && !m.is_owner && roles.data ? (
+                      <Select
+                        aria-label={`Role for ${m.user.email}`}
+                        className="min-h-[34px] w-auto rounded-compact px-2.5 py-1.5 text-[0.86rem]"
+                        value={m.role.id}
+                        disabled={update.isPending}
+                        onChange={(e) =>
+                          update.mutate({ id: m.membership_id, role_id: e.target.value })
+                        }
+                      >
+                        {roles.data.roles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 text-ink-secondary">
+                        {m.role.name}
+                        {m.is_owner && <Badge>Owner</Badge>}
+                      </span>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {update.isError && (
-              <Notice tone="error" className="mt-3">
-                {describeApiError(update.error)}
-              </Notice>
-            )}
-          </div>
-        )}
-      </Card>
+                  </TD>
+                  <TD>
+                    <Badge tone={m.status === "active" ? "active" : "waiting"}>{m.status}</Badge>
+                  </TD>
+                  {canEdit && (
+                    <TD>
+                      {!m.is_owner && m.user.id !== me.data?.user.id && (
+                        <div className="flex flex-wrap gap-2">
+                          {m.status === "active" ? (
+                            <Button
+                              size="compact"
+                              variant="outline"
+                              disabled={update.isPending}
+                              onClick={() =>
+                                update.mutate({ id: m.membership_id, status: "suspended" })
+                              }
+                            >
+                              Suspend
+                            </Button>
+                          ) : (
+                            <Button
+                              size="compact"
+                              variant="outline"
+                              disabled={update.isPending}
+                              onClick={() =>
+                                update.mutate({ id: m.membership_id, status: "active" })
+                              }
+                            >
+                              Reactivate
+                            </Button>
+                          )}
+                          <Button
+                            size="compact"
+                            variant="destructive"
+                            disabled={update.isPending}
+                            onClick={() => {
+                              if (window.confirm(`Remove ${m.user.email} from this brokerage?`)) {
+                                update.mutate({ id: m.membership_id, status: "removed" });
+                              }
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      )}
+                    </TD>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {update.isError && (
+            <Notice tone="error" className="mt-3">
+              {describeApiError(update.error)}
+            </Notice>
+          )}
+        </>
+      )}
 
       {canInvite && (
-        <Card>
-          <CardTitle>Invite someone</CardTitle>
-          <CardDescription>
+        <>
+          <SectionTitle>Invite someone</SectionTitle>
+          <p className="-mt-2 mb-4 text-sm text-ink-muted">
             They receive an email with a link that expires in 7 days.
-          </CardDescription>
+          </p>
           <form
-            className="mt-4 grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end"
+            className="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end"
             onSubmit={form.handleSubmit((v) => invite.mutate(v))}
             noValidate
           >
@@ -235,7 +238,7 @@ export function Members() {
                 ))}
               </Select>
             </Field>
-            <Button type="submit" variant="accent" disabled={invite.isPending}>
+            <Button type="submit" variant="green" disabled={invite.isPending}>
               {invite.isPending ? "Sending…" : "Send invitation"}
             </Button>
           </form>
@@ -248,40 +251,46 @@ export function Members() {
             <Notice tone="success" className="mt-3">
               Invitation sent.
               {lastAcceptUrl && (
-                <span className="block break-all text-xs">
+                <span className="mt-1 block break-all text-xs">
                   Local environment — no email was sent. Link: <code>{lastAcceptUrl}</code>
                 </span>
               )}
             </Notice>
           )}
 
-          <h3 className="mt-6 text-sm font-semibold text-ink">Pending invitations</h3>
-          {invitations.data?.invitations.length === 0 && (
-            <p className="mt-2 text-sm text-ink-muted">None.</p>
-          )}
-          <ul className="mt-2 divide-y divide-line-soft text-sm">
-            {invitations.data?.invitations.map((i) => (
-              <li key={i.id} className="flex flex-wrap items-center gap-3 py-2">
-                <span className="font-medium text-ink">{i.email}</span>
-                <span className="text-ink-secondary">{i.role.name}</span>
-                <Badge tone={i.status === "expired" ? "review" : "waiting"}>
-                  {i.status === "expired"
-                    ? "expired"
-                    : `expires ${new Date(i.expires_at).toLocaleDateString()}`}
-                </Badge>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="ml-auto"
-                  disabled={revoke.isPending}
-                  onClick={() => revoke.mutate(i.id)}
+          <SectionTitle aside={pending.length > 0 ? <Count>{pending.length}</Count> : undefined}>
+            Pending invitations
+          </SectionTitle>
+          {invitations.data?.invitations.length === 0 ? (
+            <EmptyState title="None." />
+          ) : (
+            <ul className="flex flex-col">
+              {pending.map((i) => (
+                <li
+                  key={i.id}
+                  className="flex flex-wrap items-center gap-3 border-b border-line-soft py-3 last:border-b-0"
                 >
-                  Withdraw
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </Card>
+                  <span className="font-semibold text-ink">{i.email}</span>
+                  <span className="text-sm text-ink-secondary">{i.role.name}</span>
+                  <Badge tone={i.status === "expired" ? "review" : "waiting"}>
+                    {i.status === "expired"
+                      ? "expired"
+                      : `expires ${new Date(i.expires_at).toLocaleDateString()}`}
+                  </Badge>
+                  <Button
+                    size="compact"
+                    variant="ghost"
+                    className="ml-auto"
+                    disabled={revoke.isPending}
+                    onClick={() => revoke.mutate(i.id)}
+                  >
+                    Withdraw
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </div>
   );

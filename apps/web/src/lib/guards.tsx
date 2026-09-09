@@ -91,6 +91,7 @@ export function ChooseBrokerage({ memberships }: { memberships: MeResponse["memb
               <Button
                 variant="outline"
                 className="w-full justify-between"
+                size="lg"
                 disabled={choose.isPending}
                 onClick={() => choose.mutate(m.organization.id)}
               >

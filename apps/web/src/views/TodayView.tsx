@@ -1,5 +1,6 @@
 import type { RunRow, WorkItemRow } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
+import { Count, SectionTitle } from "@asap/ui";
 import { WorkCard } from "../components/WorkCard.js";
 import { EmptyState } from "../components/states.js";
 
@@ -34,7 +35,7 @@ export function TodayView({
           <Link
             to="/work"
             search={{ view: "with" }}
-            className="text-sm text-accent-green underline"
+            className="text-sm font-bold text-accent-green underline underline-offset-2"
           >
             See what is with others
           </Link>
@@ -46,9 +47,13 @@ export function TodayView({
   return (
     <div className="flex flex-col gap-8">
       <section aria-labelledby="needs-you" className="flex flex-col gap-3">
-        <h2 id="needs-you" className="text-xl font-semibold text-ink">
+        <SectionTitle
+          id="needs-you"
+          className="mt-0"
+          aside={needsYou.length > 0 ? <Count>{needsYou.length}</Count> : undefined}
+        >
           Needs you
-        </h2>
+        </SectionTitle>
         {needsYou.length === 0 && (
           <p className="text-sm text-ink-muted">Nothing needs you right now.</p>
         )}
@@ -68,7 +73,10 @@ export function TodayView({
           />
         ))}
         {orphanRuns.map((r) => (
-          <p key={r.id} className="rounded-card bg-accent-red-soft p-4 text-sm text-ink">
+          <p
+            key={r.id}
+            className="rounded-card border border-accent-red/25 bg-accent-red-soft p-4 text-sm text-ink"
+          >
             {r.title}: ASAP could not finish. {r.next_step ?? "Check this run."}{" "}
             <Link to="/r/$recordId" params={{ recordId: r.id }} className="underline">
               Open
@@ -78,9 +86,9 @@ export function TodayView({
       </section>
       {checksDue.length > 0 && (
         <section aria-labelledby="checks-due" className="flex flex-col gap-3">
-          <h2 id="checks-due" className="text-xl font-semibold text-ink">
+          <SectionTitle id="checks-due" className="mt-0" aside={<Count>{checksDue.length}</Count>}>
             Checks due
-          </h2>
+          </SectionTitle>
           {checksDue.map((item) => (
             <WorkCard key={item.id} item={item} showWhy />
           ))}
