@@ -110,10 +110,17 @@ function makeDb(): FakeDb {
       invitations: [],
     },
     rpc: {
-      create_organization: (args) =>
-        args["p_accepted_terms"] === true
-          ? { data: "40000000-0000-4000-8000-000000000001" }
-          : { error: { code: "22023", message: "terms_not_accepted" } },
+      create_organization: (args) => {
+        if (args["p_accepted_terms"] !== true)
+          return { error: { code: "22023", message: "terms_not_accepted" } };
+        // Mirrors 0029: the same request key returns the same id; a new key is a new row.
+        const key = String(args["p_request_key"]);
+        const existing = createdOrganizations.get(key);
+        if (existing) return { data: existing };
+        const id = `40000000-0000-4000-8000-00000000000${createdOrganizations.size + 1}`;
+        createdOrganizations.set(key, id);
+        return { data: id };
+      },
       set_active_organization: (args) =>
         args["p_organization_id"] === ORG_A
           ? {}
@@ -227,6 +234,8 @@ describe("POST /me/active-organization", () => {
   });
 });
 
+const createdOrganizations = new Map<string, string>();
+
 describe("POST /organizations", () => {
   it("validates the body and requires accepted terms", async () => {
     const res = await app.request(
@@ -259,12 +268,51 @@ describe("POST /organizations", () => {
           currency: "kes",
           timezone: "Africa/Nairobi",
           accepted_terms: true,
+          request_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         },
         "tok-admin",
       ),
     );
     expect(res.status).toBe(201);
     expect((await readJson(res)).organization_id).toMatch(/^40000000/);
+  });
+  it("requires a request key", async () => {
+    const res = await app.request(
+      "/organizations",
+      json(
+        {
+          name: "Gamma Cover",
+          country: "KE",
+          currency: "KES",
+          timezone: "Africa/Nairobi",
+          accepted_terms: true,
+        },
+        "tok-admin",
+      ),
+    );
+    expect(res.status).toBe(422);
+    expect((await readJson(res)).details.map((d: { path: string }) => d.path)).toContain(
+      "request_key",
+    );
+  });
+  it("a double submit with the same request key is one brokerage", async () => {
+    const body = {
+      name: "Delta Cover",
+      country: "KE",
+      currency: "KES",
+      timezone: "Africa/Nairobi",
+      accepted_terms: true,
+      request_key: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    };
+    const before = createdOrganizations.size;
+    const [first, second] = await Promise.all([
+      app.request("/organizations", json(body, "tok-admin")),
+      app.request("/organizations", json(body, "tok-admin")),
+    ]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect((await readJson(first)).organization_id).toBe((await readJson(second)).organization_id);
+    expect(createdOrganizations.size).toBe(before + 1);
   });
 });
 

@@ -72,6 +72,8 @@ export const createOrganizationRequestSchema = z.object({
   accepted_terms: z.literal(true, {
     error: "You must accept the data-processing and security terms",
   }),
+  /** One uuid per form mount. A repeat with the same key returns the same brokerage (0029). */
+  request_key: uuidSchema,
 });
 export type CreateOrganizationRequest = z.infer<typeof createOrganizationRequestSchema>;
 

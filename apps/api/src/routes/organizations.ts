@@ -25,7 +25,10 @@ type MemberRow = {
 export function organizationRoutes(logger: Logger) {
   const app = new Hono();
 
-  /** §7 Step 1 — create the brokerage. The caller becomes owner and administrator. */
+  /**
+   * §7 Step 1 — create the brokerage. The caller becomes owner and administrator. Idempotent on
+   * the browser's request key: a double submit returns the same id (0029, D-053).
+   */
   app.post("/organizations", async (c) => {
     const { db } = c.get("auth");
     const input = await parseBody(c, createOrganizationRequestSchema);
@@ -36,6 +39,7 @@ export function organizationRoutes(logger: Logger) {
       p_currency: input.currency,
       p_timezone: input.timezone,
       p_accepted_terms: input.accepted_terms,
+      p_request_key: input.request_key,
     });
     if (error) return sendError(c, mapDatabaseError(error));
     return c.json(createOrganizationResponseSchema.parse({ organization_id: data }), 201);

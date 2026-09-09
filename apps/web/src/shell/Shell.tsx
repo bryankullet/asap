@@ -1,4 +1,3 @@
-import { Button, Select } from "@asap/ui";
 import { useMutation } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
 import { useState } from "react";
@@ -8,11 +7,13 @@ import { useRuns } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { ActivityChip } from "./ActivityChip.js";
 import { AskComposer } from "./AskComposer.js";
+import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
 
 /**
  * The permanent shell (UI Build Spec v1 Part 1): a 224px sidebar with Today · Work · Automations,
- * Ask, the Activity chip, utilities, and the person and brokerage at the bottom. Under 900px the
+ * Ask, the Activity chip, Search and + New, and the profile control (C01) at the bottom, which
+ * opens the brokerage switcher, Members, Agreements, Client files and Sign out. Under 900px the
  * destinations become a bottom bar and Ask stays reachable at the top.
  */
 export function Shell() {
@@ -25,47 +26,14 @@ export function Shell() {
     mutationFn: api.setActiveOrganization,
     onSuccess: () => void invalidate(),
   });
-  const activeMemberships = me.data?.memberships.filter((m) => m.status === "active") ?? [];
 
-  const person = (
-    <div className="flex flex-col gap-2 text-sm">
-      {activeMemberships.length > 0 && (
-        <Select
-          aria-label="Active brokerage"
-          value={org?.id ?? ""}
-          disabled={switchOrg.isPending}
-          onChange={(e) => switchOrg.mutate(e.target.value)}
-        >
-          {!org && <option value="">Choose a brokerage…</option>}
-          {activeMemberships.map((m) => (
-            <option key={m.organization.id} value={m.organization.id}>
-              {m.organization.name}
-            </option>
-          ))}
-        </Select>
-      )}
-      <span className="truncate text-ink-muted" title={me.data?.user.email}>
-        {me.data?.user.full_name ?? me.data?.user.email}
-      </span>
-      <div className="flex gap-2">
-        <Link to="/settings/members" className="text-ink-secondary hover:text-ink">
-          Members
-        </Link>
-        <Link to="/settings/agreements" className="text-ink-secondary hover:text-ink">
-          Agreements
-        </Link>
-        <Link
-          to="/files"
-          search={{ view: "blocking" }}
-          className="text-ink-secondary hover:text-ink"
-        >
-          Client files
-        </Link>
-        <Button variant="ghost" size="sm" onClick={() => void supabase.auth.signOut()}>
-          Sign out
-        </Button>
-      </div>
-    </div>
+  const profile = (
+    <ProfileMenu
+      me={me.data}
+      switching={switchOrg.isPending}
+      onSwitch={(id) => switchOrg.mutate(id)}
+      onSignOut={() => void supabase.auth.signOut()}
+    />
   );
 
   return (
@@ -92,7 +60,7 @@ export function Shell() {
             + New
           </span>
         </div>
-        <div className="mt-auto">{person}</div>
+        <div className="mt-auto">{profile}</div>
       </aside>
 
       <div className="flex min-h-screen flex-col">
@@ -104,6 +72,7 @@ export function Shell() {
             <AskComposer />
           </div>
           <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
+          <div className="w-40">{profile}</div>
         </header>
         <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 pb-24 min-[900px]:px-8 min-[900px]:pb-8">
           <Outlet />

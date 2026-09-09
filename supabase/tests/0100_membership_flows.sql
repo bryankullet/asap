@@ -1,7 +1,7 @@
 -- pgTAP: work item 4 membership flows (app.create_organization, invitations, memberships).
 -- Runs against a migrated + seeded database. Rolls back at the end.
 begin;
-select plan(23);
+select plan(25);
 
 create or replace function pg_temp.login(p_user uuid) returns void language plpgsql as $$
 begin
@@ -44,6 +44,14 @@ select is((select active_organization_id from users where id = :beta_admin), (se
 
 select is((select count(*) from audit_log where organization_id = (select id from t_new)), 2::bigint,
   'organization.created and membership.created audit rows exist');
+
+-- 0029: the same person repeating the same request key gets the same brokerage, once.
+select is(
+  app.create_organization('Repeat Cover', null, 'KE', 'KES', 'Africa/Nairobi', true, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+  app.create_organization('Repeat Cover', null, 'KE', 'KES', 'Africa/Nairobi', true, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+  'a repeated request key returns the same organization id');
+select is((select count(*) from organizations where name = 'Repeat Cover'), 1::bigint,
+  'and exactly one brokerage was created');
 
 -- 2. send_external matrix (D-022) -------------------------------------------------
 reset role;

@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { createOrganizationRequestSchema, type CreateOrganizationRequest } from "@asap/schema";
 import { Button, Card, Field, Input, Notice, Select } from "@asap/ui";
 import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { AuthLayout } from "../components/AuthLayout.js";
@@ -36,9 +37,17 @@ export function CreateOrganization() {
   const navigate = useNavigate();
   const router = useRouter();
   const invalidate = useInvalidateMe();
+  // One request key for the life of this form. A second submit, a retry after a lost response,
+  // or a double click all carry the same key, and the database returns the same brokerage (0029).
+  const [requestKey] = useState(() => crypto.randomUUID());
   const form = useForm<CreateOrganizationRequest>({
     resolver: zodResolver(createOrganizationRequestSchema),
-    defaultValues: { country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
+    defaultValues: {
+      country: "KE",
+      currency: "KES",
+      timezone: "Africa/Nairobi",
+      request_key: requestKey,
+    },
   });
   const create = useMutation({
     mutationFn: api.createOrganization,
@@ -57,7 +66,10 @@ export function CreateOrganization() {
       <Card>
         <form
           className="flex flex-col gap-4"
-          onSubmit={form.handleSubmit((v) => create.mutate(v))}
+          onSubmit={form.handleSubmit((v) => {
+            if (create.isPending) return;
+            create.mutate({ ...v, request_key: requestKey });
+          })}
           noValidate
         >
           <Field label="Brokerage name" htmlFor="name" error={errors.name?.message}>

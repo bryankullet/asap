@@ -23,6 +23,7 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     "/settings/members",
     "/files",
     "/settings/agreements",
+    "/onboarding/create",
   ].map((path) => createRoute({ getParentRoute: () => root, path, component: page }));
   const record = createRoute({ getParentRoute: () => root, path: "/r/$recordId", component: page });
   const file = createRoute({

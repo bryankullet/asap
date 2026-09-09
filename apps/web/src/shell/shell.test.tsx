@@ -7,12 +7,13 @@
  * Insurance modules are never destinations (Architecture v3.1 §45).
  */
 import type { RunRow, WorkItemRow } from "@asap/schema";
-import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { WorkItemView } from "../views/RecordViews.js";
 import { TodayView } from "../views/TodayView.js";
 import { renderInRouter } from "../test-utils.js";
 import { NAV, NEVER_NAV } from "./nav.js";
+import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
 
 const ORG = "10000000-0000-4000-8000-00000000000a";
@@ -168,4 +169,60 @@ describe("record views (checks.mjs line 23)", () => {
       expect(html).not.toMatch(/\b(Waiting|Failed|Success|Space|Job)\b/);
     },
   );
+});
+
+describe("profile control (C01)", () => {
+  const me = {
+    user: {
+      id: "a0000000-0000-4000-8000-000000000001",
+      email: "amina@acme.test",
+      full_name: "Amina Otieno",
+    },
+    active_organization: { id: ORG, name: "Acme Insurance Brokers" },
+    memberships: [
+      { organization: { id: ORG, name: "Acme Insurance Brokers" }, status: "active" },
+      {
+        organization: { id: "10000000-0000-4000-8000-00000000000b", name: "Beta Risk" },
+        status: "active",
+      },
+    ],
+    permissions: [],
+  } as unknown as Parameters<typeof ProfileMenu>[0]["me"];
+
+  it("shows brokerage and person as one control, with the utilities behind it", async () => {
+    await renderInRouter(
+      <ProfileMenu me={me} switching={false} onSwitch={() => {}} onSignOut={() => {}} />,
+    );
+    const control = screen.getByRole("button", { name: /Acme Insurance Brokers/ });
+    expect(control).toHaveTextContent("Amina Otieno");
+    expect(screen.queryByRole("menu")).toBeNull();
+    for (const name of ["Members", "Agreements", "Client files", "Sign out"]) {
+      expect(screen.queryByText(name)).toBeNull();
+    }
+    fireEvent.click(control);
+    const menu = screen.getByRole("menu", { name: "Profile" });
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((e) => e.textContent?.trim()),
+    ).toEqual(["Members", "Agreements", "Client files", "Sign out"]);
+    expect(within(menu).getByRole("combobox", { name: "Active brokerage" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("signs out and switches brokerage from the menu", async () => {
+    const onSignOut = vi.fn();
+    const onSwitch = vi.fn();
+    await renderInRouter(
+      <ProfileMenu me={me} switching={false} onSwitch={onSwitch} onSignOut={onSignOut} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Acme Insurance Brokers/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByRole("combobox", { name: "Active brokerage" }), {
+      target: { value: "10000000-0000-4000-8000-00000000000b" },
+    });
+    expect(onSwitch).toHaveBeenCalledWith("10000000-0000-4000-8000-00000000000b");
+  });
 });
