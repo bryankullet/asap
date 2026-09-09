@@ -18,11 +18,17 @@ export function ActionPanel({
   step,
   drafts,
   onRunStarted,
+  candidatePeriods = [],
 }: {
   item: WorkItemRow;
   step: Step;
   drafts: DraftRow[];
   onRunStarted: (runId: string) => void;
+  candidatePeriods?: {
+    period: { id: string; period_start: string; period_end: string };
+    policy: { class_of_business: string; policy_number: string | null };
+    insurerName: string;
+  }[];
 }) {
   const qc = useQueryClient();
   const me = useMe();
@@ -38,6 +44,8 @@ export function ActionPanel({
   const [told, setTold] = useState("");
   const [override, setOverride] = useState("");
   const [inception, setInception] = useState("");
+  const [periodId, setPeriodId] = useState("");
+  const [evidenceKind, setEvidenceKind] = useState<"document" | "call_note">("document");
 
   const act = useMutation({
     mutationFn: (input: ActRequest) => api.act(item.id, input),
@@ -162,6 +170,47 @@ export function ActionPanel({
               placeholder="Message id, sent-folder reference, document name"
             />
           </Field>
+          {item.kind === "claim" && step.id === "match" && form === "record_evidence" && (
+            <Field
+              label={
+                candidatePeriods.length > 1
+                  ? `${candidatePeriods.length} policy periods contain the incident date — choose which`
+                  : "Policy period"
+              }
+              htmlFor="period"
+            >
+              <select
+                id="period"
+                className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
+                value={periodId}
+                onChange={(e) => setPeriodId(e.target.value)}
+              >
+                <option value="">Choose…</option>
+                {candidatePeriods.map((p) => (
+                  <option key={p.period.id} value={p.period.id}>
+                    {p.policy.class_of_business} with {p.insurerName}
+                    {p.policy.policy_number ? ` (${p.policy.policy_number})` : ""} ·{" "}
+                    {p.period.period_start} to {p.period.period_end}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {item.kind === "claim" && step.id === "response" && form === "record_evidence" && (
+            <Field label="What is this?" htmlFor="evidenceKind">
+              <select
+                id="evidenceKind"
+                className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
+                value={evidenceKind}
+                onChange={(e) => setEvidenceKind(e.target.value as typeof evidenceKind)}
+              >
+                <option value="document">Their email or letter</option>
+                <option value="call_note">
+                  A call note (ours — cannot stand in for their words)
+                </option>
+              </select>
+            </Field>
+          )}
           {step.id === "cover_confirmed" && form === "record_evidence" && (
             <Field
               label="Inception date (cover becomes Active cover from this date, by date)"

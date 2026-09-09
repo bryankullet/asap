@@ -11,7 +11,13 @@ import {
   createPlacementRequestSchema,
   createWorkItemRequestSchema,
   createWorkItemResponseSchema,
+  claimActionSchema,
+  claimSteps,
+  classifyEndorsementRequest,
   deriveTask,
+  endorsementSteps,
+  policyResponseSchema,
+  endorsementActionSchema,
   matchClientName,
   type ClientCandidate,
   type CreateWorkItemResponse,
@@ -29,9 +35,16 @@ import type { Logger } from "pino";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { applyAction } from "../engine/apply.js";
 import { loadGuardFacts } from "../facts.js";
+import {
+  clientPolicies,
+  loadClaimDetail,
+  loadEndorsementDetail,
+  loadPolicy,
+  today,
+} from "../servicing.js";
 import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
-import type { Executor } from "../runs/executor.js";
+import type { Executor, RunFacts } from "../runs/executor.js";
 import { parseBody } from "./_parse.js";
 
 export type WorkDeps = {
@@ -134,27 +147,238 @@ export function workRoutes(deps: WorkDeps) {
       client = match.client;
     }
 
-    const steps = renewalSteps({ clientName: client.name, insurers: input.insurers });
+    // Endorsements need a policy: the given one, the client's only one, or ask which.
+    let policy: {
+      id: string;
+      insurerId: string;
+      insurerName: string;
+      className: string;
+      number: string | null;
+    } | null = null;
+    if (input.kind === "endorsement") {
+      const policies = await clientPolicies(db, client.id);
+      const chosen = input.policyId
+        ? policies.find((p) => p.policy.id === input.policyId)
+        : policies.length === 1
+          ? policies[0]
+          : undefined;
+      if (!chosen) {
+        if (policies.length === 0) {
+          return c.json(
+            createWorkItemResponseSchema.parse({
+              outcome: "no_policy",
+              clientId: client.id,
+              intent: {
+                type: "answer",
+                target: null,
+                panel: null,
+                view: "summary",
+                answer: `${client.name} has no policy on file to change.`,
+                suggestions: [],
+              },
+            }),
+            404,
+          );
+        }
+        return c.json(
+          createWorkItemResponseSchema.parse({
+            outcome: "ambiguous_policy",
+            clientId: client.id,
+            candidates: policies.map((p) => ({
+              id: p.policy.id,
+              label: `${p.policy.class_of_business} with ${p.insurerName}${p.policy.policy_number ? ` (${p.policy.policy_number})` : ""}`,
+            })),
+          }),
+          409,
+        );
+      }
+      policy = {
+        id: chosen.policy.id,
+        insurerId: chosen.policy.insurer_id,
+        insurerName: chosen.insurerName,
+        className: chosen.policy.class_of_business,
+        number: chosen.policy.policy_number,
+      };
+    }
+
+    let steps;
+    let title: string;
+    if (input.kind === "claim") {
+      const policies = await clientPolicies(db, client.id);
+      steps = claimSteps({
+        clientName: client.name,
+        insurerName: policies.length === 1 ? policies[0]!.insurerName : null,
+      });
+      title = `${client.name} — claim, incident ${input.incidentOn}`;
+    } else if (input.kind === "endorsement") {
+      steps = endorsementSteps({ insurerName: policy!.insurerName });
+      title = `${client.name} — policy change, ${policy!.className}${policy!.number ? ` ${policy!.number}` : ""}`;
+    } else {
+      steps = renewalSteps({ clientName: client.name, insurers: input.insurers });
+      title = `${client.name} — renewal`;
+    }
     const task = deriveTask(steps);
     const { data, error } = await db.rpc("work_item_create", {
       p_organization_id: org.id,
       p_kind: input.kind,
-      p_title: `${client.name} — renewal`,
+      p_title: title,
       p_client_name: client.name,
       p_steps: steps,
       p_task_status: task.status,
       p_task_party: task.party,
       p_client_id: client.id,
-      p_insurer_id: null,
-      p_class_of_business: null,
+      p_insurer_id: policy?.insurerId ?? null,
+      p_class_of_business: policy?.className ?? null,
     });
     if (error) return sendError(c, mapDatabaseError(error));
     const { id, reopened } = data as { id: string; reopened: boolean };
+
+    // The record behind the item, created once: a claim is always a draft; an endorsement records who asked.
+    if (!reopened && input.kind === "claim") {
+      const r = await db.rpc("claim_create", {
+        p_work_item_id: id,
+        p_client_id: client.id,
+        p_policy_id: null,
+        p_incident_on: input.incidentOn,
+        p_summary: input.incidentSummary,
+        p_source: input.source ?? "ask",
+      });
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+    }
+    if (!reopened && input.kind === "endorsement") {
+      const r = await db.rpc("endorsement_create", {
+        p_work_item_id: id,
+        p_policy_id: policy!.id,
+        p_kind: classifyEndorsementRequest(input.requestText!),
+        p_requested_by: input.requestedBy ?? "policyholder",
+        p_requested_by_name:
+          input.requestedByName ?? (input.requestedBy === "other" ? null : client.name),
+        p_request_text: input.requestText,
+        p_effective_on: input.effectiveOn ?? null,
+        p_items: [],
+      });
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+    }
     const item = await loadItem(db, id);
     return c.json(
       createWorkItemResponseSchema.parse({ outcome: "opened", item, reopened }),
       reopened ? 200 : 201,
     );
+  });
+
+  /** A policy, titled as itself: its periods and every version, old ones kept. */
+  app.get("/policies/:id", async (c) => {
+    const { db } = c.get("auth");
+    const policy = await loadPolicy(db, c.req.param("id"));
+    if (!policy) return sendError(c, new HttpError(404, "not_found"));
+    return c.json(policyResponseSchema.parse(policy));
+  });
+
+  /** Facts a person records about the claim itself, outside the step verbs. */
+  app.post("/claims/:id/actions", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const input = await parseBody(c, claimActionSchema);
+    let r: { error: { code?: string; message?: string } | null };
+    switch (input.action) {
+      case "set_clock":
+        r = await db.rpc("claim_set_clock", {
+          p_claim_id: id,
+          p_clause: input.clauseReference,
+          p_page: input.clausePage,
+          p_days: input.clauseDays,
+          p_start_event: input.startEvent,
+          p_start_on: input.startOn,
+          p_start_evidence: input.startEvidence,
+        });
+        break;
+      case "add_document":
+        r = await db.rpc("claim_document_add", {
+          p_claim_id: id,
+          p_label: input.label,
+          p_holder: input.holder,
+        });
+        break;
+      case "receive_document":
+        r = await db.rpc("claim_document_receive", {
+          p_document_id: input.documentId,
+          p_reference: input.reference,
+        });
+        break;
+      case "add_call_note":
+        r = await db.rpc("claim_note_add", {
+          p_claim_id: id,
+          p_kind: "call_note",
+          p_spoke_with: input.spokeWith,
+          p_body: input.body,
+        });
+        break;
+      case "set_insurer_reference":
+        r = await db.rpc("claim_set_insurer_reference", {
+          p_claim_id: id,
+          p_reference: input.reference,
+        });
+        break;
+    }
+    if (r.error) return sendError(c, mapDatabaseError(r.error));
+    const wiR = await db.from("claims").select("work_item_id").eq("id", id).maybeSingle();
+    if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    const detail = wiR.data
+      ? await loadClaimDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
+      : null;
+    void user;
+    return c.json({ claim: detail });
+  });
+
+  app.post("/endorsements/:id/actions", async (c) => {
+    const { db } = c.get("auth");
+    const id = c.req.param("id");
+    const input = await parseBody(c, endorsementActionSchema);
+    let r: { error: { code?: string; message?: string } | null };
+    switch (input.action) {
+      case "classify":
+        r = await db.rpc("endorsement_update", {
+          p_id: id,
+          p_kind: input.kind,
+          p_effective_on: null,
+          p_items: null,
+        });
+        break;
+      case "set_details":
+        r = await db.rpc("endorsement_update", {
+          p_id: id,
+          p_kind: null,
+          p_effective_on: input.effectiveOn ?? null,
+          p_items: input.items
+            ? input.items.map((i) => ({ ...i, decision: "pending", note: null }))
+            : null,
+        });
+        break;
+      case "record_instruction":
+        r = await db.rpc("endorsement_record_instruction", {
+          p_id: id,
+          p_reference: input.reference,
+          p_from: input.from,
+          p_from_name: input.fromName ?? null,
+        });
+        break;
+      case "decide_item":
+        r = await db.rpc("endorsement_item_decide", {
+          p_id: id,
+          p_item_id: input.itemId,
+          p_decision: input.decision,
+          p_note: input.note ?? null,
+          p_response_reference: input.responseReference,
+        });
+        break;
+    }
+    if (r.error) return sendError(c, mapDatabaseError(r.error));
+    const wiR = await db.from("endorsements").select("work_item_id").eq("id", id).maybeSingle();
+    if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    const detail = wiR.data
+      ? await loadEndorsementDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
+      : null;
+    return c.json({ endorsement: detail });
   });
 
   /** A placement (Part 6.2). The gate is evaluated at approval, not here. */
@@ -227,9 +451,13 @@ export function workRoutes(deps: WorkDeps) {
     ]);
     if (runsR.error) return sendError(c, mapDatabaseError(runsR.error));
     if (draftsR.error) return sendError(c, mapDatabaseError(draftsR.error));
+    const claim = item.kind === "claim" ? await loadClaimDetail(db, id) : null;
+    const endorsement = item.kind === "endorsement" ? await loadEndorsementDetail(db, id) : null;
     return c.json(
       workItemResponseSchema.parse({
         item,
+        claim,
+        endorsement,
         runs: RunRow.array().parse(runsR.data ?? []),
         drafts: DraftRow.array().parse(draftsR.data ?? []),
       }),
@@ -284,10 +512,34 @@ export function workRoutes(deps: WorkDeps) {
       const run = await loadRun(db, data as string);
       const fresh = await loadItem(db, id);
       // Fire and forget: the stream carries progress; run_end writes the outcome atomically.
-      void deps.executor(db)(run, fresh, effects.startRun.stepId, {
+      const runFacts: RunFacts = {
         clientFileState: facts.clientFileState,
         agreedRate: facts.agreedRate,
-      });
+        today: today(),
+      };
+      if (facts.claim !== undefined) runFacts.claim = facts.claim;
+      if (facts.endorsement !== undefined) runFacts.endorsement = facts.endorsement;
+      if (facts.claim?.claim.policy_id) {
+        const v = await db.rpc("policy_version_on", {
+          p_policy_id: facts.claim.claim.policy_id,
+          p_on: facts.claim.claim.incident_on,
+        });
+        if (v.error) return sendError(c, mapDatabaseError(v.error));
+        const row = ((v.data ?? []) as { id: string; version: number }[])[0];
+        const period = facts.claim.candidatePeriods.find(
+          (p) => p.policy.id === facts.claim!.claim.policy_id,
+        );
+        runFacts.coverOnIncident =
+          row && period
+            ? {
+                versionId: row.id,
+                version: row.version,
+                className: period.policy.class_of_business,
+                insurerName: period.insurerName,
+              }
+            : null;
+      }
+      void deps.executor(db)(run, fresh, effects.startRun.stepId, runFacts);
       return c.json(actResponseSchema.parse({ outcome: "applied", item: fresh, run, draft: null }));
     }
 
@@ -354,6 +606,44 @@ export function workRoutes(deps: WorkDeps) {
       return c.json(
         actResponseSchema.parse({ outcome: "applied", item: fresh, run: null, draft: null }),
       );
+    }
+
+    if (effects.registerClaim && facts.claim) {
+      const { error } = await db.rpc("claim_register", {
+        p_claim_id: facts.claim.claim.id,
+        p_policy_period_id: effects.registerClaim.policyPeriodId,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
+    if (effects.claimFact && facts.claim) {
+      const { error } = await db.rpc("claim_fact_record", {
+        p_claim_id: facts.claim.claim.id,
+        p_fact: effects.claimFact.fact,
+        p_reference: effects.claimFact.reference,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
+    if (effects.applyEndorsement && facts.endorsement) {
+      const { error } = await db.rpc("endorsement_apply", {
+        p_id: facts.endorsement.endorsement.id,
+      });
+      if (error) {
+        const mapped = mapDatabaseError(error);
+        if (mapped.code === "policyholder_instruction_required") {
+          const current = await loadItem(db, id);
+          return c.json(
+            actResponseSchema.parse({
+              outcome: "blocked",
+              item: current,
+              guard: "evidence_present",
+              reason:
+                "Transfer of ownership needs the policyholder's own instruction. A request from anyone else is recorded, not acted on.",
+            }),
+            409,
+          );
+        }
+        return sendError(c, mapped);
+      }
     }
 
     if (effects.recordSend) {

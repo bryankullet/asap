@@ -8,6 +8,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GuardFacts } from "./engine/apply.js";
 import { mapDatabaseError } from "./errors.js";
+import { loadClaimDetail, loadEndorsementDetail } from "./servicing.js";
 
 /** Loads the facts guards need for one item, under the caller's session (RLS applies). */
 export async function loadGuardFacts(db: SupabaseClient, item: WorkItemRow): Promise<GuardFacts> {
@@ -32,5 +33,8 @@ export async function loadGuardFacts(db: SupabaseClient, item: WorkItemRow): Pro
     const rows = (data ?? []) as unknown[];
     agreedRate = rows.length > 0 ? agreedRateSchema.parse(rows[0]) : null;
   }
-  return { clientFileState, agreedRate, clientId: item.client_id };
+  const facts: GuardFacts = { clientFileState, agreedRate, clientId: item.client_id };
+  if (item.kind === "claim") facts.claim = await loadClaimDetail(db, item.id);
+  if (item.kind === "endorsement") facts.endorsement = await loadEndorsementDetail(db, item.id);
+  return facts;
 }

@@ -9,6 +9,9 @@ import {
   clientFilesResponseSchema,
   createClientResponseSchema,
   placementCreatedSchema,
+  policyResponseSchema,
+  claimDetailSchema,
+  endorsementDetailSchema,
   askResponseSchema,
   createWorkItemResponseSchema,
   markDraftCopiedResponseSchema,
@@ -23,14 +26,16 @@ import {
   rolesResponseSchema,
   type ActRequest,
   type AgreementAction,
+  type ClaimAction,
   type ClientFileAction,
+  type EndorsementAction,
   type K01View,
   type CreateInvitationRequest,
   type CreateWorkItemRequest,
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
 } from "@asap/schema";
-import type { z } from "zod";
+import { z } from "zod";
 import { env } from "../env.js";
 import { supabase } from "./supabase.js";
 
@@ -108,6 +113,21 @@ export const api = {
       allow: [409],
     }),
   agreements: () => request("GET", "/agreements", agreementsResponseSchema),
+  policy: (id: string) => request("GET", `/policies/${id}`, policyResponseSchema),
+  claimAct: (id: string, input: ClaimAction) =>
+    request(
+      "POST",
+      `/claims/${id}/actions`,
+      z.object({ claim: claimDetailSchema.nullable() }),
+      input,
+    ),
+  endorsementAct: (id: string, input: EndorsementAction) =>
+    request(
+      "POST",
+      `/endorsements/${id}/actions`,
+      z.object({ endorsement: endorsementDetailSchema.nullable() }),
+      input,
+    ),
   agreement: (id: string) => request("GET", `/agreements/${id}`, agreementResponseSchema),
   agreementAct: (input: AgreementAction) => request("POST", "/agreements/actions", null, input),
   createPlacement: (input: { clientId: string; insurerId: string; classOfBusiness: string }) =>
@@ -164,6 +184,16 @@ export function describeApiError(err: unknown): string {
     file_incomplete: "The file is missing documents it needs before it can be cleared.",
     reason_required: "Type a reason.",
     client_must_land_not_started: "A client always lands as Not started.",
+    period_not_this_clients: "That policy period belongs to another client.",
+    clock_inputs_incomplete:
+      "The clock needs the clause, its page, the days, and a verified start event with evidence.",
+    already_recorded: "That fact is already recorded.",
+    items_undecided: "Record the insurer's decision on every item first.",
+    policyholder_instruction_required:
+      "Transfer of ownership needs the policyholder's own instruction.",
+    effective_date_not_after_current:
+      "The effective date must be after the current version's start.",
+    no_version_on_effective_date: "No policy version is effective on that date.",
   };
   return messages[err.code] ?? `Request failed (${err.code}).`;
 }

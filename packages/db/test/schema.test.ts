@@ -19,6 +19,13 @@ const TENANT_TABLES = [
   schema.agreements,
   schema.agreementVersions,
   schema.agreementRates,
+  schema.policies,
+  schema.policyPeriods,
+  schema.policyVersions,
+  schema.claims,
+  schema.claimDocuments,
+  schema.claimNotes,
+  schema.endorsements,
 ];
 
 describe("Drizzle schema conventions", () => {
@@ -36,7 +43,7 @@ describe("Drizzle schema conventions", () => {
     }
   });
 
-  it("lists exactly the eleven Phase 1 tables, event_deliveries, and the 0022/0023 engine tables and the 0026 compliance tables", () => {
+  it("lists exactly the eleven Phase 1 tables, event_deliveries, and the 0022/0023 engine tables and the 0026/0028 servicing tables", () => {
     const names = Object.values(schema)
       .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:Name") in v)
       .map((t) => getTableConfig(t as never).name)
@@ -46,9 +53,13 @@ describe("Drizzle schema conventions", () => {
       "agreement_versions",
       "agreements",
       "audit_log",
+      "claim_documents",
+      "claim_notes",
+      "claims",
       "client_file_documents",
       "clients",
       "drafts",
+      "endorsements",
       "event_deliveries",
       "events",
       "insurers",
@@ -56,6 +67,9 @@ describe("Drizzle schema conventions", () => {
       "organization_memberships",
       "organizations",
       "permissions",
+      "policies",
+      "policy_periods",
+      "policy_versions",
       "role_permissions",
       "roles",
       "run_events",

@@ -247,4 +247,22 @@ insert into agreement_rates (organization_id, version_id, class_of_business, rat
   ('10000000-0000-4000-8000-00000000000a', '81000000-0000-4000-8000-00000000000a', 'Motor private', 1000, 'Schedule A, clause 4.1', 'person', 'a0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', now() - interval '30 days'),
   ('10000000-0000-4000-8000-00000000000a', '81000000-0000-4000-8000-00000000000a', 'Motor commercial', 1250, 'Schedule A, clause 4.2', 'asap', null, null, null);
 
+-- ---------------------------------------------------------------------------
+-- Phase 5a: policies with versions, a draft claim from email
+-- ---------------------------------------------------------------------------
+insert into policies (id, organization_id, client_id, insurer_id, class_of_business, policy_number) values
+  ('90000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '70000000-0000-4000-8000-00000000000a', '60000000-0000-4000-8000-00000000000a', 'Motor commercial', 'JUB/MC/2026/0142'),
+  ('90000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', '70000000-0000-4000-8000-00000000000b', '60000000-0000-4000-8000-00000000000a', 'Motor private', 'JUB/MP/2026/0877');
+insert into policy_periods (id, organization_id, policy_id, period_start, period_end) values
+  ('91000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '90000000-0000-4000-8000-00000000000a', '2026-01-01', '2026-12-31'),
+  ('91000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', '90000000-0000-4000-8000-00000000000b', '2026-03-01', '2027-02-28');
+insert into policy_versions (id, organization_id, policy_id, version, effective_from, source, items, created_by) values
+  ('92000000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', '90000000-0000-4000-8000-00000000000a', 1, '2026-01-01', 'seed',
+   '[{"id":"kda482a","label":"KDA 482A Toyota Hilux","sumInsuredMinor":350000000,"covered":true,"status":"in_force","note":null},
+     {"id":"kcb100x","label":"KCB 100X Toyota Probox","sumInsuredMinor":80000000,"covered":true,"status":"in_force","note":null}]',
+   'a0000000-0000-4000-8000-000000000001'),
+  ('92000000-0000-4000-8000-00000000000b', '10000000-0000-4000-8000-00000000000a', '90000000-0000-4000-8000-00000000000b', 1, '2026-03-01', 'seed',
+   '[{"id":"kdb220j","label":"KDB 220J Mazda Demio","sumInsuredMinor":95000000,"covered":true,"status":"in_force","note":null}]',
+   'a0000000-0000-4000-8000-000000000001');
+
 commit;

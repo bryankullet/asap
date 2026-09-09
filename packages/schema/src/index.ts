@@ -13,3 +13,8 @@ export * from "./compliance.js";
 export * from "./agreements.js";
 export * from "./recipes/placement.js";
 export * from "./clientMatch.js";
+export * from "./policies.js";
+export * from "./claims.js";
+export * from "./endorsements.js";
+export * from "./recipes/claim.js";
+export * from "./recipes/endorsement.js";

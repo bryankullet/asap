@@ -1,10 +1,13 @@
 import {
   GATE_MESSAGE,
+  HOLDER_LABELS,
   NO_AGREED_RATE,
   deriveTask,
   fileClearsPlacement,
   type ActRequest,
   type AgreedRate,
+  type ClaimDetail,
+  type EndorsementDetail,
   type EvidenceRecord,
   type FileStatus,
   type GuardRef,
@@ -31,6 +34,10 @@ export type GuardFacts = {
   /** The confirmed agreed rate for this item's insurer and class, null when none, undefined when not applicable. */
   agreedRate: AgreedRate | undefined;
   clientId?: string | null;
+  /** Present on claim items: the claim, its documents and the candidate policy periods. */
+  claim?: ClaimDetail | null | undefined;
+  /** Present on endorsement items: the endorsement and what Check requirements still needs. */
+  endorsement?: EndorsementDetail | null | undefined;
 };
 export const NO_FACTS: GuardFacts = { clientFileState: null, agreedRate: undefined };
 
@@ -42,6 +49,12 @@ export type Effects = {
   /** approve at X01 with the client file not cleared: the database re-checks, audits, and creates the principal's item. */
   approveWithOverride?: { reason: string };
   approve?: true;
+  /** claim match step: a person chose the policy period; the draft becomes registered. */
+  registerClaim?: { policyPeriodId: string };
+  /** claim steps 8, 9, 10: one fact each, never merged. */
+  claimFact?: { fact: "offer" | "acceptance" | "payment"; reference: string };
+  /** endorsement update step: the insurer's decisions become a new effective-dated policy version. */
+  applyEndorsement?: true;
 };
 
 export type Derived = {
@@ -112,6 +125,68 @@ export function evaluateGuard(
       return null;
     }
     case "evidence_present": {
+      // Claim: documents step names every outstanding document and who holds it.
+      if (item.kind === "claim" && step.id === "documents" && facts.claim) {
+        const outstanding = facts.claim.documents.filter((d) => !d.received_at);
+        if (outstanding.length > 0) {
+          return {
+            guard: id,
+            reason: `Still outstanding: ${outstanding.map((d) => `${d.label} (with ${HOLDER_LABELS[d.holder]})`).join("; ")}.`,
+          };
+        }
+      }
+      // Claim: the insurer's response is their written words; a call note is ours.
+      if (item.kind === "claim" && step.id === "response" && req.evidenceKind === "call_note") {
+        return {
+          guard: id,
+          reason:
+            "A call note is our record of a conversation, not the insurer's words. Add it as a call note; this step needs their email or letter.",
+        };
+      }
+      // Claim: matching needs a chosen policy period when more than one fits the incident date.
+      if (item.kind === "claim" && step.id === "match" && facts.claim) {
+        const candidates = facts.claim.candidatePeriods;
+        if (candidates.length === 0)
+          return {
+            guard: id,
+            reason: "No policy period on file contains the incident date. Add the policy first.",
+          };
+        if (!req.policyPeriodId) {
+          return candidates.length === 1
+            ? { guard: id, reason: "Confirm the policy period this incident falls in." }
+            : {
+                guard: id,
+                reason: `${candidates.length} policy periods contain the incident date. Choose which.`,
+              };
+        }
+        if (!candidates.some((c) => c.period.id === req.policyPeriodId)) {
+          return { guard: id, reason: "That policy period does not contain the incident date." };
+        }
+        return null;
+      }
+      // Endorsement: the insurer's response is complete only when every item carries a decision.
+      if (
+        item.kind === "endorsement" &&
+        (step.id === "response" || step.id === "update_policy") &&
+        facts.endorsement
+      ) {
+        const undecided = facts.endorsement.endorsement.items.filter(
+          (i) => i.decision === "pending",
+        );
+        if (undecided.length > 0) {
+          return {
+            guard: id,
+            reason: `No decision recorded yet for: ${undecided.map((i) => i.label).join("; ")}. Partial acceptance is itemised.`,
+          };
+        }
+        if (step.id === "update_policy" && !facts.endorsement.endorsement.response_reference) {
+          return {
+            guard: id,
+            reason: "Record the insurer's written response before applying the changes.",
+          };
+        }
+        if (step.id === "update_policy") return null;
+      }
       if (req.verb === "complete") {
         const missing = item.steps.filter(
           (s) => s.evidence.length > 0 && s.recorded.length === 0 && s.id !== step.id,
@@ -331,10 +406,19 @@ export function applyAction(
         step.id === "cover_confirmed" && item.kind === "placement"
           ? ("confirmed" as const)
           : item.cover_status;
+      const effects: Effects = {};
+      if (item.kind === "claim" && step.id === "match" && req.policyPeriodId)
+        effects.registerClaim = { policyPeriodId: req.policyPeriodId };
+      if (
+        item.kind === "claim" &&
+        (step.id === "offer" || step.id === "acceptance" || step.id === "payment")
+      ) {
+        effects.claimFact = { fact: step.id, reference: (req.evidence ?? "").trim() };
+      }
       return {
         kind: "applied",
         derived: deriveFrom(item, steps, ctx, { cover }),
-        effects: {},
+        effects,
         auditAction: "work_item.record_evidence",
       };
     }
@@ -394,6 +478,29 @@ export function applyAction(
       };
     }
     case "approve": {
+      if (item.kind === "endorsement") {
+        // Applying the confirmed endorsement: a new effective-dated policy version, the old one kept.
+        const steps = advance(
+          withStep(item.steps, step.id, {
+            recorded: [
+              ...step.recorded,
+              {
+                kind: "approval",
+                reference: `Applied by ${ctx.userId}`,
+                recordedBy: ctx.userId,
+                recordedAt: ctx.now.toISOString(),
+              },
+            ],
+          }),
+          step.id,
+        );
+        return {
+          kind: "applied",
+          derived: deriveFrom(item, steps, ctx),
+          effects: { applyEndorsement: true },
+          auditAction: "endorsement.applied",
+        };
+      }
       const overriding =
         !(facts.clientFileState && fileClearsPlacement(facts.clientFileState)) &&
         Boolean(req.override?.reason?.trim());
@@ -436,6 +543,11 @@ export function runTitleFor(step: Step): string {
     compare: "Term comparison prepared",
     prepare: "Placement prepared",
     documents: "Policy documents checked",
+    capture: "Incident captured",
+    cover_check: "Cover on the incident date reviewed",
+    clock: "Notification clock checked",
+    classify: "Request classified",
+    requirements: "Requirements checked",
   };
   return titles[step.id] ?? step.label;
 }

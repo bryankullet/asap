@@ -2,6 +2,15 @@ import { deriveTask, type RunRow, type Step, type WorkItemRow } from "@asap/sche
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { advance, draftFor } from "../engine/apply.js";
+import {
+  TRANSFER_NEEDS_POLICYHOLDER,
+  classifyEndorsementRequest,
+  clockState,
+  coverReviewSentence,
+  endorsementRequirementsMissing,
+  type ClaimDetail,
+  type EndorsementDetail,
+} from "@asap/schema";
 
 /**
  * Executes a run in-process (UI Build Spec v1 Part 8). Each step appends a persisted event, so
@@ -13,6 +22,8 @@ import { advance, draftFor } from "../engine/apply.js";
  */
 export type RunPlan = {
   events: string[];
+  /** Database calls the run makes with its findings, before it ends. */
+  rpcs?: { name: string; args: Record<string, unknown> }[];
   /** Null when the run finishes; otherwise why it paused and what the person should do. */
   pause: { nextStep: string; blockedReason: string } | null;
   drafts: { stepId: string; to: string; subject: string; body: string }[];
@@ -23,6 +34,16 @@ export type RunPlan = {
 export type RunFacts = {
   clientFileState: string | null;
   agreedRate: { rate_basis_points: number } | null | undefined;
+  claim?: ClaimDetail | null | undefined;
+  endorsement?: EndorsementDetail | null | undefined;
+  /** The policy version effective on the claim's incident date, if the claim is matched. */
+  coverOnIncident?: {
+    version: number;
+    className: string;
+    insurerName: string;
+    versionId: string;
+  } | null | undefined;
+  today?: string | undefined;
 };
 
 export function planRun(
@@ -65,6 +86,169 @@ export function planRun(
             : `Agreed rate on file: ${(facts.agreedRate.rate_basis_points / 100).toFixed(2)}% of the commission basis`;
       return {
         events: ["Collecting the chosen quote and the client file state", rate],
+        pause: null,
+        drafts: [],
+        note: null,
+      };
+    }
+    case "capture": {
+      const c = facts.claim?.claim;
+      if (!c)
+        return {
+          events: ["No claim record found for this item"],
+          pause: { nextStep: "Check this item", blockedReason: "The claim record is missing." },
+          drafts: [],
+          note: null,
+        };
+      return {
+        events: [
+          "Reading the client's own report",
+          `Incident on ${c.incident_on}: ${c.incident_summary}`,
+          c.source === "email"
+            ? "Captured from email as a draft claim — it is not registered until a person matches it to a policy period"
+            : "Captured as a draft claim — a person registers it by choosing the policy period",
+        ],
+        pause: null,
+        drafts: [],
+        note:
+          c.source === "email"
+            ? "Draft claim from email. Not registered."
+            : "Draft claim. Not registered.",
+      };
+    }
+    case "cover_check": {
+      const c = facts.claim?.claim;
+      const on = c?.incident_on ?? "the incident date";
+      const found = facts.coverOnIncident ?? null;
+      const sentence = coverReviewSentence(
+        found
+          ? {
+              found: true,
+              className: found.className,
+              insurerName: found.insurerName,
+              version: found.version,
+              on,
+            }
+          : { found: false, on },
+      );
+      const rpcs = c
+        ? [
+            {
+              name: "claim_set_cover_review",
+              args: {
+                p_claim_id: c.id,
+                p_review: sentence,
+                p_version_id: found?.versionId ?? null,
+              },
+            },
+          ]
+        : [];
+      return {
+        events: [`Finding the policy version effective on ${on}`, sentence],
+        rpcs,
+        pause: null,
+        drafts: [],
+        note: sentence,
+      };
+    }
+    case "clock": {
+      const c = facts.claim?.claim;
+      const state = c
+        ? clockState(c, facts.today ?? new Date().toISOString().slice(0, 10))
+        : { started: false as const, reason: "Clock not started: no claim record." };
+      const line = state.started
+        ? `Clock running: ${state.days} days from ${state.startEvent.replaceAll("_", " ")} on ${state.startOn} (${state.clause}, page ${state.page}); due ${state.dueOn}; today is day ${state.dayOf}.`
+        : state.reason;
+      return {
+        events: ["Looking for a wording clause with its page, and a verified start event", line],
+        pause: null,
+        drafts: [],
+        note: line,
+      };
+    }
+    case "classify": {
+      const e = facts.endorsement?.endorsement;
+      if (!e)
+        return {
+          events: ["No endorsement record found for this item"],
+          pause: {
+            nextStep: "Check this item",
+            blockedReason: "The endorsement record is missing.",
+          },
+          drafts: [],
+          note: null,
+        };
+      const kind = e.kind ?? classifyEndorsementRequest(e.request_text);
+      if (!kind) {
+        return {
+          events: ["Reading the request as received", "The kind of change is ambiguous"],
+          pause: {
+            nextStep: "Say what kind of change this is",
+            blockedReason: "Ambiguous request: it could be more than one kind of change.",
+          },
+          drafts: [],
+          note: null,
+        };
+      }
+      return {
+        events: ["Reading the request as received", `Classified as: ${kind.replaceAll("_", " ")}`],
+        rpcs: e.kind
+          ? []
+          : [
+              {
+                name: "endorsement_update",
+                args: { p_id: e.id, p_kind: kind, p_effective_on: null, p_items: null },
+              },
+            ],
+        pause: null,
+        drafts: [],
+        note: `Classified as ${kind.replaceAll("_", " ")}.`,
+      };
+    }
+    case "requirements": {
+      const e = facts.endorsement?.endorsement;
+      if (!e)
+        return {
+          events: ["No endorsement record found"],
+          pause: {
+            nextStep: "Check this item",
+            blockedReason: "The endorsement record is missing.",
+          },
+          drafts: [],
+          note: null,
+        };
+      const missing = endorsementRequirementsMissing(e);
+      if (
+        e.kind === "transfer_ownership" &&
+        !(e.instruction_from === "policyholder" && e.instruction_reference)
+      ) {
+        const who = e.requested_by_name ?? "someone other than the policyholder";
+        return {
+          events: ["Checking what the insurer will need", TRANSFER_NEEDS_POLICYHOLDER],
+          pause: {
+            nextStep: "Record the policyholder's own instruction",
+            blockedReason: `${TRANSFER_NEEDS_POLICYHOLDER} This request came from ${who}; it is recorded, not acted on.`,
+          },
+          drafts: [],
+          note: null,
+        };
+      }
+      if (missing.length > 0) {
+        return {
+          events: ["Checking what the insurer will need", `Missing: ${missing.join("; ")}`],
+          pause: {
+            nextStep: `Add ${missing.join(", ")}`,
+            blockedReason: `Missing: ${missing.join("; ")}.`,
+          },
+          drafts: [],
+          note: null,
+        };
+      }
+      return {
+        events: [
+          "Checking what the insurer will need",
+          `Ready: ${e.items.length} item${e.items.length === 1 ? "" : "s"} effective ${e.effective_on}`,
+        ],
         pause: null,
         drafts: [],
         note: null,
@@ -169,6 +353,10 @@ export function createExecutor(deps: {
         });
         if (error) throw new Error(error.message);
         await sleep(deps.delayMs);
+      }
+      for (const call of plan.rpcs ?? []) {
+        const { error } = await db.rpc(call.name, call.args);
+        if (error) throw new Error(error.message);
       }
       for (const d of plan.drafts) {
         const { error } = await db.rpc("draft_create", {

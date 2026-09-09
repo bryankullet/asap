@@ -17,9 +17,23 @@ export function AskComposer() {
   const [pending, setPending] = useState<CreateWorkItemResponse | CreateClientResponse | null>(
     null,
   );
+  const [lastRequest, setLastRequest] = useState<{
+    kind: "claim" | "endorsement";
+    clientName: string;
+    requestText?: string;
+    incidentSummary?: string;
+  } | null>(null);
   const renew = useMutation({
-    mutationFn: (input: { clientName?: string; clientId?: string }) =>
-      api.createWorkItem({ kind: "renewal", insurers: [], ...input }),
+    mutationFn: (input: {
+      kind?: "renewal" | "claim" | "endorsement";
+      clientName?: string;
+      clientId?: string;
+      policyId?: string;
+      requestText?: string;
+      incidentOn?: string;
+      incidentSummary?: string;
+      source?: "ask";
+    }) => api.createWorkItem({ kind: input.kind ?? "renewal", insurers: [], ...input }),
     onSuccess: (res) => {
       setLast(null);
       if (res.outcome === "opened") {
@@ -64,6 +78,33 @@ export function AskComposer() {
       renew.mutate({ clientName: m[1].trim() });
       return;
     }
+    // "Claim for <client>": a draft claim, today's date, the words typed as the report; a person registers it.
+    const cm = /^claim\s+(?:for\s+)?(.+?)(?::\s*(.+))?$/i.exec(text);
+    if (cm?.[1]) {
+      setPending(null);
+      setLastRequest({
+        kind: "claim",
+        clientName: cm[1].trim(),
+        incidentSummary: cm[2]?.trim() || `Reported through Ask: ${text}`,
+      });
+      renew.mutate({
+        kind: "claim",
+        clientName: cm[1].trim(),
+        incidentOn: new Date().toISOString().slice(0, 10),
+        incidentSummary: cm[2]?.trim() || `Reported through Ask: ${text}`,
+        source: "ask",
+      });
+      return;
+    }
+    // "Endorse <client>: <request>" or "Change <client>'s policy: <request>"
+    const em = /^(?:endorse|change)\s+(.+?)(?:'s policy)?(?::\s*(.+))?$/i.exec(text);
+    if (em?.[1]) {
+      setPending(null);
+      const requestText = em[2]?.trim() || text;
+      setLastRequest({ kind: "endorsement", clientName: em[1].trim(), requestText });
+      renew.mutate({ kind: "endorsement", clientName: em[1].trim(), requestText });
+      return;
+    }
     ask.mutate(text);
   }
 
@@ -104,6 +145,33 @@ export function AskComposer() {
             </button>
           ))}
         </div>
+      )}
+      {pending?.outcome === "ambiguous_policy" && (
+        <div className="flex flex-col gap-1 text-sm" aria-live="polite">
+          <p className="text-ink-secondary">Which policy?</p>
+          {pending.candidates.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="text-left text-ink hover:underline"
+              onClick={() =>
+                renew.mutate({
+                  kind: "endorsement",
+                  clientId: pending.clientId,
+                  policyId: p.id,
+                  requestText: lastRequest?.requestText ?? q,
+                })
+              }
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {pending?.outcome === "no_policy" && (
+        <p className="text-sm text-ink-secondary" aria-live="polite">
+          {pending.intent.answer}
+        </p>
       )}
       {pending?.outcome === "no_client" && (
         <div className="flex flex-col gap-1 text-sm" aria-live="polite">

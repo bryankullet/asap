@@ -4,6 +4,7 @@ import { DraftRow } from "../draft.js";
 import { UiIntent } from "../intent.js";
 import { RunEventRow, RunRow, WorkItemKind, WorkItemRow } from "../work.js";
 import { uuidSchema } from "./common.js";
+import { claimDetailSchema, endorsementDetailSchema } from "./servicing.js";
 
 /**
  * `POST /work-items` — Phase 2 creates renewals only. The client is matched by normalised name
@@ -11,16 +12,28 @@ import { uuidSchema } from "./common.js";
  */
 export const createWorkItemRequestSchema = z
   .object({
-    kind: WorkItemKind.extract(["renewal"]),
+    kind: WorkItemKind.extract(["renewal", "claim", "endorsement"]),
     clientName: z.string().trim().min(1).max(200).optional(),
     clientId: uuidSchema.optional(),
-    /** Insurers to request terms from. May be empty; the review run then pauses and asks. */
+    /** renewal: insurers to request terms from. May be empty; the review run then pauses and asks. */
     insurers: z.array(z.string().trim().min(1).max(100)).max(10).default([]),
+    /** claim: the incident as the client reported it. `email` keeps the claim a draft until a person registers it. */
+    incidentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    incidentSummary: z.string().trim().min(1).max(4000).optional(),
+    source: z.enum(["email", "manual", "ask"]).optional(),
+    /** endorsement: the policy (or the client's only policy), the request in its own words, who asked. */
+    policyId: uuidSchema.optional(),
+    requestText: z.string().trim().min(1).max(4000).optional(),
+    requestedBy: z.enum(["policyholder", "other"]).optional(),
+    requestedByName: z.string().trim().max(200).optional(),
+    effectiveOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   })
   .refine((v) => v.clientName !== undefined || v.clientId !== undefined, {
     message: "clientName or clientId is required",
     path: ["clientName"],
-  });
+  })
+  .refine((v) => v.kind !== "claim" || (v.incidentOn && v.incidentSummary), { message: "a claim needs incidentOn and incidentSummary", path: ["incidentOn"] })
+  .refine((v) => v.kind !== "endorsement" || v.requestText, { message: "an endorsement needs requestText", path: ["requestText"] });
 export type CreateWorkItemRequest = z.infer<typeof createWorkItemRequestSchema>;
 
 const clientCandidateSchema = z.object({
@@ -44,6 +57,14 @@ export const createWorkItemResponseSchema = z.discriminatedUnion("outcome", [
   }),
   /** No client: the only action offered is creating one, through the H05 path with duplicate review. */
   z.object({ outcome: z.literal("no_client"), name: z.string(), intent: UiIntent }),
+  /** endorsement: the client has several policies — ask which. */
+  z.object({
+    outcome: z.literal("ambiguous_policy"),
+    clientId: uuidSchema,
+    candidates: z.array(z.object({ id: uuidSchema, label: z.string() })),
+  }),
+  /** endorsement: no policy on file for this client. Nothing is created. */
+  z.object({ outcome: z.literal("no_policy"), clientId: uuidSchema, intent: UiIntent }),
 ]);
 export type CreateWorkItemResponse = z.infer<typeof createWorkItemResponseSchema>;
 
@@ -71,6 +92,10 @@ export const actRequestSchema = z.object({
   inceptionAt: z.string().datetime({ offset: true }).optional(),
   /** approve: principal-officer override of client_file_cleared, with a typed reason (audited). */
   override: z.object({ reason: z.string().trim().min(1).max(1000) }).optional(),
+  /** claim match step: the policy period the person chose. */
+  policyPeriodId: uuidSchema.optional(),
+  /** claim response step: a call note can never stand in for the insurer's written response. */
+  evidenceKind: z.enum(["document", "call_note"]).optional(),
 });
 export type ActRequest = z.infer<typeof actRequestSchema>;
 
@@ -95,6 +120,8 @@ export const workItemResponseSchema = z.object({
   item: WorkItemRow,
   runs: z.array(RunRow),
   drafts: z.array(DraftRow),
+  claim: z.lazy(() => claimDetailSchema).nullable().default(null),
+  endorsement: z.lazy(() => endorsementDetailSchema).nullable().default(null),
 });
 export type WorkItemResponse = z.infer<typeof workItemResponseSchema>;
 

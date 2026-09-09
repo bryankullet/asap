@@ -30,6 +30,7 @@ export function WorkItemView({
   runs,
   actions = null,
   live = null,
+  aside = null,
 }: {
   item: WorkItemRow;
   runs: RunRow[];
@@ -37,6 +38,8 @@ export function WorkItemView({
   actions?: ReactNode;
   /** Messages from a run in progress, streamed. */
   live?: string[] | null;
+  /** The record behind the item (claim, endorsement), rendered beside the steps. */
+  aside?: ReactNode;
 }) {
   return (
     <article className="flex flex-col gap-6">
@@ -139,6 +142,8 @@ export function WorkItemView({
           evidence.
         </p>
       </Card>
+
+      {aside}
 
       {runs.length > 0 && (
         <Card className="flex flex-col gap-3">
