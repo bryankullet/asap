@@ -21,7 +21,7 @@ import { Onboarding } from "./pages/Onboarding.js";
 import { Record } from "./pages/Record.js";
 import { SignIn } from "./pages/SignIn.js";
 import { SignUp } from "./pages/SignUp.js";
-import { Today } from "./pages/Today.js";
+import { Discover } from "./pages/Discover.js";
 import { Work } from "./pages/Work.js";
 import { Shell } from "./shell/Shell.js";
 
@@ -84,10 +84,24 @@ const index = createRoute({
   getParentRoute: () => shell,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/today", replace: true });
+    throw redirect({ to: "/discover", replace: true });
   },
 });
-const today = createRoute({ getParentRoute: () => shell, path: "/today", component: Today });
+const discover = createRoute({
+  getParentRoute: () => shell,
+  path: "/discover",
+  component: Discover,
+  /** `?ask=` pre-fills the docked composer, so a Discover card can open Ask on its own context. */
+  validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
+});
+/** D-060 renamed Today to Discover. Existing links, bookmarks and `?next=` values keep working. */
+const legacyToday = createRoute({
+  getParentRoute: () => shell,
+  path: "/today",
+  beforeLoad: () => {
+    throw redirect({ to: "/discover", replace: true });
+  },
+});
 const work = createRoute({
   getParentRoute: () => shell,
   path: "/work",
@@ -159,7 +173,8 @@ export const routeTree = rootRoute.addChildren([
     member.addChildren([
       shell.addChildren([
         index,
-        today,
+        discover,
+        legacyToday,
         work,
         automations,
         automationDetail,

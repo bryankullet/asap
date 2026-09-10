@@ -7,12 +7,18 @@ Two brokerages, seven people, one deliberate consultant who belongs to both. Pas
 in `docs/staging-users.md`. The data is `supabase/seed.sql`, applied to hosted; every row named here
 was read back from hosted through RLS as the user named.
 
-Ranking is not a preference. Today shows **Needs you** (task status `needs_you`) and **Checks due**
-(`with_party` whose next check has passed), in that order. Everything else lives in Work.
+Ranking is not a preference. Discover (renamed from Today by D-060, at `/discover`) shows **Needs
+you** (task status `needs_you`) and **Checks due** (`with_party` whose next check has passed), in
+that order. Everything else lives in Work.
+
+**Inside a section the order is the deterministic signal score** from `apps/api/src/attention/signals.ts`,
+not recency: a blocked step, a run that could not finish and an overdue check outrank an item that
+is merely recent. Every card's "Why here?" lists the signals that ranked it, each naming the row it
+came from, so the order can be checked against the record. No model produces a score or a fact.
 
 ---
 
-## 1. What Today shows, per user
+## 1. What Discover shows, per user
 
 ### Amina Otieno — `admin@acme-brokers.test` — Acme Insurance Brokers, brokerage administrator
 
@@ -29,7 +35,7 @@ Five cards. Four under **Needs you**, one under **Checks due**.
 Card 4 also carries a red footer: **ASAP could not finish: Check this file.** That is run
 `40000000-…-000000000003` (Certificate extraction), which stopped and left the item needing a person.
 
-Not on Today, by design: **Acme Motors — Q2 statement reconciled** (done, in Work → Done).
+Not on Discover, by design: **Acme Motors — Q2 statement reconciled** (done, in Work → Done).
 
 ### Brian Kamau — `ae@acme-brokers.test` — Acme, account executive
 
@@ -38,7 +44,7 @@ only a brokerage administrator can.
 
 ### Cynthia Wanjiru — `finance@acme-brokers.test` — Acme, finance officer
 
-The same five cards. Today is the brokerage's work, not a personal queue; ownership shows on the
+The same five cards. Discover is the brokerage's work, not a personal queue; ownership shows on the
 record, not by hiding rows.
 
 ### David Mwangi — `admin@beta-risk.test` — Beta Risk Partners, brokerage administrator
@@ -50,7 +56,7 @@ One card, under **Needs you**:
 | Otieno household — new business quote | Needs you | Choose and recommend (you) | Three quotes are back; a recommendation is waiting for you. |
 
 **Beta Risk — CIC premium statement** is `with_party` CIC with its next check a month out, so it is
-in Work → With others, not on Today. Nothing of Acme's is visible anywhere, at any time.
+in Work → With others, not on Discover. Nothing of Acme's is visible anywhere, at any time.
 
 ### Esther Njeri — `ae@beta-risk.test` and Felix Odhiambo — `finance@beta-risk.test`
 
@@ -60,7 +66,7 @@ The same single Beta card as David.
 
 She signs in to **Acme Insurance Brokers** (read-only) and sees Amina's five cards. The profile
 control at the bottom of the sidebar offers both brokerages; switching to **Beta Risk Partners**
-(account executive) replaces Today with David's single card. She is the isolation counterexample:
+(account executive) replaces Discover with David's single card. She is the isolation counterexample:
 one session, two brokerages, never both at once, and a different role in each. As read-only in Acme
 she can open everything and change nothing; the action buttons are absent, not merely disabled.
 
@@ -91,7 +97,7 @@ and what is still to come; the current step carries its actions.
 
   For Amina only, a second panel appears offering an override in her own words, because she is the
   principal officer. Overriding writes a permanent audit entry and puts an exception item on her
-  Today. Brian sees the block and no override.
+  Discover. Brian sees the block and no override.
 - **KDA 482A — certificate.** *Allocate a number* is now. The stopped run is named on the record with
   its next step.
 - **Acme Motors — renewal.** *Terms received* is with Jubilee. The record offers a draft chaser; a
@@ -106,7 +112,7 @@ Run these in order as **Amina**. Each step says what must happen.
 1. **Sign in** at `/sign-in` with `admin@acme-brokers.test`. You land on `/today`. You are never
    asked which brokerage: you belong to one, so the server chose it. The profile control at the
    bottom of the sidebar reads **Acme Insurance Brokers / Amina Otieno**, never "Choose a brokerage".
-2. **Read Today.** Five cards, in the two sections and the order in §1. Not an empty state.
+2. **Read Discover.** Five cards, in the two sections and the order in §1. Not an empty state.
 3. **Press "Why here?"** on the placement card. It reveals: *Approval is blocked until Acme Motors'
    client file is cleared.* Every card has this control and every one gives a reason.
 4. **Open the placement** (`/r/30000000-0000-4000-8000-000000000005`). Seven steps, *Placement
@@ -127,7 +133,7 @@ Run these in order as **Amina**. Each step says what must happen.
     changes. Open the policy afterwards: version 2 is in force from 1 October, version 1 is kept and
     ended 30 September, and KDD 111A appears on version 2 as **not covered**, with Jubilee's reason.
 12. **Sign out from the profile control.** Sign back in as `shared@consultant.test`: Grace lands in
-    Acme, and the profile control offers both brokerages. Switch to Beta Risk Partners: Today becomes
+    Acme, and the profile control offers both brokerages. Switch to Beta Risk Partners: Discover becomes
     the single Otieno card and no Acme row is reachable, by link or by search.
 
 ---

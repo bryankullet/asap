@@ -41,7 +41,7 @@ export function Shell() {
 
   const brand = (
     <Link
-      to="/today"
+      to="/discover"
       className="flex items-center gap-2.5 font-heading text-base font-bold tracking-[0.15em] text-ink"
     >
       <span

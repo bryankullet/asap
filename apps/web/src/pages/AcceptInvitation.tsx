@@ -26,7 +26,7 @@ export function AcceptInvitation() {
     onSuccess: async ({ organization_id }) => {
       await api.setActiveOrganization(organization_id);
       await invalidate();
-      void navigate({ to: "/today", replace: true });
+      void navigate({ to: "/discover", replace: true });
     },
   });
 

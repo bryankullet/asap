@@ -11,7 +11,7 @@ Version 2 fixed how the product is *navigated and labelled*. Version 3 fixes wha
 5. Money that arrives with no reference and belongs to nobody
 6. Money owed *to* insurers, aged, with the brokerage's own regulatory exposure
 
-The count goes from 48 surfaces to 60. **The shell does not change.** There are still three destinations. Nothing below becomes a fourth.
+The count goes from 48 surfaces to 60. **The shell does not change.** There are still three destinations. Nothing below becomes a fourth. *(D-060 renamed destination 1 from Today to Discover. The count is what this rule fixes, and it is unchanged; Jobs is still not a destination.)*
 
 ---
 
@@ -21,7 +21,7 @@ The count goes from 48 surfaces to 60. **The shell does not change.** There are 
 
 | Position | Label | Screen |
 |---|---|---|
-| 1 | **Today** | H01 |
+| 1 | **Discover** | H01 |
 | 2 | **Work** | H03 |
 | 3 | **Automations** | A01 |
 
@@ -126,7 +126,7 @@ Without this rule, a levy-inclusive statement compared against a base-premium co
 
 ## 4.1 Client due diligence — K01, K02, K03
 
-*User-facing name: **Client files**. Reached from Ask, from the client record, and from Today when a file blocks live work. Not a destination.*
+*User-facing name: **Client files**. Reached from Ask, from the client record, and from Discover when a file blocks live work. Not a destination.*
 
 ### K01 — Client files register
 - **Purpose:** every client, the state of their file, and what is blocking what.
@@ -155,7 +155,7 @@ Without this rule, a levy-inclusive statement compared against a base-premium co
 
 Enforced at X01 (approval), not in the interface alone — the check runs again at the moment the action executes. The approval screen shows the block with a direct link to K02, and the reason is written in plain words: *We cannot instruct cover for a client whose file is not complete.*
 
-An override exists for the principal officer only, requires a written reason, and creates a permanent audit entry that appears on Josphat's Today.
+An override exists for the principal officer only, requires a written reason, and creates a permanent audit entry that appears on Josphat's Discover.
 
 **New skills:** `kyc.check`, `kyc.collect`, `kyc.verify`, `kyc.screen`, `kyc.review_match`, `kyc.decide`, `kyc.refresh_due`, `kyc.gate`, `kyc.backfill`.
 
@@ -209,7 +209,7 @@ A motor certificate is closer to a cheque book than to a document. Numbers are a
 
 ## 4.4 Money that belongs to nobody — N01
 
-*User-facing name: **Money we can't place**. Reached from the reconciliation work item (S13), from Today when the balance grows, and from Ask.*
+*User-facing name: **Money we can't place**. Reached from the reconciliation work item (S13), from Discover when the balance grows, and from Ask.*
 
 ### N01 — Unidentified receipts
 - **Purpose:** hold money that has arrived and cannot yet be attributed.
@@ -217,7 +217,7 @@ A motor certificate is closer to a cheque book than to a document. Numbers are a
 - **Actions:** attribute to a client, policy or invoice; split across several; ask the client which invoice it was for (drafted, human-sent); leave it held with a note.
 - **The total is shown prominently.** Unattributed money in the bank is a real liability, not a rounding item.
 - **Restricted:** ASAP may propose a match but may never attribute a receipt on its own. Attributing money to the wrong client is worse than leaving it unattributed.
-- **Ageing:** receipts held over a threshold appear on the finance owner's Today with how long they have been sitting there.
+- **Ageing:** receipts held over a threshold appear on the finance owner's Discover with how long they have been sitting there.
 - **Failure behaviour:** where a receipt cannot be identified at all, it stays here indefinitely. It is never written to a suspense line and forgotten.
 
 **New skills:** `money.unidentified`, `money.suggest_attribution`, `money.attribute_receipt`, `money.split_receipt`, `money.hold_receipt`, `money.aged_unidentified`.
@@ -226,7 +226,7 @@ A motor certificate is closer to a cheque book than to a document. Numbers are a
 
 ## 4.5 Money going out — N02, N03, N04
 
-*User-facing name: **What we owe** and **Tax certificates**. Reached from an insurer record, from Ask, and from Today when a settlement is due.*
+*User-facing name: **What we owe** and **Tax certificates**. Reached from an insurer record, from Ask, and from Discover when a settlement is due.*
 
 ### N02 — Insurer account
 - **Purpose:** the whole two-way position with one insurer.
@@ -258,14 +258,14 @@ A motor certificate is closer to a cheque book than to a document. Numbers are a
 
 | ID | Screen | Surface | Shown as |
 |---|---|---|---|
-| K01 | Client files register | Reached from Ask, client record, Today | Client files |
+| K01 | Client files register | Reached from Ask, client record, Discover | Client files |
 | K02 | A client's due diligence file | Opens from K01 and the client record | The client's own name |
 | K03 | Screening match review | Panel from K02 | — |
 | G01 | Insurer agreements register | Company settings | Insurer agreements |
 | G02 | An agreement version | Opens from G01 and from a commission dispute | The insurer's name |
 | T01 | Certificate stock | Company settings and policy servicing | Certificates |
 | T02 | A certificate | Opens from T01 and from a policy | The certificate number |
-| N01 | Unidentified receipts | Reached from S13, Today, Ask | Money we can't place |
+| N01 | Unidentified receipts | Reached from S13, Discover, Ask | Money we can't place |
 | N02 | Insurer account | Reached from an insurer record and Ask | The insurer's name |
 | N03 | Settlement run | Opens from N02 | What we owe ⟨insurer⟩ |
 | N04 | Tax certificates | Reached from N02, closure checks, Ask | Tax certificates |

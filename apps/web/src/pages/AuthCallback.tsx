@@ -13,7 +13,7 @@ export function AuthCallback() {
   useEffect(() => {
     if (loading) return;
     if (session)
-      void navigate({ to: next && next.startsWith("/") ? next : "/today", replace: true });
+      void navigate({ to: next && next.startsWith("/") ? next : "/discover", replace: true });
     else void navigate({ to: "/sign-in", replace: true });
   }, [loading, session, next, navigate]);
 

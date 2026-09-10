@@ -22,10 +22,13 @@ export function WorkCard({
   footer,
   reason,
   nowStep,
+  context,
 }: {
   item: WorkItemRow;
   showWhy?: boolean;
   footer?: ReactNode;
+  /** Client and period of cover, when policy context matters (Architecture section 3A). */
+  context?: ReactNode;
   /** The reason the API gave for this item appearing. Falls back to the row's own. */
   reason?: string;
   /** The step the API named as waiting, so the card need not re-derive it. */
@@ -45,6 +48,7 @@ export function WorkCard({
             </Link>
           </h3>
         </CardHeadline>
+        {context}
         {now && (
           <p className="text-sm text-ink-secondary">
             Now: {now.label}{" "}

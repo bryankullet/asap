@@ -14,10 +14,11 @@ import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
  * Renders a component inside a memory router with the shell's routes registered (so <Link to>
  * resolves) but no data layer. Views under test are pure and take fixtures as props.
  */
-export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
+export async function renderInRouter(ui: ReactNode, initialPath = "/discover") {
   const root = createRootRoute({ component: () => <Outlet /> });
   const page = () => <div data-testid="routed">{ui}</div>;
   const routes = [
+    "/discover",
     "/today",
     "/work",
     "/automations",
@@ -82,10 +83,29 @@ export function attentionFixture(
     list.map((item, i) => ({
       section,
       rank: i + 1,
+      // A view fixture does not re-implement the signal table; it carries one honest signal so the
+      // shape is real. The scoring itself is proven in apps/api/test/attention.test.ts.
+      score: 24,
       item,
       reason: item.reason ?? `${step(item)?.label ?? "This item"} is the step waiting.`,
+      signals: [
+        {
+          id: "evidence_missing" as const,
+          because: `${step(item)?.label ?? "This item"} is the step waiting on a person.`,
+          points: 24,
+        },
+      ],
       nowStep: step(item),
+      client: null,
+      period: null,
+      facts: [],
       runFailure: byItem.get(item.id) ? fail(byItem.get(item.id)!) : null,
+      links: {
+        work: `/r/${item.id}`,
+        client: item.client_id ? `/files/${item.client_id}` : null,
+        policy: null,
+        ask: item.title,
+      },
     }));
   const needsYou = items.filter((i) => i.task_status === "needs_you");
   const checksDue = items.filter(
@@ -111,6 +131,7 @@ export function attentionFixture(
     orphanRuns: stuck
       .filter((r) => !r.work_item_id || !needsYouIds.has(r.work_item_id))
       .map(fail),
-    cap: 25,
+    degraded: [],
+    cap: 12,
   };
 }

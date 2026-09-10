@@ -31,7 +31,7 @@ export function SignIn() {
       );
       return;
     }
-    void navigate({ to: next ?? "/today", replace: true });
+    void navigate({ to: next ?? "/discover", replace: true });
   }
 
   async function magicLink() {

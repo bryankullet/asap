@@ -4,7 +4,7 @@ Ported from the v4 prototype's `interaction-contract.md` (UI Build Spec v1, Part
 
 ## Navigation
 
-The visible destinations are **Today**, **Work** and **Automations**, in that order. **Ask** sits after them and is always available. The **Activity chip** comes last and renders only while a run is working, paused, or finished this session. New and Search are utilities. Profile stays at the bottom. Internal recipe names and insurance modules (Clients, Policies, Renewals, Claims, Money) are never navigation labels (Architecture v3.1 §45).
+The visible destinations are **Discover**, **Work** and **Automations**, in that order (D-060 renamed Today; the count is unchanged). **Ask** sits after them and is always available. The **Activity chip** comes last and renders only while a run is working, paused, or finished this session. New and Search are utilities. Profile stays at the bottom. Internal recipe names and insurance modules (Clients, Policies, Renewals, Claims, Money) are never navigation labels (Architecture v3.1 §45).
 
 Work has four views: **Needs you**, **With others**, **Recent** and **Done**. Pinned is a personal marker, not a view. A title names the outcome or the record, never its internal recipe.
 
@@ -15,6 +15,7 @@ Each status word belongs to one layer only (`packages/schema/src/status.ts`; the
 | Layer | Allowed labels | Position |
 |---|---|---|
 | Task | Needs you · With {party} since {date} · In progress · Done | Card headline, record header |
+| Evidence | Known · Inferred · Conflicting · Missing · Stale · Waiting for verification | Beside a fact, never in a status slot (D-060) |
 | Run | Working · Paused · Finished · Couldn't finish · Stopped | Activity panel, run detail |
 | Cover | Draft · Requested · Submitted · Confirmed · Active cover · Expired · Cancelled | Policy period line |
 | Money | Not invoiced · Unpaid · Part paid · Paid · Received · Reconciled · Disputed · Due to insurer · Settled | Money row |
@@ -41,7 +42,7 @@ Reads go through `supabase-js` under RLS with the user's session. Domain writes 
 
 ## Mapping from the v1 catalogue
 
-H01 maps to Today. H03 and S16 combine as the Work views. J01 maps to the optional Activity panel; J02 remains run detail. Other task recipes are reached through Ask, Search, New and related work. Status and navigation wording here supersedes earlier catalogue wording.
+H01 maps to Discover (D-060; it was Today). H03 and S16 combine as the Work views. J01 maps to the optional Activity panel; J02 remains run detail. Other task recipes are reached through Ask, Search, New and related work. Status and navigation wording here supersedes earlier catalogue wording.
 
 ## What code checks do not prove
 

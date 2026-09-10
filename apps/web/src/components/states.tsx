@@ -68,3 +68,46 @@ export function ErrorState({ what, retry }: { what: string; retry?: () => void }
 export function Stale({ from }: { from: string }) {
   return <p className="text-xs text-ink-muted">Data from {from}.</p>;
 }
+
+/**
+ * Something the caller's role does not include. It names what and why, and never renders a blank
+ * where a value would be (ui-contract: "a restricted field says 'Not available to your role'").
+ */
+export function PermissionNotice({ what, role }: { what: string; role?: string | undefined }) {
+  return (
+    <Card role="status" variant="quiet" className="flex flex-col gap-1">
+      <CardTitle>{what} is not available to your role</CardTitle>
+      <CardDescription>
+        {role ? `Your role in this brokerage is ${role}. ` : ""}
+        Nothing is hidden without saying so. Ask a brokerage administrator if you need it.
+      </CardDescription>
+    </Card>
+  );
+}
+
+/**
+ * Part of the answer could not be read. The rest is shown rather than thrown away — §36's
+ * partial-success state, which is the honest alternative to a blank screen or a silent gap.
+ */
+export function PartialSuccess({
+  parts,
+}: {
+  parts: { what: string; because: string }[];
+}) {
+  if (parts.length === 0) return null;
+  return (
+    <Card role="status" variant="attention" className="flex flex-col gap-1.5">
+      <CardTitle>Some of this could not be loaded</CardTitle>
+      <CardDescription>
+        Everything else below is current. What is missing is named, not guessed at.
+      </CardDescription>
+      <ul className="flex flex-col gap-1 text-sm text-ink-secondary">
+        {parts.map((p) => (
+          <li key={p.what}>
+            <span className="text-ink">{p.what}</span> — {p.because}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}

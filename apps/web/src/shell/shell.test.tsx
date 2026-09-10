@@ -10,7 +10,7 @@ import type { RunRow, WorkItemRow } from "@asap/schema";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkItemView } from "../views/RecordViews.js";
-import { TodayView } from "../views/TodayView.js";
+import { DiscoverView } from "../views/DiscoverView.js";
 import { attentionFixture, renderInRouter } from "../test-utils.js";
 import { NAV, NEVER_NAV } from "./nav.js";
 import { ProfileMenu } from "./ProfileMenu.js";
@@ -124,15 +124,19 @@ const RUNS: RunRow[] = [
 ];
 
 describe("shell navigation", () => {
-  it("renders Today, Work, Automations in that order (checks.mjs line 26)", async () => {
+  it("renders Discover, Work, Automations in that order (checks.mjs line 26; D-060)", async () => {
     expect(NAV.map((n) => [n.to, n.glyph, n.label])).toEqual([
-      ["/today", "☀", "Today"],
+      ["/discover", "✦", "Discover"],
       ["/work", "▣", "Work"],
       ["/automations", "⟳", "Automations"],
     ]);
     await renderInRouter(<ShellNav />);
     const links = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link");
-    expect(links.map((l) => l.textContent?.trim())).toEqual(["☀Today", "▣Work", "⟳Automations"]);
+    expect(links.map((l) => l.textContent?.trim())).toEqual([
+      "✦Discover",
+      "▣Work",
+      "⟳Automations",
+    ]);
   });
 
   it("never offers an insurance module as a destination", async () => {
@@ -143,14 +147,14 @@ describe("shell navigation", () => {
   });
 });
 
-describe("Today with Activity hidden (checks.mjs line 19)", () => {
+describe("Discover with Activity hidden (checks.mjs line 19)", () => {
   it("shows the item that needs you and a Why here? control", async () => {
-    // TodayView never renders the Activity chip; a run that could not finish reaches Today through its work item.
-    await renderInRouter(<TodayView data={attentionFixture(FIXTURES, RUNS, "Acme")} />);
+    // DiscoverView never renders the Activity chip; a run that could not finish reaches Discover through its work item.
+    await renderInRouter(<DiscoverView data={attentionFixture(FIXTURES, RUNS, "Acme")} />);
     expect(screen.getByText(/KDA 482A/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Why here?" }).length).toBeGreaterThan(0);
     expect(screen.getByText(/could not finish: Check this file/)).toBeInTheDocument();
-    // The overdue check with Jubilee is on Today too, named with its party.
+    // The overdue check with Jubilee is on Discover too, named with its party.
     expect(screen.getByText(/With Jubilee since/)).toBeInTheDocument();
   });
 });

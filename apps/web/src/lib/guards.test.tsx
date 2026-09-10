@@ -39,7 +39,7 @@ function mount() {
     <QueryClientProvider client={new QueryClient()}>
       <RequireMembership />
     </QueryClientProvider>,
-    "/today",
+    "/discover",
   );
 }
 
@@ -55,7 +55,7 @@ describe("RequireMembership", () => {
     const a = org(A, "Acme Insurance Brokers");
     meState.data = { user, memberships: [a], active_organization: a.organization, permissions: [] };
     const { router } = await mount();
-    expect(router.state.location.pathname).toBe("/today");
+    expect(router.state.location.pathname).toBe("/discover");
     expect(screen.queryByText(/Which brokerage/)).toBeNull();
   });
 

@@ -1,5 +1,5 @@
 /**
- * Today's acceptance fixture (docs/click-through.md). The rows below are the rows Amina Otieno
+ * Discover's acceptance fixture (docs/click-through.md). The rows below are the rows Amina Otieno
  * actually receives from hosted through RLS — copied from the live query, not invented — so this
  * test fails if the seed stops producing the five cards the click-through document promises.
  */
@@ -7,7 +7,7 @@ import type { RunRow, WorkItemRow } from "@asap/schema";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { attentionFixture, renderInRouter } from "../test-utils.js";
-import { TodayView } from "./TodayView.js";
+import { DiscoverView } from "./DiscoverView.js";
 
 const ORG = "10000000-0000-4000-8000-00000000000a";
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
@@ -111,9 +111,9 @@ const RUNS: RunRow[] = [
   },
 ];
 
-describe("Amina's Today (acceptance)", () => {
+describe("Amina's Discover (acceptance)", () => {
   it("shows five cards: four that need her and one check that is due", async () => {
-    await renderInRouter(<TodayView data={attentionFixture(ITEMS, RUNS)} />);
+    await renderInRouter(<DiscoverView data={attentionFixture(ITEMS, RUNS)} />);
     expect(screen.getAllByTestId("work-card")).toHaveLength(5);
 
     const needsYou = screen.getByRole("region", { name: "Needs you" });
@@ -128,7 +128,7 @@ describe("Amina's Today (acceptance)", () => {
   });
 
   it("names every item and the step that is waiting", async () => {
-    await renderInRouter(<TodayView data={attentionFixture(ITEMS, RUNS)} />);
+    await renderInRouter(<DiscoverView data={attentionFixture(ITEMS, RUNS)} />);
     for (const title of [
       "Jane Wanjiku — claim, incident 2 September",
       "Acme Motors — add KDC 900T to the Motor commercial policy",
@@ -141,7 +141,7 @@ describe("Amina's Today (acceptance)", () => {
   });
 
   it("gives every card a Why here? that states the reason", async () => {
-    await renderInRouter(<TodayView data={attentionFixture(ITEMS, RUNS)} />);
+    await renderInRouter(<DiscoverView data={attentionFixture(ITEMS, RUNS)} />);
     const why = screen.getAllByRole("button", { name: "Why here?" });
     expect(why).toHaveLength(5);
     for (const b of why) fireEvent.click(b);
@@ -157,7 +157,7 @@ describe("Amina's Today (acceptance)", () => {
   });
 
   it("says on the certificate card that ASAP could not finish, and why", async () => {
-    await renderInRouter(<TodayView data={attentionFixture(ITEMS, RUNS)} />);
+    await renderInRouter(<DiscoverView data={attentionFixture(ITEMS, RUNS)} />);
     expect(screen.getByText(/ASAP could not finish: Check this file\./)).toBeInTheDocument();
   });
 });

@@ -37,6 +37,6 @@ describe("CreateOrganization double submit", () => {
     expect(sent.request_key).toMatch(/^[0-9a-f-]{36}$/);
 
     resolve({ organization_id: "40000000-0000-4000-8000-000000000001" });
-    await waitFor(() => expect(router.state.location.pathname).toBe("/today"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/discover"));
   });
 });

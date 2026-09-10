@@ -496,3 +496,29 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Reason.** The two contracts were not competing catalogues by accident — one is a message and the other is a schema registry. Collapsing them either bloats the envelope until it cannot be validated cheaply, or reduces the registry to an enum that cannot carry a property schema, a permission or an evidence requirement. Keeping both, with the envelope referencing the registry, is the only arrangement in which "the model cannot name a component that does not exist" is enforceable against data rather than against a constant someone remembered to update.
 
 **Consequence for D-041.** D-041's interim answer — two hand-written enums — is superseded for `ComponentId`. The enum stays only as the compile-time mirror, and a test asserts it matches the registry rather than the reverse.
+
+## D-060 · 2026-09-10 · Today becomes Discover; still three destinations, and Jobs is still not one
+
+**Decision.** The first destination is renamed **Discover** and its canonical route is `/discover`. `/today` redirects to it permanently, so existing links, bookmarks and `?next=` values keep working. The shell is now:
+
+```text
+✦ Discover   ▣ Work   ⟳ Automations      + New   ⌕ Search      Profile
+```
+
+**This is a rename, not a fourth destination.** Screen Map v3's rule is about the *count* — "There are still three destinations. Nothing below becomes a fourth" — and the count is unchanged. It supersedes the label in Screen Map v3 §1.1, `docs/ui-contract.md`, `CLAUDE.md` and D-058, each of which is updated in the same commit. D-058's arrangement of authority is untouched: Screen Map v3 and the ui-contract still govern visible navigation, and this is them being amended, not overruled.
+
+**Reason.** "Today" names a time; "Discover" names a job — *what matters now?* The surface was already ranked work rather than a diary, and the name was the last thing implying otherwise. Architecture v3.1 §42 has said `Discover` since v3.0, so this moves the visible shell **toward** the controlling document rather than away from it: the architecture wins on everything behind the screen, and here it happens to have been right about the screen too.
+
+**Jobs does not become a destination, and that is not a compromise.** `apps/web/src/shell/nav.ts` lists `Jobs` in `NEVER_NAV` and `shell.test.tsx` asserts it. Screen Map v3: "Runs live in an **Activity** chip beside the Ask composer, never in navigation," and "a run may never be the only place something important lives; a run that pauses or fails creates an item in Work first." The richer run experience the prototype shows as a Jobs destination is therefore built in three places that already exist — the Activity chip, a record's run history, and Work — because a person's queue and ASAP's queue are different things and a fourth nav item would blur them.
+
+**Discover became a real attention surface in the same commit,** not just a renamed page:
+
+- **Ranking is deterministic and server-side.** `apps/api/src/attention/signals.ts` holds a fixed weight table over twelve named signals — `run_failed`, `step_blocked`, `check_overdue`, `cover_uncertain`, `file_blocks_placement`, `period_ending`, `exception_open`, `evidence_conflicting`, `evidence_missing`, `evidence_stale`, `money_unpaid`, `untouched`. Each is computed from a column and carries a `because` naming the row it came from. The score is the sum of its signals and nothing else, so a ranking can be audited against the record, and a test can too.
+- **No model authors a score, a reason or a business value.** A model may one day *explain* a ranked item. It may not produce one. This is §45 rules 9 and 10 applied to attention.
+- **The cap is twelve.** Discover is a short ranked list, and it says how many it left out.
+- **The six evidence conditions are modelled**: Known, Inferred, Conflicting, Missing, Stale, Waiting for verification. They describe *evidence*, so they are a sixth vocabulary with their own slot beside a fact, sharing no word with the four status layers. "Waiting for verification" is written in full precisely so it is never read as the banned bare "Waiting". Conflicting shows both sources and resolves neither; inferred always says what it was derived from; missing and waiting never carry a reference, because that is what makes them missing.
+- **Cover requested is not cover confirmed.** A requested cover status produces a `waiting` fact reading "A request is not proof of cover; no insurer confirmation is recorded", and a `cover_uncertain` signal. The prototype's central rule is a computed condition here, not a sentence someone wrote.
+- **Every card leads somewhere**: the Work item, the client's file, the policy period, and Ask pre-filled with the item's own words.
+- **Partial success is a state.** A context read that fails degrades the answer and names what is missing (`degraded[]`) rather than failing whole or rendering a confident gap.
+
+**Not decided here.** Whether a model ever explains a ranked item, and which model — that is build spec Part 13 item 6, still open. Nothing generative ships until it is.

@@ -14,6 +14,10 @@ import { fakeFactory, type FakeDb } from "./_fake-supabase.js";
 const ORG_A = "10000000-0000-4000-8000-00000000000a";
 const ORG_B = "10000000-0000-4000-8000-00000000000b";
 const AMINA = { id: "a0000000-0000-4000-8000-000000000001", email: "admin@acme-brokers.test" };
+const CLIENT = "70000000-0000-4000-8000-00000000000a";
+const POLICY = "50000000-0000-4000-8000-0000000000a1";
+const PERIOD = "60000000-0000-4000-8000-0000000000a1";
+const INSURER = "80000000-0000-4000-8000-0000000000a1";
 
 const DAY = 86_400_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -111,6 +115,34 @@ function makeDb(): FakeDb {
         },
       ],
       role_permissions: [],
+      clients: [
+        { id: CLIENT, organization_id: ORG_A, name: "Acme Motors", kind: "corporate", file_status: "incomplete" },
+      ],
+      insurers: [{ id: INSURER, organization_id: ORG_A, name: "Jubilee" }],
+      policies: [
+        {
+          id: POLICY,
+          organization_id: ORG_A,
+          client_id: CLIENT,
+          insurer_id: INSURER,
+          class_of_business: "Motor commercial",
+          policy_number: "MC-4471",
+          created_at: ago(0),
+          updated_at: ago(0),
+          deleted_at: null,
+        },
+      ],
+      policy_periods: [
+        {
+          id: PERIOD,
+          organization_id: ORG_A,
+          policy_id: POLICY,
+          period_start: "2025-10-14",
+          period_end: "2026-10-14",
+          created_at: ago(0),
+          updated_at: ago(0),
+        },
+      ],
       work_items: [
         item({
           id: "30000000-0000-4000-8000-000000000003",
@@ -134,9 +166,15 @@ function makeDb(): FakeDb {
           id: "30000000-0000-4000-8000-000000000005",
           title: "Acme Motors — Motor commercial placement with Jubilee",
           kind: "placement",
+          client_id: CLIENT,
           cover_status: "requested",
           reason: PLACEMENT_REASON,
-          steps: [step("approve", "Placement approved", "you", "blocked")],
+          steps: [
+            {
+              ...step("approve", "Placement approved", "you", "blocked"),
+              guards: ["client_file_cleared"],
+            },
+          ],
         }),
         item({
           id: CERT_ID,
@@ -150,6 +188,8 @@ function makeDb(): FakeDb {
         item({
           id: "30000000-0000-4000-8000-000000000001",
           title: "Acme Motors — renewal terms from Jubilee",
+          client_id: CLIENT,
+          policy_period_id: PERIOD,
           task_status: "with_party",
           task_party: "Jubilee",
           task_since: ago(5 * DAY),
@@ -303,13 +343,17 @@ describe("GET /attention", () => {
       "checks_due",
     ]);
     expect(body.items.map((i: { rank: number }) => i.rank)).toEqual([1, 2, 3, 4, 1]);
-    // Recency inside the section, exactly as the browser ordered it before the move.
+    // Inside a section, the deterministic signal score orders it — not recency. The blocked
+    // placement and the item a run could not finish outrank the two that are merely recent.
     expect(body.items.slice(0, 4).map((i: { item: { title: string } }) => i.item.title)).toEqual([
-      "Jane Wanjiku — claim, incident 2 September",
-      "KDA 482A — motor certificate",
-      "Acme Motors — add KDC 900T to the Motor commercial policy",
       "Acme Motors — Motor commercial placement with Jubilee",
+      "KDA 482A — motor certificate",
+      "Jane Wanjiku — claim, incident 2 September",
+      "Acme Motors — add KDC 900T to the Motor commercial policy",
     ]);
+    // The score falls monotonically down the section, so the ranking is auditable.
+    const scores = body.items.slice(0, 4).map((i: { score: number }) => i.score);
+    expect(scores).toEqual([...scores].sort((a: number, b: number) => b - a));
   });
 
   it("carries the plain-English reason and the step that is waiting", async () => {
@@ -393,14 +437,15 @@ describe("GET /attention", () => {
     );
     db.tables["work_items"]!.push(...extra);
     const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
-    expect(body.cap).toBe(25);
+    // Discover is a short ranked list, not a dashboard: twelve, and it says how many it left out.
+    expect(body.cap).toBe(12);
     const needs = body.items.filter((i: { section: string }) => i.section === "needs_you");
-    expect(needs).toHaveLength(25);
+    expect(needs).toHaveLength(12);
     expect(body.sections[0]).toEqual({
       key: "needs_you",
       label: "Needs you",
       visible: 44,
-      returned: 25,
+      returned: 12,
     });
   });
 });
@@ -472,5 +517,136 @@ describe("GET /work", () => {
   it("falls back to the needs view when the view is unknown", async () => {
     const body = await readJson(await app.request("/work?view=nonsense", { headers: auth("tok-amina") }));
     expect(body.view).toBe("needs");
+  });
+});
+
+describe("Discover ranks deterministically, from rows", () => {
+  it("gives every item at least one signal that names the row it came from", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    for (const row of body.items) {
+      expect(row.signals.length, row.item.title).toBeGreaterThan(0);
+      for (const sig of row.signals) {
+        expect(sig.because.length).toBeGreaterThan(0);
+        expect(typeof sig.points).toBe("number");
+      }
+      // The score is the sum of its signals: nothing else contributes, so it is auditable.
+      const sum = row.signals.reduce((n: number, x: { points: number }) => n + x.points, 0);
+      expect(row.score, row.item.title).toBe(sum);
+    }
+  });
+
+  it("names the blocked step, the overdue check and the failed run as the reasons they are", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const by = (t: string) => body.items.find((i: { item: { title: string } }) => i.item.title === t);
+
+    const placement = by("Acme Motors — Motor commercial placement with Jubilee");
+    const ids = placement.signals.map((x: { id: string }) => x.id);
+    expect(ids).toContain("step_blocked");
+    expect(placement.signals.find((x: { id: string }) => x.id === "step_blocked").because).toMatch(
+      /Placement approved/,
+    );
+
+    const cert = by("KDA 482A — motor certificate");
+    expect(cert.signals.map((x: { id: string }) => x.id)).toContain("run_failed");
+    expect(cert.signals.find((x: { id: string }) => x.id === "run_failed").because).toMatch(
+      /Certificate extraction could not finish/,
+    );
+
+    const renewal = by("Acme Motors — renewal terms from Jubilee");
+    const overdue = renewal.signals.find((x: { id: string }) => x.id === "check_overdue");
+    expect(overdue).toBeTruthy();
+    // The party is named and the lateness counted from the server's clock, not the browser's.
+    expect(overdue.because).toMatch(/^Jubilee was asked and the check was due/);
+  });
+
+  it("is stable: the same rows rank the same way twice", async () => {
+    const a = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const b = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    expect(a.items.map((i: { item: { id: string } }) => i.item.id)).toEqual(
+      b.items.map((i: { item: { id: string } }) => i.item.id),
+    );
+  });
+});
+
+describe("Discover states how well each fact is known", () => {
+  it("says cover is waiting for verification when it was only requested", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const placement = body.items.find(
+      (i: { item: { title: string } }) =>
+        i.item.title === "Acme Motors — Motor commercial placement with Jubilee",
+    );
+    const cover = placement.facts.find((f: { label: string }) => f.label === "Cover for this period");
+    expect(cover.condition).toBe("waiting");
+    // The demo's central rule, as a fact condition rather than a sentence someone wrote.
+    expect(cover.derivedFrom).toMatch(/A request is not proof of cover/);
+    expect(placement.signals.map((x: { id: string }) => x.id)).toContain("cover_uncertain");
+  });
+
+  it("marks a required-but-unrecorded piece of evidence as missing, and one owed by a party as waiting", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const conditions = new Set(
+      body.items.flatMap((i: { facts: { condition: string }[] }) => i.facts.map((f) => f.condition)),
+    );
+    expect(conditions.has("missing") || conditions.has("waiting")).toBe(true);
+    for (const row of body.items) {
+      for (const f of row.facts) {
+        // Missing and waiting never carry a reference: that is what makes them missing.
+        if (f.condition === "missing" || f.condition === "waiting") expect(f.reference).toBeNull();
+        // Inferred always says what it was derived from; it is never presented as recorded.
+        if (f.condition === "inferred") expect(f.derivedFrom).not.toBeNull();
+      }
+    }
+  });
+
+  it("never carries a confidence, a percentage or a progress value", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const flat = JSON.stringify(body);
+    expect(flat).not.toMatch(/confidence/i);
+    expect(flat).not.toMatch(/"progress"/i);
+    expect(flat).not.toMatch(/\d+%/);
+  });
+});
+
+describe("Discover carries the context a card needs", () => {
+  it("names the client and the period of cover where it has one", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    const withClient = body.items.filter((i: { client: unknown }) => i.client !== null);
+    expect(withClient.length).toBeGreaterThan(0);
+    for (const row of withClient) expect(row.client.name).toBe("Acme Motors");
+
+    // The renewal names its client-policy-year, so the card can show which period it is about.
+    const renewal = body.items.find(
+      (i: { item: { title: string } }) => i.item.title === "Acme Motors — renewal terms from Jubilee",
+    );
+    expect(renewal.period).toMatchObject({
+      classOfBusiness: "Motor commercial",
+      insurerName: "Jubilee",
+      policyNumber: "MC-4471",
+      periodStart: "2025-10-14",
+      periodEnd: "2026-10-14",
+    });
+    expect(typeof renewal.period.daysToEnd).toBe("number");
+    expect(renewal.links.policy).toBe(`/r/${PERIOD}?kind=policy`);
+
+    // An incomplete client file blocking a placement is its own named signal.
+    const placement = body.items.find(
+      (i: { item: { title: string } }) =>
+        i.item.title === "Acme Motors — Motor commercial placement with Jubilee",
+    );
+    expect(placement.signals.map((x: { id: string }) => x.id)).toContain("file_blocks_placement");
+  });
+
+  it("gives every card routes out: the work, the client and Ask in the item's own words", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    for (const row of body.items) {
+      expect(row.links.work).toBe(`/r/${row.item.id}`);
+      if (row.item.client_id) expect(row.links.client).toBe(`/files/${row.item.client_id}`);
+      expect(row.links.ask).toBe(row.item.title);
+    }
+  });
+
+  it("reports nothing degraded when every read succeeded", async () => {
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    expect(body.degraded).toEqual([]);
   });
 });
