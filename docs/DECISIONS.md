@@ -462,3 +462,37 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 **Derived, never authored.** The headline comes from a phrasebook keyed by `kind:stepId`, falling back to the step's own label where there is no phrasing; the sentence of why is the `reason` the engine already wrote; the blocker is the step's own `state` and `reason`, or the first guard it is waiting on. No new data, no new guard, no engine change: the action panel moved inside the focus card, drafts moved out of it into their own section, and that is the whole of it.
 
 **Honest about what is missing.** The prototype's record page also carries insurer terms, outstanding premium lines, a document's source excerpt and a report's bars. Those need Phase 3 money, Phase 3 extraction and Phase 7 reporting, so Part 14 names them as arriving with their phase rather than stubbing a panel. History is C05 and not built, so the footer says so rather than offering a control that goes nowhere.
+
+## D-058 · 2026-09-10 · The two plans are reconciled: each owns a layer, and neither renumbers the other
+
+**Decision.** The repository has carried two phase plans since 8 September — Architecture v3.1 §43 (thirteen phases, a `Discover · Spaces · Jobs · Automations` shell) and UI Build Spec v1 Part 12 (eight phases, a `Today · Work · Automations` shell). They were both live, they disagreed on the shell and on what "Phase 4" and "Phase 5" mean, and nothing recorded which one governs what. Each now owns one layer:
+
+- **Architecture v3.1 is the source of truth for backend architecture, security, the economic rules and dependencies.** Tenancy, RLS, the audit obligations, the economic model's prohibitions and the seventeen non-negotiables in §45 are settled there and nowhere else.
+- **Screen Map v3 and `docs/ui-contract.md` are the source of truth for visible navigation, wording and interaction.** Where the architecture's §42 shell and Screen Map v3's three destinations disagree, **v3 wins on what a person sees.** The architecture still wins on everything behind it.
+- **UI Build Spec v1 Part 12 remains the delivery checklist**, tracked at the foot of `docs/PHASE-1-WORK-ORDER.md`. It orders the work; **it may not bypass an architecture dependency.** A build-spec phase whose prerequisite sits in an unbuilt architecture phase waits, or ships the part that does not need it, and says which.
+- **A new insurance capability is not built as a temporary fixed page when it can be built directly on the Space system.** From the first Renewal Space onward, the question for each new capability is which blocks it needs, not which page it gets.
+- **No existing phase is renumbered.** Both numbering schemes stay as they are. When a phase number is written down, it names its plan: "build spec Phase 5b", "architecture Phase 3".
+
+**Reason.** Two live plans meant every session could reasonably pick either, and the file that was meant to arbitrate — `CLAUDE.md` — described the older shell while also declaring the architecture the winner. That is not a drift to be corrected later; it is an ambiguity that produces different products depending on who reads which document first.
+
+**Corrected in this commit.** `CLAUDE.md` now describes the permanent shell as Today · Work · Automations, with + New and Search as utilities, Profile at the bottom, Ask ASAP persistent and never a destination, and Activity as the chip where ASAP's runs appear. Insurance modules remain barred from primary navigation (§45 rule 16) — that rule is unchanged and both plans always agreed on it.
+
+**What did not change.** No phase was renumbered, no work order was rewritten, and the architecture's authority over the backend is untouched.
+
+## D-059 · 2026-09-10 · `UiIntent` and `component_definitions` have separate responsibilities
+
+**Decision.** Build spec Part 13 item 6 asked whether the Architecture §18 component registry collapses into the narrower `UiIntent` of Part 4, and said "only one should survive". Neither survives alone: they answer different questions, and the resolution is to give each one job and forbid it the other's.
+
+**`UiIntent` is the small validated result envelope.** It carries what was asked and what should be shown: the intent, the result type, the relevant records, the Space type, the suggested actions, and **which registered blocks are requested**. It is deliberately small enough to validate in one parse.
+
+**`component_definitions` is the authoritative registry of allowed components and their property schemas.** A component's identity, version, purpose, permitted Space types, property JSON Schema, required permissions, whether it may carry an action and whether it requires evidence live there, in the database, as data — not in a hand-written enum.
+
+**The rules that follow:**
+1. `UiIntent` **references registered component IDs**. It must not maintain a competing catalogue of its own. `AskComponentId` therefore stops being a hand-written list and becomes the subset of the registry marked as returnable by Ask.
+2. The renderer may render **only** components present in `component_definitions`. A block naming anything else is dropped and the Space shows a state, never a blank.
+3. **The server validates every plan before it reaches the browser.** Validation is not a client-side courtesy; a plan that fails any rule never leaves the API.
+4. **No model may invent** a component, a business value, a permission, progress, a cover state, a money state or an action. Values are read from the database by id; progress derives from steps; cover and money come from their own columns; actions come from the finite verb list; permissions resolve from the session. This is §45 rules 9, 10 and 12 restated at the plan boundary.
+
+**Reason.** The two contracts were not competing catalogues by accident — one is a message and the other is a schema registry. Collapsing them either bloats the envelope until it cannot be validated cheaply, or reduces the registry to an enum that cannot carry a property schema, a permission or an evidence requirement. Keeping both, with the envelope referencing the registry, is the only arrangement in which "the model cannot name a component that does not exist" is enforceable against data rather than against a constant someone remembered to update.
+
+**Consequence for D-041.** D-041's interim answer — two hand-written enums — is superseded for `ComponentId`. The enum stays only as the compile-time mirror, and a test asserts it matches the registry rather than the reverse.

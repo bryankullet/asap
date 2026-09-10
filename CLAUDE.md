@@ -196,7 +196,24 @@ The prototype is a **built demo with hardcoded seed data**, not source. Do not i
 
 ### The shape of the product
 
-There is no module navigation. No `Work / Clients / Policies / Renewals / Claims / Money` menu tree — §45 forbids rebuilding it. The permanent shell is: **Discover · Ask ASAP · Spaces · Jobs · Automations · Search · + New**. Business objects surface contextually inside Spaces.
+There is no module navigation. No `Work / Clients / Policies / Renewals / Claims / Money` menu tree — §45 forbids rebuilding it, and no insurance module ever becomes a primary destination. The permanent shell is (D-058, Screen Map v3 §1.1):
+
+```text
+ASAP
+────────────────
+☀ Today
+▣ Work
+⚡ Automations
+────────────────
++ New
+⌕ Search
+────────────────
+Profile
+```
+
+**Ask ASAP is persistent and is not a destination** — it is available from every surface and always carries the current context. **Activity is where ASAP's runs appear**: a chip beside the Ask composer, never a navigation item. Business objects surface contextually inside Spaces.
+
+Architecture §42 lists an older shell (`Discover · Spaces · Jobs · Automations`). Screen Map v3 and `docs/ui-contract.md` win on what a person sees; the architecture wins on everything behind it (D-058).
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 
