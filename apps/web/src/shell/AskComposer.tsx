@@ -71,6 +71,11 @@ export function AskComposer() {
     e.preventDefault();
     const text = q.trim();
     if (text.length === 0) return;
+    // A failure from the previous question must not sit beside this one's answer. Mutations keep
+    // isError until they are reset, so a stale "Request failed" read as part of the new result.
+    ask.reset();
+    renew.reset();
+    createClient.reset();
     // "Renew <client>" opens a renewal; asking twice reopens the same item (Part 5.4).
     const m = /^renew\s+(.+)$/i.exec(text);
     if (m?.[1]) {

@@ -10,7 +10,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Card, CardTitle, Timeline, TimelineEvent } from "@asap/ui";
 import { FocusCard } from "./FocusCard.js";
-import { RecordFooter } from "./RecordFooter.js";
+import { RECORD_ACTIVITY_ID, RecordFooter } from "./RecordFooter.js";
 import {
   CoverStatus,
   MoneyRow,
@@ -129,7 +129,8 @@ export function WorkItemView({
 
   const activitySection =
     runs.length > 0 ? (
-      <Card className="flex flex-col gap-3">
+      // The record footer's Activity control targets this id. It pointed at nothing before.
+      <Card id={RECORD_ACTIVITY_ID} tabIndex={-1} className="flex flex-col gap-3">
         <CardTitle>What ASAP did</CardTitle>
         <RunDetailSlot>
           <Timeline>

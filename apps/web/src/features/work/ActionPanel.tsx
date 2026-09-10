@@ -47,7 +47,10 @@ export function ActionPanel({
   const [told, setTold] = useState("");
   const [override, setOverride] = useState("");
   const [inception, setInception] = useState("");
-  const [periodId, setPeriodId] = useState("");
+  const [periodId, setPeriodId] = useState(
+    // One candidate is not a choice: preselect it so the only possible answer is not a question.
+    candidatePeriods.length === 1 ? candidatePeriods[0]!.period.id : "",
+  );
   const [evidenceKind, setEvidenceKind] = useState<"document" | "call_note">("document");
 
   const act = useMutation({
@@ -92,11 +95,20 @@ export function ActionPanel({
           step.id === "cover_confirmed" && inception
             ? new Date(inception).toISOString()
             : undefined,
+        // The claim match step cannot be satisfied without it: apply.ts requires the period a
+        // person chose, and the guard re-checks that it contains the incident date.
+        policyPeriodId: needsPeriod && periodId ? periodId : undefined,
+        evidenceKind:
+          item.kind === "claim" && step.id === "response" && form === "record_evidence"
+            ? evidenceKind
+            : undefined,
       });
     }
   }
 
   const stepDrafts = drafts.filter((d) => d.step_id === step.id);
+  /** The claim match step is the one place a policy period is chosen; the select is required there. */
+  const needsPeriod = item.kind === "claim" && step.id === "match";
 
   return (
     <div className="flex flex-col gap-3">
@@ -176,7 +188,7 @@ export function ActionPanel({
               placeholder="Message id, sent-folder reference, document name"
             />
           </Field>
-          {item.kind === "claim" && step.id === "match" && form === "record_evidence" && (
+          {needsPeriod && form === "record_evidence" && (
             <Field
               label={
                 candidatePeriods.length > 1
@@ -185,21 +197,28 @@ export function ActionPanel({
               }
               htmlFor="period"
             >
-              <select
-                id="period"
-                className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
-                value={periodId}
-                onChange={(e) => setPeriodId(e.target.value)}
-              >
-                <option value="">Choose…</option>
-                {candidatePeriods.map((p) => (
-                  <option key={p.period.id} value={p.period.id}>
-                    {p.policy.class_of_business} with {p.insurerName}
-                    {p.policy.policy_number ? ` (${p.policy.policy_number})` : ""} ·{" "}
-                    {p.period.period_start} to {p.period.period_end}
-                  </option>
-                ))}
-              </select>
+              {candidatePeriods.length === 0 ? (
+                <p className="text-sm text-ink-secondary">
+                  No policy period on file contains the incident date. Add the policy first.
+                </p>
+              ) : (
+                <select
+                  id="period"
+                  required
+                  className="rounded-control border border-line-strong bg-paper px-3 py-2 text-sm"
+                  value={periodId}
+                  onChange={(e) => setPeriodId(e.target.value)}
+                >
+                  <option value="">Choose…</option>
+                  {candidatePeriods.map((p) => (
+                    <option key={p.period.id} value={p.period.id}>
+                      {p.policy.class_of_business} with {p.insurerName}
+                      {p.policy.policy_number ? ` (${p.policy.policy_number})` : ""} ·{" "}
+                      {p.period.period_start} to {p.period.period_end}
+                    </option>
+                  ))}
+                </select>
+              )}
             </Field>
           )}
           {item.kind === "claim" && step.id === "response" && form === "record_evidence" && (

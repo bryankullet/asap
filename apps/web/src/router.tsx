@@ -108,7 +108,11 @@ const record = createRoute({
   getParentRoute: () => shell,
   path: "/r/$recordId",
   component: Record,
-  validateSearch: z.object({ panel: z.string().optional().catch(undefined) }),
+  validateSearch: z.object({
+    panel: z.string().optional().catch(undefined),
+    /** A link that already knows the id is a policy; the page then skips the work-item probe. */
+    kind: z.literal("policy").optional().catch(undefined),
+  }),
 });
 const files = createRoute({
   getParentRoute: () => shell,

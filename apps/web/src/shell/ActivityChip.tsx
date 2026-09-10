@@ -4,12 +4,23 @@ import { useState } from "react";
 import { Card } from "@asap/ui";
 import { ActivityPanelSlot, RunStatus } from "../components/status/slots.js";
 
-/** Runs the chip may show: working, paused, or finished since this session began (spec Part 8). */
+/**
+ * Runs the chip shows (spec Part 8, ui-contract "Runs and Activity"):
+ *
+ * - `working` and `paused` — live now, always shown.
+ * - `could_not_finish` and `stopped` — a run that ended without doing its job. Always shown,
+ *   whenever it ended: the contract says hiding Activity must not hide a failure, and the chip
+ *   showing nothing while two runs could not finish is exactly that failure. Work still carries
+ *   the item, so this is a second route to it, never the only one.
+ * - `finished` — only since this session began, because a success from last week is not news.
+ */
 export function chipRuns(runs: RunRow[], sessionStart: Date): RunRow[] {
   return runs.filter(
     (r) =>
       r.status === "working" ||
       r.status === "paused" ||
+      r.status === "could_not_finish" ||
+      r.status === "stopped" ||
       (r.status === "finished" && r.ended_at !== null && new Date(r.ended_at) >= sessionStart),
   );
 }
@@ -20,6 +31,9 @@ export function ActivityChip({ runs, sessionStart }: { runs: RunRow[]; sessionSt
   const visible = chipRuns(runs, sessionStart);
   if (visible.length === 0) return null;
   const working = visible.filter((r) => r.status === "working").length;
+  const needsPerson = visible.some(
+    (r) => r.status === "could_not_finish" || r.status === "stopped" || r.status === "paused",
+  );
   return (
     <div className="relative">
       <button
@@ -34,7 +48,9 @@ export function ActivityChip({ runs, sessionStart }: { runs: RunRow[]; sessionSt
           className={
             working > 0
               ? "h-[7px] w-[7px] animate-pulse rounded-full bg-accent-green"
-              : "h-[7px] w-[7px] rounded-full bg-dot-neutral"
+              : needsPerson
+                ? "h-[7px] w-[7px] rounded-full bg-accent-red"
+                : "h-[7px] w-[7px] rounded-full bg-dot-neutral"
           }
         />
         Activity

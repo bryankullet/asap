@@ -69,6 +69,7 @@ export function EndorsementPanel({
         <Link
           to="/r/$recordId"
           params={{ recordId: e.policy_id }}
+          search={{ kind: "policy" as const }}
           className="self-start text-sm font-semibold text-accent-green underline-offset-2 hover:underline"
         >
           Open the policy ({detail.versions.length} version{detail.versions.length === 1 ? "" : "s"}

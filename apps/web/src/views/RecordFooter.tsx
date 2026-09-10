@@ -2,6 +2,9 @@ import type { WorkItemRow } from "@asap/schema";
 import { Button } from "@asap/ui";
 import { useState } from "react";
 
+/** The id of the run history on a record page. The footer's Activity control targets it. */
+export const RECORD_ACTIVITY_ID = "record-activity";
+
 /**
  * The record footer (UI Build Spec v1 Part 14): the source chip, Activity and History. The source
  * chip lists what has actually been recorded against the record; Activity jumps to what ASAP did
@@ -24,12 +27,19 @@ export function RecordFooter({ item, hasRuns }: { item: WorkItemRow; hasRuns: bo
           {recorded.length > 0 ? `Evidence on record (${recorded.length})` : "Evidence on record"}
         </Button>
         {hasRuns ? (
-          <a
-            href="#record-activity"
-            className="rounded-compact px-3 py-1.5 text-[0.86rem] font-semibold text-ink hover:bg-wash"
+          <Button
+            variant="outline"
+            size="compact"
+            onClick={() => {
+              // Scroll and move focus, so a keyboard user lands on the section too. This was an
+              // <a href="#record-activity"> pointing at an id that no element carried.
+              const el = document.getElementById(RECORD_ACTIVITY_ID);
+              el?.scrollIntoView({ behavior: "smooth", block: "start" });
+              el?.focus({ preventScroll: true });
+            }}
           >
             Activity
-          </a>
+          </Button>
         ) : (
           <span className="px-3 py-1.5 text-[0.86rem] font-semibold text-ink-muted">
             No runs on this record yet
