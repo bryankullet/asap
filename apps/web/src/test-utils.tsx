@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
+import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
 
 /**
  * Renders a component inside a memory router with the shell's routes registered (so <Link to>
@@ -47,4 +48,69 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
   const utils = render(<RouterProvider router={router as any} />);
   await utils.findByTestId("routed");
   return { ...utils, router };
+}
+
+/**
+ * The `GET /attention` body for a set of rows, as the API would return it.
+ *
+ * View tests need the endpoint's *shape*; whether the endpoint puts the right rows in it is
+ * proven where that logic now lives — `apps/api/test/attention.test.ts`, against Amina's five
+ * cards from `docs/click-through.md`. This helper mirrors the endpoint's two rules (section, then
+ * recency) so a view fixture stays as readable as the rows it came from.
+ */
+export function attentionFixture(
+  items: WorkItemRow[],
+  runs: RunRow[],
+  orgName = "Acme Insurance Brokers",
+  now = new Date(),
+): AttentionResponse {
+  const stuck = runs.filter(
+    (r) => r.status === "paused" || r.status === "could_not_finish" || r.status === "stopped",
+  );
+  const byItem = new Map(stuck.filter((r) => r.work_item_id).map((r) => [r.work_item_id!, r]));
+  const fail = (r: RunRow) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status as "paused" | "could_not_finish" | "stopped",
+    nextStep: r.next_step,
+  });
+  const step = (i: WorkItemRow) => {
+    const s = i.steps.find((x) => x.state === "now" || x.state === "blocked");
+    return s ? { id: s.id, label: s.label, actor: s.actor } : null;
+  };
+  const rows = (list: WorkItemRow[], section: "needs_you" | "checks_due") =>
+    list.map((item, i) => ({
+      section,
+      rank: i + 1,
+      item,
+      reason: item.reason ?? `${step(item)?.label ?? "This item"} is the step waiting.`,
+      nowStep: step(item),
+      runFailure: byItem.get(item.id) ? fail(byItem.get(item.id)!) : null,
+    }));
+  const needsYou = items.filter((i) => i.task_status === "needs_you");
+  const checksDue = items.filter(
+    (i) =>
+      i.task_status === "with_party" &&
+      i.task_next_check !== null &&
+      new Date(i.task_next_check) <= now,
+  );
+  const needsYouIds = new Set(needsYou.map((i) => i.id));
+  return {
+    organization: { id: "10000000-0000-4000-8000-00000000000a", name: orgName },
+    generatedAt: now.toISOString(),
+    items: [...rows(needsYou, "needs_you"), ...rows(checksDue, "checks_due")],
+    sections: [
+      { key: "needs_you", label: "Needs you", visible: needsYou.length, returned: needsYou.length },
+      {
+        key: "checks_due",
+        label: "Checks due",
+        visible: checksDue.length,
+        returned: checksDue.length,
+      },
+    ],
+    orphanRuns: stuck
+      .filter((r) => !r.work_item_id || !needsYouIds.has(r.work_item_id))
+      .map(fail),
+    cap: 25,
+  };
 }

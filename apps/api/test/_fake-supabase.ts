@@ -21,6 +21,7 @@ class Query {
   private filters: ((row: Record<string, unknown>) => boolean)[] = [];
   private single = false;
   private max: number | null = null;
+  private sort: { col: string; ascending: boolean } | null = null;
   constructor(
     private readonly db: FakeDb,
     private readonly table: string,
@@ -59,7 +60,9 @@ class Query {
     this.max = n;
     return this;
   }
-  order() {
+  order(col?: string, opts?: { ascending?: boolean }) {
+    // Ordering matters to the ranked endpoints, so the stand-in sorts rather than ignoring it.
+    if (col) this.sort = { col, ascending: opts?.ascending !== false };
     return this;
   }
   maybeSingle() {
@@ -68,6 +71,14 @@ class Query {
   }
   then<T>(resolve: (v: { data: unknown; error: null }) => T) {
     let rows = (this.db.tables[this.table] ?? []).filter((r) => this.filters.every((f) => f(r)));
+    if (this.sort) {
+      const { col, ascending } = this.sort;
+      rows = [...rows].sort((a, b) => {
+        const x = String(a[col] ?? "");
+        const y = String(b[col] ?? "");
+        return ascending ? x.localeCompare(y) : y.localeCompare(x);
+      });
+    }
     if (this.max !== null) rows = rows.slice(0, this.max);
     void this.selectSpec;
     return Promise.resolve(resolve({ data: this.single ? (rows[0] ?? null) : rows, error: null }));

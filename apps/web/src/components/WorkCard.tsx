@@ -20,13 +20,20 @@ export function WorkCard({
   item,
   showWhy = false,
   footer,
+  reason,
+  nowStep,
 }: {
   item: WorkItemRow;
   showWhy?: boolean;
   footer?: ReactNode;
+  /** The reason the API gave for this item appearing. Falls back to the row's own. */
+  reason?: string;
+  /** The step the API named as waiting, so the card need not re-derive it. */
+  nowStep?: { label: string; actor: string } | null;
 }) {
-  const [why, setWhy] = useState(false);
-  const now = item.steps.find((s) => s.state === "now");
+  const [open, setOpen] = useState(false);
+  const now = nowStep ?? item.steps.find((s) => s.state === "now") ?? null;
+  const why = reason ?? item.reason;
   return (
     <WorkCardSlot>
       <Card data-testid="work-card" className="flex flex-col gap-3">
@@ -62,19 +69,17 @@ export function WorkCard({
             )}
           </div>
         )}
-        {showWhy && item.reason && (
+        {showWhy && why && (
           <div>
             <button
               type="button"
               className="text-sm font-bold text-accent-green underline underline-offset-2"
-              aria-expanded={why}
-              onClick={() => setWhy((v) => !v)}
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
             >
               Why here?
             </button>
-            {why && (
-              <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">{item.reason}</p>
-            )}
+            {open && <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">{why}</p>}
           </div>
         )}
         {footer}

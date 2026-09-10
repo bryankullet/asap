@@ -11,7 +11,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkItemView } from "../views/RecordViews.js";
 import { TodayView } from "../views/TodayView.js";
-import { renderInRouter } from "../test-utils.js";
+import { attentionFixture, renderInRouter } from "../test-utils.js";
 import { NAV, NEVER_NAV } from "./nav.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
@@ -146,7 +146,7 @@ describe("shell navigation", () => {
 describe("Today with Activity hidden (checks.mjs line 19)", () => {
   it("shows the item that needs you and a Why here? control", async () => {
     // TodayView never renders the Activity chip; a run that could not finish reaches Today through its work item.
-    await renderInRouter(<TodayView items={FIXTURES} runs={RUNS} orgName="Acme" />);
+    await renderInRouter(<TodayView data={attentionFixture(FIXTURES, RUNS, "Acme")} />);
     expect(screen.getByText(/KDA 482A/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Why here?" }).length).toBeGreaterThan(0);
     expect(screen.getByText(/could not finish: Check this file/)).toBeInTheDocument();

@@ -34,6 +34,9 @@ import {
   type CreateWorkItemRequest,
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
+  attentionResponseSchema,
+  workListResponseSchema,
+  type WorkView,
 } from "@asap/schema";
 import { z } from "zod";
 import { env } from "../env.js";
@@ -88,6 +91,11 @@ async function request<S extends z.ZodTypeAny>(
 export const api = {
   me: () => request("GET", "/me", meResponseSchema),
   ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
+  /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
+  attention: () => request("GET", "/attention", attentionResponseSchema),
+  /** Work's four views, ranked and capped by the API rather than by the browser. */
+  workList: (view: WorkView, limit = 50) =>
+    request("GET", `/work?view=${view}&limit=${limit}`, workListResponseSchema),
   createWorkItem: (input: CreateWorkItemRequest) =>
     request("POST", "/work-items", createWorkItemResponseSchema, input, {
       auth: true,

@@ -4,7 +4,7 @@ import { chipVariants } from "@asap/ui";
 import { WorkCard } from "../components/WorkCard.js";
 import { EmptyState, ErrorState, LoadingList } from "../components/states.js";
 import { useMe } from "../lib/me.js";
-import { useWorkItems } from "../lib/queries.js";
+import { useWorkList } from "../lib/queries.js";
 
 /** Work's four views (H03 + S16). The view lives in the URL so a link to it is shareable. */
 export function Work() {
@@ -12,7 +12,7 @@ export function Work() {
   const current: WorkView = WorkView.catch("needs").parse(view);
   const me = useMe();
   const org = me.data?.active_organization;
-  const items = useWorkItems(org?.id, current);
+  const items = useWorkList(org?.id, current);
 
   return (
     <div className="flex flex-col gap-4">
@@ -35,16 +35,34 @@ export function Work() {
         <LoadingList label={`Loading ${WORK_VIEW_LABELS[current]}`} />
       ) : items.isError ? (
         <ErrorState what="Work could not load" retry={() => void items.refetch()} />
-      ) : items.data.length === 0 ? (
+      ) : items.data.items.length === 0 ? (
         <EmptyState
           scope={`${WORK_VIEW_LABELS[current]} for ${org.name}`}
           freshness="Checked just now."
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {items.data.map((item) => (
-            <WorkCard key={item.id} item={item} />
+          {items.data.items.map((row) => (
+            <WorkCard
+              key={row.item.id}
+              item={row.item}
+              reason={row.reason ?? undefined}
+              nowStep={row.nowStep}
+              footer={
+                row.runFailure ? (
+                  <p className="text-sm text-accent-red">
+                    ASAP could not finish: {row.runFailure.nextStep ?? "check this item"}.
+                  </p>
+                ) : undefined
+              }
+            />
           ))}
+          {items.data.visible > items.data.returned && (
+            <p className="text-sm text-ink-muted">
+              Showing {items.data.returned} of {items.data.visible} in{" "}
+              {WORK_VIEW_LABELS[current]}.
+            </p>
+          )}
         </div>
       )}
     </div>

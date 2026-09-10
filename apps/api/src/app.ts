@@ -8,6 +8,7 @@ import type { BuildInfo } from "./build-info.js";
 import { HttpError, sendError } from "./errors.js";
 import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
+import { attentionRoutes } from "./routes/attention.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
@@ -79,6 +80,8 @@ export function createApp(deps: AppDeps) {
     "/organizations/*",
     "/invitations/:token/accept",
     "/ask",
+    "/attention",
+    "/work",
     "/work-items",
     "/work-items/*",
     "/placements",
@@ -96,6 +99,7 @@ export function createApp(deps: AppDeps) {
   }
   app.route("/", meRoutes());
   app.route("/", askRoutes());
+  app.route("/", attentionRoutes());
   app.route("/", complianceRoutes({ logger }));
   app.route(
     "/",
