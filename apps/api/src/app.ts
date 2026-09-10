@@ -14,6 +14,7 @@ import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
 import { meRoutes } from "./routes/me.js";
 import { organizationRoutes } from "./routes/organizations.js";
+import { spaceRoutes } from "./routes/spaces.js";
 import { workRoutes } from "./routes/work.js";
 import type { Executor } from "./runs/executor.js";
 import type { SupabaseFactory } from "./supabase.js";
@@ -81,6 +82,7 @@ export function createApp(deps: AppDeps) {
     "/invitations/:token/accept",
     "/ask",
     "/attention",
+    "/spaces/*",
     "/work",
     "/work-items",
     "/work-items/*",
@@ -100,6 +102,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", meRoutes());
   app.route("/", askRoutes());
   app.route("/", attentionRoutes());
+  app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
   app.route(
     "/",

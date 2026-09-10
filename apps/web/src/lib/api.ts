@@ -35,6 +35,7 @@ import {
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
   attentionResponseSchema,
+  spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
 } from "@asap/schema";
@@ -93,6 +94,9 @@ export const api = {
   ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
+  /** A validated Space plan for one record (D-059). Renewals only, so far. */
+  space: (recordId: string, view: string) =>
+    request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /** Work's four views, ranked and capped by the API rather than by the browser. */
   workList: (view: WorkView, limit = 50) =>
     request("GET", `/work?view=${view}&limit=${limit}`, workListResponseSchema),

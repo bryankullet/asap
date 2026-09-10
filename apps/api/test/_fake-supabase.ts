@@ -39,6 +39,10 @@ class Query {
     this.filters.push((r) => Number(r[col]) > v);
     return this;
   }
+  in(col: string, vs: unknown[]) {
+    this.filters.push((r) => vs.includes(r[col]));
+    return this;
+  }
   is(col: string, v: unknown) {
     this.filters.push((r) => r[col] === v);
     return this;

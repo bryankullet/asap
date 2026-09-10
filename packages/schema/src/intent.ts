@@ -153,10 +153,16 @@ export const UiIntentType = z.enum([
   "automation",
   "panel",
 ]);
+/**
+ * Which blocks a question asks for. `policy` was added with the first Renewal Space (D-059): the
+ * prototype's routing answers "show me the current policy" by changing the blocks while keeping
+ * the client's context, and there was no view for it. Additive; every other value is unchanged.
+ */
 export const UiIntentView = z.enum([
   "summary",
   "blocker",
   "comparison",
+  "policy",
   "money",
   "documents",
   "timeline",

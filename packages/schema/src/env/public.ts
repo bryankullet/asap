@@ -12,6 +12,12 @@ export const publicEnvSchema = z.object({
   VITE_PUBLIC_SENTRY_DSN: optionalNonEmpty,
   VITE_PUBLIC_POSTHOG_KEY: optionalNonEmpty,
   VITE_PUBLIC_POSTHOG_HOST: z.string().url().optional(),
+  /**
+   * The first Renewal Space, behind a flag (D-058: capabilities move into the Space system one at
+   * a time). "on" renders a renewal through the registry; anything else, including absent, keeps
+   * the existing record page. The old renderer stays in place either way, so this is the rollback.
+   */
+  VITE_PUBLIC_RENEWAL_SPACE: z.enum(["on", "off"]).default("off"),
 });
 
 export type PublicEnv = z.infer<typeof publicEnvSchema>;

@@ -54,6 +54,9 @@ describe("UiIntent JSON schema", () => {
       "summary",
       "blocker",
       "comparison",
+      // Added with the first Renewal Space (D-059): "show me the current policy" changes the
+      // blocks while keeping the client's context, and there was no view for it.
+      "policy",
       "money",
       "documents",
       "timeline",

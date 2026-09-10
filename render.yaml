@@ -85,5 +85,9 @@ services:
       # that `fromService … property: host` provides.
       - key: VITE_PUBLIC_API_BASE_URL
         sync: false
+      # The first Renewal Space (D-058, D-059). "off" keeps the existing record page for every
+      # kind, which is the rollback: flip to "on" in the dashboard and redeploy the static site.
+      - key: VITE_PUBLIC_RENEWAL_SPACE
+        value: "off"
       - key: NODE_VERSION
         value: "22.22.2"
