@@ -94,6 +94,9 @@ function Answer({
         <Link
           to="/r/$recordId"
           params={{ recordId: response.planRecordId }}
+          // The view travels with the link, so the record opens on what was asked about. The
+          // blocks and every value in them are still built and validated server-side.
+          search={response.planView ? { view: response.planView } : {}}
           className="self-start text-ink underline"
         >
           Open the work

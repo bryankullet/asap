@@ -50,7 +50,8 @@ There is no shared `.env` file passed between people. A new machine gets values 
 | Secret | Sensitivity | Allowed in | Notes |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | High | `apps/api` gateway only | Never in workers directly — workers call the gateway. |
-| `OPENAI_API_KEY` | High | `apps/api` gateway only | Same. |
+| `OPENAI_API_KEY` | High | `apps/api` gateway only | Same. The first production adapter. |
+| `AI_MODEL` | Low | `apps/api` gateway only | Not a secret, but server-side all the same: the browser is never told which model answers (§45 rule 4), and Ask's configuration-required state names no provider. |
 
 Both are billing-attached. A leaked key is a bill, not just a breach.
 

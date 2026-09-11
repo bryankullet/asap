@@ -1,4 +1,4 @@
-import { K01View, WorkView } from "@asap/schema";
+import { K01View, SpaceView, WorkView } from "@asap/schema";
 import {
   Outlet,
   createRootRoute,
@@ -131,6 +131,13 @@ const record = createRoute({
      * and still falls back through every kind in turn.
      */
     kind: z.enum(["policy", "run"]).optional().catch(undefined),
+    /**
+     * Which blocks to open with. Ask sets it when an answer is about one side of a record — the
+     * money, the documents, what is blocking — so the record opens on what was asked about
+     * rather than on the summary. The plan behind each view is still built and validated
+     * server-side; the search parameter only chooses which validated plan to request.
+     */
+    view: SpaceView.optional().catch(undefined),
   }),
 });
 /** H04. A real search over what the backend can actually search, with the query in the URL. */

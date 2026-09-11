@@ -318,7 +318,7 @@ export function AskComposer() {
           id={id}
           name="q"
           value={q}
-          placeholder="Find a client, vehicle or item…"
+          placeholder="Ask a question, or find a client, vehicle or item…"
           autoComplete="off"
           onChange={(e) => setQ(e.target.value)}
           className="min-h-[42px] flex-1 border-0 bg-transparent px-1 text-base shadow-none focus-visible:ring-0"

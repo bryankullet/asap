@@ -522,3 +522,38 @@ Evaluated in `apps/api/src/engine/apply.ts` before the write and re-checked by 0
 - **Partial success is a state.** A context read that fails degrades the answer and names what is missing (`degraded[]`) rather than failing whole or rendering a confident gap.
 
 **Not decided here.** Whether a model ever explains a ranked item, and which model — that is build spec Part 13 item 6, still open. Nothing generative ships until it is.
+
+## D-061 — Ask ASAP: one provider-neutral gateway, OpenAI first, and three checks we own
+
+**2026-09-11.** Ask now answers questions. The decisions that shape it:
+
+**The gateway is provider-neutral by construction.** `packages/schema/src/ai/gateway.ts` defines
+messages, tool declarations, requests, responses and failures; nothing above it names a vendor.
+OpenAI is the first production adapter, chosen by `AI_DEFAULT_PROVIDER` with the exact model in
+`AI_MODEL` — server-side configuration, never a constant in code and never sent to the browser.
+Anthropic is a sibling adapter and one config value; adding it changes no router, tool, contract,
+evaluation fixture or renderer. A deterministic provider serves the tests and the evaluation set.
+
+**With nothing configured, Ask is honestly unconfigured.** `not_configured` is a designed state
+that says a model is not connected. It is not a spinner, not an empty result, and it names no
+provider, model or key.
+
+**Three checks run on every reply, and all three are ours rather than the provider's.** The reply
+must parse as a `UiIntent`; every record id it names must be one a declared tool returned on that
+turn; and the sentence may not assert a status, a percentage or an approval outcome. Failing any
+of them abstains with a reason. This is what "do not treat AI output as authoritative" means in
+code (§45 rules 8, 9, 10, 12).
+
+**Routing is decided in the browser, deterministically.** A named operation goes to the create
+path, a lookup to search, a question to the model. An exact database question is a lookup, not a
+model call (§45 rule 7), and making that a model's judgement would add a way to get it wrong
+without adding anything.
+
+**The model chooses a record and a view, never blocks or values.** An answer that is a workspace
+opens the record on the asked-about view, and the existing server-side plan validator and
+component registry build it. There is no second renderer and no second path by which a value
+could arrive from model text.
+
+**Conversations are personal within the brokerage** (0032). Colleagues share the work a
+conversation produced — that lives in `work_items` — but not the asking. Every policy carries
+both `app.can_access` and `created_by = auth.uid()`.

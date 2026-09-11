@@ -21,7 +21,10 @@ export function Record() {
   const { recordId = "" } = useParams({ strict: false }) as { recordId?: string };
   // A link that already knows the id is a policy says so, so the page does not probe /work-items
   // first and log a 404 on the way to the answer. A pasted URL carries no hint and still probes.
-  const { kind } = useSearch({ strict: false }) as { kind?: "policy" | "run" };
+  const { kind, view: askedView } = useSearch({ strict: false }) as {
+    kind?: "policy" | "run";
+    view?: SpaceView;
+  };
   const isPolicy = kind === "policy";
   const isRun = kind === "run";
   const full = useQuery({
@@ -68,7 +71,9 @@ export function Record() {
   // The first Renewal Space, behind a flag. The old renderer below stays in place for every kind,
   // including renewals when the flag is off — that is the rollback path (D-058).
   const spaceOn = env.VITE_PUBLIC_RENEWAL_SPACE === "on" && !isPolicy;
-  const [spaceView, setSpaceView] = useState<SpaceView>("summary");
+  // Ask can open a record on the side of it that was asked about. The parameter only chooses
+  // which validated plan to request; it never carries blocks or values of its own.
+  const [spaceView, setSpaceView] = useState<SpaceView>(askedView ?? "summary");
   const isRenewal = full.data?.item.kind === "renewal";
   const space = useQuery({
     queryKey: ["space", recordId, spaceView],
