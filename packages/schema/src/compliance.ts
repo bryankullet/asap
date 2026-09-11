@@ -11,7 +11,12 @@ const isoDate = z.string().datetime({ offset: true });
 
 export const ClientKind = z.enum(["individual", "corporate"]);
 export const ClientSource = z.enum(["imported", "manual", "seed"]);
-export const DocumentKind = z.enum([
+/**
+ * The due-diligence file's document vocabulary — what a client file needs, not what a stored
+ * document is. `DocumentKind` in `api/documents.ts` is the other one: the kind of an uploaded
+ * file. They are separate vocabularies on purpose and must not be merged.
+ */
+export const ClientFileDocumentKind = z.enum([
   "identity",
   "beneficial_ownership",
   "source_of_funds",
@@ -41,7 +46,7 @@ export const ClientDocumentRow = z.object({
   id: uuidSchema,
   organization_id: uuidSchema,
   client_id: uuidSchema,
-  kind: DocumentKind,
+  kind: ClientFileDocumentKind,
   label: z.string(),
   /** What was actually received. Null means requested, not received. */
   reference: z.string().nullable(),

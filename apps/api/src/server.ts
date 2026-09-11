@@ -40,6 +40,11 @@ const bootToken = newBootToken();
 
 const app = createApp({
   aiProvider: resolveProvider(env, logger),
+  storage: {
+    bucket: env.STORAGE_BUCKET,
+    signedUrlTtlSeconds: env.SIGNED_URL_TTL_SECONDS,
+    maxUploadBytes: env.MAX_UPLOAD_BYTES,
+  },
   logger,
   build,
   supabase,

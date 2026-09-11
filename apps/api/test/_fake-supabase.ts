@@ -15,6 +15,12 @@ export type FakeDb = {
   >;
   users: Record<string, { id: string; email: string }>; // token -> auth user
   inserts: { table: string; row: Record<string, unknown> }[];
+  /**
+   * Column defaults the database would apply on insert, per table. A route that reads back what
+   * it wrote sees them, as it would in Postgres — declaring them here keeps the stand-in honest
+   * about the difference between "the route did not send it" and "the column has a default".
+   */
+  defaults?: Record<string, Record<string, unknown>>;
 };
 
 class Query {
@@ -108,6 +114,33 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
       },
       from: (table: string) => ({
         select: (spec: string) => new Query(db, table, spec),
+        // Update, for the extraction-review route. Returns the updated row so a route that reads
+        // back what it wrote sees what a real update would have returned.
+        update: (patch: Record<string, unknown>) => {
+          const filters: [string, unknown][] = [];
+          const chain = {
+            eq(col: string, val: unknown) {
+              filters.push([col, val]);
+              return chain;
+            },
+            select() {
+              return chain;
+            },
+            async single() {
+              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => r[c] === v));
+              if (!row) return { data: null, error: { code: "PGRST116", message: "no rows" } };
+              Object.assign(row, patch);
+              return { data: row, error: null };
+            },
+            then(resolve: (v: { error: null }) => unknown) {
+              for (const row of db.tables[table] ?? []) {
+                if (filters.every(([c, v]) => row[c] === v)) Object.assign(row, patch);
+              }
+              return Promise.resolve(resolve({ error: null }));
+            },
+          };
+          return chain;
+        },
         // Upsert and delete, for the pin route. Both keep the table consistent so a test can read
         // back what it wrote rather than trusting the call's return.
         upsert: async (row: Record<string, unknown>, opts?: { onConflict?: string }) => {
@@ -136,7 +169,13 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
         },
         insert: (row: Record<string, unknown>) => {
           db.inserts.push({ table, row });
-          const stored = { id: nextId(), created_at: STAMP, updated_at: STAMP, ...row };
+          const stored = {
+            id: nextId(),
+            created_at: STAMP,
+            updated_at: STAMP,
+            ...(db.defaults?.[table] ?? {}),
+            ...row,
+          };
           (db.tables[table] ??= []).push(stored);
           // Awaitable on its own, and chainable as .select(...).single() — both shapes the API
           // uses. Returning the stored row matters: a route that reads back what it wrote must
@@ -151,6 +190,20 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
           };
         },
       }),
+      // Storage: signing only. No bytes move in these tests, and none should — the point of the
+      // private bucket is that reads are short-lived signed URLs, which is what this returns.
+      storage: {
+        from: () => ({
+          createSignedUrl: async (path: string, ttl: number) => ({
+            data: { signedUrl: `https://stub.invalid/${path}?ttl=${ttl}` },
+            error: null,
+          }),
+          createSignedUploadUrl: async (path: string) => ({
+            data: { signedUrl: `https://stub.invalid/upload/${path}`, token: "stub-upload-token", path },
+            error: null,
+          }),
+        }),
+      },
       rpc: async (name: string, args: Record<string, unknown>) => {
         const fn = db.rpc[name];
         if (!fn) return { data: null, error: { code: "42883", message: `no rpc ${name}` } };

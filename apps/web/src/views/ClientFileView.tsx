@@ -1,4 +1,4 @@
-import { DocumentKind, type ClientFileAction, type ClientFileResponse } from "@asap/schema";
+import { ClientFileDocumentKind, type ClientFileAction, type ClientFileResponse } from "@asap/schema";
 import {
   Button,
   Card,
@@ -14,7 +14,7 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ClientHeader } from "../components/ClientHeader.js";
 
-const KIND_LABEL: Record<(typeof DocumentKind.options)[number], string> = {
+const KIND_LABEL: Record<(typeof ClientFileDocumentKind.options)[number], string> = {
   identity: "Identity",
   beneficial_ownership: "Beneficial ownership",
   source_of_funds: "Source of funds",
@@ -33,7 +33,7 @@ export function ClientFileView({
   pending: boolean;
   blocked: { guard: string; reason: string } | null;
 }) {
-  const [kind, setKind] = useState<(typeof DocumentKind.options)[number]>("identity");
+  const [kind, setKind] = useState<(typeof ClientFileDocumentKind.options)[number]>("identity");
   const [label, setLabel] = useState("");
   const [reference, setReference] = useState("");
   const [reason, setReason] = useState("");
@@ -100,7 +100,7 @@ export function ClientFileView({
               value={kind}
               onChange={(e) => setKind(e.target.value as typeof kind)}
             >
-              {DocumentKind.options.map((k) => (
+              {ClientFileDocumentKind.options.map((k) => (
                 <option key={k} value={k}>
                   {KIND_LABEL[k]}
                 </option>

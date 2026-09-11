@@ -6,7 +6,7 @@ import {
   InsurerRow,
   RateProposer,
 } from "../agreements.js";
-import { ClientDocumentRow, ClientKind, ClientRow, DocumentKind, K01View } from "../compliance.js";
+import { ClientDocumentRow, ClientKind, ClientRow, ClientFileDocumentKind, K01View } from "../compliance.js";
 import { FileStatus } from "../status.js";
 import { WorkItemRow } from "../work.js";
 import { uuidSchema } from "./common.js";
@@ -59,12 +59,12 @@ export type CreateClientResponse = z.infer<typeof createClientResponseSchema>;
 export const clientFileActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("request_document"),
-    kind: DocumentKind,
+    kind: ClientFileDocumentKind,
     label: z.string().trim().min(1).max(200),
   }),
   z.object({
     action: z.literal("record_document"),
-    kind: DocumentKind,
+    kind: ClientFileDocumentKind,
     label: z.string().trim().min(1).max(200),
     reference: z.string().trim().min(1).max(500),
     receivedAt: z.string().datetime({ offset: true }).optional(),

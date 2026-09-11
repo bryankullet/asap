@@ -11,6 +11,7 @@ import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
+import { documentRoutes } from "./routes/documents.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
 import { meRoutes } from "./routes/me.js";
@@ -38,6 +39,11 @@ export type AppDeps = {
    * configured — Ask then answers with the configuration-required state instead of failing.
    */
   aiProvider?: AiProvider | null;
+  /**
+   * The private document bucket and its limits. `server.ts` always passes the configured values;
+   * the fallback below exists so a test that never touches a document need not describe storage.
+   */
+  storage?: { bucket: string; signedUrlTtlSeconds: number; maxUploadBytes: number };
   streamPollMs?: number;
 };
 
@@ -90,6 +96,8 @@ export function createApp(deps: AppDeps) {
     "/ask",
     "/attention",
     "/pins",
+    "/documents",
+    "/documents/*",
     "/conversations",
     "/conversations/*",
     "/spaces/*",
@@ -112,6 +120,15 @@ export function createApp(deps: AppDeps) {
   app.route("/", meRoutes());
   app.route("/", askRoutes());
   app.route("/", conversationRoutes({ logger, provider: deps.aiProvider ?? null }));
+  app.route(
+    "/",
+    documentRoutes({
+      logger,
+      bucket: deps.storage?.bucket ?? "insurance-documents",
+      signedUrlTtlSeconds: deps.storage?.signedUrlTtlSeconds ?? 300,
+      maxUploadBytes: deps.storage?.maxUploadBytes ?? 52_428_800,
+    }),
+  );
   app.route("/", attentionRoutes());
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
