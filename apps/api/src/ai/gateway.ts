@@ -2,6 +2,7 @@ import { AiGatewayError, type AiProvider, type AiProviderId } from "@asap/schema
 import type { ServerEnv } from "@asap/schema/env/server";
 import type { Logger } from "pino";
 import { openAiProvider } from "./providers/openai.js";
+import { anthropicProvider } from "./providers/anthropic.js";
 import { fakeProvider } from "./providers/fake.js";
 
 /**
@@ -38,8 +39,28 @@ export function resolveProvider(env: ServerEnv, logger: Logger): AiProvider | nu
     });
   }
 
-  // Anthropic is a sibling adapter and one config value. Until it is written, saying so beats
-  // silently falling back to another provider, which would make "which model answered?" a guess.
+  if (id === "anthropic") {
+    if (!env.ANTHROPIC_API_KEY || !env.AI_MODEL) {
+      logger.warn(
+        {
+          missing: [!env.ANTHROPIC_API_KEY && "ANTHROPIC_API_KEY", !env.AI_MODEL && "AI_MODEL"].filter(
+            Boolean,
+          ),
+        },
+        "ai gateway disabled: Ask will answer with the configuration-required state",
+      );
+      return null;
+    }
+    logger.info({ provider: "anthropic", model: env.AI_MODEL }, "ai gateway ready");
+    return anthropicProvider({
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.AI_MODEL,
+      timeoutMs: env.AI_REQUEST_TIMEOUT_MS,
+    });
+  }
+
+  // Never silently fall back to another provider: that would make "which model answered?" a
+  // guess, and the answer is recorded against the conversation and the audit row.
   logger.warn({ provider: id }, "ai gateway disabled: no adapter for the configured provider");
   return null;
 }
