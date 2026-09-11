@@ -144,6 +144,8 @@ for (const [name, route] of [
   ["8-start-work", "/new"],
   ["9-clients", "/files"],
   ["10-team", "/settings/members"],
+  ["11-documents", "/documents"],
+  ["12-connections", "/settings/connections"],
 ]) {
   await look(name, route);
 }

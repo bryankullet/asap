@@ -1,8 +1,11 @@
 import { DEMO_NOTICE } from "@asap/schema";
-import { Link } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
+import { api, describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 
 /**
  * Data and connections (D-064).
@@ -27,68 +30,153 @@ const PROVIDERS = [
 
 export function Connections() {
   const { isDemo } = useDemo();
-  const [connected, setConnected] = useState<string | null>(isDemo ? "gmail" : null);
+  const me = useMe();
+  const qc = useQueryClient();
+  const [demoConnected, setDemoConnected] = useState<string | null>(isDemo ? "gmail" : null);
+  const [notConfigured, setNotConfigured] = useState<string | null>(null);
+
+  /* What is actually connected, from the brokerage's own rows. Never a token. */
+  const live = useQuery({
+    queryKey: ["mailboxes", me.data?.active_organization?.id],
+    enabled: Boolean(me.data?.active_organization?.id) && !isDemo,
+    queryFn: () => api.mailboxes(),
+  });
+
+  const connect = useMutation({
+    mutationFn: (provider: "gmail" | "microsoft") => api.connectMailbox(provider),
+    onSuccess: (res) => {
+      if (res.outcome === "authorise") {
+        // The provider's own page. Nothing is connected until it sends the person back.
+        window.location.assign(res.url);
+        return;
+      }
+      setNotConfigured(res.reason);
+    },
+  });
+  const disconnect = useMutation({
+    mutationFn: (id: string) => api.disconnectMailbox(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+  });
+
+  const providers = live.data?.providers ?? [];
+  const mailboxes = live.data?.mailboxes ?? [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Data and connections</h1>
-        <p className="text-sm text-ink-secondary">
-          What ASAP is allowed to read on the brokerage's behalf.
-        </p>
-      </header>
+    <>
+      <ScreenTitle
+        title="Data and connections"
+        meta="What ASAP is allowed to read on the brokerage's behalf"
+      />
+      <section className="page-scroll spaces-page">
+        <div className="section-label">Mailbox</div>
 
-      <section aria-label="Mailboxes" className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-ink">Mailbox</h2>
-        {PROVIDERS.map((p) => {
-          const isOn = connected === p.id;
-          return (
-            <article
-              key={p.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line-strong bg-paper p-3.5"
-            >
-              <div className="min-w-0">
-                <p className="font-medium text-ink">{p.name}</p>
-                <p className="text-xs text-ink-muted">{p.detail}</p>
-                {isOn && (
-                  <p className="text-xs text-accent-green-ink">
-                    Connected as grace@asapbrokers.co.ke
-                    {isDemo ? " — simulated for this demonstration" : ""}
-                  </p>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => setConnected(isOn ? null : p.id)}
-                className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-              >
-                {isOn ? "Disconnect" : `Connect ${p.name}`}
-              </button>
-            </article>
-          );
-        })}
-        {!connected && (
-          <p className="rounded-card border border-line-soft bg-wash px-3 py-2 text-sm text-ink-secondary">
-            No mailbox is connected. ASAP can still read documents and records; it cannot see or
-            send email until one is.
+        {isDemo
+          ? PROVIDERS.map((p) => (
+              <article className="job-card" key={p.id}>
+                <div className="job-icon" aria-hidden>
+                  ✉
+                </div>
+                <div className="job-main">
+                  <div className="job-title">
+                    <strong>{p.name}</strong>
+                    {demoConnected === p.id && (
+                      <span className="job-pill running">Connected — simulated</span>
+                    )}
+                  </div>
+                  <p>{p.detail}</p>
+                  <small>
+                    {demoConnected === p.id
+                      ? "A simulated connection for this demonstration. No real mailbox is attached."
+                      : "Not connected."}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setDemoConnected(demoConnected === p.id ? null : p.id)}
+                >
+                  {demoConnected === p.id ? "Disconnect" : "Connect"}
+                </button>
+              </article>
+            ))
+          : providers.map((p) => {
+              const mine = mailboxes.filter((m) => m.provider === p.id && m.status !== "disconnected");
+              return (
+                <article className="job-card" key={p.id}>
+                  <div className={`job-icon ${p.available ? "" : "amber"}`} aria-hidden>
+                    ✉
+                  </div>
+                  <div className="job-main">
+                    <div className="job-title">
+                      <strong>{p.label}</strong>
+                      {mine.map((m) => (
+                        <span
+                          key={m.id}
+                          className={`job-pill ${m.status === "connected" ? "running" : "waiting"}`}
+                        >
+                          {m.status === "connected" ? "Connected" : "Needs authorising again"}
+                        </span>
+                      ))}
+                    </div>
+                    <p>
+                      {mine.length > 0
+                        ? mine.map((m) => m.emailAddress).join(", ")
+                        : p.available
+                          ? "Not connected."
+                          : (p.unavailableReason ?? "Not available here.")}
+                    </p>
+                    <small>
+                      {mine[0]?.statusReason ??
+                        (mine[0]?.lastSyncedAt
+                          ? `Last read ${new Date(mine[0].lastSyncedAt).toLocaleString()}`
+                          : "ASAP reads and replies in the same thread, and never sends without a person.")}
+                    </small>
+                  </div>
+                  {mine.length > 0 ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={disconnect.isPending}
+                      onClick={() => disconnect.mutate(mine[0]!.id)}
+                    >
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={!p.available || connect.isPending}
+                      onClick={() => {
+                        setNotConfigured(null);
+                        connect.mutate(p.id);
+                      }}
+                    >
+                      {p.available ? "Connect" : "Not available here"}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+
+        {notConfigured && (
+          <div className="warning">
+            <strong>Nothing was connected:</strong> {notConfigured}
+          </div>
+        )}
+        {!isDemo && live.isError && (
+          <div className="warning">
+            <strong>We could not read your connections:</strong> {describeApiError(live.error)}
+          </div>
+        )}
+        {!isDemo && !live.isPending && mailboxes.length === 0 && (
+          <p style={{ fontSize: 11, color: "#707a72", marginTop: 12 }}>
+            Until a mailbox is connected, ASAP works from what you put on file yourself. Nothing is
+            read from anybody&rsquo;s email without this.
           </p>
         )}
-      </section>
 
-      <section aria-label="Elsewhere" className="flex flex-col gap-1.5">
-        <h2 className="text-sm font-medium text-ink">Elsewhere</h2>
-        <Link to="/email" className="text-sm text-ink underline">
-          Email conversations
-        </Link>
-        <Link to="/documents" className="text-sm text-ink underline">
-          Documents on file
-        </Link>
+        <DemoBoundary>{DEMO_NOTICE} A simulated connection attaches no real mailbox.</DemoBoundary>
       </section>
-
-      <DemoBoundary>
-        {DEMO_NOTICE} Connecting here is simulated. Production requires real OAuth, your
-        permission, and the provider's own evidence before anything is read or sent.
-      </DemoBoundary>
-    </div>
+    </>
   );
 }

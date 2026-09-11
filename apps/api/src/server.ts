@@ -45,6 +45,20 @@ const app = createApp({
     signedUrlTtlSeconds: env.SIGNED_URL_TTL_SECONDS,
     maxUploadBytes: env.MAX_UPLOAD_BYTES,
   },
+  // Absent means a brokerage cannot connect that provider here, and the surface says so.
+  mailboxOAuth: {
+    gmail: {
+      clientId: env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI,
+    },
+    microsoft: {
+      clientId: env.MICROSOFT_OAUTH_CLIENT_ID,
+      clientSecret: env.MICROSOFT_OAUTH_CLIENT_SECRET,
+      tenantId: env.MICROSOFT_OAUTH_TENANT_ID,
+      redirectUri: env.MICROSOFT_OAUTH_REDIRECT_URI,
+    },
+  },
   logger,
   build,
   supabase,

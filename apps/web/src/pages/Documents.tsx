@@ -1,6 +1,11 @@
 import { DEMO_DOCUMENTS, DEMO_NOTICE, demoClient, type DemoDocument } from "@asap/schema";
 import { Link, useParams } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { api, describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { useDemo } from "../demo/state.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
 import { MissingData } from "../components/states.js";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
@@ -16,43 +21,188 @@ import { DemoBoundary } from "../demo/DemoBoundary.js";
  * field becomes missing, not known, because rejecting a reading does not tell us the truth.
  */
 export function Documents() {
-  return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Documents</h1>
-        <p className="text-sm text-ink-secondary">
-          Everything on file, and what ASAP read from it. Nothing here is treated as known until a
-          person has accepted it.
-        </p>
-      </header>
+  const demo = useDemo();
+  const me = useMe();
+  const qc = useQueryClient();
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState<string | null>(null);
 
-      <ul className="flex flex-col gap-2">
-        {DEMO_DOCUMENTS.map((d) => {
-          const client = demoClient(d.clientId);
-          return (
-            <li key={d.id}>
+  /* A real brokerage's own files, under its own session. Nothing here is a fixture. */
+  const live = useQuery({
+    queryKey: ["documents", me.data?.active_organization?.id],
+    enabled: Boolean(me.data?.active_organization?.id) && !demo.isDemo,
+    queryFn: () => api.documents(),
+  });
+
+  /**
+   * Putting a file on file, in three moves the browser does itself:
+   *
+   *   1. hash the bytes, so the same file twice is recognised rather than filed twice;
+   *   2. ask the API where it may go — the server allocates the path inside this brokerage's own
+   *      prefix, because a path the browser chose could name another brokerage's folder;
+   *   3. PUT the bytes straight to storage. They never pass through the API.
+   */
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const bytes = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const contentSha256 = [...new Uint8Array(digest)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      const asked = await api.uploadDocument({
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
+        byteSize: file.size,
+        contentSha256,
+      });
+      if (asked.outcome === "already_on_file") return asked;
+      const put = await fetch(asked.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+        body: bytes,
+      });
+      if (!put.ok) throw new Error("The file store would not accept the file.");
+      return asked;
+    },
+    onSuccess: (res) => {
+      setUploadError(null);
+      setUploaded(
+        res.outcome === "already_on_file"
+          ? `${res.document.filename} was already on file — nothing was filed twice.`
+          : `${res.document.filename} is on file. ASAP reads it next; nothing is treated as known until you accept it.`,
+      );
+      void qc.invalidateQueries({ queryKey: ["documents"] });
+    },
+    onError: (e) => setUploadError(e instanceof Error ? e.message : describeApiError(e)),
+  });
+
+  const documents = live.data?.documents ?? [];
+
+  return (
+    <>
+      <ScreenTitle title="Documents" meta="Everything on file, and what ASAP read from it" />
+      <section className="page-scroll spaces-page">
+        {!demo.isDemo && (
+          <article className="space-card" style={{ marginBottom: 12 }}>
+            <div className="space-body">
+              <div className="section-label">Put something on file</div>
+              <p style={{ fontSize: 12, color: "#707a72", margin: "0 0 12px" }}>
+                A schedule, a quote, a statement, a cover note. ASAP reads it and proposes what it
+                found; a person accepts each value before it counts as known.
+              </p>
+              <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
+                {upload.isPending ? "Filing…" : "Choose a file"}
+                <input
+                  type="file"
+                  className="sr-only"
+                  disabled={upload.isPending}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) upload.mutate(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {uploaded && (
+                <p style={{ fontSize: 11, color: "#3e4941", marginTop: 10 }} role="status">
+                  {uploaded}
+                </p>
+              )}
+              {uploadError && (
+                <div className="warning" style={{ marginTop: 10 }}>
+                  <strong>Nothing was filed:</strong> {uploadError}
+                </div>
+              )}
+            </div>
+          </article>
+        )}
+
+        {demo.isDemo ? (
+          <ul className="flex flex-col gap-2">
+            {DEMO_DOCUMENTS.map((d) => {
+              const client = demoClient(d.clientId);
+              return (
+                <li key={d.id}>
+                  <Link
+                    to="/documents/$documentId"
+                    params={{ documentId: d.id }}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line-strong bg-paper p-3.5 hover:border-ink-muted"
+                  >
+                    <span className="flex flex-col">
+                      <span className="font-medium text-ink">{d.name}</span>
+                      <span className="text-xs text-ink-muted">
+                        {client?.shortName} · {d.kind} · {d.pages} pages
+                      </span>
+                    </span>
+                    <EvidenceConditionChip condition={d.highlight.state} />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        ) : live.isPending ? (
+          <article className="space-card">
+            <div className="space-body">
+              <strong>Reading what is on file…</strong>
+            </div>
+          </article>
+        ) : live.isError ? (
+          <article className="space-card">
+            <div className="space-body">
+              <strong>We could not read your documents.</strong>
+              <p style={{ color: "#707a72", fontSize: 11 }}>{describeApiError(live.error)}</p>
+            </div>
+          </article>
+        ) : documents.length === 0 ? (
+          <article className="space-card">
+            <div className="space-body">
+              <strong>Nothing is on file yet.</strong>
+              <p style={{ color: "#707a72", fontSize: 11 }}>
+                Put a schedule or a statement in above, or connect the mailbox the brokerage already
+                works from, and what arrives lands here.
+              </p>
+            </div>
+          </article>
+        ) : (
+          <div className="spaces-grid">
+            {documents.map((d) => (
               <Link
+                key={d.id}
                 to="/documents/$documentId"
                 params={{ documentId: d.id }}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line-strong bg-paper p-3.5 hover:border-ink-muted"
+                className="space-tile"
               >
-                <span className="flex flex-col">
-                  <span className="font-medium text-ink">{d.name}</span>
-                  <span className="text-xs text-ink-muted">
-                    {client?.shortName} · {d.kind} · {d.pages} pages
-                  </span>
+                <span className={`pill ${d.extractionState === "failed" ? "high" : ""}`}>
+                  {EXTRACTION_LABEL[d.extractionState]}
                 </span>
-                <EvidenceConditionChip condition={d.highlight.state} />
+                <div className="section-label">{d.kind.replace(/_/g, " ")}</div>
+                <h3>{d.filename}</h3>
+                <p>
+                  {d.pageCount === null
+                    ? "Not read yet"
+                    : `${d.pageCount} ${d.pageCount === 1 ? "page" : "pages"}`}
+                  {d.extractionError ? ` · ${d.extractionError}` : ""}
+                </p>
+                <small>{new Date(d.createdAt).toLocaleDateString()}</small>
               </Link>
-            </li>
-          );
-        })}
-      </ul>
+            ))}
+          </div>
+        )}
 
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
-    </div>
+        <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
+      </section>
+    </>
   );
 }
+
+/** What has happened to a document so far, in words rather than an enum. */
+const EXTRACTION_LABEL: Record<string, string> = {
+  pending: "Waiting to be read",
+  running: "Being read",
+  done: "Read",
+  failed: "Could not be read",
+  not_attempted: "Not read",
+};
 
 export function DocumentViewer() {
   const { documentId = "" } = useParams({ strict: false }) as { documentId?: string };

@@ -138,6 +138,13 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
               Object.assign(row, patch);
               return { data: row, error: null };
             },
+            /** No row is an answer, not an error — the difference `single` exists to make. */
+            async maybeSingle() {
+              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => r[c] === v));
+              if (!row) return { data: null, error: null };
+              Object.assign(row, patch);
+              return { data: row, error: null };
+            },
             then(resolve: (v: { error: null }) => unknown) {
               for (const row of db.tables[table] ?? []) {
                 if (filters.every(([c, v]) => row[c] === v)) Object.assign(row, patch);

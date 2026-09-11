@@ -816,3 +816,31 @@ failure state, or shows a demonstration record.
 **Still missing on the first-run path**, and named rather than left to be discovered: adding a
 policy has no endpoint at all; adding a client has one but no entry point from `+ New`; and
 connecting a mailbox and uploading a document have working APIs behind fixture-only screens.
+
+## D-069 — Evidence arrives without typing: documents and the mailbox
+
+Two surfaces that had working APIs behind fixture-only screens, and one that had no API at all.
+
+**Documents are real.** The screen lists the brokerage's own files and files a new one in three
+moves the browser makes itself: hash the bytes, ask the API where it may go, then PUT the bytes
+straight to storage. The bytes never pass through the API, and the server allocates the path inside
+the brokerage's own prefix — a path the browser chose could name another brokerage's folder. The
+same file twice is recognised, not filed twice, and the screen says so.
+
+**The mailbox had provider adapters and no HTTP surface at all** — no connect, no list, no
+disconnect. `GET /mailboxes`, `POST /mailboxes/connect` and `DELETE /mailboxes/:id` exist now, and
+they hold two rules:
+
+- **A response never carries a token.** The encrypted access and refresh tokens live server-side
+  only, and no response shape here has anywhere to put one; a test asserts the serialised body
+  contains no token in any shape or key.
+- **A deployment without OAuth credentials says so, in words.** "This deployment has no Google
+  credentials yet. Whoever administers it can add them" — not a dead button, not a page that
+  cannot work, and never the variable names (§45 rule 4).
+
+Disconnecting keeps the row — a mailbox that once fed this brokerage is part of its history — and
+clears what could read or send with it.
+
+**Still to do on this path:** the OAuth callback that exchanges the code for tokens and stores them
+encrypted. Until it exists, a deployment that *has* credentials can send a person to authorise and
+cannot yet finish. That is stated on the screen rather than discovered.

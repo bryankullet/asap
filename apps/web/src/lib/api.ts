@@ -11,6 +11,14 @@ import {
   placementCreatedSchema,
   policyResponseSchema,
   createPolicyResponseSchema,
+  documentsResponseSchema,
+  mailboxesResponseSchema,
+  connectMailboxResponseSchema,
+  documentDetailSchema,
+  uploadResponseSchema,
+  reviewFieldResponseSchema,
+  type ReviewFieldRequest,
+  type UploadInput,
   type CreatePolicyInput,
   claimDetailSchema,
   endorsementDetailSchema,
@@ -199,6 +207,41 @@ export const api = {
       allow: [409],
     }),
   agreements: () => request("GET", "/agreements", agreementsResponseSchema),
+  /* ---- Documents: what is on file, and what ASAP read from it ----------------------------- */
+  /** Everything on file, newest first. Optionally for one client or one piece of work. */
+  documents: (filter: { clientId?: string; workItemId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (filter.clientId) q.set("clientId", filter.clientId);
+    if (filter.workItemId) q.set("workItemId", filter.workItemId);
+    const query = q.toString();
+    return request("GET", `/documents${query ? `?${query}` : ""}`, documentsResponseSchema);
+  },
+  /** One document: its pages, what was extracted, and where each value was read from. */
+  document: (id: string) => request("GET", `/documents/${id}`, documentDetailSchema),
+  /**
+   * Ask for somewhere to put a file. The bytes never pass through the API: it answers with a
+   * signed URL the browser PUTs to, and the same bytes already on file are not an upload.
+   */
+  uploadDocument: (input: UploadInput) =>
+    request("POST", "/documents", uploadResponseSchema, input),
+  /** One person's decision about one extracted field. Extraction proposes; a person decides. */
+  reviewDocumentField: (documentId: string, fieldId: string, input: ReviewFieldRequest) =>
+    request(
+      "POST",
+      `/documents/${documentId}/fields/${fieldId}/review`,
+      reviewFieldResponseSchema,
+      input,
+    ),
+
+  /* ---- Mailboxes: the email the brokerage already works from -------------------------------- */
+  /** What is connected, and what this deployment could connect. Never a token. */
+  mailboxes: () => request("GET", "/mailboxes", mailboxesResponseSchema),
+  /** Begin connecting one, or be told plainly that this deployment cannot. */
+  connectMailbox: (provider: "gmail" | "microsoft") =>
+    request("POST", "/mailboxes/connect", connectMailboxResponseSchema, { provider }),
+  /** Disconnect: the row stays as history, the tokens do not. */
+  disconnectMailbox: (id: string) => request("DELETE", `/mailboxes/${id}`, null),
+
   policy: (id: string) => request("GET", `/policies/${id}`, policyResponseSchema),
   /** Record cover the brokerage already places. Asking twice records a period, never a twin. */
   createPolicy: (input: CreatePolicyInput) =>

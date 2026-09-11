@@ -4,6 +4,7 @@ import {
   documentDetailSchema,
   documentsResponseSchema,
   reviewFieldRequestSchema,
+  reviewFieldResponseSchema,
   uploadRequestSchema,
   uploadResponseSchema,
   type DocumentField,
@@ -377,7 +378,7 @@ export function documentRoutes(deps: {
       newState: { state: patch.state, value: value ?? before.proposedValue },
     });
 
-    return c.json({ field: toField(updated as FieldRow) });
+    return c.json(reviewFieldResponseSchema.parse({ field: toField(updated as FieldRow) }));
   });
 
   app.onError((err, c) => {

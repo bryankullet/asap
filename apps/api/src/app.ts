@@ -12,6 +12,7 @@ import { attentionRoutes } from "./routes/attention.js";
 import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
+import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { documentRoutes } from "./routes/documents.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
@@ -45,6 +46,12 @@ export type AppDeps = {
    * the fallback below exists so a test that never touches a document need not describe storage.
    */
   storage?: { bucket: string; signedUrlTtlSeconds: number; maxUploadBytes: number };
+  /**
+   * OAuth credentials for the mailboxes a brokerage can connect. Every field is optional: a
+   * deployment without them says so at the moment somebody asks, rather than offering a
+   * connection that cannot work (D-068).
+   */
+  mailboxOAuth?: MailboxOAuthConfig;
   streamPollMs?: number;
 };
 
@@ -101,6 +108,8 @@ export function createApp(deps: AppDeps) {
     "/automations/*",
     "/documents",
     "/documents/*",
+    "/mailboxes",
+    "/mailboxes/*",
     "/conversations",
     "/conversations/*",
     "/spaces/*",
@@ -132,6 +141,13 @@ export function createApp(deps: AppDeps) {
       bucket: deps.storage?.bucket ?? "insurance-documents",
       signedUrlTtlSeconds: deps.storage?.signedUrlTtlSeconds ?? 300,
       maxUploadBytes: deps.storage?.maxUploadBytes ?? 52_428_800,
+    }),
+  );
+  app.route(
+    "/",
+    mailboxRoutes({
+      logger,
+      oauth: deps.mailboxOAuth ?? { gmail: {}, microsoft: {} },
     }),
   );
   app.route("/", attentionRoutes());
