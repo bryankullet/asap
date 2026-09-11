@@ -13,6 +13,8 @@ import {
   claimDetailSchema,
   endorsementDetailSchema,
   askResponseSchema,
+  askResponseV2Schema,
+  type AskRequest,
   createWorkItemResponseSchema,
   markDraftCopiedResponseSchema,
   runEventsResponseSchema,
@@ -94,6 +96,11 @@ async function request<S extends z.ZodTypeAny>(
 export const api = {
   me: () => request("GET", "/me", meResponseSchema),
   ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
+  /**
+   * Ask a question. Everything that decides the answer — the tools, the grounding check, the
+   * provider — is server-side; the browser sends words and a scope id and receives a state.
+   */
+  askQuestion: (body: AskRequest) => request("POST", "/ask", askResponseV2Schema, body),
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */

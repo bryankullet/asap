@@ -127,9 +127,13 @@ function makeDb(): FakeDb {
 
 const auth = { Authorization: "Bearer tok-amina" };
 
+// Test-only: bodies are asserted field by field, so a loose type is the honest one here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const readJson = (res: Response): Promise<any> => res.json();
+
 function build(db: FakeDb, script: FakeScript | null) {
   return createApp({
-    logger: pino({ level: process.env.ASK_DEBUG ? "warn" : "silent" }),
+    logger: pino({ level: process.env["ASK_DEBUG"] ? "warn" : "silent" }),
     build: { version: "t", commit: "t" },
     supabase: fakeFactory(db),
     mailer: silentMailer,
@@ -182,7 +186,7 @@ describe("POST /ask", () => {
   it("answers from a tool result and cites the record it read", async () => {
     const res = await ask(build(db, GROUNDED), { question: "What is Jubilee waiting on?" });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, any>;
+    const body = await readJson(res);
 
     expect(body.state).toBe("answered");
     expect(body.message.intent.target).toBe(ITEM);
@@ -195,7 +199,7 @@ describe("POST /ask", () => {
 
   it("persists both turns of the conversation and continues it", async () => {
     const app = build(db, GROUNDED);
-    const first = (await (await ask(app, { question: "What is Jubilee waiting on?" })).json()) as any;
+    const first = await readJson(await ask(app, { question: "What is Jubilee waiting on?" }));
     expect(first.conversationId).toBeTruthy();
 
     const second = await ask(app, {
@@ -204,10 +208,10 @@ describe("POST /ask", () => {
     });
     expect(second.status).toBe(200);
 
-    const messages = db.tables.conversation_messages as Record<string, unknown>[];
-    expect(messages.map((m) => m.role)).toEqual(["person", "asap", "person", "asap"]);
+    const messages = db.tables["conversation_messages"] as Record<string, unknown>[];
+    expect(messages.map((m) => m["role"])).toEqual(["person", "asap", "person", "asap"]);
     // Sequence continues rather than restarting: a transcript a person can read in order.
-    expect(messages.map((m) => m.seq)).toEqual([0, 1, 2, 3]);
+    expect(messages.map((m) => m["seq"])).toEqual([0, 1, 2, 3]);
   });
 
   it("abstains when the model names a record no tool returned", async () => {
@@ -229,7 +233,7 @@ describe("POST /ask", () => {
       },
     ];
     const res = await ask(build(db, fabricated), { question: "Tell me about Beta Risk." });
-    const body = (await res.json()) as any;
+    const body = await readJson(res);
 
     expect(body.state).toBe("abstained");
     expect(body.planRecordId).toBeNull();
@@ -256,7 +260,7 @@ describe("POST /ask", () => {
       },
     ];
     const res = await ask(build(db, authoritative), { question: "Is it done?" });
-    const body = (await res.json()) as any;
+    const body = await readJson(res);
     expect(body.state).toBe("abstained");
     expect(body.message.abstained.reason).toMatch(/cannot decide a status/i);
   });
@@ -265,7 +269,7 @@ describe("POST /ask", () => {
     const garbage: FakeScript = [
       { match: /./, reply: { text: "<div>Here is your answer</div>", toolCalls: [], stop: "end" } },
     ];
-    const body = (await (await ask(build(db, garbage), { question: "anything" })).json()) as any;
+    const body = await readJson(await ask(build(db, garbage), { question: "anything" }));
     expect(body.state).toBe("abstained");
     expect(body.message.body).not.toContain("<div>");
   });
@@ -273,11 +277,11 @@ describe("POST /ask", () => {
   it("reports a missing model as a configuration state, not an empty answer", async () => {
     const res = await ask(build(db, null), { question: "What is Jubilee waiting on?" });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
+    const body = await readJson(res);
     expect(body.state).toBe("not_configured");
     expect(body.message).toBeNull();
     // Nothing was persisted for a question that was never asked of a model.
-    expect(db.tables.conversation_messages).toHaveLength(0);
+    expect(db.tables["conversation_messages"]).toHaveLength(0);
   });
 
   it("refuses a scope the caller cannot read", async () => {
@@ -293,7 +297,7 @@ describe("POST /ask", () => {
       question: "What is Jubilee waiting on?",
       scope: { kind: "client", id: CLIENT },
     });
-    const body = (await res.json()) as any;
+    const body = await readJson(res);
     expect(body.scope).toEqual({ kind: "client", id: CLIENT, label: "Acme Motors" });
   });
 
@@ -316,7 +320,7 @@ describe("POST /ask", () => {
         },
       },
     ];
-    const body = (await (await ask(build(db, findAll), { question: "list everything" })).json()) as any;
+    const body = await readJson(await ask(build(db, findAll), { question: "list everything" }));
     expect(body.state).toBe("answered");
     expect(JSON.stringify(body)).not.toContain(BETA_ITEM);
   });

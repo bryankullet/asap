@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "ASAP — a multi-tenant AI operating system for insurance brokerages",
+  "description": "ASAP \u2014 a multi-tenant AI operating system for insurance brokerages",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=22.13.0",
@@ -25,7 +25,8 @@
     "db:seed:passwords": "node scripts/seed-set-passwords.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify:live": "bash scripts/verify-live.sh"
+    "verify:live": "bash scripts/verify-live.sh",
+    "eval:ask": "pnpm --filter @asap/api eval:ask"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -1,14 +1,37 @@
-import type { AskResponse, CreateClientResponse, CreateWorkItemResponse } from "@asap/schema";
+import type {
+  AskResponse,
+  AskResponseV2,
+  CreateClientResponse,
+  CreateWorkItemResponse,
+} from "@asap/schema";
 import { Input } from "@asap/ui";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useId, useState, type FormEvent } from "react";
 import { api, describeApiError } from "../lib/api.js";
+import { AskThread } from "./AskThread.js";
 
 /**
- * Ask, Phase 1: a search bar that returns a UiIntent. It opens things; it cannot act
- * (UI Build Spec v1 Part 4.3). The response is validated against the shared contract in api.ts.
+ * Ask: one composer, three paths, chosen here in the browser and never by a model.
+ *
+ *  1. **A named operation** — "renew Acme", "claim for Acme" — goes straight to the create path.
+ *     These are exact instructions, and routing them through a model would add a way to get them
+ *     wrong without adding anything.
+ *  2. **A lookup** — a name, a policy number, a vehicle — goes to search. §45 rule 7: an exact
+ *     database question is a lookup, not a search over meanings, and certainly not a model call.
+ *  3. **A question** — anything phrased as one — goes to `POST /ask`, which reads the records
+ *     through declared tools and answers from them or abstains.
+ *
+ * Ask opens and prepares. It does not send, approve or pay; those are recorded by a person.
  */
+
+/** Phrased as a question, so it wants an answer rather than a list of matches. */
+function looksLikeAQuestion(text: string): boolean {
+  if (text.endsWith("?")) return true;
+  return /^(what|why|when|who|where|which|how|is|are|does|do|did|can|should|show me|tell me|explain|summarise|summarize)\b/i.test(
+    text,
+  );
+}
 export function AskComposer() {
   const [q, setQ] = useState("");
   const [last, setLast] = useState<AskResponse | null>(null);
@@ -57,6 +80,40 @@ export function AskComposer() {
       setPending(res);
     },
   });
+  // The conversation, in this session. It is a transcript for a person to read; every value shown
+  // beside it is fetched by record id, never read back out of these turns (§45 rule 14).
+  const [turns, setTurns] = useState<{ question: string; response: AskResponseV2 | null }[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  // The scope travels with the question: the record a person is looking at is what "this" means.
+  const recordId = useRouterState({
+    // Read from the matched route's own params rather than parsed from the URL by hand, so a
+    // change to the path shape cannot leave this silently scoping every question to the brokerage.
+    select: (state) => {
+      for (const match of state.matches) {
+        const params = match.params as { recordId?: string };
+        if (params.recordId) return params.recordId;
+      }
+      return null;
+    },
+  });
+  const question = useMutation({
+    mutationFn: (text: string) =>
+      api.askQuestion({
+        question: text,
+        conversationId,
+        scope: recordId ? { kind: "record", id: recordId } : { kind: "brokerage", id: null },
+      }),
+    onSuccess: (res) => {
+      setConversationId(res.conversationId);
+      setTurns((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.response === null) next[next.length - 1] = { ...last, response: res };
+        return next;
+      });
+    },
+  });
+
   const ask = useMutation({
     mutationFn: api.ask,
     onSuccess: (res) => {
@@ -110,6 +167,14 @@ export function AskComposer() {
       renew.mutate({ kind: "endorsement", clientName: em[1].trim(), requestText });
       return;
     }
+    if (looksLikeAQuestion(text)) {
+      setLast(null);
+      setPending(null);
+      setTurns((prev) => [...prev, { question: text, response: null }]);
+      question.mutate(text);
+      setQ("");
+      return;
+    }
     ask.mutate(text);
   }
 
@@ -117,6 +182,17 @@ export function AskComposer() {
     <div className="flex flex-col gap-2">
       {/* Answers and choices sit above the bar, because the bar is docked to the foot of the page. */}
       <div className="empty:hidden flex flex-col gap-2 rounded-card border border-line-strong bg-paper p-3 shadow-dock empty:border-0 empty:p-0 empty:shadow-none">
+        <AskThread
+          turns={turns}
+          pending={question.isPending}
+          onRetry={() => {
+            const lastTurn = turns[turns.length - 1];
+            if (lastTurn) question.mutate(lastTurn.question);
+          }}
+        />
+        {question.isError && (
+          <p className="text-xs text-accent-red">{describeApiError(question.error)}</p>
+        )}
         {(ask.isPending || renew.isPending) && (
           <p className="text-xs text-ink-muted">{renew.isPending ? "Opening…" : "Searching…"}</p>
         )}
