@@ -4,6 +4,8 @@ import {
   connectMailboxRequestSchema,
   connectMailboxResponseSchema,
   mailboxesResponseSchema,
+  emailThreadsResponseSchema,
+  emailThreadResponseSchema,
   type MailboxProviderIdValue,
   type MailboxesResponse,
 } from "@asap/schema";
@@ -27,7 +29,11 @@ import { parseBody } from "./_parse.js";
  *    page that cannot work.
  */
 export type MailboxOAuthConfig = {
-  gmail: { clientId?: string | undefined; clientSecret?: string | undefined; redirectUri?: string | undefined };
+  gmail: {
+    clientId?: string | undefined;
+    clientSecret?: string | undefined;
+    redirectUri?: string | undefined;
+  };
   microsoft: {
     clientId?: string | undefined;
     clientSecret?: string | undefined;
@@ -65,6 +71,85 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
   const app = new Hono();
 
   /** What is connected, and what this deployment could connect. */
+  /**
+   * The brokerage's own correspondence, newest first.
+   *
+   * Read-only, under the caller's RLS. Nothing is sent from here: a message leaves ASAP only
+   * through an approved draft, with the provider's own message id recorded against it.
+   */
+  app.get("/email/threads", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    const boxes = await db.from("mailboxes").select("id").eq("organization_id", org.id).limit(1);
+    if (boxes.error) return sendError(c, mapDatabaseError(boxes.error));
+
+    const { data, error } = await db
+      .from("email_threads")
+      .select(
+        "id, subject, client_id, work_item_id, last_message_at, clients(name), email_messages(count)",
+      )
+      .eq("organization_id", org.id)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(50);
+    if (error) return sendError(c, mapDatabaseError(error));
+
+    return c.json(
+      emailThreadsResponseSchema.parse({
+        mailboxConnected: (boxes.data ?? []).length > 0,
+        threads: ((data ?? []) as ThreadRow[]).map(threadSummary),
+      }),
+    );
+  });
+
+  /** One conversation, in order. The body is the brokerage's own correspondence — never logged. */
+  app.get("/email/threads/:id", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    const thread = await db
+      .from("email_threads")
+      .select(
+        "id, subject, client_id, work_item_id, last_message_at, clients(name), email_messages(count)",
+      )
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .maybeSingle();
+    if (thread.error) return sendError(c, mapDatabaseError(thread.error));
+    if (!thread.data) throw new HttpError(404, "not_found", "No conversation with that id");
+
+    const messages = await db
+      .from("email_messages")
+      .select(
+        "id, direction, from_address, to_addresses, subject, body_text, snippet, sent_at, has_attachments",
+      )
+      .eq("organization_id", org.id)
+      .eq("thread_id", id)
+      .order("sent_at", { ascending: true })
+      .limit(200);
+    if (messages.error) return sendError(c, mapDatabaseError(messages.error));
+
+    return c.json(
+      emailThreadResponseSchema.parse({
+        thread: threadSummary(thread.data as ThreadRow),
+        messages: ((messages.data ?? []) as MessageRow[]).map((m) => ({
+          id: m.id,
+          direction: m.direction,
+          from: m.from_address,
+          to: m.to_addresses ?? [],
+          subject: m.subject,
+          body: m.body_text,
+          snippet: m.snippet,
+          sentAt: m.sent_at,
+          hasAttachments: m.has_attachments,
+        })),
+      }),
+    );
+  });
+
   app.get("/mailboxes", async (c) => {
     const { db, user } = c.get("auth");
     const ctx = await resolveContext(db, user.id);
@@ -162,7 +247,9 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
       newState: { provider: input.provider },
     });
 
-    return c.json(connectMailboxResponseSchema.parse({ outcome: "authorise", url: url.toString() }));
+    return c.json(
+      connectMailboxResponseSchema.parse({ outcome: "authorise", url: url.toString() }),
+    );
   });
 
   /**
@@ -209,4 +296,40 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
     throw err;
   });
   return app;
+}
+
+/** A thread row as selected above, with the client's name and its message count joined in. */
+type ThreadRow = {
+  id: string;
+  subject: string;
+  client_id: string | null;
+  work_item_id: string | null;
+  last_message_at: string | null;
+  clients: { name: string } | { name: string }[] | null;
+  email_messages: { count: number }[] | null;
+};
+
+type MessageRow = {
+  id: string;
+  direction: "inbound" | "outbound";
+  from_address: string;
+  to_addresses: string[] | null;
+  subject: string;
+  body_text: string | null;
+  snippet: string | null;
+  sent_at: string;
+  has_attachments: boolean;
+};
+
+function threadSummary(row: ThreadRow) {
+  const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
+  return {
+    id: row.id,
+    subject: row.subject,
+    clientId: row.client_id,
+    clientName: client?.name ?? null,
+    workItemId: row.work_item_id,
+    lastMessageAt: row.last_message_at,
+    messageCount: row.email_messages?.[0]?.count ?? 0,
+  };
 }

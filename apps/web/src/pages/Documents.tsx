@@ -1,14 +1,12 @@
-import { DEMO_DOCUMENTS, DEMO_NOTICE, demoClient, type DemoDocument } from "@asap/schema";
 import { Link, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
-import { useDemo } from "../demo/state.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
-import { MissingData } from "../components/states.js";
-import { DemoBoundary } from "../demo/DemoBoundary.js";
+import { ErrorState, LoadingList, MissingData } from "../components/states.js";
+import type { DocumentField } from "@asap/schema";
 
 /**
  * Documents, the viewer and extraction review (D-064).
@@ -21,7 +19,6 @@ import { DemoBoundary } from "../demo/DemoBoundary.js";
  * field becomes missing, not known, because rejecting a reading does not tell us the truth.
  */
 export function Documents() {
-  const demo = useDemo();
   const me = useMe();
   const qc = useQueryClient();
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -30,7 +27,7 @@ export function Documents() {
   /* A real brokerage's own files, under its own session. Nothing here is a fixture. */
   const live = useQuery({
     queryKey: ["documents", me.data?.active_organization?.id],
-    enabled: Boolean(me.data?.active_organization?.id) && !demo.isDemo,
+    enabled: Boolean(me.data?.active_organization?.id),
     queryFn: () => api.documents(),
   });
 
@@ -82,65 +79,40 @@ export function Documents() {
     <>
       <ScreenTitle title="Documents" meta="Everything on file, and what ASAP read from it" />
       <section className="page-scroll spaces-page">
-        {!demo.isDemo && (
-          <article className="space-card" style={{ marginBottom: 12 }}>
-            <div className="space-body">
-              <div className="section-label">Put something on file</div>
-              <p style={{ fontSize: 12, color: "#707a72", margin: "0 0 12px" }}>
-                A schedule, a quote, a statement, a cover note. ASAP reads it and proposes what it
-                found; a person accepts each value before it counts as known.
+        <article className="space-card" style={{ marginBottom: 12 }}>
+          <div className="space-body">
+            <div className="section-label">Put something on file</div>
+            <p style={{ fontSize: 12, color: "#707a72", margin: "0 0 12px" }}>
+              A schedule, a quote, a statement, a cover note. ASAP reads it and proposes what it
+              found; a person accepts each value before it counts as known.
+            </p>
+            <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
+              {upload.isPending ? "Filing…" : "Choose a file"}
+              <input
+                type="file"
+                className="sr-only"
+                disabled={upload.isPending}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) upload.mutate(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {uploaded && (
+              <p style={{ fontSize: 11, color: "#3e4941", marginTop: 10 }} role="status">
+                {uploaded}
               </p>
-              <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
-                {upload.isPending ? "Filing…" : "Choose a file"}
-                <input
-                  type="file"
-                  className="sr-only"
-                  disabled={upload.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) upload.mutate(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              {uploaded && (
-                <p style={{ fontSize: 11, color: "#3e4941", marginTop: 10 }} role="status">
-                  {uploaded}
-                </p>
-              )}
-              {uploadError && (
-                <div className="warning" style={{ marginTop: 10 }}>
-                  <strong>Nothing was filed:</strong> {uploadError}
-                </div>
-              )}
-            </div>
-          </article>
-        )}
+            )}
+            {uploadError && (
+              <div className="warning" style={{ marginTop: 10 }}>
+                <strong>Nothing was filed:</strong> {uploadError}
+              </div>
+            )}
+          </div>
+        </article>
 
-        {demo.isDemo ? (
-          <ul className="flex flex-col gap-2">
-            {DEMO_DOCUMENTS.map((d) => {
-              const client = demoClient(d.clientId);
-              return (
-                <li key={d.id}>
-                  <Link
-                    to="/documents/$documentId"
-                    params={{ documentId: d.id }}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line-strong bg-paper p-3.5 hover:border-ink-muted"
-                  >
-                    <span className="flex flex-col">
-                      <span className="font-medium text-ink">{d.name}</span>
-                      <span className="text-xs text-ink-muted">
-                        {client?.shortName} · {d.kind} · {d.pages} pages
-                      </span>
-                    </span>
-                    <EvidenceConditionChip condition={d.highlight.state} />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        ) : live.isPending ? (
+        {live.isPending ? (
           <article className="space-card">
             <div className="space-body">
               <strong>Reading what is on file…</strong>
@@ -188,8 +160,6 @@ export function Documents() {
             ))}
           </div>
         )}
-
-        <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
       </section>
     </>
   );
@@ -204,19 +174,53 @@ const EXTRACTION_LABEL: Record<string, string> = {
   not_attempted: "Not read",
 };
 
+/**
+ * One document: the pages ASAP read, and every value it proposes, each awaiting a person.
+ *
+ * Extraction proposes; a person decides (Phase 3 gate). Accept, correct or reject each field — and
+ * a rejected field becomes *missing*, not known, because rejecting a reading does not tell us what
+ * the truth is. Nothing here is a business value until somebody accepted it.
+ */
 export function DocumentViewer() {
   const { documentId = "" } = useParams({ strict: false }) as { documentId?: string };
-  const doc = DEMO_DOCUMENTS.find((d) => d.id === documentId);
-  if (!doc) return <MissingData what="No document with that id" why="It may have been removed." />;
-  return <DocumentBody doc={doc} />;
-}
+  const qc = useQueryClient();
+  const detail = useQuery({
+    queryKey: ["document", documentId],
+    queryFn: () => api.document(documentId),
+    enabled: Boolean(documentId),
+    retry: false,
+  });
+  const review = useMutation({
+    mutationFn: (input: {
+      fieldId: string;
+      decision: "accept" | "correct" | "reject";
+      value: string | null;
+    }) =>
+      api.reviewDocumentField(documentId, input.fieldId, {
+        decision: input.decision,
+        value: input.value,
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["document", documentId] }),
+  });
 
-function DocumentBody({ doc }: { doc: DemoDocument }) {
-  const client = demoClient(doc.clientId);
-  const [decision, setDecision] = useState<"proposed" | "accepted" | "corrected" | "rejected">(
-    "proposed",
-  );
-  const [corrected, setCorrected] = useState(doc.highlight.value);
+  if (detail.isPending) return <LoadingList rows={3} label="Opening the document" />;
+  if (detail.isError) {
+    return (
+      <ErrorState
+        what={`We could not open this document. ${describeApiError(detail.error)}`}
+        retry={() => void detail.refetch()}
+      />
+    );
+  }
+  if (!detail.data) {
+    return (
+      <MissingData
+        what="No document with that id"
+        why="It may have been removed, or your role in this brokerage cannot see it."
+      />
+    );
+  }
+  const { document: doc, fields, pages, fileUrl } = detail.data;
 
   return (
     <div className="flex flex-col gap-4">
@@ -224,97 +228,137 @@ function DocumentBody({ doc }: { doc: DemoDocument }) {
         <Link to="/documents" className="text-sm text-ink-secondary hover:underline">
           ← Documents
         </Link>
-        <h1 className="font-heading text-lg font-semibold text-ink">{doc.name}</h1>
+        <h1 className="font-heading text-lg font-semibold text-ink">{doc.filename}</h1>
         <p className="text-xs text-ink-muted">
-          {client?.name} · {doc.kind} · {doc.pages} pages
+          {doc.kind.replace(/_/g, " ")} ·{" "}
+          {doc.pageCount === null ? "not read yet" : `${doc.pageCount} pages`} ·{" "}
+          {new Date(doc.createdAt).toLocaleDateString()}
         </p>
+        {doc.extractionError && (
+          <p className="text-sm text-accent-red">ASAP could not read it: {doc.extractionError}</p>
+        )}
       </header>
 
       <div className="grid gap-4 min-[1000px]:grid-cols-[minmax(0,1fr)_22rem]">
-        {/* The page, with the region the value was read from marked on it. */}
         <figure className="flex flex-col gap-2">
-          <div className="relative aspect-[1/1.414] w-full overflow-hidden rounded-card border border-line-strong bg-paper">
-            <div className="absolute inset-0 grid place-items-center text-sm text-ink-muted">
-              Page {doc.highlight.page} of {doc.pages}
+          {fileUrl ? (
+            <object
+              data={fileUrl}
+              type={doc.mimeType}
+              aria-label={`${doc.filename}, as filed`}
+              className="aspect-[1/1.414] w-full rounded-card border border-line-strong bg-paper"
+            >
+              <a href={fileUrl}>Open {doc.filename}</a>
+            </object>
+          ) : (
+            <div className="grid aspect-[1/1.414] w-full place-items-center rounded-card border border-line-strong bg-paper p-6 text-center text-sm text-ink-muted">
+              The file itself is not available to open right now. What ASAP read from it is still
+              here.
             </div>
-            <div
-              aria-label={`Highlighted: ${doc.highlight.field}`}
-              className="absolute left-[12%] top-[26%] h-[4%] w-[46%] rounded-[3px] border-2 border-accent-gold bg-accent-gold-soft/60"
-            />
-          </div>
-          <figcaption className="text-xs text-ink-muted">
-            The highlight marks where “{doc.highlight.field}” was read, on page {doc.highlight.page}.
-          </figcaption>
+          )}
+          {pages.length > 0 && (
+            <figcaption className="text-xs text-ink-muted">
+              {pages.length} {pages.length === 1 ? "page" : "pages"} read.
+            </figcaption>
+          )}
         </figure>
 
-        <section
-          aria-label="Extraction review"
-          className="flex h-fit flex-col gap-3 rounded-card border border-line-strong bg-paper p-4"
-        >
+        <section aria-label="What ASAP read" className="flex flex-col gap-2">
           <h2 className="text-sm font-medium text-ink">What ASAP read</h2>
-          <div className="flex flex-col gap-1">
-            <span className="text-xs uppercase tracking-wide text-ink-muted">
-              {doc.highlight.field}
-            </span>
-            <span className="text-base font-medium text-ink">{doc.highlight.value}</span>
-            <span className="flex items-center gap-2 text-xs text-ink-muted">
-              Page {doc.highlight.page}
-              <EvidenceConditionChip condition={doc.highlight.state} />
-            </span>
-          </div>
-
-          {decision === "proposed" ? (
-            <>
-              <p className="text-xs text-ink-muted">
-                This is a reading, not a fact. Accept it, correct it, or reject it.
-              </p>
-              <label htmlFor="corrected" className="sr-only">
-                Corrected value
-              </label>
-              <input
-                id="corrected"
-                value={corrected}
-                onChange={(e) => setCorrected(e.target.value)}
-                className="min-h-[38px] rounded-control border border-line-strong px-3 text-sm"
-              />
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setDecision("accepted")}
-                  className="rounded-control bg-navy px-3 py-1.5 text-sm text-paper hover:bg-navy-hover"
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDecision("corrected")}
-                  disabled={corrected.trim() === doc.highlight.value}
-                  className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink hover:border-ink-muted disabled:opacity-50"
-                >
-                  Save correction
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDecision("rejected")}
-                  className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-                >
-                  Reject
-                </button>
-              </div>
-            </>
+          {fields.length === 0 ? (
+            <p className="text-sm text-ink-muted">
+              {doc.extractionState === "queued" || doc.extractionState === "working"
+                ? "ASAP is still reading this. Values appear here for review as it finds them."
+                : "Nothing was proposed from this document. That is an answer, not an empty list."}
+            </p>
           ) : (
-            <p className="rounded-card bg-wash px-3 py-2 text-sm text-ink-secondary">
-              {decision === "accepted" && "Accepted. This is now recorded as known, by you."}
-              {decision === "corrected" && `Corrected to “${corrected}”. What ASAP read is kept alongside it.`}
-              {/* Rejecting a reading does not establish the truth. */}
-              {decision === "rejected" &&
-                "Rejected. This field is now missing rather than known — rejecting a reading does not tell us the right value."}
+            fields.map((field) => (
+              <FieldReview
+                key={field.id}
+                field={field}
+                busy={review.isPending}
+                onDecide={(decision, value) =>
+                  review.mutate({ fieldId: field.id, decision, value })
+                }
+              />
+            ))
+          )}
+          {review.isError && (
+            <p role="alert" className="text-sm text-accent-red">
+              That decision was not recorded: {describeApiError(review.error)} The field is still as
+              it was.
             </p>
           )}
-
-          <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
         </section>
       </div>
     </div>
+  );
+}
+
+/** One proposed value, and the three things a person can do with it. */
+function FieldReview({
+  field,
+  busy,
+  onDecide,
+}: {
+  field: DocumentField;
+  busy: boolean;
+  onDecide: (decision: "accept" | "correct" | "reject", value: string | null) => void;
+}) {
+  const [corrected, setCorrected] = useState(field.correctedValue ?? field.proposedValue ?? "");
+  const decided = field.state !== "proposed";
+
+  return (
+    <article className="flex flex-col gap-2 rounded-card border border-line-strong bg-paper p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs uppercase tracking-wide text-ink-muted">
+          {field.fieldKey.replace(/_/g, " ")}
+        </span>
+        <EvidenceConditionChip condition={field.condition} />
+      </div>
+      <p className="text-sm text-ink">
+        {field.state === "rejected"
+          ? "Rejected — this value is missing, not known."
+          : (field.correctedValue ?? field.proposedValue ?? "Nothing was read for this field.")}
+      </p>
+      <p className="text-xs text-ink-muted">
+        {field.page === null ? "ASAP could not place this on a page." : `Page ${field.page}`}
+        {field.reviewedAt ? ` · decided ${new Date(field.reviewedAt).toLocaleDateString()}` : ""}
+      </p>
+      {!decided && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            aria-label={`Correct ${field.fieldKey.replace(/_/g, " ")}`}
+            value={corrected}
+            onChange={(e) => setCorrected(e.target.value)}
+            className="min-h-[34px] min-w-[8rem] flex-1 rounded-control border border-line-strong px-2 text-sm"
+          />
+          <button
+            type="button"
+            disabled={busy || !field.proposedValue}
+            onClick={() => onDecide("accept", null)}
+            className="rounded-control bg-navy px-3 py-1 text-sm text-paper hover:bg-navy-hover"
+          >
+            Accept
+          </button>
+          <button
+            type="button"
+            disabled={busy || corrected.trim() === ""}
+            onClick={() => onDecide("correct", corrected.trim())}
+            className="rounded-control border border-line-strong px-3 py-1 text-sm text-ink hover:border-ink-muted"
+          >
+            Correct
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onDecide("reject", null)}
+            className="rounded-control border border-line-strong px-3 py-1 text-sm text-accent-red hover:border-accent-red"
+          >
+            Reject
+          </button>
+        </div>
+      )}
+    </article>
   );
 }

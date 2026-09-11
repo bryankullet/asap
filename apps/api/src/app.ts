@@ -128,6 +128,10 @@ export function createApp(deps: AppDeps) {
     "/drafts/*",
     "/runs",
     "/runs/*",
+    "/search",
+    "/audit",
+    "/email/threads",
+    "/email/threads/*",
   ]) {
     app.use(path, guard);
   }

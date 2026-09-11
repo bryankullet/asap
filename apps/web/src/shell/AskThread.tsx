@@ -111,13 +111,18 @@ function Citations({ message }: { message: ConversationMessage }) {
   return (
     <div className="flex flex-col gap-1 rounded-card border border-line-soft bg-wash p-2">
       <p className="text-xs font-medium text-ink-muted">
-        Read from {message.citations.length === 1 ? "1 source" : `${message.citations.length} sources`}
+        Read from{" "}
+        {message.citations.length === 1 ? "1 source" : `${message.citations.length} sources`}
       </p>
       <ul className="flex flex-col gap-1">
         {message.citations.map((c, i) => (
           <li key={i} className="text-xs">
             {c.recordId ? (
-              <Link to="/r/$recordId" params={{ recordId: c.recordId }} className="text-ink underline">
+              <Link
+                to="/r/$recordId"
+                params={{ recordId: c.recordId }}
+                className="text-ink underline"
+              >
                 {c.label}
               </Link>
             ) : (
@@ -125,7 +130,9 @@ function Citations({ message }: { message: ConversationMessage }) {
             )}
             {/* Page and highlight arrive with document extraction. Until then, saying so beats a
                 link that opens nothing. */}
-            {c.page === null && <span className="text-ink-muted"> · no page reference on file</span>}
+            {c.page === null && (
+              <span className="text-ink-muted"> · no page reference on file</span>
+            )}
           </li>
         ))}
       </ul>

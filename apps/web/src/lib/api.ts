@@ -13,6 +13,8 @@ import {
   createPolicyResponseSchema,
   documentsResponseSchema,
   mailboxesResponseSchema,
+  emailThreadsResponseSchema,
+  emailThreadResponseSchema,
   connectMailboxResponseSchema,
   documentDetailSchema,
   uploadResponseSchema,
@@ -58,6 +60,7 @@ import {
   type SetPinRequest,
   historyResponseSchema,
   runDetailResponseSchema,
+  searchResponseSchema,
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
@@ -65,7 +68,6 @@ import {
 import { z } from "zod";
 import { env } from "../env.js";
 import { supabase } from "./supabase.js";
-import { DEMO_MODE } from "../demo/mode.js";
 
 export class ApiRequestError extends Error {
   constructor(
@@ -90,13 +92,6 @@ async function request<S extends z.ZodTypeAny>(
   body?: unknown,
   opts: { auth?: boolean; allow?: number[] } = { auth: true },
 ): Promise<z.infer<S>> {
-  /*
-   * The demonstration reaches nothing (D-065). This is the single place every call passes through,
-   * so it is the one place that can promise it: no read, no mutation, no email, no audit row, no
-   * brokerage's data — whatever a surface forgets. A caller that lands here in demo mode has a
-   * defect to fix in the surface; the error says so plainly rather than pretending to succeed.
-   */
-  if (DEMO_MODE) throw new ApiRequestError(0, "demo_mode_reaches_nothing", { method, path });
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.auth !== false) {
@@ -179,6 +174,8 @@ export const api = {
     }),
   workItem: (id: string) => request("GET", `/work-items/${id}`, workItemResponseSchema),
   /** The audit history of one record (C05). Read-only, gated on audit:view server-side. */
+  audit: () => request("GET", "/audit", historyResponseSchema),
+  search: (q: string) => request("GET", `/search?q=${encodeURIComponent(q)}`, searchResponseSchema),
   history: (id: string) => request("GET", `/work-items/${id}/history`, historyResponseSchema),
   act: (id: string, input: ActRequest) =>
     request("POST", `/work-items/${id}/actions`, actResponseSchema, input, {
@@ -235,6 +232,8 @@ export const api = {
 
   /* ---- Mailboxes: the email the brokerage already works from -------------------------------- */
   /** What is connected, and what this deployment could connect. Never a token. */
+  emailThreads: () => request("GET", "/email/threads", emailThreadsResponseSchema),
+  emailThread: (id: string) => request("GET", `/email/threads/${id}`, emailThreadResponseSchema),
   mailboxes: () => request("GET", "/mailboxes", mailboxesResponseSchema),
   /** Begin connecting one, or be told plainly that this deployment cannot. */
   connectMailbox: (provider: "gmail" | "microsoft") =>

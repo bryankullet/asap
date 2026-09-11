@@ -10,22 +10,20 @@ import {
 import { Ask } from "./pages/Ask.js";
 import { AuditHistory } from "./pages/AuditHistory.js";
 import { Connections } from "./pages/Connections.js";
-import { DiscoverDemo } from "./pages/DiscoverDemo.js";
+import { Discover } from "./pages/Discover.js";
 import { DocumentViewer, Documents } from "./pages/Documents.js";
 import { Email, EmailThread } from "./pages/Email.js";
 import { JobDetail, Jobs } from "./pages/Jobs.js";
-import { NewThing } from "./pages/NewThing.js";
 import { StartWork } from "./pages/StartWork.js";
-import { WorkDemo, WorkDetail } from "./pages/WorkDemo.js";
+import { Work } from "./pages/Work.js";
 import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
-import { DEMO_MODE } from "./demo/mode.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 import { AuthCallback } from "./pages/AuthCallback.js";
 import { ForgotPassword, ResetPassword } from "./pages/ResetPassword.js";
 import { AgreementVersion } from "./pages/AgreementVersion.js";
 import { Agreements } from "./pages/Agreements.js";
-import { AutomationDemoDetail, AutomationsDemo } from "./pages/AutomationsDemo.js";
+import { AutomationDetail, Automations } from "./pages/Automations.js";
 import { ClientFile } from "./pages/ClientFile.js";
 import { Files } from "./pages/Files.js";
 import { CreateOrganization } from "./pages/CreateOrganization.js";
@@ -34,7 +32,7 @@ import { Onboarding } from "./pages/Onboarding.js";
 import { Record } from "./pages/Record.js";
 import { SignIn } from "./pages/SignIn.js";
 import { SignUp } from "./pages/SignUp.js";
-import { SearchDemo } from "./pages/SearchDemo.js";
+import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
 
 /** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
@@ -83,18 +81,14 @@ const invite = createRoute({
 /**
  * The demo-mode boundary (D-065).
  *
- * The public demonstration is a different application: fixture-only, session-scoped, and reaching
- * nothing real. It therefore branches *here*, above the guards, rather than inside them — the
- * guards are not relaxed, they are simply not mounted. With the flag off, which is every real
- * deployment, both guards mount exactly as they did and production authentication is untouched.
- *
- * `Outlet` is the whole of the demo branch: no session lookup, no `/me`, no membership check, so
- * `/discover` renders for anyone, in any browser, with no cookie and no redirect to sign-in.
+ * Every destination sits under both guards: a live Supabase session, then a resolved brokerage
+ * membership. Neither is optional and neither has a bypass — there is no unauthenticated route
+ * into the application beyond sign-in, sign-up and password reset.
  */
 const authed = createRoute({
   getParentRoute: () => rootRoute,
   id: "authed",
-  component: DEMO_MODE ? Outlet : RequireSession,
+  component: RequireSession,
 });
 const onboarding = createRoute({
   getParentRoute: () => authed,
@@ -110,7 +104,7 @@ const onboardingCreate = createRoute({
 const member = createRoute({
   getParentRoute: () => authed,
   id: "member",
-  component: DEMO_MODE ? Outlet : RequireMembership,
+  component: RequireMembership,
 });
 const shell = createRoute({ getParentRoute: () => member, id: "shell", component: Shell });
 
@@ -124,7 +118,7 @@ const index = createRoute({
 const discover = createRoute({
   getParentRoute: () => shell,
   path: "/discover",
-  component: DiscoverDemo,
+  component: Discover,
   /** `?ask=` pre-fills the docked composer, so a Discover card can open Ask on its own context. */
   validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
 });
@@ -139,7 +133,7 @@ const legacyToday = createRoute({
 const work = createRoute({
   getParentRoute: () => shell,
   path: "/work",
-  component: WorkDemo,
+  component: Work,
   // The approved Work vocabulary (D-064). Old links carrying ?view=needs still land somewhere.
   validateSearch: z.object({
     view: z
@@ -150,12 +144,12 @@ const work = createRoute({
 const automations = createRoute({
   getParentRoute: () => shell,
   path: "/automations",
-  component: AutomationsDemo,
+  component: Automations,
 });
 const automationDetail = createRoute({
   getParentRoute: () => shell,
   path: "/automations/$id",
-  component: AutomationDemoDetail,
+  component: AutomationDetail,
 });
 const record = createRoute({
   getParentRoute: () => shell,
@@ -182,7 +176,7 @@ const record = createRoute({
 const search = createRoute({
   getParentRoute: () => shell,
   path: "/search",
-  component: SearchDemo,
+  component: Search,
   validateSearch: z.object({ q: z.string().max(200).optional().catch(undefined) }),
 });
 const files = createRoute({
@@ -241,19 +235,11 @@ const jobDetail = createRoute({
   path: "/jobs/$jobId",
   component: JobDetail,
 });
-const workDetail = createRoute({
-  getParentRoute: () => shell,
-  path: "/work/$workId",
-  component: WorkDetail,
-});
 const newThing = createRoute({
   getParentRoute: () => shell,
   path: "/new",
-  /*
-   * `+ New` starts real work on a real brokerage (D-067) and shows the approved demonstration's
-   * starting paths in demo mode. Both lead somewhere; neither is a menu of apologies.
-   */
-  component: DEMO_MODE ? NewThing : StartWork,
+  // `+ New` starts real work on a real brokerage (D-067) — never a menu of apologies.
+  component: StartWork,
   validateSearch: z.object({ kind: z.string().max(40).optional().catch(undefined) }),
 });
 const email = createRoute({ getParentRoute: () => shell, path: "/email", component: Email });
@@ -302,8 +288,7 @@ const routeTree = rootRoute.addChildren([
         ask,
         jobs,
         jobDetail,
-        workDetail,
-        newThing,
+            newThing,
         email,
         emailThread,
         documents,

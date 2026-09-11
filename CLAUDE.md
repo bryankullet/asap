@@ -240,24 +240,22 @@ was accepted or money arrived.
 retired from every visible surface; `vocabulary.test.ts` fails if it returns. Pinned is a filter,
 not a destination. "Space" never appears on screen — it is called Work.
 
-**Demo mode** (`VITE_PUBLIC_DEMO_MODE=on`) is a *public, fixture-only application*, not production
-with fixtures in it (D-065). It has no Supabase session, never requests `/me`, needs no brokerage
-membership and makes no API call of any kind: the route tree branches on `DEMO_MODE` **above** both
-authentication guards, so they are not relaxed — they are not mounted. Every destination therefore
-opens for a stranger in an incognito window, at any URL, with no redirect to sign-in. State lives in
-`sessionStorage` for the browser session and Reset restores the fixtures. Every surface it touches is
-labelled demonstration data, and a simulated send says so rather than implying delivery.
+**There is one application and it is the brokerage's own** (D-069). The public fixture-only
+demonstration of D-065 has been removed — fixtures, presenter bar, `VITE_PUBLIC_DEMO_MODE` and the
+branch above the guards are all gone. `RequireSession` and `RequireMembership` mount for every
+destination, unconditionally, and there is no flag that turns either off.
+`apps/web/src/routing/auth-entry.test.tsx` drives the real route tree and fails if any destination
+becomes reachable without signing in.
 
-With the flag off — the default, and what every real deployment runs — the session, `/me`,
-membership, RLS, permissions and real API operations all apply exactly as before, and there is no
-presenter bar and no fictional record. **The boards then read the brokerage's own rows** (D-066):
-Discover from `GET /attention`, Work from `GET /work?view=`, Jobs from `GET /runs`, Automations from
-`GET /automations`. Each board renders a typed view model from `packages/schema/src/views/boards.ts`,
-produced by one of two adapters — `apps/web/src/live/adapters.ts` from API rows, or
-`apps/web/src/demo/adapters.ts` from the fixtures. Add a board by adding a view model and two
-adapters, never by branching inside a card. Never weaken a production guard to make the demo work: branch
-above it. `apps/web/src/demo/demo-entry.test.tsx` drives the real route tree in both modes and fails
-if either rule breaks.
+**Every board reads the brokerage's own rows** (D-066): Discover from `GET /attention`, Work from
+`GET /work?view=`, Jobs from `GET /runs`, Automations from `GET /automations`, Search from
+`GET /search`, Audit from `GET /audit`, Email from `GET /email/threads`. Each board renders a typed
+view model from `packages/schema/src/views/boards.ts`, produced by `apps/web/src/live/adapters.ts`.
+Add a board by adding a view model and an adapter, never by branching inside a card.
+
+The approved demo remains the *visual* authority (D-064) and lives in `apps/web/src/styles/shell.css`
+— it decides the shell, the screens and the interactions. It is a design reference, never data: no
+fictional client, policy, claim or message belongs in this codebase.
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 

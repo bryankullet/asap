@@ -19,7 +19,10 @@ export const createWorkItemRequestSchema = z
     /** renewal: insurers to request terms from. May be empty; the review run then pauses and asks. */
     insurers: z.array(z.string().trim().min(1).max(100)).max(10).default([]),
     /** claim: the incident as the client reported it. `email` keeps the claim a draft until a person registers it. */
-    incidentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    incidentOn: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
     incidentSummary: z.string().trim().min(1).max(4000).optional(),
     source: z.enum(["email", "manual", "ask"]).optional(),
     /** endorsement: the policy (or the client's only policy), the request in its own words, who asked. */
@@ -27,14 +30,23 @@ export const createWorkItemRequestSchema = z
     requestText: z.string().trim().min(1).max(4000).optional(),
     requestedBy: z.enum(["policyholder", "other"]).optional(),
     requestedByName: z.string().trim().max(200).optional(),
-    effectiveOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    effectiveOn: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
   })
   .refine((v) => v.clientName !== undefined || v.clientId !== undefined, {
     message: "clientName or clientId is required",
     path: ["clientName"],
   })
-  .refine((v) => v.kind !== "claim" || (v.incidentOn && v.incidentSummary), { message: "a claim needs incidentOn and incidentSummary", path: ["incidentOn"] })
-  .refine((v) => v.kind !== "endorsement" || v.requestText, { message: "an endorsement needs requestText", path: ["requestText"] });
+  .refine((v) => v.kind !== "claim" || (v.incidentOn && v.incidentSummary), {
+    message: "a claim needs incidentOn and incidentSummary",
+    path: ["incidentOn"],
+  })
+  .refine((v) => v.kind !== "endorsement" || v.requestText, {
+    message: "an endorsement needs requestText",
+    path: ["requestText"],
+  });
 export type CreateWorkItemRequest = z.infer<typeof createWorkItemRequestSchema>;
 /**
  * What a caller *sends*, as opposed to what the server has after parsing: `insurers` has a
@@ -126,8 +138,14 @@ export const workItemResponseSchema = z.object({
   item: WorkItemRow,
   runs: z.array(RunRow),
   drafts: z.array(DraftRow),
-  claim: z.lazy(() => claimDetailSchema).nullable().default(null),
-  endorsement: z.lazy(() => endorsementDetailSchema).nullable().default(null),
+  claim: z
+    .lazy(() => claimDetailSchema)
+    .nullable()
+    .default(null),
+  endorsement: z
+    .lazy(() => endorsementDetailSchema)
+    .nullable()
+    .default(null),
 });
 export type WorkItemResponse = z.infer<typeof workItemResponseSchema>;
 
@@ -176,7 +194,8 @@ export const historyEntrySchema = z.object({
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
 export const historyResponseSchema = z.object({
-  recordId: uuidSchema,
+  /** The record this history belongs to, or null when it is the whole brokerage's. */
+  recordId: uuidSchema.nullable(),
   entries: z.array(historyEntrySchema),
   /** Rows the caller can see, and how many came back. */
   visible: z.number().int().min(0),
@@ -220,14 +239,16 @@ export const runDetailResponseSchema = z.object({
     })
     .nullable(),
   /** Evidence recorded against the related work while or because this run ran. */
-  evidence: z.array(
-    z.object({
-      label: z.string(),
-      reference: z.string(),
-      recordedBy: z.string().nullable(),
-      recordedAt: z.string().nullable(),
-    }),
-  ).max(20),
+  evidence: z
+    .array(
+      z.object({
+        label: z.string(),
+        reference: z.string(),
+        recordedBy: z.string().nullable(),
+        recordedAt: z.string().nullable(),
+      }),
+    )
+    .max(20),
   /** Why a run is not finished, in its own words. Never a business outcome. */
   waitingFor: z.string().nullable(),
   recovery: z.array(runRecoverySchema),
@@ -341,3 +362,27 @@ export const runListResponseSchema = z.object({
   degraded: z.array(attentionDegradationSchema).default([]),
 });
 export type RunListResponse = z.infer<typeof runListResponseSchema>;
+
+/**
+ * `GET /search?q=` — one query across the records a person actually looks for.
+ *
+ * Deliberately a lookup, not a vector search (§45 rule 7): a policy number is an exact fact, and
+ * answering it with an embedding is how search starts feeling like a guess. Every result carries
+ * where it opens, because a result that goes nowhere is the failure that makes search a lie.
+ */
+export const searchResultSchema = z.object({
+  id: uuidSchema,
+  kind: z.enum(["client", "policy", "work"]),
+  title: z.string(),
+  subtitle: z.string(),
+  to: z.string(),
+});
+export type SearchResult = z.infer<typeof searchResultSchema>;
+
+export const searchResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(searchResultSchema),
+  /** What could not be read this time, said plainly rather than silently returning less. */
+  degraded: z.array(z.object({ what: z.string(), because: z.string() })).default([]),
+});
+export type SearchResponse = z.infer<typeof searchResponseSchema>;

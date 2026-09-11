@@ -161,7 +161,6 @@ export const DOCUMENT_PAGE_COLUMNS = "id, document_id, page_number, text, width,
 export const DOCUMENT_FIELD_COLUMNS =
   "id, document_id, field_key, proposed_value, corrected_value, page_number, region_x, region_y, region_width, region_height, state, condition, reviewed_by, reviewed_at, created_at";
 
-
 /* ---- Mailboxes: the email the brokerage already works from --------------------------------- */
 
 /**
@@ -225,3 +224,46 @@ export type ConnectMailboxResponse = z.infer<typeof connectMailboxResponseSchema
 
 export const MAILBOX_COLUMNS =
   "id, organization_id, provider, email_address, display_name, connected_by, token_expires_at, sync_cursor, last_synced_at, status, status_reason, created_at, updated_at";
+
+/**
+ * `GET /email/threads` and `GET /email/threads/:id` — the brokerage's own correspondence.
+ *
+ * Read-only. There is no send here: a message leaves ASAP only through an approved draft with the
+ * provider's own message id recorded against it (`email_send_attempts`), never from a list screen.
+ */
+export const emailMessageSchema = z.object({
+  id: uuidSchema,
+  direction: z.enum(["inbound", "outbound"]),
+  from: z.string(),
+  to: z.array(z.string()),
+  subject: z.string(),
+  body: z.string().nullable(),
+  snippet: z.string().nullable(),
+  sentAt: z.string(),
+  hasAttachments: z.boolean(),
+});
+export type EmailMessage = z.infer<typeof emailMessageSchema>;
+
+export const emailThreadSummarySchema = z.object({
+  id: uuidSchema,
+  subject: z.string(),
+  clientId: uuidSchema.nullable(),
+  clientName: z.string().nullable(),
+  workItemId: uuidSchema.nullable(),
+  lastMessageAt: z.string().nullable(),
+  messageCount: z.number().int().min(0),
+});
+export type EmailThreadSummary = z.infer<typeof emailThreadSummarySchema>;
+
+export const emailThreadsResponseSchema = z.object({
+  threads: z.array(emailThreadSummarySchema),
+  /** True when no mailbox is connected at all, so the screen says that rather than "no email". */
+  mailboxConnected: z.boolean(),
+});
+export type EmailThreadsResponse = z.infer<typeof emailThreadsResponseSchema>;
+
+export const emailThreadResponseSchema = z.object({
+  thread: emailThreadSummarySchema,
+  messages: z.array(emailMessageSchema),
+});
+export type EmailThreadResponse = z.infer<typeof emailThreadResponseSchema>;
