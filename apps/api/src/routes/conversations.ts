@@ -79,6 +79,7 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
       .select(CONVERSATION_COLUMNS)
       .eq("organization_id", org.id)
       .eq("created_by", user.id)
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(30);
     if (error) return sendError(c, mapDatabaseError(error));
@@ -138,7 +139,9 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     // record for a person to read, not context to resend in full.
     let conversationId = request.conversationId;
     let history: { role: "person" | "asap"; body: string }[] = [];
-    let nextSeq = 0;
+    // Sequence starts at 1: the 0032 check constraint refuses 0, and a transcript a person reads
+    // is naturally 1-based.
+    let nextSeq = 1;
     if (conversationId) {
       const { data, error } = await db
         .from("conversation_messages")
@@ -149,7 +152,7 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
       if (error) return sendError(c, mapDatabaseError(error));
       const rows = ((data ?? []) as { seq: number; role: "person" | "asap"; body: string }[]).reverse();
       history = rows.map((r) => ({ role: r.role, body: r.body }));
-      nextSeq = rows.length > 0 ? Math.max(...rows.map((r) => r.seq)) + 1 : 0;
+      nextSeq = rows.length > 0 ? Math.max(...rows.map((r) => r.seq)) + 1 : 1;
     } else {
       const { data, error } = await db
         .from("conversations")

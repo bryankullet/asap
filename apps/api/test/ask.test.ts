@@ -210,8 +210,8 @@ describe("POST /ask", () => {
 
     const messages = db.tables["conversation_messages"] as Record<string, unknown>[];
     expect(messages.map((m) => m["role"])).toEqual(["person", "asap", "person", "asap"]);
-    // Sequence continues rather than restarting: a transcript a person can read in order.
-    expect(messages.map((m) => m["seq"])).toEqual([0, 1, 2, 3]);
+    // Sequence continues rather than restarting, and starts at 1 as the 0032 constraint requires.
+    expect(messages.map((m) => m["seq"])).toEqual([1, 2, 3, 4]);
   });
 
   it("abstains when the model names a record no tool returned", async () => {
