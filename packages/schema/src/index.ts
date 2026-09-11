@@ -1,6 +1,7 @@
 export * from "./env/index.js";
 export * from "./health.js";
 export * from "./api/index.js";
+export * from "./automations.js";
 // UI Build Spec v1 — Phase 0 contracts
 export * from "./status.js";
 export * from "./money.js";

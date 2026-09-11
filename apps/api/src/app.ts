@@ -9,6 +9,7 @@ import { HttpError, sendError } from "./errors.js";
 import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
+import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { documentRoutes } from "./routes/documents.js";
@@ -96,6 +97,8 @@ export function createApp(deps: AppDeps) {
     "/ask",
     "/attention",
     "/pins",
+    "/automations",
+    "/automations/*",
     "/documents",
     "/documents/*",
     "/conversations",
@@ -130,6 +133,7 @@ export function createApp(deps: AppDeps) {
     }),
   );
   app.route("/", attentionRoutes());
+  app.route("/", automationRoutes({ logger }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
   app.route(

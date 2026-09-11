@@ -575,3 +575,40 @@ both `app.can_access` and `created_by = auth.uid()`.
   everyone in the brokerage sees it — but not what someone chose to keep. Every one of the four
   policies carries both `app.can_access(organization_id)` and `user_id = auth.uid()`, and the
   insert policy additionally refuses a pin naming a brokerage the record is not in.
+
+## D-063 — Documents, connected email and automations
+
+**2026-09-11.** Three increments, and the decisions in each that were not obvious.
+
+**Documents (0034).** The constraints live at the database because the route will not be the only
+thing that writes these rows. A region without a page cannot be stored — a citation you cannot
+open is not a citation. A field cannot be `accepted` with nobody having accepted it. Extraction
+reports one of the six evidence conditions rather than a percentage: a number invites a threshold
+nobody agreed. Review is gated on `document:edit` from the 0005 catalogue rather than a new
+`review` verb, which would have left every existing role grant silently not covering it.
+
+**Connected email (0035).** The mailbox interface returns a three-way outcome, and the third value
+is the whole point: `outcome_unknown` stays unknown. It is not retried automatically and not
+rounded to either neighbour, because only a person can check the sent folder and know whether the
+client already has the letter. Mapping a timeout onto `failed` and retrying is how a client
+receives the same letter twice.
+
+Microsoft's `/sendMail` answers **202 with an empty body** — acceptance without evidence. So that
+adapter creates a draft, sends it, and reads the id back, because "sent" has to mean something we
+can show a person later. Gmail threads on `threadId`, not the subject, so a reply without it
+starts a second conversation in the client's inbox.
+
+**Automations (0036).** They prepare; they never decide. The prepared action is a named verb from
+the engine's vocabulary on the record's own next step, and the record's guards apply unchanged —
+an automation does not get to do what a person at the same step could not.
+
+Worth stating plainly: **no verb in the engine vocabulary sends anything.** `draft` opens a draft
+for a person; `record_send` records that a person sent. Both are nonetheless marked
+`sends_externally`, so the 0036 constraint refuses `approval: never` on them — an automation that
+silently drafts letters to insurers, or records sends nobody made, is not something a brokerage
+should be able to switch on unattended. Whether an automation is outward-facing is read from the
+verb, never taken from the request: a browser that could set it false would be a way around §45
+rule 13.
+
+Every firing is recorded, including the ones that did nothing, with each condition's result. A
+silent automation is worse than none, and "why did nothing happen?" has to have an answer.
