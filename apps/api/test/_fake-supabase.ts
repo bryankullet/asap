@@ -89,6 +89,12 @@ class Query {
   }
 }
 
+/** Deterministic ids and timestamps: a test that depends on the clock is a flaky test. */
+let idCounter = 0;
+const nextId = () =>
+  `f0000000-0000-4000-8000-${String((idCounter += 1)).padStart(12, "0")}`;
+const STAMP = "2026-09-11T00:00:00.000Z";
+
 export function fakeFactory(db: FakeDb): SupabaseFactory {
   const client = (token: string | null) =>
     ({
@@ -102,9 +108,21 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
       },
       from: (table: string) => ({
         select: (spec: string) => new Query(db, table, spec),
-        insert: async (row: Record<string, unknown>) => {
+        insert: (row: Record<string, unknown>) => {
           db.inserts.push({ table, row });
-          return { error: null };
+          const stored = { id: nextId(), created_at: STAMP, updated_at: STAMP, ...row };
+          (db.tables[table] ??= []).push(stored);
+          // Awaitable on its own, and chainable as .select(...).single() — both shapes the API
+          // uses. Returning the stored row matters: a route that reads back what it wrote must
+          // see the same row a real insert would have returned.
+          const result = { data: stored, error: null };
+          return {
+            then: (resolve: (v: { error: null }) => unknown) => Promise.resolve(resolve({ error: null })),
+            select: () => ({
+              single: async () => result,
+              maybeSingle: async () => result,
+            }),
+          };
         },
       }),
       rpc: async (name: string, args: Record<string, unknown>) => {

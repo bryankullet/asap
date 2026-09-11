@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { loadServerEnv } from "@asap/schema/env/server";
+import { resolveProvider } from "./ai/gateway.js";
 import { createApp } from "./app.js";
 import { resolveBuildInfo } from "./build-info.js";
 import { createLogger } from "./logger.js";
@@ -38,6 +39,7 @@ if (!env.SENTRY_DSN)
 const bootToken = newBootToken();
 
 const app = createApp({
+  aiProvider: resolveProvider(env, logger),
   logger,
   build,
   supabase,

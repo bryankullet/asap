@@ -10,12 +10,14 @@ import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { complianceRoutes } from "./routes/compliance.js";
+import { conversationRoutes } from "./routes/conversations.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
 import { meRoutes } from "./routes/me.js";
 import { organizationRoutes } from "./routes/organizations.js";
 import { spaceRoutes } from "./routes/spaces.js";
 import { workRoutes } from "./routes/work.js";
+import type { AiProvider } from "@asap/schema";
 import type { Executor } from "./runs/executor.js";
 import type { SupabaseFactory } from "./supabase.js";
 
@@ -31,6 +33,11 @@ export type AppDeps = {
   executor: (db: SupabaseClient) => Executor;
   /** Identifies this process on every run it starts; recovery on boot ends runs from other tokens. */
   bootToken: string;
+  /**
+   * The AI gateway, resolved once at boot from server-side configuration. Null when nothing is
+   * configured — Ask then answers with the configuration-required state instead of failing.
+   */
+  aiProvider?: AiProvider | null;
   streamPollMs?: number;
 };
 
@@ -101,6 +108,7 @@ export function createApp(deps: AppDeps) {
   }
   app.route("/", meRoutes());
   app.route("/", askRoutes());
+  app.route("/", conversationRoutes({ logger, provider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));

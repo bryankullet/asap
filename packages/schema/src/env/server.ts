@@ -70,7 +70,14 @@ export const serverEnvSchema = z
     MICROSOFT_OAUTH_REDIRECT_URI: optionalNonEmpty,
     EXTRACTOR_URL: optionalNonEmpty,
     EXTRACTOR_SHARED_SECRET: optionalNonEmpty,
-    AI_DEFAULT_PROVIDER: z.enum(["anthropic", "openai"]).default("anthropic"),
+    /**
+     * Which adapter serves Ask. `openai` is the first production adapter; `anthropic` is a
+     * drop-in; `fake` is deterministic and is what tests and the evaluation set run against.
+     * Server-side only — the browser never learns which provider or model is configured.
+     */
+    AI_DEFAULT_PROVIDER: z.enum(["openai", "anthropic", "fake"]).default("openai"),
+    /** The exact model. Configuration, never a constant in code, so it moves without a deploy. */
+    AI_MODEL: optionalNonEmpty,
     AI_FAST_MODEL: optionalNonEmpty,
     AI_FRONTIER_MODEL: optionalNonEmpty,
     AI_EMBEDDING_PROVIDER: optionalNonEmpty,
