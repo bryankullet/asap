@@ -5,8 +5,11 @@ import {
   type DemoPanel,
   type DemoScenario,
 } from "@asap/schema";
+import { useMutation } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { api, describeApiError } from "../lib/api.js";
+import { AskThread } from "../shell/AskThread.js";
 import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
 import { useDemo } from "../demo/state.js";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
@@ -24,9 +27,15 @@ import { DemoBoundary } from "../demo/DemoBoundary.js";
  * cover, an approval or a payment; evidence carries one of the six conditions rather than a
  * percentage; a prepared action is prepared, and a person does it.
  *
- * With no model configured, this answers from the approved fixtures and says so. That is the
- * honest version of "demo": the reasoning shown is the reasoning the demo was approved with, not a
- * model's improvisation dressed up as one.
+ * Two ways to answer, and the surface says which it used:
+ *
+ *  - **A configured model**, through the provider-neutral gateway. Grounded in declared tools,
+ *    checked before it is shown, and able to abstain — the real path.
+ *  - **The approved scenarios**, when no model is configured. The reasoning shown is the reasoning
+ *    the demo was approved with, not a model's improvisation dressed up as one.
+ *
+ * A free question tries the model first and falls back to the scenarios, so the primary experience
+ * is never empty. Which one answered is never hidden.
  */
 export function Ask() {
   const { scenario: requested } = useSearch({ strict: false }) as { scenario?: string };
@@ -34,6 +43,23 @@ export function Ask() {
   const navigate = useNavigate();
   const [typed, setTyped] = useState("");
   const threadEnd = useRef<HTMLDivElement>(null);
+  /** Turns answered by the configured model, newest last. Empty when none is configured. */
+  const [liveTurns, setLiveTurns] = useState<
+    { question: string; response: Awaited<ReturnType<typeof api.askQuestion>> | null }[]
+  >([]);
+
+  const live = useMutation({
+    mutationFn: (question: string) =>
+      api.askQuestion({ question, conversationId: null, scope: { kind: "brokerage", id: null } }),
+    onSuccess: (res) =>
+      setLiveTurns((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.response === null) next[next.length - 1] = { ...last, response: res };
+        return next;
+      }),
+    onError: () => setLiveTurns((prev) => prev.slice(0, -1)),
+  });
 
   const activeId = requested ?? demo.activeScenarioId;
   const scenario = useMemo(
@@ -55,16 +81,29 @@ export function Ask() {
 
   function ask(e: FormEvent) {
     e.preventDefault();
-    const q = typed.trim().toLowerCase();
-    if (!q) return;
-    // Match the question against the approved scenarios. Nothing is invented: if no scenario
-    // covers it, Ask says so rather than producing an answer the demo cannot stand behind.
+    const question = typed.trim();
+    if (!question) return;
+    const q = question.toLowerCase();
+
+    // An approved scenario is the better answer when one matches: it is the reasoning this demo
+    // was signed off with, and it comes with its panel, evidence and prepared actions.
     const hit =
       demo.scenarios.find((s) => s.ask.toLowerCase().includes(q)) ??
       demo.scenarios.find((s) => s.name.toLowerCase().includes(q)) ??
-      demo.scenarios.find((s) => q.split(/\s+/).some((w) => w.length > 3 && s.ask.toLowerCase().includes(w)));
-    if (hit) open(hit.id);
-    else setTyped("");
+      demo.scenarios.find((s) =>
+        q.split(/\s+/).some((w) => w.length > 3 && s.ask.toLowerCase().includes(w)),
+      );
+    if (hit) {
+      open(hit.id);
+      setTyped("");
+      return;
+    }
+    // Nothing matched. Ask the configured model, which grounds its answer in declared tools and
+    // abstains when the evidence is not there. With none configured it returns not_configured,
+    // and AskThread says so rather than showing an empty answer.
+    setLiveTurns((prev) => [...prev, { question, response: null }]);
+    live.mutate(question);
+    setTyped("");
   }
 
   return (
@@ -109,6 +148,23 @@ export function Ask() {
                   {s}
                 </button>
               ))}
+            </div>
+          )}
+
+          {liveTurns.length > 0 && (
+            <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
+              <p className="text-xs text-ink-muted">Asked of the brokerage's own records</p>
+              <AskThread
+                turns={liveTurns}
+                pending={live.isPending}
+                onRetry={() => {
+                  const last = liveTurns[liveTurns.length - 1];
+                  if (last) live.mutate(last.question);
+                }}
+              />
+              {live.isError && (
+                <p className="text-xs text-accent-red">{describeApiError(live.error)}</p>
+              )}
             </div>
           )}
 

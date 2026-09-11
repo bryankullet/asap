@@ -67,6 +67,11 @@ type DemoState = {
   setWorkState: (id: string, state: DemoWorkState, note: string) => void;
   assign: (id: string, owner: string) => void;
   toggleAutomation: (id: string) => void;
+  createAutomation: (draft: Omit<DemoAutomation, "id" | "runs" | "lastTest">) => string;
+  updateAutomation: (id: string, patch: Partial<DemoAutomation>) => void;
+  deleteAutomation: (id: string) => void;
+  /** Runs an automation against the fixtures and reports what it would have prepared. */
+  testAutomation: (id: string) => string;
   /** Appends to a fictional thread. Records that it was simulated — never that it was delivered. */
   sendDemoEmail: (threadId: string, body: string, workId: string | null) => void;
   saveDemoDraft: (workId: string | null) => void;
@@ -186,6 +191,54 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     [record],
   );
 
+  const createAutomation = useCallback(
+    (draft: Omit<DemoAutomation, "id" | "runs" | "lastTest">) => {
+      const id = `a-${draft.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 32)}`;
+      setAutomations((prev) => [
+        ...prev,
+        // A new automation starts switched off and untested. Nothing begins watching the
+        // brokerage's mail because somebody filled in a form.
+        { ...draft, id, enabled: false, lastTest: "Not tested yet", runs: [] },
+      ]);
+      record(`Created: ${draft.name}`);
+      return id;
+    },
+    [record],
+  );
+
+  const updateAutomation = useCallback(
+    (id: string, patch: Partial<DemoAutomation>) => {
+      setAutomations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+      record("Automation edited");
+    },
+    [record],
+  );
+
+  const deleteAutomation = useCallback(
+    (id: string) => {
+      setAutomations((prev) => {
+        record(`Deleted: ${prev.find((a) => a.id === id)?.name ?? id}`);
+        return prev.filter((a) => a.id !== id);
+      });
+    },
+    [record],
+  );
+
+  const testAutomation = useCallback(
+    (id: string) => {
+      const found = automations.find((a) => a.id === id);
+      if (!found) return "No such automation.";
+      // A test says what it *would* prepare. It never performs the action.
+      const outcome = `Would prepare: ${found.preparedAction}. Nothing was done.`;
+      setAutomations((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, lastTest: `Tested just now — ${outcome}` } : a)),
+      );
+      record(`Tested: ${found.name}`);
+      return outcome;
+    },
+    [automations, record],
+  );
+
   const sendDemoEmail = useCallback(
     (threadId: string, body: string, workId: string | null) => {
       setThreads((prev) =>
@@ -263,6 +316,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       setWorkState,
       assign,
       toggleAutomation,
+      createAutomation,
+      updateAutomation,
+      deleteAutomation,
+      testAutomation,
       sendDemoEmail,
       saveDemoDraft,
       reset,
@@ -282,6 +339,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       setWorkState,
       assign,
       toggleAutomation,
+      createAutomation,
+      updateAutomation,
+      deleteAutomation,
+      testAutomation,
       sendDemoEmail,
       saveDemoDraft,
       reset,

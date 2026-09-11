@@ -5,7 +5,9 @@ import { useEffect, useId, useRef, useState } from "react";
 
 /**
  * C01: one control at the bottom of the sidebar showing the brokerage and the person. It opens a
- * small menu with the brokerage switcher, Members, Agreements, Client files and Sign out. Pure:
+ * small menu with the brokerage switcher and the company paths the approved demo exposes —
+ * team and permissions, data and connections, insurers and business rules, audit history, client
+ * files — then Sign out (D-064). Pure:
  * the shell supplies the data and the two actions, so shell.test.tsx renders it in a memory router.
  */
 export function ProfileMenu({
@@ -99,7 +101,7 @@ export function ProfileMenu({
             className={linkClass}
             onClick={() => setOpen(false)}
           >
-            Members
+            Team and permissions
           </Link>
           <Link
             role="menuitem"
@@ -107,7 +109,23 @@ export function ProfileMenu({
             className={linkClass}
             onClick={() => setOpen(false)}
           >
-            Agreements
+            Insurers and business rules
+          </Link>
+          <Link
+            role="menuitem"
+            to="/settings/connections"
+            className={linkClass}
+            onClick={() => setOpen(false)}
+          >
+            Data and connections
+          </Link>
+          <Link
+            role="menuitem"
+            to="/audit"
+            className={linkClass}
+            onClick={() => setOpen(false)}
+          >
+            Audit history
           </Link>
           <Link
             role="menuitem"

@@ -26,6 +26,13 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/discover") {
     "/settings/members",
     "/files",
     "/settings/agreements",
+    "/settings/connections",
+    "/audit",
+    "/ask",
+    "/jobs",
+    "/new",
+    "/email",
+    "/documents",
     "/onboarding/create",
     "/onboarding",
   ].map((path) => createRoute({ getParentRoute: () => root, path, component: page }));

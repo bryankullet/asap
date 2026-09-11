@@ -7,6 +7,7 @@ import {
   redirect,
 } from "@tanstack/react-router";
 import { Ask } from "./pages/Ask.js";
+import { AuditHistory } from "./pages/AuditHistory.js";
 import { Connections } from "./pages/Connections.js";
 import { DiscoverDemo } from "./pages/DiscoverDemo.js";
 import { DocumentViewer, Documents } from "./pages/Documents.js";
@@ -244,6 +245,11 @@ const documentViewer = createRoute({
   path: "/documents/$documentId",
   component: DocumentViewer,
 });
+const audit = createRoute({
+  getParentRoute: () => shell,
+  path: "/audit",
+  component: AuditHistory,
+});
 const connections = createRoute({
   getParentRoute: () => shell,
   path: "/settings/connections",
@@ -273,6 +279,7 @@ const routeTree = rootRoute.addChildren([
         documents,
         documentViewer,
         connections,
+        audit,
         search,
         work,
         automations,

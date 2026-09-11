@@ -199,7 +199,8 @@ describe("profile control (C01)", () => {
     const control = screen.getByRole("button", { name: /Acme Insurance Brokers/ });
     expect(control).toHaveTextContent("Amina Otieno");
     expect(screen.queryByRole("menu")).toBeNull();
-    for (const name of ["Members", "Agreements", "Client files", "Sign out"]) {
+    // The approved demo's company paths (D-064).
+    for (const name of ["Team and permissions", "Insurers and business rules", "Data and connections", "Audit history", "Client files", "Sign out"]) {
       expect(screen.queryByText(name)).toBeNull();
     }
     fireEvent.click(control);
@@ -208,7 +209,7 @@ describe("profile control (C01)", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((e) => e.textContent?.trim()),
-    ).toEqual(["Members", "Agreements", "Client files", "Sign out"]);
+    ).toEqual(["Team and permissions", "Insurers and business rules", "Data and connections", "Audit history", "Client files", "Sign out"]);
     expect(within(menu).getByRole("combobox", { name: "Active brokerage" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
