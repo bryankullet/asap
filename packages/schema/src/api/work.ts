@@ -227,3 +227,30 @@ export const runDetailResponseSchema = z.object({
   recovery: z.array(runRecoverySchema),
 });
 export type RunDetailResponse = z.infer<typeof runDetailResponseSchema>;
+
+/**
+ * Pins (0033). A personal marker on a record: "I am coming back to this."
+ *
+ * It is not a status, not shared, and not a navigation destination. Nothing about the record
+ * changes when it is pinned, and Discover's order — computed from signals — is not moved by
+ * anyone's marker. What it does is let a person find their way back without inventing a list.
+ */
+export const pinSchema = z.object({
+  workItemId: uuidSchema,
+  title: z.string(),
+  note: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type Pin = z.infer<typeof pinSchema>;
+
+export const pinsResponseSchema = z.object({ pins: z.array(pinSchema) });
+export type PinsResponse = z.infer<typeof pinsResponseSchema>;
+
+export const setPinRequestSchema = z.object({
+  pinned: z.boolean(),
+  note: z.string().trim().min(1).max(280).nullable().default(null),
+});
+export type SetPinRequest = z.infer<typeof setPinRequestSchema>;
+
+export const setPinResponseSchema = z.object({ pinned: z.boolean() });
+export type SetPinResponse = z.infer<typeof setPinResponseSchema>;

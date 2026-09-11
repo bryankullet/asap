@@ -557,3 +557,21 @@ could arrive from model text.
 **Conversations are personal within the brokerage** (0032). Colleagues share the work a
 conversation produced — that lives in `work_items` — but not the asking. Every policy carries
 both `app.can_access` and `created_by = auth.uid()`.
+
+## D-062 — Pinning is a personal marker, not a view
+
+**2026-09-11.** A pin says "I am coming back to this" — one person, one record, one brokerage
+(0033). What it deliberately is not:
+
+- **Not a destination.** `Pinned` and `Kept` join `NEVER_NAV`. A Pinned tab would be a list page
+  for a thing rather than a surface for work, which is the old product leaking back in. A person
+  finds their pins on the record and in the small list beside it, where the marker already lives.
+- **Not a Work view.** Work's views are the states work is actually in. A personal marker is not
+  one of them.
+- **Not a status, and not a thumb on the scale.** Pinning bumps no version, writes no step, and
+  writes no audit row, because keeping a marker is not a business action on the brokerage's
+  record. Discover's order is computed from signals and is not moved by anyone's marker (D-060).
+- **Not shared.** Colleagues share the work a pin points at — that is in `work_items`, where
+  everyone in the brokerage sees it — but not what someone chose to keep. Every one of the four
+  policies carries both `app.can_access(organization_id)` and `user_id = auth.uid()`, and the
+  insert policy additionally refuses a pin naming a brokerage the record is not in.

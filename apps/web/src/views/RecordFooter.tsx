@@ -2,6 +2,7 @@ import type { WorkItemRow } from "@asap/schema";
 import { Button, Card } from "@asap/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { PinButton } from "../components/PinButton.js";
 import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { formatSince } from "../components/status/slots.js";
 
@@ -21,6 +22,9 @@ export function RecordFooter({ item, hasRuns }: { item: WorkItemRow; hasRuns: bo
   return (
     <footer className="mt-6 flex flex-col gap-3 border-t border-line-soft pt-4">
       <div className="flex flex-wrap items-center gap-2">
+        {/* A personal marker sits beside the record's own evidence and history, because that is
+            where a person is already looking. It is not a destination and not a Work view. */}
+        <PinButton recordId={item.id} />
         <Button
           variant="outline"
           size="compact"

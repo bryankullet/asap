@@ -17,4 +17,16 @@ export const NAV = [
 export type NavTo = (typeof NAV)[number]["to"];
 
 /** Words that must never be a destination. Tested. */
-export const NEVER_NAV = ["Clients", "Policies", "Renewals", "Claims", "Money", "Spaces", "Jobs"];
+export const NEVER_NAV = [
+  "Clients",
+  "Policies",
+  "Renewals",
+  "Claims",
+  "Money",
+  "Spaces",
+  "Jobs",
+  // A pin is a personal marker, not a state work is in. Giving it a destination would make a list
+  // page for a thing, which is the old product leaking back in (0033, D-062).
+  "Pinned",
+  "Kept",
+];

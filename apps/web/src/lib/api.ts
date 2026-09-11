@@ -37,6 +37,9 @@ import {
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
   attentionResponseSchema,
+  pinsResponseSchema,
+  setPinResponseSchema,
+  type SetPinRequest,
   historyResponseSchema,
   runDetailResponseSchema,
   spacePlanResponseSchema,
@@ -106,6 +109,13 @@ export const api = {
   /** A validated Space plan for one record (D-059). Renewals only, so far. */
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
+  /**
+   * A person's own pins. Not a Work view and not a navigation destination — the marker's list,
+   * read where the marker is shown.
+   */
+  pins: () => request("GET", "/pins", pinsResponseSchema),
+  setPin: (recordId: string, body: SetPinRequest) =>
+    request("PUT", `/work-items/${recordId}/pin`, setPinResponseSchema, body),
   /** Work's four views, ranked and capped by the API rather than by the browser. */
   workList: (view: WorkView, limit = 50) =>
     request("GET", `/work?view=${view}&limit=${limit}`, workListResponseSchema),

@@ -108,6 +108,32 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
       },
       from: (table: string) => ({
         select: (spec: string) => new Query(db, table, spec),
+        // Upsert and delete, for the pin route. Both keep the table consistent so a test can read
+        // back what it wrote rather than trusting the call's return.
+        upsert: async (row: Record<string, unknown>, opts?: { onConflict?: string }) => {
+          const keys = (opts?.onConflict ?? "id").split(",").map((k) => k.trim());
+          const rows = (db.tables[table] ??= []);
+          const found = rows.find((r) => keys.every((k) => r[k] === row[k]));
+          if (found) Object.assign(found, row);
+          else rows.push({ created_at: STAMP, ...row });
+          db.inserts.push({ table, row });
+          return { error: null };
+        },
+        delete: () => {
+          const filters: [string, unknown][] = [];
+          const chain = {
+            eq(col: string, val: unknown) {
+              filters.push([col, val]);
+              return chain;
+            },
+            then(resolve: (v: { error: null }) => unknown) {
+              const rows = (db.tables[table] ??= []);
+              db.tables[table] = rows.filter((r) => !filters.every(([c, v]) => r[c] === v));
+              return Promise.resolve(resolve({ error: null }));
+            },
+          };
+          return chain;
+        },
         insert: (row: Record<string, unknown>) => {
           db.inserts.push({ table, row });
           const stored = { id: nextId(), created_at: STAMP, updated_at: STAMP, ...row };

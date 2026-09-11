@@ -1,4 +1,7 @@
 import {
+  pinsResponseSchema,
+  setPinRequestSchema,
+  setPinResponseSchema,
   historyResponseSchema,
   runDetailResponseSchema,
   type RunDetailResponse,
@@ -478,6 +481,97 @@ export function workRoutes(deps: WorkDeps) {
    * `apps/api/src/audit.ts` already refuses to write document contents or credentials, so there
    * is nothing here to redact a second time.
    */
+  /**
+   * A person's own pins (0033). RLS already limits this to the caller's, and to this brokerage;
+   * the filters below say so at the call site rather than relying on that alone.
+   *
+   * There is no Pinned navigation tab and this endpoint is not a Work view. It answers "what did I
+   * keep?" for the marker on a record — nothing here ranks, filters or changes work.
+   */
+  app.get("/pins", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const { data, error } = await db
+      .from("work_item_pins")
+      .select("work_item_id, note, created_at")
+      .eq("organization_id", org.id)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) return sendError(c, mapDatabaseError(error));
+    const rows = (data ?? []) as { work_item_id: string; note: string | null; created_at: string }[];
+    if (rows.length === 0) return c.json(pinsResponseSchema.parse({ pins: [] }));
+
+    // Titles come from the record, read under the same session. A pin on something the caller can
+    // no longer see simply does not appear — it is not an error and it names nothing.
+    const { data: items, error: itemsErr } = await db
+      .from("work_items")
+      .select("id, title")
+      .eq("organization_id", org.id)
+      .is("deleted_at", null)
+      .in("id", rows.map((r) => r.work_item_id));
+    if (itemsErr) return sendError(c, mapDatabaseError(itemsErr));
+    const titles = new Map(((items ?? []) as { id: string; title: string }[]).map((i) => [i.id, i.title]));
+    return c.json(
+      pinsResponseSchema.parse({
+        pins: rows
+          .filter((r) => titles.has(r.work_item_id))
+          .map((r) => ({
+            workItemId: r.work_item_id,
+            title: titles.get(r.work_item_id) ?? "",
+            note: r.note,
+            createdAt: r.created_at,
+          })),
+      }),
+    );
+  });
+
+  /**
+   * Pin or unpin a record for the caller. Pinning twice is the same pin — the primary key makes it
+   * so, and the route upserts rather than counting. Nothing about the record changes: no step, no
+   * guard, no version bump, and no audit row, because keeping a personal marker is not a business
+   * action on the brokerage's record.
+   */
+  app.put("/work-items/:id/pin", async (c) => {
+    const { db, user } = c.get("auth");
+    const parsed = setPinRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new HttpError(400, "validation_failed", "pinned is required");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const id = c.req.param("id");
+
+    // The record must be one the caller can read. Without this, an unreadable id would come back
+    // as a successful pin and quietly confirm that it exists.
+    const { data: item, error: itemErr } = await db
+      .from("work_items")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (itemErr) return sendError(c, mapDatabaseError(itemErr));
+    if (!item) throw new HttpError(404, "not_found", "That record is not available.");
+
+    if (!parsed.data.pinned) {
+      const { error } = await db
+        .from("work_item_pins")
+        .delete()
+        .eq("work_item_id", id)
+        .eq("user_id", user.id);
+      if (error) return sendError(c, mapDatabaseError(error));
+      return c.json(setPinResponseSchema.parse({ pinned: false }));
+    }
+    const { error } = await db
+      .from("work_item_pins")
+      .upsert(
+        { organization_id: org.id, work_item_id: id, user_id: user.id, note: parsed.data.note },
+        { onConflict: "work_item_id,user_id" },
+      );
+    if (error) return sendError(c, mapDatabaseError(error));
+    return c.json(setPinResponseSchema.parse({ pinned: true }));
+  });
+
   app.get("/work-items/:id/history", async (c) => {
     const { db, user } = c.get("auth");
     const id = c.req.param("id");

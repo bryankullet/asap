@@ -6,6 +6,7 @@ import {
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
@@ -45,8 +46,18 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/discover") {
   });
   // Test-only router; the app's typed router registration does not apply here.
   await router.load();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const utils = render(<RouterProvider router={router as any} />);
+  // A query client, because components that read their own small piece of state (the pin marker,
+  // for one) use one. Retries off and no network: a view under test still takes its fixtures as
+  // props, and anything that would fetch resolves to its own error or empty state instead.
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+  });
+  const utils = render(
+    <QueryClientProvider client={qc}>
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+      <RouterProvider router={router as any} />
+    </QueryClientProvider>,
+  );
   await utils.findByTestId("routed");
   return { ...utils, router };
 }
