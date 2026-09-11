@@ -138,3 +138,12 @@ export const AUTOMATION_RUN_COLUMNS =
  * even though neither verb puts anything in an inbox.
  */
 export const EXTERNALLY_SENDING_VERBS: readonly string[] = ["draft", "record_send"];
+
+export const automationsResponseSchema = z.object({ automations: z.array(automationSchema) });
+export type AutomationsResponse = z.infer<typeof automationsResponseSchema>;
+
+export const automationRunsResponseSchema = z.object({ runs: z.array(automationRunSchema) });
+export type AutomationRunsResponse = z.infer<typeof automationRunsResponseSchema>;
+
+export const automationResponseSchema = z.object({ automation: automationSchema });
+export type AutomationResponse = z.infer<typeof automationResponseSchema>;

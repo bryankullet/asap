@@ -293,6 +293,11 @@ Status colours are semantic and fixed: green = running or active, gold = waiting
 | 6 | Approval surface with frozen payloads. |
 | 7+ | Per-slice components and Space recipes, shipped with their slice. |
 
+**Automations are a surface, not a module** (D-063). The page lists standing instructions and the
+history of every firing — including the ones that did nothing and why. It is not a list page for an
+entity type: an automation *is* the thing, and there is no `/automations/new` builder rebuilding a
+menu tree behind it.
+
 Phases 1–3 are ordinary application screens. Do not build the generative layer early — the component registry depends on decisions that are not made yet.
 
 ---

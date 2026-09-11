@@ -37,6 +37,9 @@ import {
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
   attentionResponseSchema,
+  automationsResponseSchema,
+  automationRunsResponseSchema,
+  automationResponseSchema,
   pinsResponseSchema,
   setPinResponseSchema,
   type SetPinRequest,
@@ -114,6 +117,12 @@ export const api = {
    * read where the marker is shown.
    */
   pins: () => request("GET", "/pins", pinsResponseSchema),
+  /** The brokerage's standing instructions, and the history of every firing. */
+  automations: () => request("GET", "/automations", automationsResponseSchema),
+  automationRuns: (id: string) =>
+    request("GET", `/automations/${id}/runs`, automationRunsResponseSchema),
+  setAutomationEnabled: (id: string, enabled: boolean) =>
+    request("POST", `/automations/${id}/enabled`, automationResponseSchema, { enabled }),
   setPin: (recordId: string, body: SetPinRequest) =>
     request("PUT", `/work-items/${recordId}/pin`, setPinResponseSchema, body),
   /** Work's four views, ranked and capped by the API rather than by the browser. */
