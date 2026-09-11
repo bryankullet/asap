@@ -40,7 +40,7 @@ export const SCREENS = [
   { label: "Discover", view: "discover", route: "/discover" },
   { label: "Ask", view: "ask", route: "/ask" },
   { label: "Work", view: "work", route: "/work?view=active" },
-  { label: "Jobs", view: "jobs", route: "/jobs?filter=running" },
+  { label: "Jobs", view: "jobs", route: "/jobs?filter=all" },
   { label: "Automations", view: "automations", route: "/automations" },
 ];
 
@@ -106,9 +106,15 @@ export async function capture(only) {
       reducedMotion: "reduce",
     });
     const orig = await origCtx.newPage();
-    await orig.goto(`${ORIGINAL}/`, { waitUntil: "networkidle" });
     for (const s of screens) {
       if (!s.view) continue;
+      /*
+       * Reload before each screen. Switching the demo's views with its own nav sets
+       * `display: none` on the outgoing one, which resets any scroll position inside it — so a
+       * thread the demo had scrolled to its newest turn came back at the top, and the port was
+       * then measured against a state the demo never shows on its own.
+       */
+      await orig.goto(`${ORIGINAL}/`, { waitUntil: "networkidle" });
       await orig.evaluate((v) => {
         const b = document.querySelector(`.nav-item[data-view="${v}"]`);
         if (b instanceof HTMLElement) b.click();

@@ -43,29 +43,47 @@ body.demo-body {
 .demo-root *::before,
 .demo-root *::after {
   box-sizing: border-box;
-  /*
-   * The old design system tightened every heading by -0.02em. The approved demo does not: its
-   * headings are `normal`, and the difference showed up as a 3-14px width error on every one of
-   * them. Rules below that *do* set letter-spacing — the eyebrow, the quick-actions title — come
-   * later in this file and still win.
-   */
-  letter-spacing: normal;
 }
 /*
- * The approved demo sets no line-height on the body, so every box is `normal`. Tailwind's preflight
- * cascades 1.5 from the root, which made every card a few pixels taller than the original and
- * pushed the page progressively out of alignment down its length.
+ * The approved demo sets no line-height on the body and no letter-spacing anywhere, so every box
+ * is `normal` and inherits. Tailwind's preflight cascades `line-height: 1.5` from the root, and
+ * the old design system tightens every heading by -0.02em — a 3-14px width error per heading, and
+ * a few pixels of height per card that accumulate down the page.
  *
- * This has to be set on the shell and *inherited*, not applied to every descendant: a universal
- * selector re-declares `normal` on the children of anything that does set a line-height — the
- * demo's `.bubble` is 1.55 — and silently discards it. That cost Ask 30px of thread height.
+ * Both are corrected here by *inheritance*, not by a universal selector. A universal selector
+ * re-declares the value on the children of anything that sets its own — `.bubble` is 1.55 and
+ * `.group-title` is 0.08em — and silently discards it. That cost Ask 30px of thread height and
+ * misplaced every count on the Jobs board. The heading rule needs one explicit override because a
+ * rule that targets the element beats an inherited value whatever the layer.
  */
 .demo-root {
   line-height: normal;
+  letter-spacing: normal;
+}
+.demo-root h1,
+.demo-root h2,
+.demo-root h3,
+.demo-root h4 {
+  letter-spacing: normal;
+}
+/*
+ * The demo's own control reset. It is what makes a button inherit the line-height and letter
+ * spacing of the box it sits in, which several of its layouts depend on. Rules below still win,
+ * so a control that sets its own size keeps it.
+ */
+.demo-root button,
+.demo-root select,
+.demo-root textarea {
+  font: inherit;
+  /*
+   * Chromium's UA stylesheet gives form controls `letter-spacing: normal` and does not inherit it;
+   * Tailwind's preflight makes them inherit instead. The demo is drawn against the UA behaviour —
+   * its presenter bar sets 0.02em on the bar and its buttons do not take it.
+   */
+  letter-spacing: normal;
 }
 .demo-root button {
   cursor: pointer;
-  font-family: inherit;
 }
 
 /* ---- Presenter bar ---------------------------------------------------------------------- */
@@ -217,9 +235,14 @@ body.demo-body {
   align-items: center;
   gap: 9px;
 }
+/* The original's `•••` is the flex item that takes the remaining space. Here it is wrapped, so
+   the wrapper carries the rule. */
+.profile-menu {
+  margin-left: auto;
+}
 .profile-text {
+  /* The original's text block shrinks to its content; the `•••` takes the remaining space. */
   min-width: 0;
-  flex: 1;
 }
 .profile-text strong {
   display: block;
@@ -232,6 +255,7 @@ body.demo-body {
   display: block;
   font-size: 10px;
   color: var(--muted);
+  margin-top: 2px;
 }
 .avatar {
   width: 34px;
@@ -794,6 +818,8 @@ body.demo-body {
   color: var(--green);
   padding: 0;
   font-weight: 600;
+  /* The original is a button, whose box is the line box. An inline link's is only the glyphs. */
+  display: inline-block;
 }
 
 /* The composer, docked at the foot of the conversation. */
@@ -1224,6 +1250,165 @@ body.demo-body {
   font-size: 9px;
 }
 
+/* ---- Jobs: what ASAP is processing ---------------------------------------------------------- */
+.jobs-page,
+.automation-page {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+.job-group {
+  margin-bottom: 24px;
+}
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: uppercase;
+  color: #707b72;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 9px 5px;
+}
+.group-title b {
+  background: #e9ede9;
+  border-radius: 99px;
+  padding: 2px 6px;
+}
+.job-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+.job-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--green2);
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  flex: none;
+}
+.job-icon.amber {
+  background: var(--amberbg);
+  color: var(--amber);
+}
+.job-icon.blue {
+  background: var(--bluebg);
+  color: var(--blue);
+}
+.job-icon.red {
+  background: var(--redbg);
+  color: var(--red);
+}
+.job-main {
+  flex: 1;
+  min-width: 0;
+}
+.job-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.job-title strong {
+  font-size: 12px;
+}
+.job-main p {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 3px 0 5px;
+}
+.job-main small {
+  font-size: 9px;
+  color: #849087;
+}
+.job-pill {
+  padding: 3px 6px;
+  border-radius: 99px;
+  font-size: 8px;
+  font-weight: 700;
+}
+.job-pill.running {
+  background: var(--green2);
+  color: var(--green);
+}
+.job-pill.waiting {
+  background: var(--amberbg);
+  color: var(--amber);
+}
+.job-pill.work {
+  background: var(--bluebg);
+  color: var(--blue);
+}
+.job-pill.done {
+  background: #edf1ed;
+  color: #4e5a51;
+}
+.job-pill.failed {
+  background: var(--redbg);
+  color: var(--red);
+}
+.job-card > button,
+.job-card > .link {
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 9px;
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  color: inherit;
+  white-space: nowrap;
+}
+.progress {
+  width: 220px;
+  height: 4px;
+  background: #e8ede9;
+  border-radius: 99px;
+  margin: 7px 0 5px;
+}
+.progress i {
+  display: block;
+  height: 100%;
+  background: #4da86c;
+  border-radius: 99px;
+}
+/* One step of a job, on its detail. */
+.job-step {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.job-step > span {
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  background: #e6f3e9;
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+}
+.job-step strong {
+  font-size: 10px;
+}
+.job-step small,
+.job-step time {
+  font-size: 8px;
+  color: var(--muted);
+}
+
 /* ---- Responsive: the demo's own breakpoints, 1000px and 760px ---------------------------- */
 @media (max-width: 1000px) {
   .app-shell {
@@ -1346,6 +1531,13 @@ body.demo-body {
   }
   .spaces-grid {
     grid-template-columns: 1fr;
+  }
+  .job-card {
+    align-items: flex-start;
+  }
+  .job-card > button,
+  .job-card > .link {
+    display: none;
   }
   .policy-strip {
     align-items: flex-start;

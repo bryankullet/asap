@@ -32,6 +32,8 @@ layout rather than a sandbox artefact.
 |---|---|---|---|---|
 | Discover | `original/Discover-<size>.png` | `react/Discover-<size>.png` | `diff/Discover-<size>.png` | `side-by-side/Discover-<size>.png` |
 | Ask ASAP | `original/Ask-<size>.png` | `react/Ask-<size>.png` | `diff/Ask-<size>.png` | `side-by-side/Ask-<size>.png` |
+| Work | `original/Work-<size>.png` | `react/Work-<size>.png` | `diff/Work-<size>.png` | `side-by-side/Work-<size>.png` |
+| Jobs | `original/Jobs-<size>.png` | `react/Jobs-<size>.png` | `diff/Jobs-<size>.png` | `side-by-side/Jobs-<size>.png` |
 
 Sizes: `1440x900`, `1360x900`, `1024x768`, `390x844`.
 
@@ -39,24 +41,21 @@ Sizes: `1440x900`, `1360x900`, `1024x768`, `390x844`.
 
 | Screen | 1440×900 | 1360×900 | 1024×768 | 390×844 |
 |---|---|---|---|---|
-| Discover | 0.17% | 0.19% | 0.29% | 0.47% |
-| Ask ASAP | 0.12% | 0.14% | 0.20% | 0.62% |
+| Discover | 0.12% | 0.13% | 0.19% | 0.46% |
+| Ask ASAP | 0.04% | 0.04% | 0.07% | 0.61% |
+| Work | 0.12% | 0.13% | 0.20% | 0.60% |
+| Jobs | 0.32% | 0.34% | 0.53% | 1.38% |
 
 ### What the residual is
 
-`regions.mjs` on `diff/Ask-1440x900.png` (1561 px of 1.30M):
+On Discover, Ask and Work the residual is symbol-glyph rendering: the presenter bar's arrows and
+check marks, the sidebar's `✦ ⌁ ▱ ◴ ⌘` icons, `⌕`, `＋`. Those glyphs come from a fallback font in
+this sandbox and render identically wherever the real webfonts load.
 
-```
-  presenter bar / content:  629 px
-  topbar / content:          97 px
-  page body / sidebar:      840 px
-  page body / content:       ~0 px
-```
-
-So the product's own content area is clean, and the residual is symbol-glyph rendering — the
-presenter bar's arrows and check marks, the sidebar's `✦ ⌁ ▱ ◴ ⌘` icons, `⌕`, `＋` — plus the two
-nav counts, which read from the port's fixtures rather than the demo's static markup and will match
-once the Work fixtures carry the demo's full Active/Waiting/For-review sets.
+Jobs carries one further difference, and it is content, not layout: the port shows a job the demo
+counts but does not draw. The demo's Work group is headed "2" above a single card; the port draws
+both — the prepared notification and the extraction that could not finish. Showing a job that
+failed is the point of the board.
 
 ## What was wrong, and how it was found
 
@@ -78,3 +77,13 @@ Every fix below came from a measurement, not from looking at the page:
 - Keeping the newest turn in view with `scrollIntoView` on a trailing sentinel scrolls every
   scrollable ancestor; the demo sets the thread's own `scrollTop`. The sentinel left the thread
   scrolled at viewports where the conversation fits.
+- Chromium gives form controls `letter-spacing: normal` and does not inherit it; Tailwind's
+  preflight makes them inherit. The demo's presenter bar sets 0.02em on the bar, so every control
+  in it was 8px out of place.
+- A link is inline: its box is the glyphs. The button it replaces is inline-block: its box is the
+  line box. Six pixels, and the Ask thread then overflowed and scrolled when the demo's did not.
+- `Active <b>8</b>` — the space is the label's only break opportunity. Without it the tab cannot
+  wrap, so it never shrinks, so the row is 14px shorter and every tile below it sits too high.
+- The harness itself had a defect: switching the demo's views with its own nav sets `display: none`
+  on the outgoing one, which resets the scroll position inside it. The Ask thread was therefore
+  captured at the top, in a state the demo never shows on its own. It now reloads per screen.

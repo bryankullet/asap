@@ -50,7 +50,7 @@ export function ProfileMenu({
     "rounded-compact px-3 py-2.5 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink";
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="profile-menu relative">
       <button
         type="button"
         aria-haspopup="menu"

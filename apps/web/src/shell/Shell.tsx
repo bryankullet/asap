@@ -143,9 +143,9 @@ function NavCount({ to }: { to: string }) {
       ? // The demo counts everything a person owns here, which is what its Work grid opens on.
         work.length
       : to === "/jobs"
-        ? jobs.filter(
-            (j) => j.state === "running" || j.state === "waiting" || j.state === "needs_human",
-          ).length
+        ? // What ASAP itself is still carrying. A job stopped for a person is on the board's Work
+        // tab, where a person looks for it, not in the count of what the software is running.
+        jobs.filter((j) => j.state === "running" || j.state === "waiting").length
         : 0;
   if (n === 0) return null;
   return <span className="nav-count">{n}</span>;

@@ -207,9 +207,7 @@ const jobs = createRoute({
   path: "/jobs",
   component: Jobs,
   validateSearch: z.object({
-    filter: z
-      .enum(["running", "waiting", "needs_human", "completed", "failed"])
-      .catch("running"),
+    filter: z.enum(["all", "running", "waiting", "work", "completed"]).catch("all"),
   }),
 });
 const jobDetail = createRoute({

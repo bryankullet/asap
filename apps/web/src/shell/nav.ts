@@ -50,11 +50,15 @@ export const WORK_FILTERS = [
 export type WorkFilterId = (typeof WORK_FILTERS)[number]["id"];
 
 /** What ASAP is processing. Deliberately a different vocabulary from Work's. */
+/**
+ * The Jobs board's filters, as the approved demo names them (D-064). "Work" is the tab for jobs
+ * that have stopped and are waiting on a person — a decision to take or a failure to look at.
+ */
 export const JOB_FILTERS = [
+  { id: "all", label: "All" },
   { id: "running", label: "Running" },
   { id: "waiting", label: "Waiting" },
-  { id: "needs_human", label: "Needs a person" },
+  { id: "work", label: "Work" },
   { id: "completed", label: "Completed" },
-  { id: "failed", label: "Failed" },
 ] as const;
 export type JobFilterId = (typeof JOB_FILTERS)[number]["id"];

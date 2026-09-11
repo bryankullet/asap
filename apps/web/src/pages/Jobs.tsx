@@ -4,6 +4,7 @@ import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
 import { MissingData } from "../components/states.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 
 /**
  * Jobs — what ASAP is processing (D-064).
@@ -18,100 +19,134 @@ import { MissingData } from "../components/states.js";
  * its own evidence.
  */
 
-const STATE_TONE: Record<DemoJob["state"], string> = {
-  running: "bg-accent-green-soft text-accent-green-ink",
-  waiting: "bg-accent-gold-soft text-accent-gold-ink",
-  needs_human: "bg-accent-gold-soft text-accent-gold-ink",
-  completed: "bg-wash text-ink-muted",
-  failed: "bg-accent-red-soft text-accent-red-ink",
-};
-
-const STATE_WORD: Record<DemoJob["state"], string> = {
-  running: "Running",
-  waiting: "Waiting",
-  needs_human: "Needs a person",
-  completed: "Completed",
-  failed: "Could not finish",
-};
+/** Which jobs each tab shows. "Work" is everything that has stopped and needs a person. */
+function inFilter(job: DemoJob, filter: string): boolean {
+  // The board's All is everything still live; a finished job has its own tab.
+  if (filter === "all") return job.state !== "completed";
+  if (filter === "work") return job.state === "needs_human" || job.state === "failed";
+  return job.state === filter;
+}
 
 export function Jobs() {
   const { filter } = useSearch({ strict: false }) as { filter?: string };
   const demo = useDemo();
-  const active = filter ?? "running";
-  const shown = demo.jobs.filter((j) => j.state === active);
+  const active = filter ?? "all";
+  const shown = demo.jobs.filter((j) => inFilter(j, active));
+
+  /** The demo groups the board by what a job is waiting on, in the fixtures' own order. */
+  const groups: { title: string; jobs: DemoJob[] }[] = [];
+  for (const j of shown) {
+    const found = groups.find((g) => g.title === j.group);
+    if (found) found.jobs.push(j);
+    else groups.push({ title: j.group, jobs: [j] });
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Jobs</h1>
-        <p className="text-sm text-ink-secondary">
-          What ASAP is doing. Work is what you own; this is what the software is processing for you.
-        </p>
-      </header>
-
-      <nav aria-label="Job states" className="flex flex-wrap gap-1.5">
-        {JOB_FILTERS.map((f) => {
-          const count = demo.jobs.filter((j) => j.state === f.id).length;
-          return (
-            <Link
-              key={f.id}
-              to="/jobs"
-              search={{ filter: f.id }}
-              aria-current={f.id === active ? "page" : undefined}
-              className={`rounded-pill px-3 py-1 text-sm ${
-                f.id === active
-                  ? "bg-navy text-paper"
-                  : "border border-line-strong text-ink-secondary hover:border-ink-muted"
-              }`}
-            >
-              {f.label}
-              <span className="ml-1.5 text-xs opacity-70">{count}</span>
+    <>
+      <ScreenTitle
+        title="Jobs"
+        meta="See what ASAP is preparing and what it is waiting for"
+        actions={
+          <div className="top-actions">
+            <Link to="/jobs" search={{ filter: "all" }} className="secondary">
+              Filter
             </Link>
-          );
-        })}
-      </nav>
+            <Link to="/ask" className="new-btn">
+              ＋ Ask ASAP
+            </Link>
+          </div>
+        }
+      />
 
-      {shown.length === 0 ? (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          Nothing is {STATE_WORD[active as DemoJob["state"]]?.toLowerCase() ?? "here"} right now.
-          That is the honest answer, not an empty box.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {shown.map((j) => (
-            <li key={j.id}>
-              <JobRow job={j} />
-            </li>
-          ))}
-        </ul>
-      )}
+      <section className="page-scroll jobs-page">
+        <nav className="tab-row" aria-label="Job states">
+          {JOB_FILTERS.map((f) => {
+            const count = demo.jobs.filter((j) => inFilter(j, f.id)).length;
+            return (
+              <Link
+                key={f.id}
+                to="/jobs"
+                search={{ filter: f.id }}
+                aria-current={f.id === active ? "page" : undefined}
+                className={`tab ${f.id === active ? "selected" : ""}`}
+              >
+                {f.label} {f.id !== "completed" && count > 0 && <b>{count}</b>}
+              </Link>
+            );
+          })}
+        </nav>
 
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
-    </div>
+        {groups.length === 0 ? (
+          <article className="space-card" style={{ padding: 24 }}>
+            <strong>Nothing is in this view.</strong>
+            <p style={{ color: "#707a72", fontSize: 11 }}>
+              That is the honest answer, not an empty box. Jobs appear here as ASAP starts them.
+            </p>
+          </article>
+        ) : (
+          <div className="job-groups">
+            {groups.map((g) => (
+              <div className="job-group" key={g.title}>
+                <div className="group-title">
+                  <span>{g.title}</span>
+                  <b>{g.jobs.length}</b>
+                </div>
+                {g.jobs.map((j) => (
+                  <JobCard key={j.id} job={j} />
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 
-function JobRow({ job }: { job: DemoJob }) {
-  const client = demoClient(job.clientId);
+/**
+ * One job, in the approved demo's card: its icon, the headline and badge, the record it belongs
+ * to, the progress bar where there is progress, and the live note.
+ *
+ * Progress is read from the job's own steps, never authored (§45 rule 10), and the outcome
+ * language stays specific: "comparison prepared", never "policy renewed".
+ */
+function JobCard({ job }: { job: DemoJob }) {
   return (
-    <article className="flex flex-wrap items-start justify-between gap-3 rounded-card border border-line-strong bg-paper p-3.5">
-      <div className="flex min-w-0 flex-col gap-1">
-        <Link
-          to="/jobs/$jobId"
-          params={{ jobId: job.id }}
-          className="font-medium text-ink hover:underline"
-        >
-          {job.title}
-        </Link>
-        {/* Outcome language, not status language. */}
-        <p className="text-sm text-ink-secondary">{job.outcome}</p>
-        {client && <p className="text-xs text-ink-muted">{client.shortName}</p>}
+    <article className="job-card">
+      <div className={`job-icon ${job.iconTone === "green" ? "" : job.iconTone}`} aria-hidden>
+        {job.icon}
       </div>
-      <span className={`rounded-pill px-2.5 py-0.5 text-xs ${STATE_TONE[job.state]}`}>
-        {STATE_WORD[job.state]}
-      </span>
+      <div className="job-main">
+        <div className="job-title">
+          <strong>{job.headline}</strong>
+          <span className={`job-pill ${job.pillTone}`}>{job.pillLabel}</span>
+        </div>
+        <p>{job.contextLine}</p>
+        {job.progress !== null && (
+          <div
+            className="progress"
+            role="progressbar"
+            aria-valuenow={job.progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${job.headline} progress`}
+          >
+            <i style={{ width: `${job.progress}%` }} />
+          </div>
+        )}
+        <small>{job.note}</small>
+      </div>
+      <Link to="/jobs/$jobId" params={{ jobId: job.id }} className="link">
+        {job.actionLabel}
+      </Link>
     </article>
   );
+}
+
+/** The board tab a job belongs to, so its detail links back to where it was. */
+function tabFor(job: DemoJob): "running" | "waiting" | "work" | "completed" {
+  if (job.state === "needs_human" || job.state === "failed") return "work";
+  return job.state;
 }
 
 /** One job, its steps, and the Work it belongs to. */
@@ -133,7 +168,11 @@ export function JobDetail() {
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
-        <Link to="/jobs" search={{ filter: job.state }} className="text-sm text-ink-secondary hover:underline">
+        <Link
+          to="/jobs"
+          search={{ filter: tabFor(job) }}
+          className="text-sm text-ink-secondary hover:underline"
+        >
           ← Jobs
         </Link>
         <h1 className="font-heading text-xl font-semibold text-ink">{job.title}</h1>

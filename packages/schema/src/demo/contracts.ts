@@ -174,6 +174,22 @@ export const demoJobSchema = z.object({
   startedAt: z.string(),
   steps: z.array(z.object({ label: z.string(), state: z.enum(["done", "now", "todo", "failed"]) })),
   workId: z.string().nullable(),
+  /**
+   * How the approved demo draws this job on the Jobs board: which group it sits under, its icon
+   * and tone, the headline, the record line, the badge, the live note and the action. All fixture
+   * copy — a job card never names a client itself.
+   */
+  group: z.string(),
+  icon: z.string(),
+  iconTone: z.enum(["green", "amber", "blue", "red"]),
+  headline: z.string(),
+  contextLine: z.string(),
+  pillLabel: z.string(),
+  pillTone: z.enum(["running", "waiting", "work", "done", "failed"]),
+  /** Percent complete, derived from the job's own steps by the runner — never authored (rule 10). */
+  progress: z.number().int().min(0).max(100).nullable(),
+  note: z.string(),
+  actionLabel: z.string(),
 });
 export type DemoJob = z.infer<typeof demoJobSchema>;
 
