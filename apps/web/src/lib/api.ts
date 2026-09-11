@@ -10,6 +10,8 @@ import {
   createClientResponseSchema,
   placementCreatedSchema,
   policyResponseSchema,
+  createPolicyResponseSchema,
+  type CreatePolicyInput,
   claimDetailSchema,
   endorsementDetailSchema,
   askResponseSchema,
@@ -198,6 +200,10 @@ export const api = {
     }),
   agreements: () => request("GET", "/agreements", agreementsResponseSchema),
   policy: (id: string) => request("GET", `/policies/${id}`, policyResponseSchema),
+  /** Record cover the brokerage already places. Asking twice records a period, never a twin. */
+  createPolicy: (input: CreatePolicyInput) =>
+    // 409 is an answer, not a failure: several clients could be meant, or none matched.
+    request("POST", "/policies", createPolicyResponseSchema, input, { auth: true, allow: [409] }),
   claimAct: (id: string, input: ClaimAction) =>
     request(
       "POST",

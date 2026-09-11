@@ -1,4 +1,6 @@
 import {
+  createPolicyRequestSchema,
+  createPolicyResponseSchema,
   RUN_GROUP_LABELS,
   runNeedsPerson,
   RUN_LIST_FILTER_LABELS,
@@ -284,6 +286,74 @@ export function workRoutes(deps: WorkDeps) {
   });
 
   /** A policy, titled as itself: its periods and every version, old ones kept. */
+  /**
+   * Record cover the brokerage already places (D-068).
+   *
+   * Everything that decides whether this is allowed is server-side and in the database function:
+   * the client decides the brokerage, membership is re-checked there, and the write is the one
+   * SECURITY DEFINER wrapper — as every other write in the engine is. The insurer arrives by name
+   * and is created if the brokerage has not named it before.
+   */
+  app.post("/policies", async (c) => {
+    const { db, user } = c.get("auth");
+    const input = await parseBody(c, createPolicyRequestSchema);
+
+    /*
+     * Which client, decided exactly as starting work decides it: one match proceeds, several is a
+     * question, none is an answer — never a client conjured to satisfy the form (D-050).
+     */
+    let clientId = input.clientId;
+    if (!clientId) {
+      const ctx = await resolveContext(db, user.id);
+      const org = requireActiveOrganization(ctx);
+      const r = await db
+        .from("clients")
+        .select("id, name, kind")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null);
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+      const match = matchClientName(input.clientName!, (r.data ?? []) as ClientCandidate[]);
+      if (match.outcome === "many") {
+        return c.json(
+          createPolicyResponseSchema.parse({
+            outcome: "ambiguous",
+            name: input.clientName,
+            candidates: match.candidates,
+          }),
+          409,
+        );
+      }
+      if (match.outcome === "none") {
+        return c.json(
+          createPolicyResponseSchema.parse({ outcome: "no_client", name: input.clientName }),
+          409,
+        );
+      }
+      clientId = match.client.id;
+    }
+
+    const { data, error } = await db.rpc("policy_create", {
+      p_client_id: clientId,
+      p_insurer_name: input.insurerName,
+      p_class_of_business: input.classOfBusiness,
+      p_policy_number: input.policyNumber ?? null,
+      p_period_start: input.periodStart,
+      p_period_end: input.periodEnd,
+    });
+    if (error) return sendError(c, mapDatabaseError(error));
+    const written = data as { policy_id: string; created: boolean };
+    const policy = await loadPolicy(db, written.policy_id);
+    if (!policy) return sendError(c, new HttpError(404, "not_found"));
+    return c.json(
+      createPolicyResponseSchema.parse({
+        outcome: "recorded",
+        created: written.created,
+        policy,
+      }),
+      written.created ? 201 : 200,
+    );
+  });
+
   app.get("/policies/:id", async (c) => {
     const { db } = c.get("auth");
     const policy = await loadPolicy(db, c.req.param("id"));

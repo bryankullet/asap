@@ -109,15 +109,41 @@ if ((await nameField.count()) === 0) {
   notes.push(`create           ${new URL(page.url()).pathname.padEnd(22)} after creating the brokerage`);
 }
 
-// 3. Every screen, with nothing in it yet. An empty screen has to say what is missing and why.
+// 3. Put the first client in, and the cover the brokerage already places.
+await page.goto(`${BASE}/new`, { waitUntil: "networkidle" });
+await page.waitForTimeout(500);
+await page.getByRole("button", { name: "A client" }).click();
+await page.locator("#sw-client").fill(process.env.NEW_CLIENT ?? "Tamarind Exporters Ltd");
+await page.screenshot({ path: `${OUT}/3a-add-client.png` });
+await page.getByRole("button", { name: /Add the client/ }).click();
+await page.waitForTimeout(2000);
+notes.push(`add client       ${new URL(page.url()).pathname.padEnd(22)} after adding the first client`);
+await page.screenshot({ path: `${OUT}/3b-client-file.png` });
+
+await page.goto(`${BASE}/new`, { waitUntil: "networkidle" });
+await page.waitForTimeout(500);
+await page.getByRole("button", { name: "Cover you already place" }).click();
+await page.locator("#sw-client").fill(process.env.NEW_CLIENT ?? "Tamarind Exporters Ltd");
+await page.locator("#sw-insurer").fill("Jubilee Allianz");
+await page.locator("#sw-class").fill("Marine cargo");
+await page.locator("#sw-number").fill("MC-2026-0001");
+await page.locator("#sw-from").fill("2026-01-01");
+await page.locator("#sw-to").fill("2026-12-31");
+await page.screenshot({ path: `${OUT}/3c-record-policy.png` });
+await page.getByRole("button", { name: /Record the cover/ }).click();
+await page.waitForTimeout(2500);
+notes.push(`record policy    ${new URL(page.url()).pathname.padEnd(22)} after recording the cover`);
+await page.screenshot({ path: `${OUT}/3d-policy.png` });
+
+// 4. Every screen, now that there is something in it. An empty screen has to say what is missing and why.
 for (const [name, route] of [
-  ["3-discover", "/discover"],
-  ["4-work", "/work?view=active"],
-  ["5-jobs", "/jobs?filter=all"],
-  ["6-automations", "/automations"],
-  ["7-start-work", "/new"],
-  ["8-clients", "/files"],
-  ["9-team", "/settings/members"],
+  ["4-discover", "/discover"],
+  ["5-work", "/work?view=active"],
+  ["6-jobs", "/jobs?filter=all"],
+  ["7-automations", "/automations"],
+  ["8-start-work", "/new"],
+  ["9-clients", "/files"],
+  ["10-team", "/settings/members"],
 ]) {
   await look(name, route);
 }

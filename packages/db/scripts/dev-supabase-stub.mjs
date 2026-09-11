@@ -51,6 +51,13 @@ const sql = postgres(
      */
     types: {
       bigint: { to: 20, from: [20], serialize: (x) => String(x), parse: (x) => Number(x) },
+      /*
+       * A `date` is a day, not an instant. PostgREST returns "2026-01-01"; the driver would hand
+       * back a Date that JSON-serialises to a timestamp, and every contract that says a date is
+       * ten characters long would fail against a harness that is wrong rather than a product that
+       * is. The same reasoning as bigint above: the API must see what it will see in production.
+       */
+      date: { to: 1082, from: [1082], serialize: (x) => String(x), parse: (x) => String(x) },
     },
   },
 );

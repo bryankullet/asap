@@ -73,3 +73,52 @@ export const policyResponseSchema = z.object({
   versions: z.array(PolicyVersionRow),
 });
 export type PolicyResponse = z.infer<typeof policyResponseSchema>;
+
+/**
+ * `POST /policies` — recording cover the brokerage already places (D-068).
+ *
+ * A brokerage that signs up today has a book already, and until this existed there was no way to
+ * put it in. What it records is what a broker can say without opening a document: who it is for,
+ * who carries it, what class, its number if there is one, and the period. Not a premium, not a
+ * schedule, not a status — each of those arrives with its own evidence through its own step.
+ *
+ * The insurer is given by name: a brokerage's first policy is also its first insurer, and making
+ * someone create the insurer separately first is a form, not a workflow.
+ */
+export const createPolicyRequestSchema = z
+  .object({
+    /** By id, or by name — matched exactly as starting work matches it. One pattern, everywhere. */
+    clientId: uuidSchema.optional(),
+    clientName: z.string().trim().min(1).max(200).optional(),
+    insurerName: z.string().trim().min(1).max(120),
+    classOfBusiness: z.string().trim().min(1).max(120),
+    policyNumber: z.string().trim().max(120).optional(),
+    periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .refine((v) => v.clientId !== undefined || v.clientName !== undefined, {
+    message: "Name the client, or give its id",
+    path: ["clientName"],
+  });
+export type CreatePolicyRequest = z.infer<typeof createPolicyRequestSchema>;
+export type CreatePolicyInput = z.input<typeof createPolicyRequestSchema>;
+
+export const createPolicyResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("recorded"),
+    /** False when this policy was already on file: asking twice records a period, never a twin. */
+    created: z.boolean(),
+    policy: policyResponseSchema,
+  }),
+  /** Several clients could be meant. Which one is a question, never a guess. */
+  z.object({
+    outcome: z.literal("ambiguous"),
+    name: z.string(),
+    candidates: z.array(
+      z.object({ id: uuidSchema, name: z.string(), kind: z.enum(["individual", "corporate"]) }),
+    ),
+  }),
+  /** No such client. Nothing is created: a policy belongs to somebody, and ASAP never invents one. */
+  z.object({ outcome: z.literal("no_client"), name: z.string() }),
+]);
+export type CreatePolicyResponse = z.infer<typeof createPolicyResponseSchema>;

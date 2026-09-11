@@ -108,6 +108,7 @@ export function createApp(deps: AppDeps) {
     "/work-items",
     "/work-items/*",
     "/placements",
+    "/policies",
     "/policies/*",
     "/claims/*",
     "/endorsements/*",
