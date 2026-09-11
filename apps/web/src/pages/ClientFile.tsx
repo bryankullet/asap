@@ -6,6 +6,7 @@ import { useState } from "react";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
 import { api, describeApiError } from "../lib/api.js";
 import { Contacts } from "../features/contacts/Contacts.js";
+import { Page } from "../shell/Page.js";
 import { ClientFileView } from "../views/ClientFileView.js";
 
 export function ClientFile() {
@@ -36,7 +37,7 @@ export function ClientFile() {
       <ErrorState what="The file could not load" retry={() => void q.refetch()} />
     );
   return (
-    <>
+    <Page title={q.data.client.name} crumbs={["Client files", q.data.client.name]}>
       {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
       {/* Who the brokerage actually writes to. Beside the file, because that is where a person
           looks for it and where the compliance work happens. */}
@@ -47,6 +48,6 @@ export function ClientFile() {
         pending={act.isPending}
         blocked={blocked}
       />
-    </>
+    </Page>
   );
 }

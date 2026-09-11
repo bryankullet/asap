@@ -12,7 +12,6 @@ import {
   Field,
   Input,
   Notice,
-  PageHead,
   SectionTitle,
   Select,
   Table,
@@ -24,6 +23,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { api, describeApiError } from "../lib/api.js";
 import { can, useMe } from "../lib/me.js";
+import { Page } from "../shell/Page.js";
 
 export function Members() {
   const me = useMe();
@@ -87,11 +87,7 @@ export function Members() {
   const pending = invitations.data?.invitations ?? [];
 
   return (
-    <div>
-      <PageHead
-        title="Members"
-        description={`People with access to ${me.data?.active_organization?.name}.`}
-      />
+    <Page title="Members" meta={`People with access to ${me.data?.active_organization?.name ?? "this brokerage"}.`}>
 
       {members.isPending && <p className="text-sm text-ink-muted">Loading…</p>}
       {members.isError && <Notice tone="error">{describeApiError(members.error)}</Notice>}
@@ -292,6 +288,6 @@ export function Members() {
           )}
         </>
       )}
-    </div>
+    </Page>
   );
 }

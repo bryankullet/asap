@@ -158,7 +158,7 @@ export function createApp(deps: AppDeps) {
       oauth: deps.mailboxOAuth ?? { gmail: {}, microsoft: {} },
     }),
   );
-  app.route("/", importRoutes({ logger }));
+  app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
   app.route("/", spaceRoutes({ logger }));

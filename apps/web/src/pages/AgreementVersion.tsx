@@ -1,5 +1,6 @@
 import type { AgreementAction, AgreementResponse } from "@asap/schema";
-import { Badge, Button, Card, CardTitle, Field, Input, Notice, PageHead } from "@asap/ui";
+import { Badge, Button, Card, CardTitle, Field, Input, Notice } from "@asap/ui";
+import { Page } from "../shell/Page.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -21,18 +22,7 @@ export function AgreementVersionView({
   const [clause, setClause] = useState("");
   const [from, setFrom] = useState("");
   return (
-    <article className="flex flex-col gap-6">
-      <PageHead
-        className="mb-0"
-        title={data.insurer.name}
-        description={
-          <>
-            Agency agreement
-            {data.agreement.document_reference ? ` · ${data.agreement.document_reference}` : ""}.
-            Rates apply to the commission basis (base premium, not gross).
-          </>
-        }
-      />
+    <Page title={data.insurer.name} crumbs={["Insurer agreements", data.insurer.name]}>
       {data.versions.map(({ version, rates }, i) => (
         <Card key={version.id} className="flex flex-col gap-3">
           <CardTitle>
@@ -171,7 +161,7 @@ export function AgreementVersionView({
           Policies rated under the old version keep it. History is never rewritten.
         </p>
       </Card>
-    </article>
+    </Page>
   );
 }
 

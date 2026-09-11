@@ -1,5 +1,5 @@
 import { K01View, K01_VIEW_LABELS } from "@asap/schema";
-import { Button, Card, Field, Input, Notice, PageHead, Select, cn } from "@asap/ui";
+import { Button, Card, Field, Input, Notice, Select, cn } from "@asap/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
@@ -7,6 +7,7 @@ import { EmptyState, ErrorState, LoadingList } from "../components/states.js";
 import { FilesView } from "../views/FilesView.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
+import { Page } from "../shell/Page.js";
 
 export function Files() {
   const { view } = useSearch({ strict: false }) as { view?: K01View };
@@ -40,11 +41,10 @@ export function Files() {
     if (name.trim()) create.mutate(false);
   }
   return (
-    <div>
-      <PageHead
-        title="Client files"
-        description="Every client lands as Not started. Clearing is a person's decision with a reason."
-      />
+    <Page
+      title="Client files"
+      meta="Every client lands as Not started. Clearing is a person's decision with a reason."
+    >
       <div className="flex flex-col gap-4">
         <nav aria-label="Client file views" className="flex flex-wrap gap-2">
           {K01View.options.map((v) => (
@@ -135,6 +135,6 @@ export function Files() {
           </form>
         </Card>
       </div>
-    </div>
+    </Page>
   );
 }

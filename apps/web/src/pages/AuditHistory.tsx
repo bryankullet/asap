@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { ErrorState, LoadingList } from "../components/states.js";
+import { Page } from "../shell/Page.js";
 
 /**
  * Audit history (D-064).
@@ -24,14 +25,10 @@ export function AuditHistory() {
   });
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Audit history</h1>
-        <p className="text-sm text-ink-secondary">
-          Everything that happened, in order — including what ASAP only prepared, and what a person
-          decided.
-        </p>
-      </header>
+    <Page
+      title="Audit history"
+      meta="Everything that happened, in order — including what ASAP only prepared"
+    >
 
       {history.isPending && <LoadingList rows={4} label="Reading the audit history" />}
       {history.isError && (
@@ -41,33 +38,28 @@ export function AuditHistory() {
         />
       )}
       {history.data && history.data.entries.length === 0 && (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          Nothing has been recorded yet. Approve something, record a send or switch an automation
-          on, and it appears here with who did it and what changed.
-        </p>
+        <article className="space-card" style={{ padding: 20 }}>
+          <strong>Nothing has been recorded yet.</strong>
+          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
+            Approve something, record a send or switch an automation on, and it appears here with
+            who did it and what changed.
+          </p>
+        </article>
       )}
       {history.data && history.data.entries.length > 0 && (
-        <ol className="flex flex-col gap-1.5">
+        <ol className="audit-list">
           {history.data.entries.map((e) => (
-            <li
-              key={e.id}
-              className="flex flex-wrap items-baseline gap-3 rounded-card border border-line-soft bg-paper px-3 py-2 text-sm"
-            >
-              <time
-                className="shrink-0 text-xs tabular-nums text-ink-muted"
-                dateTime={e.occurredAt}
-              >
-                {new Date(e.occurredAt).toLocaleString()}
-              </time>
-              <span className="text-ink">{e.action}</span>
-              <span className="text-ink-secondary">
-                {e.actorName ?? ACTOR_WORD[e.actorType]} · {e.objectType}
-              </span>
-              {e.changed.length > 0 && (
-                <span className="text-xs text-ink-muted">{e.changed.join(", ")}</span>
-              )}
+            <li key={e.id}>
+              <time dateTime={e.occurredAt}>{new Date(e.occurredAt).toLocaleString()}</time>
+              <div className="audit-what">
+                <strong>{e.action}</strong>
+                <small>
+                  {e.actorName ?? ACTOR_WORD[e.actorType]} · {e.objectType}
+                  {e.changed.length > 0 ? ` · ${e.changed.join(", ")}` : ""}
+                </small>
+              </div>
               {e.result !== "success" && (
-                <span className="rounded-pill bg-accent-red-soft px-2 py-0.5 text-xs text-accent-red-ink">
+                <span className="pill high">
                   {e.result === "denied" ? "Denied" : "Failed"}
                   {e.failureReason ? `: ${e.failureReason}` : ""}
                 </span>
@@ -77,9 +69,9 @@ export function AuditHistory() {
                   to="/r/$recordId"
                   params={{ recordId: e.objectId }}
                   search={{}}
-                  className="ml-auto text-xs text-ink-secondary hover:underline"
+                  className="link"
                 >
-                  Open the record
+                  Open
                 </Link>
               )}
             </li>
@@ -87,11 +79,11 @@ export function AuditHistory() {
         </ol>
       )}
       {history.data && history.data.visible > history.data.returned && (
-        <p className="text-xs text-ink-muted">
+        <p className="quiet-line">
           Showing the most recent {history.data.returned} of {history.data.visible}.
         </p>
       )}
-    </div>
+    </Page>
   );
 }
 

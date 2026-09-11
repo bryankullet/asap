@@ -110,6 +110,8 @@ const PREVIEW = {
     { header: "Branch Code", meaning: null },
   ],
   blocking: [],
+  source: "spreadsheet",
+  mappedByModel: [],
 };
 
 const ME = {
@@ -141,10 +143,18 @@ function stubApi(preview: unknown = PREVIEW) {
 
 const renderScreen = () => renderInRouter(<ImportBook />, "/import");
 
-/** A File whose .text() resolves, which jsdom does not implement on its own. */
+/**
+ * A File whose bytes the screen can actually read.
+ *
+ * jsdom implements neither `.text()` nor `.arrayBuffer()` on File, and the screen now sends the
+ * bytes rather than the text — every kind of file takes the same path to the server.
+ */
 function csvFile(name: string, text: string): File {
   const f = new File([text], name, { type: "text/csv" });
+  const bytes = new TextEncoder().encode(text);
   Object.defineProperty(f, "text", { value: async () => text });
+  Object.defineProperty(f, "arrayBuffer", { value: async () => bytes.buffer });
+  Object.defineProperty(f, "size", { value: bytes.length, configurable: true });
   return f;
 }
 
@@ -158,7 +168,7 @@ describe("choosing a file", () => {
     await renderScreen();
     const user = userEvent.setup();
     await user.upload(
-      screen.getByLabelText(/choose a csv file/i),
+      screen.getByLabelText(/choose a file/i),
       csvFile("book.csv", "Client\nAcme"),
     );
     await screen.findByText(/is ready to read/i);
@@ -180,7 +190,7 @@ describe("the preview", () => {
     await renderScreen();
     const user = userEvent.setup();
     await user.upload(
-      screen.getByLabelText(/choose a csv file/i),
+      screen.getByLabelText(/choose a file/i),
       csvFile("book.csv", "Client\nAcme"),
     );
     await user.click(screen.getByRole("button", { name: /read the file/i }));
@@ -250,5 +260,50 @@ describe("the preview", () => {
     expect(screen.getByText(/say whether those figures are gross/i)).toBeTruthy();
     const button = screen.getByRole("button", { name: /import 1 rows/i }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+});
+
+describe("any kind of file", () => {
+  it("offers spreadsheets and PDFs, not only CSV", async () => {
+    stubApi();
+    await renderScreen();
+    const input = screen.getByLabelText(/choose a file/i) as HTMLInputElement;
+    expect(input.accept).toMatch(/\.xlsx/);
+    expect(input.accept).toMatch(/\.pdf/);
+    expect(input.accept).toMatch(/\.csv/);
+  });
+
+  it("says which reader understood the file, rather than implying every file is a CSV", async () => {
+    stubApi();
+    await renderScreen();
+    const user = userEvent.setup();
+    await user.upload(screen.getByLabelText(/choose a file/i), csvFile("book.csv", "Client\nAcme"));
+    await user.click(screen.getByRole("button", { name: /read the file/i }));
+    await screen.findByText(/what this would do/i);
+    expect(screen.getByText(/first sheet of your spreadsheet/i)).toBeTruthy();
+  });
+
+  it("flags the headings the model worked out, so a person checks them", async () => {
+    stubApi({ ...PREVIEW, mappedByModel: ["U/W", "Sum Ins."] });
+    await renderScreen();
+    const user = userEvent.setup();
+    await user.upload(screen.getByLabelText(/choose a file/i), csvFile("book.csv", "Client\nAcme"));
+    await user.click(screen.getByRole("button", { name: /read the file/i }));
+    await screen.findByText(/what this would do/i);
+    const note = screen.getByText(/worked out/i);
+    expect(note.textContent).toMatch(/U\/W, Sum Ins\./);
+    // The boundary, said on the screen: headings, never values.
+    expect(note.textContent).toMatch(/read the headings, never the values/i);
+  });
+
+  it("refuses a file larger than it can read, before sending anything", async () => {
+    stubApi();
+    await renderScreen();
+    const user = userEvent.setup();
+    const huge = csvFile("huge.xlsx", "x");
+    Object.defineProperty(huge, "size", { value: 20_000_000 });
+    await user.upload(screen.getByLabelText(/choose a file/i), huge);
+    expect(await screen.findByText(/20MB/)).toBeTruthy();
+    expect(posted).toEqual([]);
   });
 });

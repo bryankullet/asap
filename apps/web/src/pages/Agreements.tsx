@@ -1,5 +1,6 @@
 import type { AgreementsResponse } from "@asap/schema";
-import { Button, Card, CardTitle, Field, Input, Notice, PageHead } from "@asap/ui";
+import { Button, Card, CardTitle, Field, Input, Notice } from "@asap/ui";
+import { Page } from "../shell/Page.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -128,8 +129,7 @@ export function Agreements() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["agreements"] }),
   });
   return (
-    <div>
-      <PageHead title="Insurer agreements" />
+    <Page title="Insurer agreements" meta="What each insurer pays, and what is documented">
       <div className="flex flex-col gap-4">
         {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
         {q.isPending ? (
@@ -147,6 +147,6 @@ export function Agreements() {
           />
         )}
       </div>
-    </div>
+    </Page>
   );
 }

@@ -3,6 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
+import { Page } from "../shell/Page.js";
 
 /**
  * Connected email (D-064).
@@ -24,14 +25,7 @@ export function Email() {
   });
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Email</h1>
-        <p className="text-sm text-ink-secondary">
-          Conversations with clients and insurers, beside the work they belong to.
-        </p>
-      </header>
-
+    <Page title="Email" meta="Conversations with clients and insurers, beside the work they belong to">
       <MailboxStatus connected={threads.data?.mailboxConnected ?? false} />
 
       {threads.isPending && <LoadingList rows={3} label="Reading your conversations" />}
@@ -42,61 +36,59 @@ export function Email() {
         />
       )}
       {threads.data && threads.data.threads.length === 0 && (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          {threads.data.mailboxConnected
-            ? "Nothing has arrived yet. New conversations appear here as they land in the connected mailbox."
-            : "No mailbox is connected, so there is nothing to read. Until one is, ASAP works from what you put on file yourself."}
-        </p>
+        <article className="space-card" style={{ padding: 20 }}>
+          <strong>
+            {threads.data.mailboxConnected ? "Nothing has arrived yet." : "No mailbox is connected."}
+          </strong>
+          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
+            {threads.data.mailboxConnected
+              ? "New conversations appear here as they land in the connected mailbox."
+              : "Until one is, ASAP works from what you put on file yourself."}
+          </p>
+        </article>
       )}
 
       {threads.data && threads.data.threads.length > 0 && (
-        <ul className="flex flex-col gap-2">
+        <ul className="evidence-list">
           {threads.data.threads.map((t) => (
             <li key={t.id}>
-              <Link
-                to="/email/$threadId"
-                params={{ threadId: t.id }}
-                className="block rounded-card border border-line-strong bg-paper p-3.5 hover:border-ink-muted"
-              >
-                <span className="block font-medium text-ink">{t.subject || "(No subject)"}</span>
-                <span className="block text-xs text-ink-muted">
-                  {t.clientName ?? "Not linked to a client yet"} · {t.messageCount}{" "}
-                  {t.messageCount === 1 ? "message" : "messages"}
-                  {t.lastMessageAt ? ` · ${new Date(t.lastMessageAt).toLocaleString()}` : ""}
-                </span>
+              <Link to="/email/$threadId" params={{ threadId: t.id }}>
+                {t.subject || "(No subject)"}
               </Link>
+              <small>
+                {t.clientName ?? "Not linked to a client yet"} · {t.messageCount}{" "}
+                {t.messageCount === 1 ? "message" : "messages"}
+                {t.lastMessageAt ? ` · ${new Date(t.lastMessageAt).toLocaleString()}` : ""}
+              </small>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </Page>
   );
 }
 
 /** Whether a mailbox is connected, and how to connect one. Honest when none is. */
 function MailboxStatus({ connected }: { connected: boolean }) {
   return (
-    <section
-      aria-label="Mailbox"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line-strong bg-paper p-3.5"
-    >
-      <div>
-        <p className="text-sm font-medium text-ink">
-          {connected ? "Mailbox connected" : "No mailbox connected"}
-        </p>
-        <p className="text-xs text-ink-muted">
+    <article className="job-card" aria-label="Mailbox">
+      <div className={`job-icon ${connected ? "" : "amber"}`} aria-hidden>
+        ✉
+      </div>
+      <div className="job-main">
+        <div className="job-title">
+          <strong>{connected ? "Mailbox connected" : "No mailbox connected"}</strong>
+        </div>
+        <p>
           {connected
             ? "ASAP reads and replies in the same thread, and never sends without a person."
             : "Connect Gmail or Microsoft 365 to read and send from the brokerage's own mailbox."}
         </p>
       </div>
-      <Link
-        to="/settings/connections"
-        className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-      >
+      <Link to="/settings/connections" className="secondary">
         Data and connections
       </Link>
-    </section>
+    </article>
   );
 }
 
@@ -130,59 +122,41 @@ export function EmailThread() {
   const { thread, messages } = detail.data;
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <Link to="/email" className="text-sm text-ink-secondary hover:underline">
-          ← Email
-        </Link>
-        <h1 className="font-heading text-lg font-semibold text-ink">
-          {thread.subject || "(No subject)"}
-        </h1>
-        <p className="text-xs text-ink-muted">
-          {thread.clientName ?? "Not linked to a client yet"}
-        </p>
-      </header>
+    <Page title={thread.subject || "(No subject)"} crumbs={["Email", thread.subject || "(No subject)"]}>
+      <Link to="/email" className="link">
+        ← Every conversation
+      </Link>
+      <p className="quiet-line">{thread.clientName ?? "Not linked to a client yet"}</p>
 
       {messages.length === 0 ? (
-        <p className="text-sm text-ink-muted">
-          This conversation has no messages ASAP can read yet.
-        </p>
+        <p className="quiet-line">This conversation has no messages ASAP can read yet.</p>
       ) : (
-        <ol aria-label="Messages" className="flex flex-col gap-2">
+        <ol aria-label="Messages" className="thread-list">
           {messages.map((m) => (
-            <li
-              key={m.id}
-              className={`max-w-[85%] rounded-card border p-3 text-sm ${
-                m.direction === "outbound"
-                  ? "self-end border-line-soft bg-wash"
-                  : "self-start border-line-strong bg-paper"
-              }`}
-            >
-              <p className="text-xs text-ink-muted">
+            <li key={m.id} className={m.direction === "outbound" ? "outbound" : "inbound"}>
+              <div className="thread-meta">
                 {m.from} → {m.to.join(", ")} · {new Date(m.sentAt).toLocaleString()}
                 {m.hasAttachments ? " · has attachments" : ""}
-              </p>
-              <p className="whitespace-pre-line text-ink-secondary">
-                {m.body ?? m.snippet ?? "The body of this message has not been read."}
-              </p>
+              </div>
+              <p>{m.body ?? m.snippet ?? "The body of this message has not been read."}</p>
             </li>
           ))}
         </ol>
       )}
 
       {thread.workItemId && (
-        <section aria-label="Related work" className="flex flex-col gap-1.5">
-          <h2 className="text-sm font-medium text-ink">The work this belongs to</h2>
-          <Link
-            to="/r/$recordId"
-            params={{ recordId: thread.workItemId }}
-            search={{}}
-            className="rounded-card border border-line-strong bg-paper p-3 text-sm text-ink hover:border-ink-muted"
-          >
-            Open the record, where a reply can be prepared and approved
-          </Link>
+        <section aria-label="Related work">
+          <div className="section-label">THE WORK THIS BELONGS TO</div>
+          <ul className="evidence-list">
+            <li>
+              <Link to="/r/$recordId" params={{ recordId: thread.workItemId }} search={{}}>
+                Open the record
+              </Link>
+              <small>Where a reply can be prepared and approved</small>
+            </li>
+          </ul>
         </section>
       )}
-    </div>
+    </Page>
   );
 }

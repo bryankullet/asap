@@ -1892,3 +1892,247 @@ body.demo-body {
      collapsing, because a row read out of order is worse than a row you have to scroll to. */
   .demo-root .import-table { min-width: 560px; }
 }
+
+/* ---- One screen, one layout -------------------------------------------------------------- */
+
+/*
+ * The body of any screen that is not a board. `.page-scroll` gives it the gutters and the scroll;
+ * this adds the two rules that stop a wide child taking the whole shell with it.
+ *
+ * `min-width: 0` is the load-bearing one. The shell's main column is `1fr`, which resolves to
+ * `minmax(auto, 1fr)`, so a child wider than the column — a long table, a policy number with no
+ * break opportunity — grows the column instead of scrolling inside it, and the sidebar and every
+ * top-right control move with it.
+ */
+.demo-root .page-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* Nothing inside a screen body may be wider than the screen. */
+.demo-root .page-body > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/*
+ * A list of things a screen cites: evidence behind an answer, the columns an import read, what
+ * has come in before. The label leads, the detail follows underneath in the muted tone.
+ *
+ * It was used on Ask and the import screen before it existed, which is why the evidence panel
+ * rendered as unstyled text running off both edges of its card.
+ */
+.demo-root .evidence-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.demo-root .evidence-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--ink);
+  /* A policy number or an address has no break opportunity and must not widen the card. */
+  overflow-wrap: anywhere;
+}
+.demo-root .evidence-list li a {
+  color: var(--green);
+  text-decoration: none;
+  font-weight: 500;
+}
+.demo-root .evidence-list li a:hover {
+  text-decoration: underline;
+}
+.demo-root .evidence-list small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* A plain table on a screen body — members, agreements, anything tabular that is not a board. */
+.demo-root .page-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.demo-root .page-table th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.demo-root .page-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+/* Wide tables scroll inside their own box rather than widening the screen. */
+.demo-root .table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* The search box: one field, full width of the body, and the count under it. */
+.demo-root .search-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.demo-root .search-box input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--ink);
+}
+.demo-root .search-box input:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+  border-color: var(--green);
+}
+.demo-root .search-count {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0;
+}
+/* A line of quiet status text on a screen body: searching, reading, waiting. */
+.demo-root .quiet-line {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* The audit history: when, what, and who — one row each, the time in a fixed column so the
+   rows scan down rather than jostling with the length of each action's name. */
+.demo-root .audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.demo-root .audit-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 12px;
+}
+.demo-root .audit-list time {
+  flex: none;
+  width: 150px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.demo-root .audit-what {
+  flex: 1;
+  min-width: 0;
+}
+.demo-root .audit-what strong {
+  display: block;
+  font-weight: 500;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.demo-root .audit-what small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.demo-root .audit-list .link {
+  margin-left: auto;
+  flex: none;
+}
+@media (max-width: 760px) {
+  /* The time moves above the action rather than squeezing it to nothing. */
+  .demo-root .audit-list li {
+    flex-wrap: wrap;
+  }
+  .demo-root .audit-list time {
+    width: 100%;
+  }
+}
+
+/* A conversation: what came in on the left, what went out on the right, so the direction of a
+   thread is legible at a glance without reading a single address. */
+.demo-root .thread-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.demo-root .thread-list li {
+  max-width: 85%;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12px;
+  color: var(--ink);
+}
+.demo-root .thread-list li.outbound {
+  align-self: flex-end;
+  background: var(--soft);
+}
+.demo-root .thread-list .thread-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 5px;
+  overflow-wrap: anywhere;
+}
+.demo-root .thread-list p {
+  margin: 0;
+  white-space: pre-line;
+  color: #3e4941;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .demo-root .thread-list li {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  /*
+   * Ask's two-column workspace stacks.
+   *
+   * Its columns are `minmax(450px, 1fr) minmax(410px, 47%)` — an 860px floor — so on anything
+   * narrower the grid could not shrink and pushed the whole shell sideways instead. Mobile is a
+   * first-class layout (§37), not a squeeze: the conversation takes the width and the evidence
+   * follows underneath, where it is still reachable rather than off the edge.
+   */
+  .demo-root .workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow-y: auto;
+  }
+  .demo-root .conversation {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    min-height: 60vh;
+  }
+  .demo-root .space-panel {
+    overflow-y: visible;
+  }
+}

@@ -963,3 +963,80 @@ broken rows imported to three clients, three contacts, four policies and four pe
 12.5% stored as `0.1250`, individuals told from companies, insurers created by name once, the two
 bad rows excluded with their reasons, an audit row naming what the import did, and the same file
 refused on a second attempt.
+
+## D-071 — One layout for every screen, and a book in whatever form it is in
+
+**2026-09-11.**
+
+### Every screen sits in the same frame
+
+Eight screens — Search, the audit history, Email, the client file, client files, Members and both
+agreement screens — were laid out as bare flex columns inside `.product-view`, which supplies
+neither padding nor a scroll container. Their content sat flush against the sidebar and ran off the
+right-hand edge.
+
+`apps/web/src/shell/Page.tsx` is now the frame for every destination: the 58px topbar, the gutters,
+the scroll. The rule that actually stops the overflow is `min-width: 0` on the body — the shell's
+main column is `1fr`, which resolves to `minmax(auto, 1fr)`, so a child wider than the column grows
+the column rather than scrolling inside it, and the sidebar and every top-right control move with
+it.
+
+Two other defects in the same family:
+
+- **`.evidence-list` was used on Ask and the import screen and defined nowhere**, so the evidence
+  panel rendered as unstyled text running off both edges of its card. It exists now, along with
+  `.audit-list`, `.thread-list`, `.search-box` and `.page-table` — the idioms those screens were
+  reaching for with Tailwind utilities.
+- **Ask's workspace could not shrink.** Its columns are `minmax(450px, 1fr) minmax(410px, 47%)`, an
+  860px floor, so below that it pushed the whole shell sideways. It stacks under 900px now: mobile
+  is a first-class layout (§37), not a squeeze.
+
+**Not done, and worth naming:** `Files`, `Members`, `Agreements` and `AgreementVersion` are framed
+but their interiors still use the Phase-1 `@asap/ui` components, whose tokens differ from the
+approved language. They now *sit* in the product; they do not yet *read* as part of it.
+
+### A book arrives in whatever form the brokerage has it
+
+CSV only was the wrong constraint: a book is a spreadsheet far more often, and sometimes a PDF
+printed out of the system it is leaving.
+
+| It arrives as | What happens |
+|---|---|
+| `.csv` / `.tsv` | As before. |
+| `.xlsx` / `.xlsm` / `.xls` | The first sheet that has a table on it, **named on the screen** rather than assumed. |
+| `.pdf` with a text layer | The printed table, read from where the words sit. |
+| `.pdf` that is a scan | Refused in words, and pointed at Documents — reading a scan is extraction, not import. |
+| Anything else | Refused in words, and pointed at Documents. |
+
+The browser now sends bytes, not text, so every kind of file reaches the same validation and the
+browser is never the thing that decided what a cell meant.
+
+**The PDF reader works from geometry, and has to.** A PDF has no columns — it has glyphs at
+coordinates, and the text layer a reader produces collapses the gaps between them to single spaces.
+Splitting *that* turns "Malindi Salt Ltd" into three columns and puts every later value one field
+to the left, silently. So runs are grouped into lines by their y, the first line with three or more
+runs is the header, its x positions define the columns, and every later run joins the column whose
+heading starts nearest to its left. A line reaching fewer than half the columns is a footer or a
+total, and is skipped.
+
+### The model maps headings — and only headings
+
+The synonym table cannot cover "Sum Ins.", "U/W" or "Cover From", and a brokerage should not have
+to rename its columns to get its own book in. So where a heading is unrecognised, the configured
+model is asked what it means.
+
+**It is given the column names and nothing else.** It never sees a value, never chooses one and
+never produces one. Its answer is checked against the enum before it is used, it cannot claim a
+meaning the synonyms already took, it cannot map two headings to one meaning, and what it decided
+is shown on the preview for a person to correct before anything is written. A heading it gets wrong
+is visible and reversible; a value it invented would be neither (§45 rules 8 and 9).
+
+With no model configured it falls back to the synonyms. An import does not fail for want of a
+model, and a model that is slow, unreachable or unhelpful cannot stop a brokerage importing its
+book.
+
+### Dependencies, chosen on their advisories
+
+`read-excel-file` (0 advisories, 20 packages) and `unpdf` (0 advisories, 2 packages). The obvious
+choice for spreadsheets, `xlsx`, carries two **high**-severity advisories with no fix available —
+prototype pollution and ReDoS — which is not acceptable for parsing files a brokerage uploads.

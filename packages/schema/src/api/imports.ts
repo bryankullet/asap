@@ -159,8 +159,17 @@ export const IMPORT_ROW_LIMIT = 2000;
 
 export const importPreviewRequestSchema = z.object({
   filename: z.string().trim().min(1).max(255),
-  /** The file, as text. Parsed on the server so validation has one implementation. */
-  content: z.string().min(1).max(4_000_000),
+  /**
+   * The file itself, base64-encoded, whatever kind it is. Read on the server so that a CSV, a
+   * spreadsheet and a PDF all reach the same validation — and so the browser is never the thing
+   * that decided what a cell meant.
+   *
+   * Base64 costs a third in size, which is why the cap is stated in the file's own terms on the
+   * screen rather than in encoded bytes here.
+   */
+  content: z.string().min(1).max(12_000_000),
+  /** What the browser thinks it is. The extension is trusted first; this is the fallback. */
+  mimeType: z.string().trim().max(200).default("application/octet-stream"),
   /** Asked once per file. Required as soon as a premium column is mapped. */
   premiumBasis: PremiumBasis.nullable().default(null),
   /**
@@ -172,14 +181,24 @@ export const importPreviewRequestSchema = z.object({
 });
 export type ImportPreviewRequest = z.input<typeof importPreviewRequestSchema>;
 
+/** How a file was read, so the screen can say so rather than implying every file is a CSV. */
+export const ImportSource = z.enum(["csv", "spreadsheet", "pdf"]);
+export type ImportSource = z.infer<typeof ImportSource>;
+
 export const importPreviewResponseSchema = z.object({
   batch: importBatchSchema,
+  /** Which reader understood the file. */
+  source: ImportSource,
+  /** For a workbook, the sheet that was read — named, never assumed. */
+  sheetName: z.string().nullable().default(null),
   rows: z.array(importRowPreviewSchema),
   summary: importSummarySchema,
   /** The headers as found in the file, and what each was taken to mean (null = not mapped). */
   columns: z.array(z.object({ header: z.string(), meaning: ImportColumn.nullable() })),
   /** What the file needs before it can be committed, in words. Empty means it is ready. */
   blocking: z.array(z.string()),
+  /** Set when a heading was mapped by the model rather than by the synonym table. */
+  mappedByModel: z.array(z.string()).default([]),
 });
 export type ImportPreviewResponse = z.infer<typeof importPreviewResponseSchema>;
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { SearchResult } from "@asap/schema";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
+import { Page } from "../shell/Page.js";
 
 /**
  * Search across the brokerage's own records (D-064).
@@ -43,9 +44,8 @@ export function Search() {
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="font-heading text-xl font-semibold text-ink">Search</h1>
+    <Page title="Search" meta="Clients, policies and work — everything your role can see">
+      <div className="search-box">
         <label htmlFor="search-q" className="sr-only">
           Search everything
         </label>
@@ -55,71 +55,65 @@ export function Search() {
           autoFocus
           onChange={(e) => void navigate({ to: "/search", search: { q: e.target.value } })}
           placeholder="A client, a policy number, a piece of work…"
-          className="min-h-[44px] rounded-control border border-line-strong bg-paper px-3 text-sm text-ink"
         />
         {debounced.length > 0 && search.data && (
-          <p className="text-xs text-ink-muted">
+          <p className="search-count">
             {results.length} {results.length === 1 ? "result" : "results"} for “{search.data.query}”
           </p>
         )}
-      </header>
+      </div>
 
       {/* Every state is designed (§36): nothing typed, searching, failed, nothing found. */}
       {debounced.length === 0 && (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          Type a client name, a policy number, or a word from a piece of work. ASAP looks only at
-          the records your role can see.
-        </p>
+        <article className="space-card" style={{ padding: 20 }}>
+          <strong>Start typing.</strong>
+          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
+            A client name, a policy number, or a word from a piece of work. ASAP looks only at the
+            records your role can see.
+          </p>
+        </article>
       )}
       {search.isFetching && debounced.length > 0 && (
-        <p className="text-sm text-ink-muted" role="status">
+        <p className="quiet-line" role="status">
           Searching your records…
         </p>
       )}
       {search.isError && (
-        <p
-          role="alert"
-          className="rounded-card border border-line-soft bg-paper p-4 text-sm text-accent-red"
-        >
-          We could not search. {describeApiError(search.error)}
-        </p>
+        <div className="warning" role="alert">
+          <strong>We could not search:</strong> {describeApiError(search.error)}
+        </div>
       )}
       {(search.data?.degraded ?? []).map((d) => (
-        <p key={d.what} className="text-xs text-ink-muted">
+        <div className="warning" key={d.what}>
           <strong>{d.what}:</strong> {d.because} Everything else was searched.
-        </p>
+        </div>
       ))}
       {search.data && results.length === 0 && !search.isFetching && (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          Nothing matches “{search.data.query}”. Try a client name, a policy number, or a word from
-          a piece of work.
-        </p>
+        <article className="space-card" style={{ padding: 20 }}>
+          <strong>Nothing matches “{search.data.query}”.</strong>
+          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
+            Try a client name, a policy number, or a word from a piece of work.
+          </p>
+        </article>
       )}
 
       {grouped.length > 0 && (
-        <div className="flex flex-col gap-4">
+        <>
           {grouped.map((g) => (
-            <section key={g.kind} aria-label={KIND_WORD[g.kind]} className="flex flex-col gap-1.5">
-              <h2 className="text-xs font-medium uppercase tracking-wide text-ink-muted">
-                {KIND_WORD[g.kind]}
-              </h2>
-              <ul className="flex flex-col gap-1.5">
+            <section key={g.kind} aria-label={KIND_WORD[g.kind]}>
+              <div className="section-label">{KIND_WORD[g.kind]}</div>
+              <ul className="evidence-list">
                 {g.items.map((r) => (
                   <li key={`${r.kind}-${r.id}`}>
-                    <Link
-                      to={r.to}
-                      className="block rounded-card border border-line-strong bg-paper p-3 hover:border-ink-muted"
-                    >
-                      <span className="block text-sm font-medium text-ink">{r.title}</span>
-                      <span className="block text-xs text-ink-muted">{r.subtitle}</span>
-                    </Link>
+                    <Link to={r.to}>{r.title}</Link>
+                    <small>{r.subtitle}</small>
                   </li>
                 ))}
               </ul>
             </section>
           ))}
-        </div>
+        </>
       )}
-    </div>
+    </Page>
   );
 }

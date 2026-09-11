@@ -18,11 +18,26 @@ import { ScreenTitle } from "../shell/ScreenTitle.js";
  * person who uploaded four hundred lines and got three hundred and ninety-eight deserves to know
  * which two and why.
  */
+/** How the file was read, in the words the screen uses. */
+const SOURCE_WORD: Record<string, string> = {
+  csv: "a CSV",
+  spreadsheet: "the first sheet of your spreadsheet",
+  pdf: "the table printed in that PDF",
+};
+
+/**
+ * The largest file read in one request.
+ *
+ * Base64 costs a third on the wire, and the whole thing is parsed in memory, so this is a real
+ * limit rather than a guess. Stated on the screen in the file's own terms.
+ */
+const MAX_FILE_BYTES = 8_000_000;
+
 export function ImportBook() {
   const me = useMe();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
+  const [file, setFile] = useState<{ name: string; base64: string; type: string } | null>(null);
   const [basis, setBasis] = useState<PremiumBasis | "">("");
   const [preview, setPreview] = useState<ImportPreviewResponse | null>(null);
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
@@ -39,7 +54,8 @@ export function ImportBook() {
     mutationFn: () =>
       api.previewImport({
         filename: file!.name,
-        content: file!.text,
+        content: file!.base64,
+        mimeType: file!.type,
         premiumBasis: basis === "" ? null : basis,
       }),
     onSuccess: (res) => {
@@ -60,11 +76,24 @@ export function ImportBook() {
   async function chooseFile(f: File) {
     setReadError(null);
     setPreview(null);
+    if (f.size > MAX_FILE_BYTES) {
+      setReadError(
+        `That file is ${Math.round(f.size / 1_000_000)}MB. Files up to ${MAX_FILE_BYTES / 1_000_000}MB can be read in one go — split it, or export fewer columns.`,
+      );
+      return;
+    }
     try {
-      const text = await f.text();
-      setFile({ name: f.name, text });
+      // The bytes, whatever kind of file it is: the server decides how to read it, so a CSV, a
+      // spreadsheet and a PDF all reach the same validation and the browser never interprets a
+      // cell. Chunked so a few megabytes do not blow the argument limit of String.fromCharCode.
+      const buffer = new Uint8Array(await f.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < buffer.length; i += 8192) {
+        binary += String.fromCharCode(...buffer.subarray(i, i + 8192));
+      }
+      setFile({ name: f.name, base64: btoa(binary), type: f.type || "application/octet-stream" });
     } catch {
-      setReadError("That file could not be read. Save it as CSV and try again.");
+      setReadError("That file could not be read from your computer. Try choosing it again.");
     }
   }
 
@@ -87,19 +116,20 @@ export function ImportBook() {
             <div className="space-type">
               <span>STEP ONE</span>
             </div>
-            <h2>The spreadsheet you already have</h2>
+            <h2>The book you already have</h2>
             <p>
-              One row per policy, or one row per client if you are starting with names. ASAP reads
-              the column headings itself — you can correct what it guessed before anything is
-              written. Up to {IMPORT_ROW_LIMIT.toLocaleString()} rows at a time.
+              A spreadsheet, a CSV, or a PDF your old system printed — one row per policy, or one
+              per client if you are starting with names. ASAP works out what the column headings
+              mean itself, and you can correct it before anything is written. Up to{" "}
+              {IMPORT_ROW_LIMIT.toLocaleString()} rows and {MAX_FILE_BYTES / 1_000_000}MB at a time.
             </p>
           </div>
           <div className="space-body">
             <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
-              {file ? "Choose a different file" : "Choose a CSV file"}
+              {file ? "Choose a different file" : "Choose a file"}
               <input
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,.pdf,text/csv,application/pdf"
                 className="sr-only"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -161,7 +191,10 @@ export function ImportBook() {
               </div>
               <h2>What this would do</h2>
               <p>
-                Nothing below has been written yet. {summary?.rows ?? 0} rows read
+                Nothing below has been written yet. {summary?.rows ?? 0} rows read from{" "}
+                {preview.source === "spreadsheet" && preview.sheetName
+                  ? `the “${preview.sheetName}” sheet of your spreadsheet`
+                  : SOURCE_WORD[preview.source]}
                 {summary ? `, ${writable} of them ready` : ""}.
               </p>
             </div>
@@ -197,6 +230,13 @@ export function ImportBook() {
 
               {/* What each heading was taken to mean. A guess, shown as one. */}
               <div className="section-label">HOW YOUR COLUMNS WERE READ</div>
+              {preview.mappedByModel.length > 0 && (
+                <p className="quiet-line" style={{ marginBottom: 8 }}>
+                  ASAP worked out {preview.mappedByModel.join(", ")} from the heading alone. Check
+                  {preview.mappedByModel.length === 1 ? " it" : " them"} before importing — it read
+                  the headings, never the values.
+                </p>
+              )}
               <ul className="evidence-list" style={{ marginBottom: 14 }}>
                 {preview.columns.map((c) => (
                   <li key={c.header}>

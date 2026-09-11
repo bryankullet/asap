@@ -1,7 +1,7 @@
 import {
   CLIENT_CONTACT_COLUMNS,
   IMPORT_BATCH_COLUMNS,
-  IMPORT_ROW_LIMIT,
+  suggestColumns,
   type ImportBatch,
   type ImportColumn,
   type ImportRowPreview,
@@ -17,14 +17,15 @@ import {
   importsResponseSchema,
   interpretRow,
   matchClientName,
-  parseCsv,
-  suggestColumns,
   type ClientCandidate,
 } from "@asap/schema";
+import { readImport } from "../imports/read.js";
+import { mapColumnsIntelligently } from "../imports/map-columns.js";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
+import type { AiProvider } from "@asap/schema";
 import { recordAudit } from "../audit.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
@@ -43,7 +44,7 @@ import { parseBody } from "./_parse.js";
  * resolve differently, or a client could have been created in between — and a person would have
  * approved something other than what happened.
  */
-export function importRoutes(deps: { logger: Logger }) {
+export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | null }) {
   const app = new Hono<{ Variables: { auth: { db: SupabaseClient; user: { id: string } } } }>();
 
   /** The people at a client. */
@@ -156,7 +157,13 @@ export function importRoutes(deps: { logger: Logger }) {
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
 
-    const contentSha256 = createHash("sha256").update(input.content, "utf8").digest("hex");
+    /*
+     * The file, as bytes. Hashed before anything else so that the same file is recognised
+     * whatever it is — a spreadsheet and a CSV exported from it are different files and should
+     * be, but the same spreadsheet twice is the same spreadsheet.
+     */
+    const bytes = Buffer.from(input.content, "base64");
+    const contentSha256 = createHash("sha256").update(bytes).digest("hex");
     // The same spreadsheet twice is recognised rather than imported twice. Said before the work,
     // not discovered by a unique-index error after it.
     const already = await db
@@ -175,13 +182,30 @@ export function importRoutes(deps: { logger: Logger }) {
       );
     }
 
-    const parsed = parseCsv(input.content, IMPORT_ROW_LIMIT);
+    const read = await readImport(bytes, input.filename, input.mimeType);
+    if (read.kind === "not_a_book") {
+      // In words, with somewhere to go. A file ASAP cannot read as a book is not a failure of the
+      // person who uploaded it.
+      throw new HttpError(422, "not_a_book", `${read.reason} ${read.suggestion}`);
+    }
+    const parsed = read.parsed;
     if (parsed.headers.length === 0) {
-      throw new HttpError(400, "empty_file", "That file has no columns in it.");
+      throw new HttpError(422, "empty_file", "That file has no columns in it.");
     }
 
-    // Suggested from the headers, then overridden by anything the caller stated explicitly.
-    const columns: Record<string, ImportColumn | null> = suggestColumns(parsed.headers);
+    /*
+     * What each heading means. The synonym table first; then, for anything it did not recognise,
+     * the configured model — which is given the headings alone and never a value, and whose answer
+     * is checked against the enum before it is used. Then whatever the caller stated explicitly,
+     * because a person correcting the mapping is the last word.
+     */
+    const suggested = suggestColumns(parsed.headers);
+    const columns: Record<string, ImportColumn | null> = await mapColumnsIntelligently(
+      parsed.headers,
+      deps.aiProvider ?? null,
+      deps.logger,
+    );
+    const mappedByModel = parsed.headers.filter((h) => suggested[h] == null && columns[h] != null);
     for (const [header, meaning] of Object.entries(input.columns)) {
       if (header in columns) columns[header] = meaning;
     }
@@ -339,6 +363,9 @@ export function importRoutes(deps: { logger: Logger }) {
     return c.json(
       importPreviewResponseSchema.parse({
         batch,
+        source: read.source,
+        sheetName: read.sheetName ?? null,
+        mappedByModel,
         rows: rows.sort((a, b) => a.lineNumber - b.lineNumber),
         summary: summarise(rows),
         columns: parsed.headers.map((h) => ({ header: h, meaning: columns[h] ?? null })),

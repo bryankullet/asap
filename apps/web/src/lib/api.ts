@@ -82,6 +82,14 @@ export class ApiRequestError extends Error {
     readonly status: number,
     readonly code: string,
     readonly details?: unknown,
+    /**
+     * What the server said, when it composed an explanation rather than returning a code alone.
+     *
+     * Most failures are one of a fixed set and read better in the copy below. A few are composed
+     * per request — why *this* file could not be read as a book, and what to do with it instead —
+     * and for those the server's own sentence is the useful one.
+     */
+    readonly serverMessage?: string,
   ) {
     super(code);
     this.name = "ApiRequestError";
@@ -130,6 +138,7 @@ async function request<S extends z.ZodTypeAny>(
       res.status,
       parsed.success ? parsed.data.error : "request_failed",
       parsed.success ? parsed.data.details : undefined,
+      parsed.success ? parsed.data.message : undefined,
     );
   }
   if (!schema || res.status === 204) return undefined as z.infer<S>;
@@ -315,6 +324,10 @@ export function describeApiError(err: unknown): string {
     database_error: "The ASAP service could not read its database.",
     demo_mode_reaches_nothing:
       "This is the demonstration. It shows fictional records only and reaches nothing real.",
+    not_a_book:
+      "ASAP could not read that file as a book. The message above says why and what to do instead.",
+    empty_file: "That file has no columns in it.",
+    already_imported: "This exact file has already been imported. Nothing was read a second time.",
     not_signed_in: "Please sign in again.",
     invalid_session: "Your session has expired. Please sign in again.",
     permission_denied: "Your role does not allow this.",
@@ -354,7 +367,13 @@ export function describeApiError(err: unknown): string {
       "The effective date must be after the current version's start.",
     no_version_on_effective_date: "No policy version is effective on that date.",
   };
-  return messages[err.code] ?? `Request failed (${err.code}).`;
+  /*
+   * Codes whose message is the whole point: the server worked out something specific about this
+   * request and said it in words. A fixed line here would replace the answer with a category.
+   */
+  const COMPOSED = new Set(["not_a_book"]);
+  if (COMPOSED.has(err.code) && err.serverMessage) return err.serverMessage;
+  return messages[err.code] ?? err.serverMessage ?? `Request failed (${err.code}).`;
 }
 
 /** Opens the run's SSE stream with the session token; EventSource cannot send headers. */

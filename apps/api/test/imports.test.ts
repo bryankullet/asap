@@ -149,8 +149,18 @@ const BOOK = [
   "Mara Foods Limited,Peter Kimani,peter@mara.example,FIR-2210,Britam,Fire industrial,2026-02-01,2027-01-31,\"860,000.00\",15%",
 ].join("\n");
 
-const preview = (body: Record<string, unknown>) =>
-  build().request("/imports", { method: "POST", headers: auth, body: JSON.stringify(body) });
+/** As the browser sends it: the file's bytes, base64, whatever kind it is. */
+const preview = (body: Record<string, unknown>) => {
+  const { content, ...rest } = body as { content?: string };
+  return build().request("/imports", {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({
+      ...rest,
+      ...(content === undefined ? {} : { content: Buffer.from(content, "utf8").toString("base64") }),
+    }),
+  });
+};
 
 describe("POST /imports — reading the file", () => {
   it("requires a session", async () => {
