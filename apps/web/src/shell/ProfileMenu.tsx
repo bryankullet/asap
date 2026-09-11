@@ -4,11 +4,14 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 
 /**
- * C01: one control at the bottom of the sidebar showing the brokerage and the person. It opens a
- * small menu with the brokerage switcher and the company paths the approved demo exposes —
- * team and permissions, data and connections, insurers and business rules, audit history, client
- * files — then Sign out (D-064). Pure:
- * the shell supplies the data and the two actions, so shell.test.tsx renders it in a memory router.
+ * C01, as the approved demo draws it: the sidebar itself shows the avatar, the person and the
+ * brokerage, and this is the `•••` button beside them (D-064). It opens the company paths the demo
+ * exposes — team and permissions, data and connections, insurers and business rules, audit history,
+ * client files — plus the brokerage switcher, then Sign out.
+ *
+ * It used to render its own avatar and two lines of text, which sat on top of the sidebar's and
+ * produced a doubled, overlapping profile row. Pure: the shell supplies the data and the two
+ * actions, so shell.test.tsx renders it in a memory router.
  */
 export function ProfileMenu({
   me,
@@ -54,24 +57,10 @@ export function ProfileMenu({
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2.5 rounded-control p-2.5 text-left hover:bg-wash focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-green"
+        aria-label="Profile and company"
+        className="more-btn"
       >
-        <span
-          aria-hidden
-          className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-compact bg-accent-gold-soft text-sm font-bold text-[#7b5a09]"
-        >
-          {(me?.user.full_name ?? me?.user.email ?? "?").trim().charAt(0).toUpperCase()}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[0.95rem] font-semibold text-ink">
-            {/* One membership is never a choice: name it even before the server has set it. */}
-            {org?.name ??
-              (memberships.length === 1 ? memberships[0]!.organization.name : "Choose a brokerage")}
-          </span>
-          <span className="block truncate text-[0.8125rem] text-ink-muted" title={me?.user.email}>
-            {me?.user.full_name ?? me?.user.email ?? ""}
-          </span>
-        </span>
+        <span aria-hidden>•••</span>
       </button>
       {open && (
         <div

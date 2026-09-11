@@ -1,0 +1,694 @@
+/*
+ * The approved demo's visual system, ported (D-064).
+ *
+ * Values are lifted verbatim from the approved demo's `styles.css` — colours, fonts, sizes,
+ * spacing, radii, shadows and breakpoints. Class names are kept identical to the original so the
+ * port can be checked against its source line by line, and so a visual-regression failure points
+ * at a real rule rather than a Tailwind guess.
+ *
+ * This file is the frontend's design authority for demo-parity surfaces. It is deliberately not
+ * expressed in Tailwind utilities: approximating a 10px/1.55 type scale and a #f1f4f0 sidebar with
+ * whatever utility is nearest is how the first attempt drifted.
+ */
+
+:root {
+  --ink: #18231c;
+  --muted: #6e776f;
+  --line: #e5e9e5;
+  --soft: #f5f7f4;
+  --cream: #fbfcfa;
+  --green: #1f6c49;
+  --green2: #dff2e6;
+  --amber: #9a5a06;
+  --amberbg: #fff2d7;
+  --red: #a43b32;
+  --redbg: #fdeae7;
+  --blue: #275f8a;
+  --bluebg: #e8f2fb;
+  --purple: #674a94;
+  --purplebg: #f0eafb;
+  --shadow: 0 16px 50px rgba(24, 35, 28, 0.08);
+}
+
+/* The demo is a fixed-height application: the body never scrolls, the panes do. */
+body.demo-body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: "DM Sans", sans-serif;
+  font-size: 15px;
+  overflow: hidden;
+}
+.demo-root *,
+.demo-root *::before,
+.demo-root *::after {
+  box-sizing: border-box;
+  /*
+   * The approved demo sets no line-height anywhere, so every box is `normal`. Tailwind's preflight
+   * cascades 1.5 from the root, which made every card a few pixels taller than the original and
+   * pushed the page progressively out of alignment down its length. Restoring `normal` inside the
+   * shell is what makes the vertical rhythm match.
+   */
+  line-height: normal;
+  /*
+   * The old design system tightened every heading by -0.02em. The approved demo does not: its
+   * headings are `normal`, and the difference showed up as a 3-14px width error on every one of
+   * them. Rules below that *do* set letter-spacing — the eyebrow, the quick-actions title — come
+   * later in this file and still win.
+   */
+  letter-spacing: normal;
+}
+.demo-root button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ---- Presenter bar ---------------------------------------------------------------------- */
+.demo-bar {
+  height: 44px;
+  background: #151c18;
+  color: #e7ece8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px 0 22px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+.demo-label {
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+.demo-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #78df9a;
+  box-shadow: 0 0 0 4px rgba(120, 223, 154, 0.12);
+  margin-right: 10px;
+}
+.demo-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.demo-select {
+  width: 190px;
+}
+.demo-btn,
+.demo-select {
+  height: 30px;
+  border: 1px solid #3a443e;
+  border-radius: 9px;
+  background: #202a24;
+  color: #f7f9f7;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.demo-btn:hover {
+  background: #303d35;
+}
+/* Reset is the same chip; only its text is quieter. */
+.demo-btn.reset {
+  color: #aab4ad;
+}
+.demo-count {
+  font-size: 12px;
+  color: #9fb0a4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Shell ----------------------------------------------------------------------------- */
+.app-shell {
+  display: grid;
+  grid-template-columns: 228px 1fr;
+  height: calc(100vh - 44px);
+}
+.app-shell.no-bar {
+  height: 100vh;
+}
+.sidebar {
+  background: #f1f4f0;
+  border-right: 1px solid #e0e5e0;
+  padding: 23px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font: 800 20px Manrope, sans-serif;
+  text-decoration: none;
+  padding: 0 10px 25px;
+}
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+}
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  /* Measured on the original: the nav is a flex column with a 3px row gap. */
+  gap: 3px;
+}
+.nav-item {
+  border: 0;
+  background: transparent;
+  color: #566058;
+  width: 100%;
+  height: 42px;
+  border-radius: 13px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font-weight: 600;
+  text-decoration: none;
+}
+/* Measured on the original: an 18px glyph in a 20px block, left-aligned. */
+.nav-item .ico {
+  display: block;
+  width: 20px;
+  font-size: 18px;
+}
+.nav-item.active {
+  background: white;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.nav-count {
+  margin-left: auto;
+  background: #e4e9e4;
+  border-radius: 99px;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+.nav-item kbd {
+  margin-left: auto;
+  font: inherit;
+  color: #8a948c;
+}
+.side-bottom {
+  margin-top: auto;
+}
+.profile {
+  border-top: 1px solid #dde2dd;
+  margin-top: 13px;
+  padding: 17px 7px 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.profile-text {
+  min-width: 0;
+  flex: 1;
+}
+.profile-text strong {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.profile-text small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: #dbe8dc;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: #315d40;
+  flex-shrink: 0;
+}
+.more-btn {
+  border: 0;
+  background: transparent;
+  color: #7c857e;
+  font-weight: 700;
+}
+
+/* ---- Product view ---------------------------------------------------------------------- */
+.product-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /*
+   * `1fr` resolves to `minmax(auto, 1fr)`, so without this the column grows to the content's
+   * min-content width and the whole shell overflows sideways: at 1024 the main column came out
+   * 814px against the original's 796, moving every top-right control 18px.
+   */
+  min-width: 0;
+}
+.topbar {
+  height: 58px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 25px;
+  background: #fff;
+  flex-shrink: 0;
+}
+.screen-title {
+  display: flex;
+  align-items: baseline;
+  gap: 13px;
+}
+.screen-title h1 {
+  font: 700 19px Manrope, sans-serif;
+  margin: 0;
+}
+.screen-title > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.top-actions {
+  display: flex;
+  gap: 9px;
+}
+/*
+ * Measured: plain block buttons with one text node. Rendering them as inline-flex with a gap made
+ * both wider than the original and moved every top-right control.
+ */
+/*
+ * Measured: plain block buttons with one text node. Rendering them as inline-flex with a gap made
+ * both wider than the original and moved every top-right control.
+ *
+ * These are links here, not buttons, so the vertical centring a button gets for free has to be
+ * stated: 32px is the 34px box less its 1px borders.
+ */
+.icon-btn,
+.new-btn {
+  border: 1px solid var(--line);
+  background: white;
+  border-radius: 10px;
+  height: 34px;
+  line-height: 32px;
+  font-family: inherit;
+  color: var(--ink);
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+.icon-btn {
+  width: 36px;
+}
+.new-btn {
+  padding: 0 14px;
+  background: var(--ink);
+  color: white;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.page-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 32px;
+  min-height: 0;
+}
+
+/* ---- Discover -------------------------------------------------------------------------- */
+.welcome-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  color: #6d796f;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.welcome-row h2 {
+  font: 700 27px Manrope, sans-serif;
+  margin: 7px 0 0;
+}
+/* Measured: a plain block button, one text node, no flex gap. */
+.ask-floating {
+  border: 0;
+  background: var(--ink);
+  color: white;
+  padding: 11px 16px;
+  border-radius: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  display: block;
+}
+.discover-layout {
+  display: grid;
+  grid-template-columns: minmax(440px, 1.7fr) minmax(290px, 0.8fr);
+  gap: 20px;
+  max-width: 1150px;
+}
+.focus-card,
+.noticed-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+.focus-card {
+  cursor: pointer;
+  transition: 0.2s;
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+}
+.focus-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+  border-color: #cbd5cd;
+}
+.focus-card.urgent {
+  border-left: 4px solid #d65348;
+}
+.focus-card.quiet {
+  opacity: 0.8;
+}
+.focus-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #6f7971;
+  font-size: 10px;
+}
+.focus-top time {
+  margin-left: auto;
+}
+.focus-card h3,
+.noticed-card h3 {
+  font: 700 16px Manrope, sans-serif;
+  margin: 13px 0 6px;
+}
+.focus-card p,
+.noticed-card p {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+.focus-footer {
+  border-top: 1px solid #edf0ed;
+  margin-top: 14px;
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #758077;
+}
+.focus-footer span {
+  border: 0;
+  background: transparent;
+  font-weight: 700;
+  font-size: 10px;
+}
+/*
+ * The original's action is a <button>, which carries Chromium's own 1px/6px button padding. The
+ * card here is a link, so the action cannot be a nested button — the padding is restated instead,
+ * which is what makes the footer 26px tall in both rather than 24 in one.
+ */
+.focus-footer .link {
+  color: var(--green);
+  font-weight: 700;
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 0;
+  background: transparent;
+}
+.signal {
+  padding: 4px 7px;
+  border-radius: 99px;
+  font-weight: 700;
+}
+.signal.high {
+  background: var(--redbg);
+  color: var(--red);
+}
+.signal.medium {
+  background: var(--amberbg);
+  color: var(--amber);
+}
+.signal.resolved {
+  background: var(--green2);
+  color: var(--green);
+}
+.noticed-card {
+  position: sticky;
+  top: 0;
+  height: max-content;
+  padding: 21px;
+}
+.noticed-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.noticed-head strong {
+  display: block;
+}
+.noticed-head small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+.asap-orb {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: #9ae8b2;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+/* Measured: inline-block, the card's own 15px, 14px vertical margin, no padding. */
+.noticed-card > .link {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  font-weight: 700;
+  margin: 14px 0;
+  padding: 0;
+  display: inline-block;
+  text-decoration: none;
+}
+.noticed-card hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 9px 0 15px;
+}
+.quick-title {
+  text-transform: uppercase;
+  color: #7d877f;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin-bottom: 7px;
+}
+/*
+ * In the original these are direct children of .noticed-card, so `.noticed-card > button` wins
+ * over `.quick` for padding and margin. Measured: 12px tall, 11px type, no padding, 14px margin,
+ * no bottom rule.
+ */
+.quick {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  padding: 0;
+  margin: 14px 0;
+  border: 0;
+  background: transparent;
+  color: #536057;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* ---- Responsive: the demo's own breakpoints, 1000px and 760px ---------------------------- */
+@media (max-width: 1000px) {
+  .app-shell {
+    grid-template-columns: 74px 1fr;
+  }
+  .sidebar {
+    padding: 23px 9px;
+  }
+  /* Icons only: the labels, counts, shortcut and profile text all go. */
+  .brand span:last-child,
+  .nav-item span:not(.ico),
+  .nav-count,
+  .nav-item kbd,
+  .profile .profile-text,
+  .profile .more-btn {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+  }
+  .discover-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  body.demo-body {
+    overflow: auto;
+  }
+  .app-shell {
+    display: block;
+    height: auto;
+  }
+  .demo-bar {
+    height: auto;
+    min-height: 50px;
+    padding: 8px 10px;
+  }
+  .demo-label {
+    display: none;
+  }
+  .demo-controls {
+    width: 100%;
+    justify-content: center;
+  }
+  .demo-controls .demo-select {
+    flex: 0 1 190px;
+    max-width: 210px;
+  }
+  /* The buttons keep their arrows and lose their words; the counter goes entirely. */
+  .demo-btn span,
+  .demo-count {
+    display: none;
+  }
+  .sidebar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    z-index: 15;
+    flex-direction: row;
+    padding: 5px;
+    background: #f3f6f3;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+  .brand,
+  .side-bottom {
+    display: none;
+  }
+  .sidebar .side-nav {
+    display: flex;
+    flex: 1;
+    flex-direction: row;
+  }
+  .nav-item {
+    display: flex !important;
+    flex-direction: column;
+    gap: 1px;
+    height: 48px;
+    padding: 4px;
+    font-size: 9px;
+  }
+  /* Labels and counts come back below the icon. */
+  .nav-item span:not(.ico) {
+    display: block;
+  }
+  .nav-item .ico {
+    font-size: 16px;
+  }
+  .topbar {
+    height: 58px;
+  }
+  .screen-title > span {
+    display: none;
+  }
+  .page-scroll {
+    padding: 20px 14px 80px;
+  }
+  .discover-layout {
+    grid-template-columns: 1fr;
+  }
+  .welcome-row h2 {
+    font-size: 21px;
+  }
+}
+
+/* ---- Presenter coverage sheet ------------------------------------------------------------- */
+.coverage-sheet {
+  position: fixed;
+  inset: 44px 0 0;
+  z-index: 40;
+  overflow-y: auto;
+  background: rgba(251, 252, 250, 0.97);
+  padding: 28px 32px;
+}
+.coverage-sheet h2 {
+  font: 700 19px Manrope, sans-serif;
+  margin: 0 0 4px;
+}
+.coverage-sheet > p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+.coverage-sheet ul {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  max-width: 1150px;
+}
+.coverage-sheet li {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 11px 13px;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.coverage-sheet li span {
+  color: var(--green);
+  font-weight: 700;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

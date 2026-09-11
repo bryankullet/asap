@@ -32,8 +32,13 @@ export default tseslint.config(
     },
   },
   {
-    // Scripts are plain Node tooling; console output is their job.
-    files: ["scripts/**/*.mjs", "**/scripts/**/*.mjs", "**/scripts/**/*.ts"],
+    // Scripts and the visual-parity harness are plain Node tooling; console output is their job.
+    files: [
+      "scripts/**/*.mjs",
+      "**/scripts/**/*.mjs",
+      "**/scripts/**/*.ts",
+      "**/parity/**/*.mjs",
+    ],
     rules: { "no-console": "off" },
   },
 );

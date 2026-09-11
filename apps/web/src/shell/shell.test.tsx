@@ -192,12 +192,14 @@ describe("profile control (C01)", () => {
     permissions: [],
   } as unknown as Parameters<typeof ProfileMenu>[0]["me"];
 
-  it("shows brokerage and person as one control, with the utilities behind it", async () => {
+  it("is the ••• control beside the sidebar's own profile row (D-064)", async () => {
     await renderInRouter(
       <ProfileMenu me={me} switching={false} onSwitch={() => {}} onSignOut={() => {}} />,
     );
-    const control = screen.getByRole("button", { name: /Acme Insurance Brokers/ });
-    expect(control).toHaveTextContent("Amina Otieno");
+    // The approved demo draws the avatar, person and role in the sidebar itself; this is the
+    // control beside them, so it carries no duplicate text of its own.
+    const control = screen.getByRole("button", { name: "Profile and company" });
+    expect(control).not.toHaveTextContent("Amina Otieno");
     expect(screen.queryByRole("menu")).toBeNull();
     // The approved demo's company paths (D-064).
     for (const name of ["Team and permissions", "Insurers and business rules", "Data and connections", "Audit history", "Client files", "Sign out"]) {
@@ -221,7 +223,7 @@ describe("profile control (C01)", () => {
     await renderInRouter(
       <ProfileMenu me={me} switching={false} onSwitch={onSwitch} onSignOut={onSignOut} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Acme Insurance Brokers/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Profile and company" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Sign out" }));
     expect(onSignOut).toHaveBeenCalledTimes(1);
     fireEvent.change(screen.getByRole("combobox", { name: "Active brokerage" }), {
@@ -232,7 +234,7 @@ describe("profile control (C01)", () => {
 });
 
 describe("profile control with one brokerage (D-055)", () => {
-  it("names the only brokerage, never 'Choose a brokerage'", async () => {
+  it("names the only brokerage in the menu, never 'Choose a brokerage'", async () => {
     const one = {
       user: {
         id: "a0000000-0000-4000-8000-000000000001",
@@ -248,9 +250,10 @@ describe("profile control with one brokerage (D-055)", () => {
     await renderInRouter(
       <ProfileMenu me={one} switching={false} onSwitch={() => {}} onSignOut={() => {}} />,
     );
-    expect(screen.getByRole("button", { name: /Acme Insurance Brokers/ })).toBeInTheDocument();
-    expect(screen.queryByText("Choose a brokerage")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Acme Insurance Brokers/ }));
-    expect(screen.queryByRole("combobox", { name: "Active brokerage" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Profile and company" }));
+    const menu = screen.getByRole("menu", { name: "Profile" });
+    // One membership is never a choice: the switcher is not offered at all.
+    expect(within(menu).queryByRole("combobox")).toBeNull();
+    expect(within(menu).queryByText(/Choose a brokerage/)).toBeNull();
   });
 });

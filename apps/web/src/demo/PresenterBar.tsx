@@ -4,14 +4,14 @@ import { useState } from "react";
 import { useDemo } from "./state.js";
 
 /**
- * The presenter bar (D-064).
+ * The presenter bar, ported from the approved demo (D-064).
  *
- * Scenario picker, previous, next, coverage and reset — the approved demo's own controls. It is
- * gated on demo mode and renders nothing otherwise, so a brokerage running the real product never
- * sees it.
+ * 44px tall, `#151c18`, the DEMO MODE label on the left and the controls on the right — scenario
+ * picker, previous, the counter, next, coverage and reset. Gated on demo mode, so a brokerage
+ * running the real product never sees it.
  *
  * Reset restores the fictional fixtures only. There is nothing else for it to restore: demo state
- * lives in React, never in the brokerage's database.
+ * lives in React and sessionStorage, never in the brokerage's database.
  */
 export function PresenterBar() {
   const demo = useDemo();
@@ -22,101 +22,84 @@ export function PresenterBar() {
   const groups = scenarioGroups();
   const index = demo.scenarios.findIndex((s) => s.id === demo.activeScenarioId);
 
-  function go(id: string) {
+  const go = (id: string) => {
     demo.setScenario(id);
     void navigate({ to: "/ask", search: { scenario: id } });
-  }
+  };
+  const step = (delta: number) => {
+    const i = (index + delta + demo.scenarios.length) % demo.scenarios.length;
+    const s = demo.scenarios[i];
+    if (s) go(s.id);
+  };
 
   return (
-    <div className="sticky top-0 z-30 flex min-h-[2.25rem] flex-wrap items-center gap-2 bg-navy px-3 py-1.5 text-paper">
-      <span className="flex items-center gap-1.5 text-[0.6875rem] font-semibold tracking-[0.14em]">
-        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#f0c75e]" />
-        DEMO MODE
-      </span>
-
-      <label htmlFor="scenario-pick" className="sr-only">
-        Choose a scenario
-      </label>
-      <select
-        id="scenario-pick"
-        value={demo.activeScenarioId}
-        onChange={(e) => go(e.target.value)}
-        className="min-h-[28px] max-w-[16rem] rounded-compact bg-paper/10 px-2 text-xs text-paper"
-      >
-        {groups.map((g) => (
-          <optgroup key={g.group} label={g.group}>
-            {g.scenarios.map((s) => (
-              <option key={s.id} value={s.id} className="text-ink">
-                {s.name}
-              </option>
+    <>
+      <div className="demo-bar">
+        <div className="demo-label">
+          <span aria-hidden className="demo-dot" /> DEMO MODE
+        </div>
+        <div className="demo-controls">
+          <label htmlFor="scenario-pick" className="sr-only">
+            Choose a demo scenario
+          </label>
+          <select
+            id="scenario-pick"
+            className="demo-select"
+            value={demo.activeScenarioId}
+            onChange={(e) => go(e.target.value)}
+          >
+            {groups.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.scenarios.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </optgroup>
             ))}
-          </optgroup>
-        ))}
-      </select>
-
-      <button
-        type="button"
-        onClick={() => {
-          demo.previousScenario();
-          const i = (index - 1 + demo.scenarios.length) % demo.scenarios.length;
-          const s = demo.scenarios[i];
-          if (s) void navigate({ to: "/ask", search: { scenario: s.id } });
-        }}
-        className="rounded-compact bg-paper/10 px-2 py-1 text-xs hover:bg-paper/20"
-      >
-        ← Previous
-      </button>
-      <span className="text-xs tabular-nums opacity-80">
-        {index + 1} / {demo.scenarios.length}
-      </span>
-      <button
-        type="button"
-        onClick={() => {
-          demo.nextScenario();
-          const i = (index + 1) % demo.scenarios.length;
-          const s = demo.scenarios[i];
-          if (s) void navigate({ to: "/ask", search: { scenario: s.id } });
-        }}
-        className="rounded-compact bg-paper/10 px-2 py-1 text-xs hover:bg-paper/20"
-      >
-        Next →
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setCoverage((v) => !v)}
-        aria-expanded={coverage}
-        className="rounded-compact bg-paper/10 px-2 py-1 text-xs hover:bg-paper/20"
-      >
-        ✓ Coverage
-      </button>
-      <button
-        type="button"
-        onClick={demo.reset}
-        className="ml-auto rounded-compact bg-paper/10 px-2 py-1 text-xs hover:bg-paper/20"
-      >
-        ↻ Reset
-      </button>
+          </select>
+          <button type="button" className="demo-btn" onClick={() => step(-1)}>
+            ← <span>Previous</span>
+          </button>
+          <span className="demo-count">
+            {index + 1} / {demo.scenarios.length}
+          </span>
+          <button type="button" className="demo-btn" onClick={() => step(1)}>
+            <span>Next</span> →
+          </button>
+          <button
+            type="button"
+            className="demo-btn"
+            aria-expanded={coverage}
+            onClick={() => setCoverage((v) => !v)}
+          >
+            ✓ <span>Coverage</span>
+          </button>
+          <button type="button" className="demo-btn reset" onClick={demo.reset}>
+            ↻ <span>Reset</span>
+          </button>
+        </div>
+      </div>
 
       {coverage && (
-        <div className="w-full rounded-card bg-paper p-3 text-ink">
-          <h2 className="text-sm font-medium">Intent and Skill Map coverage</h2>
-          <p className="text-xs text-ink-muted">
+        <div className="coverage-sheet">
+          <h2>Intent and Skill Map coverage</h2>
+          <p>
             {demo.scenarios.length} scenarios across {groups.length} domains. Every one is reachable
-            from the rail on Ask ASAP.
+            from Ask ASAP.
           </p>
-          <ul className="mt-2 flex flex-wrap gap-1.5">
+          <ul>
             {groups.map((g) => (
-              <li
-                key={g.group}
-                className="rounded-pill border border-line-strong px-2.5 py-0.5 text-xs text-ink-secondary"
-              >
-                {g.group} · {g.scenarios.length}
+              <li key={g.group}>
+                {g.group} <span>{g.scenarios.length}</span>
               </li>
             ))}
           </ul>
+          <button type="button" className="demo-btn" onClick={() => setCoverage(false)}>
+            Close
+          </button>
         </div>
       )}
-    </div>
+    </>
   );
 }

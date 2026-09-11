@@ -1,117 +1,151 @@
 import { useMutation } from "@tanstack/react-query";
-import { Link, Outlet } from "@tanstack/react-router";
-import { useState } from "react";
-import { Page } from "@asap/ui";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
-import { useRuns } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
-import { ActivityChip } from "./ActivityChip.js";
-import { AskComposer } from "./AskComposer.js";
-import { ProfileMenu } from "./ProfileMenu.js";
-import { ShellNav } from "./ShellNav.js";
 import { PresenterBar } from "../demo/PresenterBar.js";
 import { useDemo } from "../demo/state.js";
+import { NAV } from "./nav.js";
+
+/** The demo's own operator, from the approved fixtures. */
+const DEMO_PERSON = { name: "Grace Wanjiku", role: "Operations Manager", initials: "GW" };
+import { ProfileMenu } from "./ProfileMenu.js";
 
 /**
- * The permanent shell, matching the approved demo (D-064): a 224px sidebar of white against the
- * wash carrying Discover · Ask ASAP · Work · Jobs · Automations, then Search and + New, then the
- * profile control (C01) — brokerage switcher, Members, Agreements, Client files, Sign out.
+ * The permanent shell, ported from the approved demo (D-064).
  *
- * Ask is both: a destination in the sidebar and the bar docked at the foot of every other screen,
- * so it is never more than one move away whatever a person is looking at. The Activity chip sits
- * on the dock's meta row. Under 900px the destinations become a bottom bar and the dock lifts
- * above it.
+ * Structure and dimensions are the demo's, not an interpretation of it: a 44px presenter bar, then
+ * a `228px 1fr` grid filling exactly `calc(100vh - 44px)`. The sidebar is `#f1f4f0` with a
+ * `#e0e5e0` right border; each destination is a 42px row with a 13px radius, and the active one is
+ * a white pill with a 1px shadow. Under 900px the sidebar becomes a 58px bottom bar, as it does
+ * there.
+ *
+ * The demo is a fixed-height application — its body does not scroll, the panes do — so `demo-body`
+ * is applied to `document.body` while the shell is mounted and removed when it unmounts.
+ *
+ * What is *not* the demo's: routing, the session, the organization switcher and the data behind
+ * every screen. Those stay.
  */
 export function Shell() {
-  // The sidebar is fixed to the viewport; without this offset the presenter bar covers the brand.
   const { isDemo } = useDemo();
   const me = useMe();
   const invalidate = useInvalidateMe();
   const org = me.data?.active_organization;
-  const runs = useRuns(org?.id);
-  const [sessionStart] = useState(() => new Date());
+  const path = useRouterState({ select: (s) => s.location.pathname });
+
   const switchOrg = useMutation({
     mutationFn: api.setActiveOrganization,
     onSuccess: () => void invalidate(),
   });
 
-  const profile = (
-    <ProfileMenu
-      me={me.data}
-      switching={switchOrg.isPending}
-      onSwitch={(id) => switchOrg.mutate(id)}
-      onSignOut={() => void supabase.auth.signOut()}
-    />
-  );
+  // The demo's body rules: no page scroll, its own background and type. Scoped to the shell so
+  // sign-in and the onboarding screens are untouched.
+  useEffect(() => {
+    document.body.classList.add("demo-body");
+    return () => document.body.classList.remove("demo-body");
+  }, []);
 
-  const brand = (
-    <Link
-      to="/discover"
-      className="flex items-center gap-2.5 font-heading text-base font-bold tracking-[0.15em] text-ink"
-    >
-      <span
-        aria-hidden
-        className="grid h-[34px] w-[34px] place-items-center rounded-compact bg-navy text-[#f0c75e]"
-      >
-        A
-      </span>
-      ASAP
-    </Link>
-  );
+  const person = me.data?.user;
+  const membershipRole = me.data?.memberships.find((m) => m.organization.id === org?.id)?.role.name;
+  // In demo mode the sidebar shows the fictional brokerage's own person, as the approved demo does.
+  // Outside it, the signed-in person and their real role.
+  const demoPerson = DEMO_PERSON;
+  const displayName = isDemo
+    ? demoPerson.name
+    : (person?.display_name ?? person?.full_name ?? person?.email ?? "");
+  const subtitle = isDemo ? demoPerson.role : (membershipRole ?? org?.name ?? "");
+  const initials = isDemo
+    ? demoPerson.initials
+    : displayName
+      .split(/[\s@.]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "A";
 
   return (
-    <div className="min-h-screen bg-wash">
+    <div className="demo-root">
       <PresenterBar />
-      <div className="min-[900px]:grid min-[900px]:grid-cols-[224px_1fr]">
-      <aside
-        className={`fixed bottom-0 left-0 z-20 hidden w-sidebar flex-col border-r border-line-soft bg-paper px-3.5 py-5 min-[900px]:flex ${
-          isDemo ? "top-9" : "top-0"
-        }`}
-      >
-        <div className="px-2 pb-5">{brand}</div>
-        <ShellNav />
-        <div className="mx-2 my-4 h-px bg-line-soft" />
-        <div className="relative flex flex-col gap-0.5 px-2">
-          <Link
-            to="/search"
-            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink"
-          >
-            Search
+      <div className={`app-shell${isDemo ? "" : " no-bar"}`}>
+        <aside className="sidebar">
+          <Link to="/discover" className="brand">
+            <span aria-hidden className="brand-mark">
+              A
+            </span>
+            <span>ASAP</span>
           </Link>
-          <Link
-            to="/new"
-            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink"
-          >
-            + New
-          </Link>
-        </div>
-        <div className="mt-auto">{profile}</div>
-      </aside>
 
-      <div className="flex min-h-screen flex-col min-[900px]:col-start-2">
-        <header className={`sticky z-12 flex h-[58px] items-center gap-3 border-b border-line-soft bg-wash/90 px-4 backdrop-blur-md min-[900px]:hidden ${isDemo ? "top-9" : "top-0"}`}>
-          {brand}
-          <div className="ml-auto min-w-0 max-w-[60%]">{profile}</div>
-        </header>
-        <main className="flex-1 pb-[190px] min-[900px]:pb-[210px]">
-          <Page>
-            <Outlet />
-          </Page>
-        </main>
+          <nav aria-label="Main" className="side-nav">
+            {NAV.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={`nav-item${path.startsWith(item.to) ? " active" : ""}`}
+              >
+                <span aria-hidden className="ico">
+                  {item.glyph}
+                </span>
+                <span>{item.label}</span>
+                <NavCount to={item.to} />
+              </Link>
+            ))}
+          </nav>
 
-        <div className="fixed bottom-[86px] left-1/2 z-25 w-[calc(100vw-1rem)] -translate-x-1/2 min-[900px]:bottom-4 min-[900px]:left-[calc(var(--spacing-sidebar)+(100vw-var(--spacing-sidebar))/2)] min-[900px]:w-[min(800px,calc(100vw-var(--spacing-sidebar)-3rem))]">
-          <div className="mb-2 flex items-center justify-end gap-2">
-            <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
+          <div className="side-bottom">
+            <Link to="/search" search={{ q: "" }} className="nav-item">
+              <span aria-hidden className="ico">
+                ⌕
+              </span>
+              <span>Search</span>
+              <kbd aria-hidden>⌘ K</kbd>
+            </Link>
+            <Link to="/new" className="nav-item">
+              <span aria-hidden className="ico">
+                ＋
+              </span>
+              <span>New</span>
+            </Link>
+
+            <div className="profile">
+              <span aria-hidden className="avatar">
+                {initials}
+              </span>
+              <span className="profile-text">
+                <strong>{displayName || "Signed in"}</strong>
+                {/* The original shows the person's role here, not the brokerage — that is in the
+                    menu, beside the switcher. */}
+                <small>{subtitle}</small>
+              </span>
+              <ProfileMenu
+                me={me.data}
+                switching={switchOrg.isPending}
+                onSwitch={(id) => switchOrg.mutate(id)}
+                onSignOut={() => void supabase.auth.signOut()}
+              />
+            </div>
           </div>
-          <AskComposer />
-        </div>
+        </aside>
 
-        <footer className="fixed inset-x-0 bottom-0 z-28 h-16 border-t border-line-strong bg-paper/95 p-1.5 backdrop-blur-sm min-[900px]:hidden">
-          <ShellNav orientation="horizontal" />
-        </footer>
-      </div>
+        <main className="product-view">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
+}
+
+/** The counts the demo shows beside Work and Jobs. Read from the same state the screens use. */
+function NavCount({ to }: { to: string }) {
+  const { work, jobs } = useDemo();
+  const n =
+    to === "/work"
+      ? work.filter((w) => w.state !== "completed").length
+      : to === "/jobs"
+        ? jobs.filter(
+            (j) => j.state === "running" || j.state === "waiting" || j.state === "needs_human",
+          ).length
+        : 0;
+  if (n === 0) return null;
+  return <span className="nav-count">{n}</span>;
 }

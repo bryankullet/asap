@@ -1,5 +1,10 @@
 @import "tailwindcss";
 @import "@asap/ui/styles.css";
+/*
+ * The approved demo's visual system (D-064), imported after Tailwind so its preflight cannot
+ * override the ported values. This file is the design authority for parity surfaces.
+ */
+@import "./demo.css";
 @source "../../../../packages/ui/src";
 
 @layer base {

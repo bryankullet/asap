@@ -1,50 +1,85 @@
-import { DEMO_NOTICE, demoClient, scenarioById, type DemoWork } from "@asap/schema";
+import type { DemoWork } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
-import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
-import { DemoBoundary } from "../demo/DemoBoundary.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { useDemo } from "../demo/state.js";
 
 /**
- * Discover — what matters now (D-064).
+ * Discover, ported from the approved demo (D-064).
  *
- * The approved demo answers one question and answers it compactly: a short ranked list of
- * meaningful issues across the brokerage, each with its client, its reason, its evidence
- * condition and a direct way in. Not a dashboard, and not a heavy stack of cards — a broker
- * should be able to read the whole thing without scrolling past the third item.
+ * The demo's structure exactly: a topbar carrying the screen title and date, then a welcome row —
+ * eyebrow greeting, "Here's what matters today.", and the Ask ASAP pill on the right — then a
+ * two-column layout of focus cards beside a sticky "ASAP noticed" card with its quick actions.
  *
- * Ranking is not a model's opinion. The order comes from the same deterministic signals the
- * backend uses, and each row shows why it is where it is.
+ * A focus card is: signal pill · client · elapsed time, then the headline, then one sentence, then
+ * a hairline footer with the Work type on the left and the action on the right. The first card
+ * carries the urgent left border. The last is `quiet`, at 80% opacity, because a settlement that
+ * has been accepted is real but not urgent.
+ *
+ * Every row's copy and ordering comes from the fixtures; the classes come from the demo's own
+ * stylesheet, so this can be checked against it rule by rule.
  */
 
-/** The approved priority order, most consequential first. Deterministic, and visible as a reason. */
-const PRIORITY: { workId: string; why: string; condition: string; noticed?: string }[] = [
+/** The approved priority list, in the demo's own order and wording. */
+const PRIORITY: {
+  workId: string;
+  signal: "high" | "medium" | "resolved";
+  signalLabel: string;
+  headline: string;
+  detail: string;
+  workType: string;
+  action: string;
+  elapsed: string;
+  /** The demo names Acme in full and the rest short. Its wording, not a derived label. */
+  clientLabel: string;
+  urgent?: boolean;
+  quiet?: boolean;
+}[] = [
   {
     workId: "w-acme-kdn",
-    why: "Cover was requested, not confirmed. Driving an unconfirmed vehicle is the live risk.",
-    condition: "conflicting",
-    noticed: "The certificate register has no entry for this vehicle either.",
+    clientLabel: "Acme Manufacturing Ltd",
+    signal: "high",
+    signalLabel: "High",
+    headline: "New vehicle requested on cover today",
+    detail:
+      "KDN 482Q is not on the latest schedule and Meridian confirmation has not been recorded.",
+    workType: "Servicing Work",
+    action: "Review servicing",
+    elapsed: "12 min ago",
+    urgent: true,
   },
   {
     workId: "w-bluewave-renewal",
-    why: "The renewal is 34 days out and the terms received cannot be compared.",
-    condition: "missing",
-    noticed: "Two pages of the quote would not extract — nothing was recorded from them.",
+    clientLabel: "Bluewave Properties",
+    signal: "medium",
+    signalLabel: "At risk",
+    headline: "Property renewal has no usable terms",
+    detail: "Updated values and a fire inspection are holding up both approached insurers.",
+    workType: "Renewal Work",
+    action: "Review renewal",
+    elapsed: "34 days",
   },
   {
     workId: "w-mara-balance",
-    why: "Premium is 62 days overdue and two receipts do not match any invoice.",
-    condition: "conflicting",
+    clientLabel: "Mara Foods",
+    signal: "medium",
+    signalLabel: "Overdue",
+    headline: "KES 860,000 premium remains unpaid",
+    detail: "One unmatched receipt may affect the balance and needs a human choice before follow-up.",
+    workType: "Money Work",
+    action: "Review balance",
+    elapsed: "18 days",
   },
   {
     workId: "w-greencare-claim",
-    why: "The settlement was offered and accepted. Money has not arrived.",
-    condition: "waiting",
-    noticed: "Acceptance is not payment — the claim stays open until the money is recorded.",
-  },
-  {
-    workId: "w-jane-claim",
-    why: "No movement for five days and no assessor allocated.",
-    condition: "stale",
+    clientLabel: "GreenCare Clinics",
+    signal: "resolved",
+    signalLabel: "Accepted",
+    headline: "Claim settlement is still unpaid",
+    detail: "The offer was accepted, but no bank receipt or remittance proves payment.",
+    workType: "Claim Work",
+    action: "Check settlement",
+    elapsed: "3 days",
+    quiet: true,
   },
 ];
 
@@ -56,119 +91,82 @@ export function DiscoverDemo() {
   })).filter((r): r is typeof r & { work: DemoWork } => Boolean(r.work));
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">What matters now?</h1>
-        <p className="text-sm text-ink-secondary">
-          The few things across the brokerage worth your attention, most consequential first. Each
-          one says why it is here.
-        </p>
-      </header>
+    <>
+      <ScreenTitle title="Discover" meta="Thursday, 10 September" />
 
-      {rows.length === 0 ? (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          Nothing needs attention. That is a real answer, not an empty screen.
-        </p>
-      ) : (
-        <ol className="flex flex-col divide-y divide-line-soft rounded-card border border-line-strong bg-paper">
-          {rows.map((r, i) => (
-            <li key={r.workId}>
-              <PriorityRow rank={i + 1} row={r} />
-            </li>
-          ))}
-        </ol>
-      )}
-
-      <section aria-label="Quick actions" className="flex flex-wrap gap-2">
-        <Link
-          to="/ask"
-          search={{ scenario: "brokerage-priorities" }}
-          className="rounded-control border border-line-strong bg-paper px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-        >
-          Ask what to do first
-        </Link>
-        <Link
-          to="/work"
-          search={{ view: "active" }}
-          className="rounded-control border border-line-strong bg-paper px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-        >
-          Open all work
-        </Link>
-        <Link
-          to="/jobs"
-          search={{ filter: "running" }}
-          className="rounded-control border border-line-strong bg-paper px-3 py-1.5 text-sm text-ink hover:border-ink-muted"
-        >
-          See what ASAP is doing
-        </Link>
-      </section>
-
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
-    </div>
-  );
-}
-
-function PriorityRow({
-  rank,
-  row,
-}: {
-  rank: number;
-  row: { work: DemoWork; why: string; condition: string; noticed?: string };
-}) {
-  const client = demoClient(row.work.clientId);
-  const scenario = scenarioById(row.work.scenarioId);
-  const verb =
-    row.work.state === "review" ? "Review" : row.work.state === "waiting" ? "Open" : "Continue";
-
-  return (
-    <article className="flex flex-wrap items-start gap-3 px-4 py-3">
-      <span
-        aria-hidden
-        className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-pill bg-wash text-xs font-medium text-ink-muted"
-      >
-        {rank}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/work/$workId"
-            params={{ workId: row.work.id }}
-            className="font-medium text-ink hover:underline"
-          >
-            {row.work.title}
+      <section className="page-scroll">
+        <div className="welcome-row">
+          <div>
+            <div className="eyebrow">Good morning, Grace</div>
+            <h2>Here’s what matters today.</h2>
+          </div>
+          {/* One text node, as the original has it: a flex gap here shifts the glyph. */}
+          <Link to="/ask" search={{}} className="ask-floating">
+            ✦ Ask ASAP
           </Link>
-          <EvidenceConditionChip condition={row.condition as never} />
         </div>
-        <p className="text-xs text-ink-muted">
-          {client?.shortName}
-          {scenario ? ` · ${scenario.panel.title}` : ""}
-        </p>
-        {/* Why this is here, in words. A rank with no reason is not a reason. */}
-        <p className="text-sm text-ink-secondary">{row.why}</p>
-        {row.noticed && (
-          <p className="text-sm text-accent-gold-ink">
-            <span className="font-medium">ASAP noticed:</span> {row.noticed}
-          </p>
-        )}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <Link
-          to="/work/$workId"
-          params={{ workId: row.work.id }}
-          className="rounded-control bg-navy px-3 py-1.5 text-sm text-paper hover:bg-navy-hover"
-        >
-          {verb}
-        </Link>
-        {scenario && (
-          <Link
-            to="/ask"
-            search={{ scenario: scenario.id }}
-            className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink-secondary hover:border-ink-muted"
-          >
-            Ask
-          </Link>
-        )}
-      </div>
-    </article>
+
+        <div className="discover-layout">
+          <div>
+            {rows.map((r) => (
+                <Link
+                  key={r.workId}
+                  to="/work/$workId"
+                  params={{ workId: r.work.id }}
+                  className={`focus-card${r.urgent ? " urgent" : ""}${r.quiet ? " quiet" : ""}`}
+                >
+                  <div className="focus-top">
+                    <span className={`signal ${r.signal}`}>{r.signalLabel}</span>
+                    <span>{r.clientLabel}</span>
+                    <time>{r.elapsed}</time>
+                  </div>
+                  <h3>{r.headline}</h3>
+                  <p>{r.detail}</p>
+                  <div className="focus-footer">
+                    <span>{r.workType}</span>
+                    <span className="link">
+                      {r.action} <span aria-hidden>→</span>
+                    </span>
+                  </div>
+                </Link>
+            ))}
+            {rows.length === 0 && (
+              <div className="focus-card" style={{ cursor: "default" }}>
+                <h3>Nothing needs attention</h3>
+                <p>That is a real answer, not an empty screen.</p>
+              </div>
+            )}
+          </div>
+
+          <aside className="noticed-card">
+            <div className="noticed-head">
+              <span aria-hidden className="asap-orb">
+                ✦
+              </span>
+              <div>
+                <strong>ASAP noticed</strong>
+                <small>Across your book</small>
+              </div>
+            </div>
+            <h3>Three motor renewals show premium increases above 18%</h3>
+            <p>The increase is mostly from declared values, not claims experience.</p>
+            <Link to="/ask" search={{ scenario: "commission-outstanding" }} className="link">
+              Investigate pattern
+            </Link>
+            <hr />
+            <div className="quick-title">Quick actions</div>
+            <Link to="/ask" search={{ scenario: "brokerage-priorities" }} className="quick">
+              Ask about the brokerage <span aria-hidden>→</span>
+            </Link>
+            <Link to="/ask" search={{ scenario: "import-brokerage-records" }} className="quick">
+              Import client records <span aria-hidden>→</span>
+            </Link>
+            <Link to="/email" className="quick">
+              Review connected email <span aria-hidden>→</span>
+            </Link>
+          </aside>
+        </div>
+      </section>
+    </>
   );
 }
