@@ -9,6 +9,7 @@ import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { WORK_FILTERS } from "../shell/nav.js";
 import { useState } from "react";
 import { MissingData } from "../components/states.js";
+import { PinList } from "../components/PinButton.js";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
 
@@ -86,6 +87,12 @@ export function WorkDemo() {
           );
         })}
       </nav>
+
+      {/*
+        Outside demo mode the Pinned filter shows what a person actually kept, read from the API
+        under their own session. In demo mode the rows above already carry the session's pins.
+      */}
+      {active === "pinned" && !demo.isDemo && <PinList />}
 
       {ordered.length === 0 ? (
         <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
