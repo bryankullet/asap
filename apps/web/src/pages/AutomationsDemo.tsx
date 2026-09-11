@@ -1,8 +1,22 @@
-import { DEMO_NOTICE, type DemoAutomation } from "@asap/schema";
+import {
+  AutomationTrigger,
+  DEMO_NOTICE,
+  EXTERNALLY_SENDING_VERBS,
+  type ActionVerb,
+  type AutomationCardView,
+  type CreateAutomationRequest,
+  type DemoAutomation,
+} from "@asap/schema";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { MissingData } from "../components/states.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api, describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { automationKeys, useAutomations } from "../lib/queries.js";
+import { TRIGGER_LABELS, VERB_LABELS, automationCardFromRow } from "../live/adapters.js";
+import { automationCardFromDemo } from "../demo/adapters.js";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
 
@@ -19,9 +33,29 @@ import { useDemo } from "../demo/state.js";
  */
 export function AutomationsDemo() {
   const demo = useDemo();
+  const me = useMe();
   const navigate = useNavigate();
+  const invalidate = useQueryClient();
   const [creating, setCreating] = useState(false);
-  const active = demo.automations.filter((a) => a.enabled).length;
+  const orgId = me.data?.active_organization?.id;
+
+  /* A real brokerage's standing instructions, and every firing counted from its own run rows. */
+  const live = useAutomations(orgId);
+  const create = useMutation({
+    mutationFn: (input: CreateAutomationRequest) => api.createAutomation(input),
+    onSuccess: () =>
+      void invalidate.invalidateQueries({ queryKey: automationKeys.list(orgId ?? "none") }),
+  });
+  const toggle = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.setAutomationEnabled(id, enabled),
+    onSuccess: () => void invalidate.invalidateQueries({ queryKey: automationKeys.list(orgId ?? "none") }),
+  });
+
+  const cards: AutomationCardView[] = demo.isDemo
+    ? demo.automations.map(automationCardFromDemo)
+    : (live.data?.automations ?? []).map((a) => automationCardFromRow(a, undefined));
+  const active = cards.filter((c) => c.enabled).length;
 
   return (
     <>
@@ -64,7 +98,7 @@ export function AutomationsDemo() {
           </div>
         </div>
 
-        {creating && (
+        {creating && demo.isDemo && (
           <CreateAutomation
             onCancel={() => setCreating(false)}
             onCreate={(draft) => {
@@ -74,13 +108,57 @@ export function AutomationsDemo() {
             }}
           />
         )}
+        {creating && !demo.isDemo && (
+          <CreateLiveAutomation
+            busy={create.isPending}
+            error={create.isError ? describeApiError(create.error) : null}
+            onCancel={() => setCreating(false)}
+            onCreate={(input) =>
+              create.mutate(input, {
+                onSuccess: (res) => {
+                  setCreating(false);
+                  void navigate({ to: "/automations/$id", params: { id: res.automation.id } });
+                },
+              })
+            }
+          />
+        )}
+
+        {!demo.isDemo && live.isPending && (
+          <article className="automation-card">
+            <h3>Reading your automations…</h3>
+          </article>
+        )}
+        {!demo.isDemo && live.isError && (
+          <article className="automation-card">
+            <h3>We could not read your automations.</h3>
+            <p>{describeApiError(live.error)}</p>
+            <footer>
+              <span>Nothing has been changed</span>
+              <button type="button" onClick={() => void live.refetch()}>
+                Try again
+              </button>
+            </footer>
+          </article>
+        )}
+        {toggle.isError && (
+          <article className="warning">
+            <strong>That switch did not take:</strong> {describeApiError(toggle.error)} The
+            automation is still as it was.
+          </article>
+        )}
 
         <div className="automation-grid">
-          {demo.automations.map((a) => (
+          {cards.map((c) => (
             <AutomationCard
-              key={a.id}
-              automation={a}
-              onToggle={() => demo.toggleAutomation(a.id)}
+              key={c.id}
+              card={c}
+              busy={toggle.isPending}
+              onToggle={() =>
+                demo.isDemo
+                  ? demo.toggleAutomation(c.id)
+                  : toggle.mutate({ id: c.id, enabled: !c.enabled })
+              }
             />
           ))}
           <button type="button" className="new-automation" onClick={() => setCreating(true)}>
@@ -106,38 +184,38 @@ export function AutomationsDemo() {
  * to a running one.
  */
 function AutomationCard({
-  automation,
+  card,
+  busy,
   onToggle,
 }: {
-  automation: DemoAutomation;
+  card: AutomationCardView;
+  busy: boolean;
   onToggle: () => void;
 }) {
   return (
-    <article className="automation-card" data-state={automation.enabled ? "active" : "paused"}>
+    <article className="automation-card" data-state={card.enabled ? "active" : "paused"}>
       <div className="auto-top">
         <span className="auto-icon" aria-hidden>
-          {automation.icon}
+          {card.icon}
         </span>
         <label className="switch">
           <span className="sr-only">
-            {automation.enabled ? `Pause ${automation.name}` : `Switch on ${automation.name}`}
+            {card.enabled ? `Pause ${card.headline}` : `Switch on ${card.headline}`}
           </span>
-          <input type="checkbox" checked={automation.enabled} onChange={onToggle} />
+          <input type="checkbox" checked={card.enabled} disabled={busy} onChange={onToggle} />
           <i aria-hidden />
         </label>
       </div>
-      <h3>{automation.headline}</h3>
-      <p>{automation.summary}</p>
+      <h3>{card.headline}</h3>
+      <p>{card.summary}</p>
       <div className="flow-line">
-        <span>{automation.flowFrom}</span>
+        <span>{card.flowFrom}</span>
         <b aria-hidden>→</b>
-        <span>{automation.flowTo}</span>
+        <span>{card.flowTo}</span>
       </div>
       <footer>
-        <span>
-          {automation.enabled ? automation.activity : "Paused · No new runs"}
-        </span>
-        <Link to="/automations/$id" params={{ id: automation.id }} className="link">
+        <span>{card.activity}</span>
+        <Link to={card.href} className="link">
           Open
         </Link>
       </footer>
@@ -313,6 +391,133 @@ export function AutomationDemoDetail() {
  * It starts switched off and untested — nothing begins watching a brokerage's mail because
  * somebody filled in a form — and anything that reaches outside always needs a person.
  */
+
+/**
+ * The real automation builder.
+ *
+ * It offers only what it can honestly set: a name, a trigger from the events the system actually
+ * emits, the step it should prepare, and whether a person approves. There is no free-text trigger
+ * here — an instruction the engine cannot evaluate is not an instruction — and a new automation is
+ * always created switched off, so nothing starts watching a brokerage's mail because a form was
+ * submitted.
+ *
+ * Whether it reaches outside the brokerage is decided by the server from the verb, never sent from
+ * the browser: a field the browser could set would be a way around §45 rule 13.
+ */
+function CreateLiveAutomation({
+  busy,
+  error,
+  onCancel,
+  onCreate,
+}: {
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onCreate: (input: CreateAutomationRequest) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [triggerEvent, setTriggerEvent] = useState<AutomationTrigger>("document.received");
+  const [preparedVerb, setPreparedVerb] = useState<ActionVerb>("prepare");
+
+  const outward = EXTERNALLY_SENDING_VERBS.includes(preparedVerb);
+
+  return (
+    <form
+      aria-label="New automation"
+      className="automation-card"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onCreate({
+          name,
+          description,
+          triggerEvent,
+          conditions: [],
+          /*
+           * The named capability that will do the work. Until the skill catalogue in
+           * docs/skill-map.md §2 is a typed enum, this records the step the person actually chose
+           * rather than a capability name invented in the browser.
+           */
+          skill: preparedVerb,
+          preparedVerb,
+          approval: "always",
+          enabled: false,
+        });
+      }}
+    >
+      <Field id="la-name" label="What should this be called?">
+        <input
+          id="la-name"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Monitor claims that have stopped moving"
+          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
+        />
+      </Field>
+      <Field id="la-description" label="What is it for?">
+        <input
+          id="la-description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Reconstruct the timeline and prepare a follow-up"
+          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
+        />
+      </Field>
+      <Field id="la-trigger" label="When should it look?">
+        <select
+          id="la-trigger"
+          value={triggerEvent}
+          onChange={(e) => setTriggerEvent(e.target.value as AutomationTrigger)}
+          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
+        >
+          {AutomationTrigger.options.map((t) => (
+            <option key={t} value={t}>
+              {TRIGGER_LABELS[t]}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field id="la-verb" label="Then prepare…">
+        <select
+          id="la-verb"
+          value={preparedVerb}
+          onChange={(e) => setPreparedVerb(e.target.value as ActionVerb)}
+          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
+        >
+          {BUILDABLE_VERBS.map((v) => (
+            <option key={v} value={v}>
+              {VERB_LABELS[v] ?? v}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="text-xs text-ink-muted">
+        {outward
+          ? "This could reach a client or an insurer, so a person approves every time. That is not a setting."
+          : "It prepares only. It cannot send, approve or decide, whatever it finds."}
+      </p>
+      {error && <p className="text-xs text-accent-red">{error}</p>}
+      <div className="flex gap-2">
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? "Creating…" : "Create, switched off"}
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** The verbs a standing instruction may prepare. Approving and completing are a person's, always. */
+const BUILDABLE_VERBS: readonly ActionVerb[] = [
+  "prepare",
+  "draft",
+  "record_evidence",
+  "record_send",
+];
+
 function CreateAutomation({
   onCancel,
   onCreate,

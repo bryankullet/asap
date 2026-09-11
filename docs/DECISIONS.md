@@ -722,3 +722,66 @@ contract is `response_unrecognised` rather than a generic throw; and `mapDatabas
 Postgres `42P01`, `42703` and `42883` to `schema_behind`. The page still shows a failure class and
 never a hostname, a variable or a database message (§45 rule 4); the console gets the whole error,
 because whoever administers a deployment has to be able to find out what broke without rebuilding it.
+
+## D-066 — The approved screens read real records
+
+The demonstration proved the design. This connects it to a brokerage's own data: with demo mode
+off, Discover, Work, Jobs and Automations are the same screens rendering rows from the database,
+through the API, under the caller's session.
+
+**One component per board, two adapters.** The approved demo decides what a card looks like; a card
+must not decide where its content comes from. So each board renders a typed view model
+(`packages/schema/src/views/boards.ts` — `FocusCardView`, `WorkTileView`, `JobCardView`,
+`AutomationCardView`), and two adapters produce it: `apps/web/src/live/adapters.ts` from API rows,
+`apps/web/src/demo/adapters.ts` from the fixtures. The difference between the demonstration and the
+product is one function, not one component per mode — which is also why the parity budgets did not
+move when this landed.
+
+A view model holds the words that appear on screen: names, not ids; a label, not an enum. Resolving
+happens in the adapter, once, where it is tested — 16 assertions covering exactly the rules that
+matter: a card names a client rather than an id, says what the engine said rather than composing
+its own explanation, shows progress only where progress was derived, and never turns a finished job
+into a business outcome.
+
+**What the API gained, because a card cannot show an id:**
+
+- `GET /work` now carries the `client` and the `period` for each row, resolved server-side under
+  the caller's session exactly as Discover already resolved them. The loader they shared is now
+  `apps/api/src/attention/record-context.ts`, and it degrades rather than failing: a read that
+  errors adds a line to `degraded` and the board says what it could not see.
+- `GET /work` also carries `counts` for every view, computed in the same pass. Five numbers, one
+  request, and a count that cannot disagree with the list under it.
+- **`GET /runs` is new** — the Jobs board had no list endpoint at all. It groups by what each run is
+  waiting on (Running, Waiting externally, Work, Completed), counts every tab in one pass, and
+  derives progress from the steps of the work each run is advancing. Progress is `null` where there
+  are no steps to derive it from, and the card then shows no bar rather than inventing a number
+  nobody measured (§45 rule 10). A finished job stays an output: nothing in the response says a
+  policy renewed, a claim was accepted or money arrived.
+- `POST /automations`'s request shape moved into `@asap/schema`, so the builder in the browser and
+  the handler on the server cannot drift. It still does not carry `sends_externally`: the server
+  reads that from the verb, because a browser that could set it false would be a way around §45
+  rule 13.
+
+**The sidebar counts read the same queries the boards read**, so the number beside Work and the
+list behind it come from one answer.
+
+**Two defects this found**, both in territory the test suites could not reach until the product was
+actually run against a database:
+
+- `anon` held EXECUTE on `app.touch_conversation()` — a SECURITY DEFINER trigger function created
+  in 0032 without revoking the default PUBLIC grant. Migration **0037** revokes it. What it does is
+  small, but a definer function callable by an anonymous caller is a hole regardless: the caller's
+  own permissions are not what decides.
+- Two assertions in the pgTAP membership suite ran inside a signed-in RLS context while asserting
+  facts about the whole seed, so they were counting rows RLS had already hidden. They now reset the
+  role first. With both fixed, all **395** isolation assertions pass against a real database.
+
+**How it is verified:** `apps/web/parity/live-wiring.mjs` drives a production-mode build against the
+real API over a real, migrated, seeded PostgreSQL, and fails if any screen shows a failure state,
+if the presenter bar appears in a live build, or if a fictional fixture name reaches the screen.
+`docs/audit/live-wiring/` holds the screenshots and states plainly what that harness does **not**
+prove: RLS (proven by `pnpm test:rls`) and Supabase Auth (proven by `scripts/verify-live.sh`).
+
+**Not yet on real records, and still fixture-backed in both modes:** Search, `+ New`, the email
+thread and draft, the document viewer and extraction review, and the Work/Job/Automation detail
+screens. Those are named in the outstanding list rather than quietly left half-wired.

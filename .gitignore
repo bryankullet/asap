@@ -32,3 +32,5 @@ coverage/
 
 # local database verification scratch (see scripts/db-verify-local.sh)
 .local-db/
+# A production-mode bundle built for the live-wiring harness (docs/audit/live-wiring).
+apps/web/dist-live/

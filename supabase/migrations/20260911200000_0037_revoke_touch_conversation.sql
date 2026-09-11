@@ -1,0 +1,15 @@
+-- 0037: take EXECUTE on app.touch_conversation() away from public.
+--
+-- 0032 created it as a SECURITY DEFINER trigger function and did not revoke the default PUBLIC
+-- grant every function is created with, so `anon` — an unauthenticated browser holding the anon
+-- key — could call it directly. What it does is small (it moves a conversation's updated_at) and
+-- RLS still governs every row anyone can read, but a definer function callable by an anonymous
+-- caller is a hole regardless of how little it does: the caller's own permissions are not what
+-- decides, which is the whole point of definer rights.
+--
+-- Found by the pgTAP grant assertion in 0302, which expects `anon` to hold exactly one executable
+-- function in `app` — the invitation preview a signed-out visitor genuinely needs.
+--
+-- Safe on a live database: PostgreSQL checks EXECUTE on a trigger function when the trigger is
+-- created, not each time it fires, so conversation_messages_touch keeps working.
+revoke all on function app.touch_conversation() from public;

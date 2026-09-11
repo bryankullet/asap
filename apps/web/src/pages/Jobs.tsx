@@ -1,10 +1,21 @@
-import { DEMO_NOTICE, demoClient, type DemoJob } from "@asap/schema";
+import {
+  DEMO_NOTICE,
+  demoClient,
+  type DemoJob,
+  type JobCardView,
+  type RunListFilter,
+} from "@asap/schema";
 import { JOB_FILTERS } from "../shell/nav.js";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
 import { MissingData } from "../components/states.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
+import { describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { useRunList } from "../lib/queries.js";
+import { jobCardFromRow } from "../live/adapters.js";
+import { jobCardFromDemo } from "../demo/adapters.js";
 
 /**
  * Jobs — what ASAP is processing (D-064).
@@ -19,7 +30,7 @@ import { ScreenTitle } from "../shell/ScreenTitle.js";
  * its own evidence.
  */
 
-/** Which jobs each tab shows. "Work" is everything that has stopped and needs a person. */
+/** Which fixture jobs each tab shows. "Work" is everything that has stopped and needs a person. */
 function inFilter(job: DemoJob, filter: string): boolean {
   // The board's All is everything still live; a finished job has its own tab.
   if (filter === "all") return job.state !== "completed";
@@ -30,16 +41,28 @@ function inFilter(job: DemoJob, filter: string): boolean {
 export function Jobs() {
   const { filter } = useSearch({ strict: false }) as { filter?: string };
   const demo = useDemo();
-  const active = filter ?? "all";
-  const shown = demo.jobs.filter((j) => inFilter(j, active));
+  const me = useMe();
+  const active = (filter ?? "all") as RunListFilter;
 
-  /** The demo groups the board by what a job is waiting on, in the fixtures' own order. */
-  const groups: { title: string; jobs: DemoJob[] }[] = [];
-  for (const j of shown) {
-    const found = groups.find((g) => g.title === j.group);
-    if (found) found.jobs.push(j);
-    else groups.push({ title: j.group, jobs: [j] });
-  }
+  /*
+   * A real brokerage's Jobs board: grouped, counted and capped by the API under the caller's
+   * session (D-066). Progress comes back derived from the work's steps — never authored here, and
+   * null when there is nothing to derive it from (§45 rule 10).
+   */
+  const live = useRunList(me.data?.active_organization?.id, active);
+
+  const groups: { title: string; cards: JobCardView[] }[] = demo.isDemo
+    ? demoGroups(demo.jobs.filter((j) => inFilter(j, active)))
+    : (live.data?.groups ?? []).map((g) => ({
+        title: g.title,
+        cards: g.items.map((row) => jobCardFromRow(row, g.title)),
+      }));
+
+  const counts: Partial<Record<RunListFilter, number>> = demo.isDemo
+    ? Object.fromEntries(
+        JOB_FILTERS.map((f) => [f.id, demo.jobs.filter((j) => inFilter(j, f.id)).length]),
+      )
+    : (live.data?.counts ?? {});
 
   return (
     <>
@@ -61,7 +84,7 @@ export function Jobs() {
       <section className="page-scroll jobs-page">
         <nav className="tab-row" aria-label="Job states">
           {JOB_FILTERS.map((f) => {
-            const count = demo.jobs.filter((j) => inFilter(j, f.id)).length;
+            const count = counts[f.id] ?? 0;
             return (
               <Link
                 key={f.id}
@@ -76,7 +99,28 @@ export function Jobs() {
           })}
         </nav>
 
-        {groups.length === 0 ? (
+        {/* Loading, partial, error and empty are all designed states (§36). */}
+        {!demo.isDemo && live.isPending && (
+          <article className="space-card" style={{ padding: 24 }}>
+            <strong>Reading what ASAP is doing…</strong>
+          </article>
+        )}
+        {!demo.isDemo && live.isError && (
+          <article className="space-card" style={{ padding: 24 }}>
+            <strong>We could not read the jobs.</strong>
+            <p style={{ color: "#707a72", fontSize: 11 }}>{describeApiError(live.error)}</p>
+            <button type="button" className="secondary" onClick={() => void live.refetch()}>
+              Try again
+            </button>
+          </article>
+        )}
+        {(live.data?.degraded ?? []).map((d) => (
+          <article className="warning" key={d.what}>
+            <strong>{d.what}:</strong> {d.because} The jobs below were read.
+          </article>
+        ))}
+
+        {groups.length === 0 && !live.isPending && !live.isError ? (
           <article className="space-card" style={{ padding: 24 }}>
             <strong>Nothing is in this view.</strong>
             <p style={{ color: "#707a72", fontSize: 11 }}>
@@ -89,18 +133,35 @@ export function Jobs() {
               <div className="job-group" key={g.title}>
                 <div className="group-title">
                   <span>{g.title}</span>
-                  <b>{g.jobs.length}</b>
+                  <b>{g.cards.length}</b>
                 </div>
-                {g.jobs.map((j) => (
-                  <JobCard key={j.id} job={j} />
+                {g.cards.map((c) => (
+                  <JobCard key={c.id} card={c} />
                 ))}
               </div>
             ))}
           </div>
         )}
+        {!demo.isDemo && live.data && live.data.visible > live.data.returned && (
+          <p style={{ color: "#707a72", fontSize: 11 }}>
+            Showing {live.data.returned} of {live.data.visible}.
+          </p>
+        )}
       </section>
     </>
   );
+}
+
+/** The demonstration's own board, grouped in the fixtures' order. */
+function demoGroups(jobs: DemoJob[]): { title: string; cards: JobCardView[] }[] {
+  const out: { title: string; cards: JobCardView[] }[] = [];
+  for (const j of jobs) {
+    const card = jobCardFromDemo(j);
+    const found = out.find((g) => g.title === card.group);
+    if (found) found.cards.push(card);
+    else out.push({ title: card.group, cards: [card] });
+  }
+  return out;
 }
 
 /**
@@ -110,34 +171,34 @@ export function Jobs() {
  * Progress is read from the job's own steps, never authored (§45 rule 10), and the outcome
  * language stays specific: "comparison prepared", never "policy renewed".
  */
-function JobCard({ job }: { job: DemoJob }) {
+function JobCard({ card }: { card: JobCardView }) {
   return (
     <article className="job-card">
-      <div className={`job-icon ${job.iconTone === "green" ? "" : job.iconTone}`} aria-hidden>
-        {job.icon}
+      <div className={`job-icon ${card.iconTone === "green" ? "" : card.iconTone}`} aria-hidden>
+        {card.icon}
       </div>
       <div className="job-main">
         <div className="job-title">
-          <strong>{job.headline}</strong>
-          <span className={`job-pill ${job.pillTone}`}>{job.pillLabel}</span>
+          <strong>{card.headline}</strong>
+          <span className={`job-pill ${card.pillTone}`}>{card.pillLabel}</span>
         </div>
-        <p>{job.contextLine}</p>
-        {job.progress !== null && (
+        <p>{card.contextLine}</p>
+        {card.progress !== null && (
           <div
             className="progress"
             role="progressbar"
-            aria-valuenow={job.progress}
+            aria-valuenow={card.progress}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={`${job.headline} progress`}
+            aria-label={`${card.headline} progress`}
           >
-            <i style={{ width: `${job.progress}%` }} />
+            <i style={{ width: `${card.progress}%` }} />
           </div>
         )}
-        <small>{job.note}</small>
+        <small>{card.note}</small>
       </div>
-      <Link to="/jobs/$jobId" params={{ jobId: job.id }} className="link">
-        {job.actionLabel}
+      <Link to={card.href} className="link">
+        {card.actionLabel}
       </Link>
     </article>
   );

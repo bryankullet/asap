@@ -3,6 +3,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
+import { useRunList, useWorkList } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { PresenterBar } from "../demo/PresenterBar.js";
 import { useDemo } from "../demo/state.js";
@@ -134,17 +135,34 @@ export function Shell() {
   );
 }
 
-/** The counts the demo shows beside Work and Jobs. Read from the same state the screens use. */
+/**
+ * The counts beside Work and Jobs — read from the same source the screen itself reads.
+ *
+ * On a real brokerage that is the API, through the queries the boards already run, so the number
+ * in the sidebar and the list behind it come from one answer and cannot disagree. In demo mode it
+ * is the fixtures. A count nobody can reach the rows for is worse than no count, so both return
+ * nothing until they have one.
+ */
 function NavCount({ to }: { to: string }) {
-  const { work, jobs } = useDemo();
+  const demo = useDemo();
+  const me = useMe();
+  const orgId = me.data?.active_organization?.id;
+  // The same query keys the boards use, so this costs nothing extra when a board is open.
+  const work = useWorkList(demo.isDemo ? undefined : orgId, "needs");
+  const jobs = useRunList(demo.isDemo ? undefined : orgId, "all");
+
   const n =
     to === "/work"
-      ? // The demo counts everything a person owns here, which is what its Work grid opens on.
-        work.length
+      ? demo.isDemo
+        ? // The demo counts everything a person owns here, which is what its Work grid opens on.
+          demo.work.length
+        : (work.data?.counts.needs ?? 0)
       : to === "/jobs"
-        ? // What ASAP itself is still carrying. A job stopped for a person is on the board's Work
-        // tab, where a person looks for it, not in the count of what the software is running.
-        jobs.filter((j) => j.state === "running" || j.state === "waiting").length
+        ? demo.isDemo
+          ? // What ASAP itself is still carrying. A job stopped for a person is on the board's
+            // Work tab, where a person looks for it, not in the count of what is running.
+            demo.jobs.filter((j) => j.state === "running" || j.state === "waiting").length
+          : (jobs.data?.counts.running ?? 0) + (jobs.data?.counts.waiting ?? 0)
         : 0;
   if (n === 0) return null;
   return <span className="nav-count">{n}</span>;

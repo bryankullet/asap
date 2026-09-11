@@ -1,15 +1,12 @@
 import {
   ATTENTION_SECTION_LABELS,
-  CLIENT_COLUMNS,
-  INSURER_COLUMNS,
-  POLICY_COLUMNS,
-  POLICY_PERIOD_COLUMNS,
   DRAFT_COLUMNS,
   DraftRow,
   RUN_COLUMNS,
   RunRow,
   WORK_ITEM_COLUMNS,
   WORK_VIEW_LABELS,
+  WorkView,
   WorkItemRow,
   attentionResponseSchema,
   runNeedsPerson,
@@ -17,14 +14,14 @@ import {
   workListResponseSchema,
   type AttentionDegradation,
   type AttentionItem,
-  type AttentionPeriod,
   type AttentionResponse,
   type AttentionRunFailure,
   type WorkListResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
-import { compareItems, daysToEnd, factsFor, nowStepOf, scoreOf, signalsFor } from "../attention/signals.js";
+import { compareItems, factsFor, nowStepOf, scoreOf, signalsFor } from "../attention/signals.js";
+import { loadRecordContext } from "../attention/record-context.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 
@@ -125,54 +122,10 @@ export function attentionRoutes() {
     const inScope = [...needsYou, ...checksDue];
 
     // Context: the client and the client-policy-year, so a card can name what it is about.
-    // A read that fails degrades the answer rather than failing it (§36 partial success).
-    const clientNames = new Map<string, string>();
-    const clientFileStatus = new Map<string, string>();
-    const clientIds = [...new Set(inScope.map((i) => i.client_id).filter((v): v is string => v !== null))];
-    if (clientIds.length > 0) {
-      const r = await db.from("clients").select(CLIENT_COLUMNS).in("id", clientIds);
-      if (r.error) {
-        degraded.push({ what: "Client names", because: "The client rows could not be read." });
-      } else {
-        for (const row of (r.data ?? []) as { id: string; name: string; file_status: string }[]) {
-          clientNames.set(row.id, row.name);
-          clientFileStatus.set(row.id, row.file_status);
-        }
-      }
-    }
-
-    const periods = new Map<string, AttentionPeriod>();
-    const periodIds = [...new Set(inScope.map((i) => i.policy_period_id).filter((v): v is string => v !== null))];
-    if (periodIds.length > 0) {
-      const pr = await db.from("policy_periods").select(POLICY_PERIOD_COLUMNS).in("id", periodIds);
-      if (pr.error) {
-        degraded.push({ what: "Periods of cover", because: "The policy period rows could not be read." });
-      } else {
-        const rows = (pr.data ?? []) as { id: string; policy_id: string; period_start: string; period_end: string }[];
-        const policyIds = [...new Set(rows.map((p) => p.policy_id))];
-        const [polR, insR] = await Promise.all([
-          db.from("policies").select(POLICY_COLUMNS).in("id", policyIds),
-          db.from("insurers").select(INSURER_COLUMNS).eq("organization_id", org.id),
-        ]);
-        const policies = polR.error ? [] : ((polR.data ?? []) as { id: string; class_of_business: string; policy_number: string | null; insurer_id: string }[]);
-        const insurers = insR.error ? [] : ((insR.data ?? []) as { id: string; name: string }[]);
-        if (polR.error || insR.error) {
-          degraded.push({ what: "Policy details", because: "The policy or insurer rows could not be read." });
-        }
-        for (const p of rows) {
-          const policy = policies.find((x) => x.id === p.policy_id);
-          periods.set(p.id, {
-            id: p.id,
-            classOfBusiness: policy?.class_of_business ?? "This policy",
-            insurerName: insurers.find((i) => i.id === policy?.insurer_id)?.name ?? "the insurer",
-            policyNumber: policy?.policy_number ?? null,
-            periodStart: p.period_start,
-            periodEnd: p.period_end,
-            daysToEnd: daysToEnd(p.period_end, now),
-          });
-        }
-      }
-    }
+    // Shared with /work and /runs, and it degrades rather than failing (§36 partial success).
+    const context = await loadRecordContext(db, org.id, inScope, now);
+    const { clientNames, clientFileStatus, periods } = context;
+    degraded.push(...context.degraded);
 
     /** Score, explain and contextualise one section, then order it by the signal total. */
     const rank = (rows: WorkItemRow[], section: AttentionItem["section"]): AttentionItem[] => {
@@ -268,6 +221,7 @@ export function attentionRoutes() {
       throw e;
     }
     const { items, runs, unsentDrafts } = loaded;
+    const now = new Date(generatedAt);
     const stuckByItem = new Map<string, RunRow>();
     for (const r of runs.filter(runNeedsPerson))
       if (r.work_item_id && !stuckByItem.has(r.work_item_id)) stuckByItem.set(r.work_item_id, r);
@@ -276,29 +230,48 @@ export function attentionRoutes() {
     // drafts table, never stored, so it cannot drift from what is actually waiting.
     const awaitingReview = new Set(unsentDrafts.map((d) => d.work_item_id));
 
-    const inView = items.filter((i) => {
-      if (q.view === "needs") return i.task_status === "needs_you";
-      if (q.view === "with") return i.task_status === "with_party";
-      if (q.view === "review") return awaitingReview.has(i.id) && i.task_status !== "done";
-      if (q.view === "done") return i.task_status === "done";
-      return i.task_status !== "done";
-    });
+    const inView2 = (item: WorkItemRow, view: WorkListResponse["view"]): boolean => {
+      if (view === "needs") return item.task_status === "needs_you";
+      if (view === "with") return item.task_status === "with_party";
+      if (view === "review") return awaitingReview.has(item.id) && item.task_status !== "done";
+      if (view === "done") return item.task_status === "done";
+      return item.task_status !== "done";
+    };
+    const inView = items.filter((i) => inView2(i, q.view));
+    // Every tab's count, from the same read, so a number can never disagree with its list.
+    const counts = Object.fromEntries(
+      WorkView.options.map((v) => [v, items.filter((i) => inView2(i, v)).length]),
+    );
+
+    // Only the rows that will actually be returned are contextualised: resolving clients and
+    // periods for rows the cap discards would be work nobody sees.
+    const shown = inView.slice(0, q.limit);
+    const context = await loadRecordContext(db, org.id, shown, now);
 
     const body: WorkListResponse = workListResponseSchema.parse({
       organization: { id: org.id, name: org.name },
       view: q.view,
       label: WORK_VIEW_LABELS[q.view],
       generatedAt,
-      items: inView.slice(0, q.limit).map((item, i) => ({
+      items: shown.map((item, i) => ({
         rank: i + 1,
         item,
         reason: item.reason ?? `${nowStep(item)?.label ?? "This item"} is the step waiting.`,
         nowStep: nowStep(item),
         runFailure: stuckByItem.has(item.id) ? failure(stuckByItem.get(item.id)!) : null,
+        client:
+          item.client_id && context.clientNames.has(item.client_id)
+            ? { id: item.client_id, name: context.clientNames.get(item.client_id)! }
+            : null,
+        period: item.policy_period_id
+          ? (context.periods.get(item.policy_period_id) ?? null)
+          : null,
       })),
       visible: inView.length,
       returned: Math.min(inView.length, q.limit),
       cap: q.limit,
+      counts,
+      degraded: context.degraded,
     });
     return c.json(body);
   });

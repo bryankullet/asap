@@ -1,6 +1,11 @@
-import type { DemoWork } from "@asap/schema";
+import type { AttentionResponse, DemoWork, FocusCardView } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
+import { describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { useAttention } from "../lib/queries.js";
+import { focusCardFromAttention } from "../live/adapters.js";
+import { DEMO_PERSON } from "../demo/mode.js";
 import { useDemo } from "../demo/state.js";
 
 /**
@@ -83,21 +88,57 @@ const PRIORITY: {
   },
 ];
 
+/** The date, in the demo's own format, from the clock that decided what is due. */
+function dateLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+}
+
+function greeting(now: Date, firstName: string): string {
+  const hour = now.getHours();
+  const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  return firstName ? `${part}, ${firstName}` : part;
+}
+
 export function DiscoverDemo() {
   const demo = useDemo();
-  const rows = PRIORITY.map((p) => ({
-    ...p,
-    work: demo.work.find((w) => w.id === p.workId),
-  })).filter((r): r is typeof r & { work: DemoWork } => Boolean(r.work));
+  const me = useMe();
+
+  /*
+   * A real brokerage's Discover: ranked, capped, reasoned and dated server-side, against the
+   * server's clock (§27, D-058). The browser renders what comes back and never re-decides what is
+   * urgent — the signals that did the ranking are rows, and the reason is the engine's own.
+   */
+  const live = useAttention(me.data?.active_organization?.id);
+  const generatedAt = live.data?.generatedAt;
+  const now = generatedAt ? new Date(generatedAt) : new Date();
+
+  const cards: FocusCardView[] = demo.isDemo
+    ? PRIORITY.flatMap((p) => {
+        const work = demo.work.find((w) => w.id === p.workId);
+        return work ? [focusCardFromDemo(p, work)] : [];
+      })
+    : (live.data?.items ?? []).map((entry, i) => focusCardFromAttention(entry, now, i));
+
+  const person = me.data?.user;
+  const firstName = demo.isDemo
+    ? DEMO_PERSON.name.split(" ")[0]!
+    : ((person?.display_name ?? person?.full_name ?? person?.email ?? "").split(/[\s@.]+/)[0] ?? "");
 
   return (
     <>
-      <ScreenTitle title="Discover" meta="Thursday, 10 September" />
+      <ScreenTitle
+        title="Discover"
+        meta={demo.isDemo ? "Thursday, 10 September" : generatedAt ? dateLabel(generatedAt) : ""}
+      />
 
       <section className="page-scroll">
         <div className="welcome-row">
           <div>
-            <div className="eyebrow">Good morning, Grace</div>
+            <div className="eyebrow">{greeting(now, firstName)}</div>
             <h2>Here’s what matters today.</h2>
           </div>
           {/* One text node, as the original has it: a flex gap here shifts the glyph. */}
@@ -108,34 +149,60 @@ export function DiscoverDemo() {
 
         <div className="discover-layout">
           <div>
-            {rows.map((r) => (
-                <Link
-                  key={r.workId}
-                  to="/work/$workId"
-                  params={{ workId: r.work.id }}
-                  className={`focus-card${r.urgent ? " urgent" : ""}${r.quiet ? " quiet" : ""}`}
-                >
-                  <div className="focus-top">
-                    <span className={`signal ${r.signal}`}>{r.signalLabel}</span>
-                    <span>{r.clientLabel}</span>
-                    <time>{r.elapsed}</time>
-                  </div>
-                  <h3>{r.headline}</h3>
-                  <p>{r.detail}</p>
-                  <div className="focus-footer">
-                    <span>{r.workType}</span>
-                    <span className="link">
-                      {r.action} <span aria-hidden>→</span>
-                    </span>
-                  </div>
-                </Link>
+            {/* Every system state is designed (§36), and none of them is a blank column. */}
+            {!demo.isDemo && live.isPending && (
+              <div className="focus-card" style={{ cursor: "default" }}>
+                <h3>Reading your book…</h3>
+                <p>Ranking what needs attention against the server’s clock.</p>
+              </div>
+            )}
+            {!demo.isDemo && live.isError && (
+              <div className="focus-card urgent" style={{ cursor: "default" }}>
+                <h3>We could not read what needs attention</h3>
+                <p>{describeApiError(live.error)}</p>
+                <div className="focus-footer">
+                  <span>Nothing has been changed</span>
+                  <button type="button" className="link" onClick={() => void live.refetch()}>
+                    Try again <span aria-hidden>→</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            {cards.map((c) => (
+              <Link
+                key={c.id}
+                to={c.href}
+                className={`focus-card${c.urgent ? " urgent" : ""}${c.quiet ? " quiet" : ""}`}
+              >
+                <div className="focus-top">
+                  <span className={`signal ${c.tone === "neutral" ? "medium" : c.tone}`}>
+                    {c.toneLabel}
+                  </span>
+                  <span>{c.clientLabel}</span>
+                  <time>{c.elapsed}</time>
+                </div>
+                <h3>{c.headline}</h3>
+                <p>{c.detail}</p>
+                <div className="focus-footer">
+                  <span>{c.workType}</span>
+                  <span className="link">
+                    {c.action} <span aria-hidden>→</span>
+                  </span>
+                </div>
+              </Link>
             ))}
-            {rows.length === 0 && (
+            {cards.length === 0 && !live.isPending && !live.isError && (
               <div className="focus-card" style={{ cursor: "default" }}>
                 <h3>Nothing needs attention</h3>
                 <p>That is a real answer, not an empty screen.</p>
               </div>
             )}
+            {/* A partial read says what it could not see rather than quietly showing less. */}
+            {(live.data?.degraded ?? []).map((d) => (
+              <div className="warning" key={d.what}>
+                <strong>{d.what}:</strong> {d.because} Everything above was read.
+              </div>
+            ))}
           </div>
 
           <aside className="noticed-card">
@@ -148,17 +215,23 @@ export function DiscoverDemo() {
                 <small>Across your book</small>
               </div>
             </div>
-            <h3>Three motor renewals show premium increases above 18%</h3>
-            <p>The increase is mostly from declared values, not claims experience.</p>
-            <Link to="/ask" search={{ scenario: "commission-outstanding" }} className="link">
-              Investigate pattern
-            </Link>
+            {demo.isDemo ? (
+              <>
+                <h3>Three motor renewals show premium increases above 18%</h3>
+                <p>The increase is mostly from declared values, not claims experience.</p>
+                <Link to="/ask" search={{ scenario: "commission-outstanding" }} className="link">
+                  Investigate pattern
+                </Link>
+              </>
+            ) : (
+              <Noticed attention={live.data} />
+            )}
             <hr />
             <div className="quick-title">Quick actions</div>
-            <Link to="/ask" search={{ scenario: "brokerage-priorities" }} className="quick">
+            <Link to="/ask" search={demo.isDemo ? { scenario: "brokerage-priorities" } : {}} className="quick">
               Ask about the brokerage <span aria-hidden>→</span>
             </Link>
-            <Link to="/ask" search={{ scenario: "import-brokerage-records" }} className="quick">
+            <Link to="/new" className="quick">
               Import client records <span aria-hidden>→</span>
             </Link>
             <Link to="/email" className="quick">
@@ -169,4 +242,64 @@ export function DiscoverDemo() {
       </section>
     </>
   );
+}
+
+/**
+ * What ASAP noticed, on a real brokerage: counted from the same answer, never generated.
+ *
+ * The approved demo shows a pattern across the book. There is no endpoint that finds patterns yet,
+ * and inventing one here would be a model-authored business claim (§45 rule 9) — so this says the
+ * true thing the answer already contains: how much is waiting, and what ASAP ran that stopped.
+ */
+function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
+  if (!attention) return null;
+  const needsYou = attention.sections.find((s) => s.key === "needs_you")?.visible ?? 0;
+  const checksDue = attention.sections.find((s) => s.key === "checks_due")?.visible ?? 0;
+  const stopped = attention.orphanRuns.length;
+
+  if (needsYou === 0 && checksDue === 0 && stopped === 0) {
+    return (
+      <>
+        <h3>Nothing is waiting on anyone</h3>
+        <p>No step needs a person, no check is overdue, and every job ASAP ran finished.</p>
+      </>
+    );
+  }
+  return (
+    <>
+      <h3>
+        {needsYou} {needsYou === 1 ? "item needs" : "items need"} a person
+        {checksDue > 0 ? `, and ${checksDue} ${checksDue === 1 ? "check is" : "checks are"} overdue` : ""}
+      </h3>
+      <p>
+        {stopped > 0
+          ? `${stopped} ${stopped === 1 ? "job" : "jobs"} ASAP ran stopped without finishing and belong to no work item yet.`
+          : "Every job ASAP ran either finished or is waiting on somebody outside."}
+      </p>
+      <Link to="/jobs" search={{ filter: "work" }} className="link">
+        {stopped > 0 ? "Open what stopped" : "See what ASAP is doing"}
+      </Link>
+    </>
+  );
+}
+
+/** The approved demo's own priority row, as the same card. */
+function focusCardFromDemo(
+  p: (typeof PRIORITY)[number],
+  work: DemoWork,
+): FocusCardView {
+  return {
+    id: work.id,
+    href: `/work/${work.id}`,
+    tone: p.signal === "resolved" ? "resolved" : p.signal,
+    toneLabel: p.signalLabel,
+    clientLabel: p.clientLabel,
+    elapsed: p.elapsed,
+    headline: p.headline,
+    detail: p.detail,
+    workType: p.workType,
+    action: p.action,
+    urgent: p.urgent ?? false,
+    quiet: p.quiet ?? false,
+  };
 }

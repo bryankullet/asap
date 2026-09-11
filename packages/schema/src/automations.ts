@@ -139,6 +139,30 @@ export const AUTOMATION_RUN_COLUMNS =
  */
 export const EXTERNALLY_SENDING_VERBS: readonly string[] = ["draft", "record_send"];
 
+/**
+ * `POST /automations` — a new standing instruction.
+ *
+ * Defined here rather than in the route because it crosses a boundary: the builder in the browser
+ * and the handler on the server must agree, and a hand-written duplicate is how they stop agreeing.
+ *
+ * What it deliberately does **not** carry: `sends_externally`. The server reads that from the verb
+ * (`EXTERNALLY_SENDING_VERBS`), because a browser that could set it false would be a way around
+ * §45 rule 13. `enabled` defaults to false: nothing starts watching a brokerage's mail because a
+ * form was submitted.
+ */
+export const createAutomationRequestSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).default(""),
+  triggerEvent: AutomationTrigger,
+  conditions: z.array(automationConditionSchema).max(8).default([]),
+  /** The named capability that does the work, from docs/skill-map.md. */
+  skill: z.string().trim().min(1).max(80),
+  preparedVerb: ActionVerb,
+  approval: z.enum(["always", "never"]).default("always"),
+  enabled: z.boolean().default(false),
+});
+export type CreateAutomationRequest = z.input<typeof createAutomationRequestSchema>;
+
 export const automationsResponseSchema = z.object({ automations: z.array(automationSchema) });
 export type AutomationsResponse = z.infer<typeof automationsResponseSchema>;
 

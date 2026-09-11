@@ -214,12 +214,27 @@ export const workListResponseSchema = z.object({
       reason: z.string(),
       nowStep: z.object({ id: z.string(), label: z.string(), actor: z.string() }).nullable(),
       runFailure: attentionRunFailureSchema.nullable(),
+      /**
+       * Who and which period of cover this is about. A work item carries ids only, and a card
+       * that showed an id would be unreadable — so the server resolves both, under the caller's
+       * session, exactly as Discover does. Null means there is none, or the caller may not see it.
+       */
+      client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+      period: attentionPeriodSchema.nullable(),
     }),
   ),
   /** Rows the caller can see in this view, and how many came back after the cap. */
   visible: z.number().int().min(0),
   returned: z.number().int().min(0),
   cap: z.number().int().min(1),
+  /**
+   * How many each view would show, counted in the same pass. The tab row needs five numbers and
+   * this way it costs one request rather than five — and the numbers cannot disagree with the
+   * list under them, because they came from the same read.
+   */
+  counts: z.record(WorkView, z.number().int().min(0)),
+  /** Empty when everything was read. Non-empty means a partial success, and the UI says so. */
+  degraded: z.array(attentionDegradationSchema).default([]),
 });
 export type WorkListResponse = z.infer<typeof workListResponseSchema>;
 

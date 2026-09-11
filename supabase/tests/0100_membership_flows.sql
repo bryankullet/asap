@@ -54,6 +54,12 @@ select is((select count(*) from organizations where name = 'Repeat Cover'), 1::b
   'and exactly one brokerage was created');
 
 -- Every seeded user lands in a workspace (D-055): no fixture signs in to an empty Today.
+--
+-- These two are facts about the *seed*, not about one caller, so the role is reset first: read as
+-- a signed-in user they were counting rows RLS had already hidden — Grace belongs to both
+-- brokerages, and a session in one of them cannot see her membership of the other. The assertion
+-- was failing for the right reason and asking the wrong question.
+reset role;
 select is((select count(*) from users u where u.email like '%.test' and u.active_organization_id is null),
   0::bigint, 'every seeded user has an active brokerage');
 select is((select count(*) from users u
@@ -64,7 +70,6 @@ select is((select count(*) from users u
   0::bigint, 'and it is a brokerage they are an active member of');
 
 -- 2. send_external matrix (D-022) -------------------------------------------------
-reset role;
 select is(
   (select count(distinct r.key) from roles r
      join role_permissions rp on rp.role_id = r.id

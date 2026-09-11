@@ -18,6 +18,8 @@ import {
   createWorkItemResponseSchema,
   markDraftCopiedResponseSchema,
   runEventsResponseSchema,
+  runListResponseSchema,
+  type RunListFilter,
   workItemResponseSchema,
   createInvitationResponseSchema,
   createOrganizationResponseSchema,
@@ -40,6 +42,7 @@ import {
   automationsResponseSchema,
   automationRunsResponseSchema,
   automationResponseSchema,
+  type CreateAutomationRequest,
   pinsResponseSchema,
   setPinResponseSchema,
   type SetPinRequest,
@@ -149,6 +152,9 @@ export const api = {
   automations: () => request("GET", "/automations", automationsResponseSchema),
   automationRuns: (id: string) =>
     request("GET", `/automations/${id}/runs`, automationRunsResponseSchema),
+  /** A new standing instruction. Created switched off, and never able to send by itself. */
+  createAutomation: (input: CreateAutomationRequest) =>
+    request("POST", "/automations", automationResponseSchema, input),
   setAutomationEnabled: (id: string, enabled: boolean) =>
     request("POST", `/automations/${id}/enabled`, automationResponseSchema, { enabled }),
   setPin: (recordId: string, body: SetPinRequest) =>
@@ -174,6 +180,12 @@ export const api = {
   runEvents: (id: string) => request("GET", `/runs/${id}/events`, runEventsResponseSchema),
   /** One run in full: steps, evidence, what it is waiting for, and the work it belongs to. */
   run: (id: string) => request("GET", `/runs/${id}`, runDetailResponseSchema),
+  /**
+   * The Jobs board: what ASAP is processing, grouped and counted server-side. One request serves
+   * every tab, because the counts come back with the rows.
+   */
+  runList: (filter: RunListFilter, limit = 50) =>
+    request("GET", `/runs?filter=${filter}&limit=${limit}`, runListResponseSchema),
   clientFiles: (view: K01View) =>
     request("GET", `/clients?view=${view}`, clientFilesResponseSchema),
   clientFile: (id: string) => request("GET", `/clients/${id}`, clientFileResponseSchema),

@@ -116,6 +116,7 @@ export function createApp(deps: AppDeps) {
     "/agreements",
     "/agreements/*",
     "/drafts/*",
+    "/runs",
     "/runs/*",
   ]) {
     app.use(path, guard);

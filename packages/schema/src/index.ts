@@ -25,3 +25,4 @@ export * from "./spaces/plan.js";
 export * from "./ai/gateway.js";
 export * from "./ai/conversation.js";
 export * from "./spaces/blocks.js";
+export * from "./views/boards.js";

@@ -1,10 +1,8 @@
 import {
   AUTOMATION_COLUMNS,
   AUTOMATION_RUN_COLUMNS,
-  AutomationTrigger,
-  ActionVerb,
+  createAutomationRequestSchema,
   EXTERNALLY_SENDING_VERBS,
-  automationConditionSchema,
   automationRunSchema,
   automationSchema,
 } from "@asap/schema";
@@ -23,16 +21,8 @@ import { HttpError, mapDatabaseError, sendError } from "../errors.js";
  * at a time, by a person — with the record's own guards, as if they had done it themselves.
  */
 
-const createSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(500).default(""),
-  triggerEvent: AutomationTrigger,
-  conditions: z.array(automationConditionSchema).max(8).default([]),
-  skill: z.string().trim().min(1).max(80),
-  preparedVerb: ActionVerb,
-  approval: z.enum(["always", "never"]).default("always"),
-  enabled: z.boolean().default(false),
-});
+/** One definition, shared with the browser's builder (`@asap/schema`), so the two cannot drift. */
+const createSchema = createAutomationRequestSchema;
 
 export function automationRoutes(deps: { logger: Logger }) {
   const app = new Hono();

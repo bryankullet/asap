@@ -7,6 +7,8 @@ export default tseslint.config(
   {
     ignores: [
       "**/dist/**",
+      // Local build outputs: `dist-live` is a production-mode bundle built for harness runs.
+      "**/dist-live/**",
       "**/node_modules/**",
       "**/.turbo/**",
       "docs/ui/prototype/**",

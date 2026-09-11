@@ -514,6 +514,38 @@ describe("GET /work", () => {
     expect(body.cap).toBe(10);
   });
 
+  it("names the client and the period, because a card cannot show an id", async () => {
+    const body = await readJson(
+      await app.request("/work?view=needs", { headers: auth("tok-amina") }),
+    );
+    const withClient = body.items.filter(
+      (i: { item: { client_id: string | null } }) => i.item.client_id !== null,
+    );
+    expect(withClient.length).toBeGreaterThan(0);
+    for (const row of withClient) {
+      // Resolved server-side under the caller's session, exactly as Discover resolves it.
+      expect(row.client).toMatchObject({ id: row.item.client_id, name: expect.any(String) });
+      expect(row.client.name).not.toBe(row.item.client_id);
+    }
+    // An item with no client says so, rather than carrying an empty object.
+    for (const row of body.items.filter(
+      (i: { item: { client_id: string | null } }) => i.item.client_id === null,
+    )) {
+      expect(row.client).toBeNull();
+    }
+    // And nothing was silently dropped on the way.
+    expect(body.degraded).toEqual([]);
+  });
+
+  it("counts every tab from the same read, so a number cannot disagree with its list", async () => {
+    const body = await readJson(
+      await app.request("/work?view=needs", { headers: auth("tok-amina") }),
+    );
+    expect(body.counts).toMatchObject({ needs: 4, with: 2, done: 1, recent: 6 });
+    // The count of the view being shown is the number of rows the caller can see in it.
+    expect(body.counts.needs).toBe(body.visible);
+  });
+
   it("falls back to the needs view when the view is unknown", async () => {
     const body = await readJson(await app.request("/work?view=nonsense", { headers: auth("tok-amina") }));
     expect(body.view).toBe("needs");

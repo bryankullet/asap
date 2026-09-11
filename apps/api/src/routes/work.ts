@@ -1,4 +1,12 @@
 import {
+  RUN_GROUP_LABELS,
+  runNeedsPerson,
+  RUN_LIST_FILTER_LABELS,
+  RunGroup,
+  RunListFilter,
+  runListQuerySchema,
+  runListResponseSchema,
+  type RunListResponse,
   pinsResponseSchema,
   setPinRequestSchema,
   setPinResponseSchema,
@@ -54,6 +62,7 @@ import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import type { Executor, RunFacts } from "../runs/executor.js";
 import { parseBody } from "./_parse.js";
+import { loadRecordContext } from "../attention/record-context.js";
 
 export type WorkDeps = {
   logger: Logger;
@@ -900,6 +909,155 @@ export function workRoutes(deps: WorkDeps) {
    * its job, and only as a disabled control with its reason when the step has moved on — a
    * person must never be able to re-run something whose record has changed underneath it.
    */
+  /**
+   * The Jobs board (D-064). What ASAP is processing, grouped by what each run is waiting on.
+   *
+   * Read under the caller's session, so RLS decides what exists before anything is grouped. The
+   * organization comes from the session and is scoped again in the query (§45 rule 5). Progress is
+   * derived from the steps of the work each run is advancing, never authored (rule 10), and is
+   * null when there are no steps to derive it from — the card then shows no bar rather than
+   * inventing a number.
+   *
+   * A finished job is an output, never a business outcome: whether cover was confirmed, a claim
+   * accepted or money received is a different fact, on the record, with its own evidence.
+   */
+  app.get("/runs", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const q = runListQuerySchema.parse({
+      filter: c.req.query("filter"),
+      limit: c.req.query("limit"),
+    });
+    const now = new Date();
+    const generatedAt = now.toISOString();
+
+    const runsR = await db
+      .from("runs")
+      .select(RUN_COLUMNS)
+      .eq("organization_id", org.id)
+      .order("started_at", { ascending: false });
+    if (runsR.error) return sendError(c, mapDatabaseError(runsR.error));
+    const runs = RunRow.array().parse(runsR.data ?? []);
+
+    const groupOf = (run: RunRow): RunGroup =>
+      run.status === "working"
+        ? "running"
+        : run.status === "paused"
+          ? "waiting_externally"
+          : run.status === "finished"
+            ? "completed"
+            : "work";
+
+    const inFilter = (run: RunRow, filter: RunListFilter): boolean => {
+      const group = groupOf(run);
+      if (filter === "all") return group !== "completed";
+      if (filter === "running") return group === "running";
+      if (filter === "waiting") return group === "waiting_externally";
+      if (filter === "work") return group === "work";
+      return group === "completed";
+    };
+
+    // Every tab's count in one pass, so the board needs one request rather than five.
+    const counts = Object.fromEntries(
+      RunListFilter.options.map((f) => [f, runs.filter((r) => inFilter(r, f)).length]),
+    ) as Record<RunListFilter, number>;
+
+    const inView = runs.filter((r) => inFilter(r, q.filter));
+    const shown = inView.slice(0, q.limit);
+
+    // The work each run is advancing: its title, so a job leads to what a person owns, and its
+    // steps, which are the only honest source of progress.
+    const workIds = [...new Set(shown.map((r) => r.work_item_id).filter((v): v is string => v !== null))];
+    const degraded: RunListResponse["degraded"] = [];
+    const items = new Map<string, WorkItemRow>();
+    if (workIds.length > 0) {
+      const r = await db
+        .from("work_items")
+        .select(WORK_ITEM_COLUMNS)
+        .in("id", workIds)
+        .is("deleted_at", null);
+      if (r.error) {
+        degraded.push({
+          what: "The work each job belongs to",
+          because: "The work item rows could not be read.",
+        });
+      } else {
+        for (const row of WorkItemRow.array().parse(r.data ?? [])) items.set(row.id, row);
+      }
+    }
+    const context = await loadRecordContext(db, org.id, [...items.values()], now);
+    degraded.push(...context.degraded);
+
+    // The last thing each shown run recorded doing, in its own words.
+    const lastEvent = new Map<string, string>();
+    if (shown.length > 0) {
+      const r = await db
+        .from("run_events")
+        .select("id, run_id, seq, kind, message, created_at")
+        .in("run_id", shown.map((x) => x.id))
+        .order("seq", { ascending: true });
+      if (r.error) {
+        degraded.push({
+          what: "What each job last did",
+          because: "The run event rows could not be read.",
+        });
+      } else {
+        for (const ev of RunEventRow.array().parse(r.data ?? [])) lastEvent.set(ev.run_id, ev.message);
+      }
+    }
+
+    const progressOf = (run: RunRow): number | null => {
+      const item = run.work_item_id ? items.get(run.work_item_id) : undefined;
+      if (!item || item.steps.length === 0) return null;
+      const done = item.steps.filter((st) => st.state === "done").length;
+      return Math.round((done / item.steps.length) * 100);
+    };
+
+    const body: RunListResponse = runListResponseSchema.parse({
+      organization: { id: org.id, name: org.name },
+      filter: q.filter,
+      label: RUN_LIST_FILTER_LABELS[q.filter],
+      generatedAt,
+      groups: RunGroup.options.flatMap((key) => {
+        const inGroup = shown.filter((r) => groupOf(r) === key);
+        if (inGroup.length === 0) return [];
+        return [
+          {
+            key,
+            title: RUN_GROUP_LABELS[key],
+            items: inGroup.map((run) => {
+              const item = run.work_item_id ? items.get(run.work_item_id) : undefined;
+              const waiting = run.status === "paused" || runNeedsPerson(run);
+              return {
+                run,
+                group: key,
+                progress: progressOf(run),
+                lastEvent: lastEvent.get(run.id) ?? null,
+                waitingFor: waiting ? run.next_step : null,
+                needsPerson: runNeedsPerson(run),
+                work: item ? { id: item.id, title: item.title } : null,
+                client:
+                  item?.client_id && context.clientNames.has(item.client_id)
+                    ? { id: item.client_id, name: context.clientNames.get(item.client_id)! }
+                    : null,
+                period: item?.policy_period_id
+                  ? (context.periods.get(item.policy_period_id) ?? null)
+                  : null,
+              };
+            }),
+          },
+        ];
+      }),
+      counts,
+      visible: inView.length,
+      returned: shown.length,
+      cap: q.limit,
+      degraded,
+    });
+    return c.json(body);
+  });
+
   app.get("/runs/:id", async (c) => {
     const { db } = c.get("auth");
     const id = c.req.param("id");

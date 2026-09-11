@@ -1,4 +1,11 @@
-import { RUN_COLUMNS, RunRow, WORK_ITEM_COLUMNS, WorkItemRow, type WorkView } from "@asap/schema";
+import {
+  RUN_COLUMNS,
+  RunRow,
+  WORK_ITEM_COLUMNS,
+  WorkItemRow,
+  type RunListFilter,
+  type WorkView,
+} from "@asap/schema";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "./supabase.js";
 import { api } from "./api.js";
@@ -21,6 +28,12 @@ export const attentionKeys = {
 export const runKeys = {
   list: (orgId: string) => ["runs", orgId] as const,
   one: (id: string) => ["run", id] as const,
+  board: (orgId: string, filter: RunListFilter, limit: number) =>
+    ["run_board", orgId, filter, limit] as const,
+};
+export const automationKeys = {
+  list: (orgId: string) => ["automations", orgId] as const,
+  runs: (id: string) => ["automation_runs", id] as const,
 };
 
 async function unwrap<T>(
@@ -132,5 +145,40 @@ export function useWorkList(orgId: string | undefined, view: WorkView, limit = 5
     queryKey: attentionKeys.work(orgId ?? "none", view, limit),
     enabled: Boolean(orgId),
     queryFn: () => api.workList(view, limit),
+  });
+}
+
+/**
+ * The Jobs board, from the API (D-066). One request per filter, and it brings every tab's count
+ * back with the rows, so the board never fires five.
+ *
+ * It polls, because a job that is working changes without anyone touching the page — and stops
+ * polling when nothing is live, so an idle board is not a heartbeat against the service.
+ */
+export function useRunList(orgId: string | undefined, filter: RunListFilter, limit = 50) {
+  return useQuery({
+    queryKey: runKeys.board(orgId ?? "none", filter, limit),
+    enabled: Boolean(orgId),
+    queryFn: () => api.runList(filter, limit),
+    refetchInterval: (query) =>
+      (query.state.data?.counts.running ?? 0) > 0 ? 10_000 : false,
+  });
+}
+
+/** The brokerage's standing instructions. */
+export function useAutomations(orgId: string | undefined) {
+  return useQuery({
+    queryKey: automationKeys.list(orgId ?? "none"),
+    enabled: Boolean(orgId),
+    queryFn: () => api.automations(),
+  });
+}
+
+/** Every firing of one automation, including the ones that decided to do nothing, and why. */
+export function useAutomationRuns(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: automationKeys.runs(id ?? "none"),
+    enabled: Boolean(id) && enabled,
+    queryFn: () => api.automationRuns(id!),
   });
 }

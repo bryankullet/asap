@@ -4,8 +4,15 @@ import {
   demoClient,
   scenarioById,
   type DemoWork,
+  type WorkTileView,
+  type WorkView,
 } from "@asap/schema";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
+import { describeApiError } from "../lib/api.js";
+import { useMe } from "../lib/me.js";
+import { useWorkList } from "../lib/queries.js";
+import { workTileFromRow } from "../live/adapters.js";
+import { workTileFromDemo } from "../demo/adapters.js";
 import { WORK_FILTERS } from "../shell/nav.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { useState } from "react";
@@ -31,26 +38,40 @@ const STATE_WORD: Record<DemoWork["state"], string> = {
   completed: "Completed",
 };
 
+/** The Work filters, as the API's own views. The labels already agree: `WORK_VIEW_LABELS`. */
+const VIEW_FOR_FILTER: Record<string, WorkView> = {
+  active: "needs",
+  waiting: "with",
+  review: "review",
+  completed: "done",
+  recent: "recent",
+};
+
 export function WorkDemo() {
   const { view } = useSearch({ strict: false }) as { view?: string };
   const demo = useDemo();
+  const me = useMe();
   const active = view ?? "active";
+  const board = demo.isDemo ? demoBoard(demo, active) : null;
 
-  /**
-   * Active is everything a person still owns, which is what the approved demo's Work grid opens
-   * on — not only the items whose own state word is "active". Waiting, For review and Completed
-   * are the narrower reads.
+  /*
+   * A real brokerage's Work, ranked and capped by the API under the caller's session. Pinned is
+   * the exception: it is a personal marker with its own endpoint, so `PinList` renders it.
    */
-  const shown = demo.work.filter((w) => {
-    if (active === "pinned") return demo.pinned.includes(w.id);
-    if (active === "recent") return true;
-    if (active === "active") return w.state !== "completed";
-    return w.state === active;
-  });
-  const ordered =
-    active === "recent"
-      ? [...shown].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      : shown;
+  const live = useWorkList(
+    me.data?.active_organization?.id,
+    VIEW_FOR_FILTER[active] ?? "needs",
+  );
+
+  const tiles = board ? board.tiles : (live.data?.items ?? []).map(workTileFromRow);
+  const counts: Record<string, number> = board
+    ? board.counts
+    : {
+        active: live.data?.counts.needs ?? 0,
+        waiting: live.data?.counts.with ?? 0,
+        review: live.data?.counts.review ?? 0,
+      };
+  const pinnedTab = active === "pinned";
 
   return (
     <>
@@ -68,12 +89,7 @@ export function WorkDemo() {
           <nav className="tab-row work-tabs" aria-label="Work filters">
             {WORK_FILTERS.map((f) => {
               // The demo counts only the three live filters; Completed, Pinned and Recent carry none.
-              const count =
-                f.id === "active"
-                  ? demo.work.filter((w) => w.state !== "completed").length
-                  : f.id === "waiting" || f.id === "review"
-                    ? demo.work.filter((w) => w.state === f.id).length
-                    : 0;
+              const count = counts[f.id] ?? 0;
               return (
                 <Link
                   key={f.id}
@@ -84,9 +100,10 @@ export function WorkDemo() {
                 >
                   {f.label}{" "}
                   {/*
-                    The count is read from the same state the grid filters on. The approved demo
-                    prints a fixed 8/5/3 here that its own eight tiles contradict; a number that
-                    disagrees with the list under it is not worth reproducing.
+                    The count comes from the same read as the list under it — the API counts every
+                    view in one pass — so the two can never disagree. The approved demo prints a
+                    fixed 8/5/3 that its own eight tiles contradict; a number that disagrees with
+                    its list is not worth reproducing.
                   */}
                   {count > 0 && <b>{count}</b>}
                 </Link>
@@ -98,25 +115,56 @@ export function WorkDemo() {
             Outside demo mode the Pinned filter shows what a person actually kept, read from the
             API under their own session. In demo mode the rows already carry the session's pins.
           */}
-          {active === "pinned" && !demo.isDemo && <PinList />}
+          {pinnedTab && !demo.isDemo && <PinList />}
 
-          {ordered.length === 0 ? (
+          {/* Every system state is designed (§36): loading, partial, error, empty — never a blank. */}
+          {!board && !pinnedTab && live.isPending && (
             <article className="space-card" style={{ padding: 24 }}>
-              <strong>
-                {active === "pinned" ? "You have not kept anything yet." : "No work in this view."}
-              </strong>
+              <strong>Reading your work…</strong>
+            </article>
+          )}
+          {!board && live.isError && (
+            <article className="space-card" style={{ padding: 24 }}>
+              <strong>We could not read your work.</strong>
+              <p style={{ color: "#707a72", fontSize: 11 }}>{describeApiError(live.error)}</p>
+              <button type="button" className="secondary" onClick={() => void live.refetch()}>
+                Try again
+              </button>
+            </article>
+          )}
+          {!board &&
+            (live.data?.degraded ?? []).map((d) => (
+              <article className="warning" key={d.what}>
+                <strong>{d.what}:</strong> {d.because} Everything else below was read.
+              </article>
+            ))}
+
+          {tiles.length === 0 && !live.isPending && !live.isError && !pinnedTab ? (
+            <article className="space-card" style={{ padding: 24 }}>
+              <strong>No work in this view.</strong>
               <p style={{ color: "#707a72", fontSize: 11 }}>
-                {active === "pinned"
-                  ? "Open an item and choose Keep to find it here."
-                  : "Completed actions and new evidence will move items here automatically."}
+                Completed actions and new evidence will move items here automatically.
+              </p>
+            </article>
+          ) : pinnedTab && demo.isDemo && tiles.length === 0 ? (
+            <article className="space-card" style={{ padding: 24 }}>
+              <strong>You have not kept anything yet.</strong>
+              <p style={{ color: "#707a72", fontSize: 11 }}>
+                Open an item and choose Keep to find it here.
               </p>
             </article>
           ) : (
             <div className="spaces-grid">
-              {ordered.map((w) => (
-                <WorkTile key={w.id} work={w} />
+              {tiles.map((t) => (
+                <WorkTile key={t.id} tile={t} />
               ))}
             </div>
+          )}
+          {!board && live.data && live.data.visible > live.data.returned && (
+            <p style={{ color: "#707a72", fontSize: 11, marginTop: 12 }}>
+              Showing {live.data.returned} of {live.data.visible}. The rest are here when these are
+              dealt with.
+            </p>
           )}
       </section>
     </>
@@ -124,20 +172,50 @@ export function WorkDemo() {
 }
 
 /**
+ * The demonstration's own board, from the approved fixtures.
+ *
+ * Its Active is everything a person still owns, which is what the approved screen opens on — the
+ * API's `needs` view means the same thing on a real brokerage, where the set is not eight rows.
+ */
+function demoBoard(
+  demo: ReturnType<typeof useDemo>,
+  active: string,
+): { tiles: WorkTileView[]; counts: Record<string, number> } {
+  const shown = demo.work.filter((w) => {
+    if (active === "pinned") return demo.pinned.includes(w.id);
+    if (active === "recent") return true;
+    if (active === "active") return w.state !== "completed";
+    return w.state === active;
+  });
+  const ordered =
+    active === "recent"
+      ? [...shown].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      : shown;
+  return {
+    tiles: ordered.map(workTileFromDemo),
+    counts: {
+      active: demo.work.filter((w) => w.state !== "completed").length,
+      waiting: demo.work.filter((w) => w.state === "waiting").length,
+      review: demo.work.filter((w) => w.state === "review").length,
+    },
+  };
+}
+
+/**
  * One tile on the Work grid, in the approved demo's shape: the badge floated right, the kind of
  * work, the headline, the one-line reason, and the record it belongs to. Every string comes from
  * the fixture — a tile that named a client would stop being a tile.
  */
-function WorkTile({ work }: { work: DemoWork }) {
-  const tone =
-    work.pill === "High" ? "high" : work.pill === "Resolved" ? "good" : "";
+function WorkTile({ tile }: { tile: WorkTileView }) {
+  // The demo's three pill tones. `medium` takes the default, as it does there.
+  const tone = tile.pillTone === "high" ? "high" : tile.pillTone === "resolved" ? "good" : "";
   return (
-    <Link to="/work/$workId" params={{ workId: work.id }} className="space-tile">
-      <span className={`pill ${tone}`}>{work.pill}</span>
-      <div className="section-label">{work.workType} WORK</div>
-      <h3>{work.headline}</h3>
-      <p>{work.summary}</p>
-      <small>{work.contextLabel}</small>
+    <Link to={tile.href} className="space-tile">
+      <span className={`pill ${tone}`}>{tile.pill}</span>
+      <div className="section-label">{tile.workType} WORK</div>
+      <h3>{tile.headline}</h3>
+      <p>{tile.summary}</p>
+      <small>{tile.contextLabel}</small>
     </Link>
   );
 }

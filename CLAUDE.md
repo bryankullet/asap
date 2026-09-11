@@ -250,7 +250,12 @@ labelled demonstration data, and a simulated send says so rather than implying d
 
 With the flag off — the default, and what every real deployment runs — the session, `/me`,
 membership, RLS, permissions and real API operations all apply exactly as before, and there is no
-presenter bar and no fictional record. Never weaken a production guard to make the demo work: branch
+presenter bar and no fictional record. **The boards then read the brokerage's own rows** (D-066):
+Discover from `GET /attention`, Work from `GET /work?view=`, Jobs from `GET /runs`, Automations from
+`GET /automations`. Each board renders a typed view model from `packages/schema/src/views/boards.ts`,
+produced by one of two adapters — `apps/web/src/live/adapters.ts` from API rows, or
+`apps/web/src/demo/adapters.ts` from the fixtures. Add a board by adding a view model and two
+adapters, never by branching inside a card. Never weaken a production guard to make the demo work: branch
 above it. `apps/web/src/demo/demo-entry.test.tsx` drives the real route tree in both modes and fails
 if either rule breaks.
 

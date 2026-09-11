@@ -48,8 +48,8 @@ describe("components that were deliberately not ported", () => {
 
   it("the one job progress bar reads a derived value, never an authored one", () => {
     const jobs = SOURCES[PROGRESS_IS_DERIVED] ?? "";
-    // The value shown is the job's own `progress`, computed from its steps by the runner.
-    expect(jobs).toContain("aria-valuenow={job.progress}");
+    // The value shown is the card's own `progress`, which the API derived from the work's steps.
+    expect(jobs).toContain("aria-valuenow={card.progress}");
     // And no percentage is ever printed as a confidence.
     expect(jobs).not.toMatch(/confidence/i);
   });

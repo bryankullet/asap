@@ -3,6 +3,7 @@ import { ActionVerb } from "../actions.js";
 import { DraftRow } from "../draft.js";
 import { UiIntent } from "../intent.js";
 import { RunEventRow, RunRow, WorkItemKind, WorkItemRow } from "../work.js";
+import { attentionDegradationSchema, attentionPeriodSchema } from "./attention.js";
 import { uuidSchema } from "./common.js";
 import { claimDetailSchema, endorsementDetailSchema } from "./servicing.js";
 
@@ -254,3 +255,84 @@ export type SetPinRequest = z.infer<typeof setPinRequestSchema>;
 
 export const setPinResponseSchema = z.object({ pinned: z.boolean() });
 export type SetPinResponse = z.infer<typeof setPinResponseSchema>;
+
+/**
+ * `GET /runs` — the Jobs board.
+ *
+ * Jobs answers a different question from Work: this is what *ASAP* is processing, never what a
+ * person owns, and a finished job means ASAP produced an output — never that a policy renewed, a
+ * claim was accepted or money arrived (§45 rule 10, D-064).
+ *
+ * The filters are the board's own: `all` is everything still live, `work` is everything that has
+ * stopped and needs a person — a decision to take or a failure to look at.
+ */
+export const RunListFilter = z.enum(["all", "running", "waiting", "work", "completed"]);
+export type RunListFilter = z.infer<typeof RunListFilter>;
+
+export const RUN_LIST_FILTER_LABELS: Readonly<Record<RunListFilter, string>> = {
+  all: "All",
+  running: "Running",
+  waiting: "Waiting",
+  work: "Work",
+  completed: "Completed",
+};
+
+/** Which group a run sits in, in the words the board prints above it. */
+export const RunGroup = z.enum(["running", "waiting_externally", "work", "completed"]);
+export type RunGroup = z.infer<typeof RunGroup>;
+
+export const RUN_GROUP_LABELS: Readonly<Record<RunGroup, string>> = {
+  running: "Running",
+  waiting_externally: "Waiting externally",
+  work: "Work",
+  completed: "Completed",
+};
+
+export const runListQuerySchema = z.object({
+  filter: RunListFilter.catch("all"),
+  limit: z.coerce.number().int().min(1).max(100).catch(50),
+});
+export type RunListQuery = z.infer<typeof runListQuerySchema>;
+
+export const runListItemSchema = z.object({
+  run: RunRow,
+  group: RunGroup,
+  /**
+   * Percent complete, or null.
+   *
+   * Derived from the steps of the work item this run is advancing — done ÷ total — and never
+   * authored by anything (§45 rule 10). Null when there is no related item or it has no steps,
+   * and the card then shows no bar rather than inventing a number nobody measured.
+   */
+  progress: z.number().int().min(0).max(100).nullable(),
+  /** The last thing the run recorded doing. Its own words, from its own event. */
+  lastEvent: z.string().nullable(),
+  /** What it is waiting for, when it is waiting. Never a business outcome. */
+  waitingFor: z.string().nullable(),
+  /** True for the statuses that have stopped and need a person. */
+  needsPerson: z.boolean(),
+  /** The work a person owns, so a job always leads somewhere they can act. */
+  work: z.object({ id: uuidSchema, title: z.string() }).nullable(),
+  /** Who and which period of cover, resolved server-side as every other board resolves it. */
+  client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  period: attentionPeriodSchema.nullable(),
+});
+export type RunListItem = z.infer<typeof runListItemSchema>;
+
+export const runListResponseSchema = z.object({
+  organization: z.object({ id: uuidSchema, name: z.string() }),
+  filter: RunListFilter,
+  label: z.string(),
+  generatedAt: z.string(),
+  /** In board order, and only the groups that have something in them. */
+  groups: z.array(
+    z.object({ key: RunGroup, title: z.string(), items: z.array(runListItemSchema) }),
+  ),
+  /** How many each filter would show, so the tabs can be counted without five requests. */
+  counts: z.record(RunListFilter, z.number().int().min(0)),
+  visible: z.number().int().min(0),
+  returned: z.number().int().min(0),
+  cap: z.number().int().min(1),
+  degraded: z.array(attentionDegradationSchema).default([]),
+});
+export type RunListResponse = z.infer<typeof runListResponseSchema>;

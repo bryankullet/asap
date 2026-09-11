@@ -107,6 +107,81 @@ const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 const readJson = (res: Response): Promise<any> => res.json();
 const get = async (p: string) => readJson(await app.request(p, { headers: auth("tok-amina") }));
 
+describe("GET /runs — the Jobs board", () => {
+  it("requires a session", async () => {
+    expect((await app.request("/runs")).status).toBe(401);
+  });
+
+  it("groups by what each run is waiting on, in the board's own words", async () => {
+    const body = await get("/runs?filter=all");
+    expect(body.label).toBe("All");
+    // Two could-not-finish runs need a person; the finished one is not in All.
+    expect(body.groups.map((g: { key: string; title: string }) => [g.key, g.title])).toEqual([
+      ["work", "Work"],
+    ]);
+    expect(body.groups[0].items).toHaveLength(2);
+    expect(body.counts).toMatchObject({ all: 2, running: 0, waiting: 0, work: 2, completed: 1 });
+  });
+
+  it("keeps Completed out of All, and finds it under its own filter", async () => {
+    const all = await get("/runs?filter=all");
+    const ids = all.groups.flatMap((g: { items: { run: { id: string } }[] }) =>
+      g.items.map((i) => i.run.id),
+    );
+    expect(ids).not.toContain(RUN_DONE);
+
+    const done = await get("/runs?filter=completed");
+    expect(done.groups[0].key).toBe("completed");
+    expect(done.groups[0].items[0].run.id).toBe(RUN_DONE);
+  });
+
+  it("derives progress from the work's steps, and says nothing when there are none", async () => {
+    const body = await get("/runs?filter=work");
+    const withWork = body.groups[0].items.find(
+      (i: { run: { id: string } }) => i.run.id === RUN_FAILED,
+    );
+    // One step, not done: 0%. Derived from the row, not authored (§45 rule 10).
+    expect(withWork.progress).toBe(0);
+    const orphan = body.groups[0].items.find(
+      (i: { run: { id: string } }) => i.run.id === RUN_ORPHAN,
+    );
+    // No work item, so no steps, so no bar — rather than a number nobody measured.
+    expect(orphan.progress).toBeNull();
+    expect(orphan.work).toBeNull();
+  });
+
+  it("leads to the work a person owns, and says what it last did", async () => {
+    const body = await get("/runs?filter=work");
+    const row = body.groups[0].items.find((i: { run: { id: string } }) => i.run.id === RUN_FAILED);
+    expect(row.work).toMatchObject({ id: ITEM, title: "Acme Motors — renewal terms from Jubilee" });
+    expect(row.lastEvent).toBe("The schedule had no premium line");
+    expect(row.needsPerson).toBe(true);
+    expect(row.waitingFor).toBe("The schedule had no premium line. Check the file.");
+  });
+
+  it("never claims a business outcome", async () => {
+    const body = await get("/runs?filter=completed");
+    expect(JSON.stringify(body)).not.toMatch(/renewed|accepted|paid|policy is active/i);
+  });
+
+  it("scopes every filter to the caller's brokerage", async () => {
+    for (const f of ["all", "running", "waiting", "work", "completed"]) {
+      const body = await get(`/runs?filter=${f}`);
+      expect(body.organization.id).toBe(ORG);
+      for (const g of body.groups)
+        for (const i of g.items) expect(i.run.organization_id).toBe(ORG);
+    }
+  });
+
+  it("falls back to All when the filter is unknown, and caps with a count", async () => {
+    expect((await get("/runs?filter=nonsense")).filter).toBe("all");
+    const capped = await get("/runs?filter=all&limit=1");
+    expect(capped.returned).toBe(1);
+    expect(capped.visible).toBe(2);
+    expect(capped.cap).toBe(1);
+  });
+});
+
 describe("GET /runs/:id", () => {
   it("requires a session", async () => {
     expect((await app.request(`/runs/${RUN_FAILED}`)).status).toBe(401);
