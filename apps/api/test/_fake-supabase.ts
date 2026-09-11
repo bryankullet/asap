@@ -175,7 +175,7 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
         },
         insert: (row: Record<string, unknown>) => {
           db.inserts.push({ table, row });
-          const stored = {
+          const stored: Record<string, unknown> = {
             id: nextId(),
             created_at: STAMP,
             updated_at: STAMP,
