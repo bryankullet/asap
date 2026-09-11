@@ -35,6 +35,7 @@ import {
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
   attentionResponseSchema,
+  historyResponseSchema,
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
@@ -106,6 +107,8 @@ export const api = {
       allow: [404, 409],
     }),
   workItem: (id: string) => request("GET", `/work-items/${id}`, workItemResponseSchema),
+  /** The audit history of one record (C05). Read-only, gated on audit:view server-side. */
+  history: (id: string) => request("GET", `/work-items/${id}/history`, historyResponseSchema),
   act: (id: string, input: ActRequest) =>
     request("POST", `/work-items/${id}/actions`, actResponseSchema, input, {
       auth: true,

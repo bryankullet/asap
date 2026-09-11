@@ -22,6 +22,7 @@ import { Record } from "./pages/Record.js";
 import { SignIn } from "./pages/SignIn.js";
 import { SignUp } from "./pages/SignUp.js";
 import { Discover } from "./pages/Discover.js";
+import { Search } from "./pages/Search.js";
 import { Work } from "./pages/Work.js";
 import { Shell } from "./shell/Shell.js";
 
@@ -128,6 +129,13 @@ const record = createRoute({
     kind: z.literal("policy").optional().catch(undefined),
   }),
 });
+/** H04. A real search over what the backend can actually search, with the query in the URL. */
+const search = createRoute({
+  getParentRoute: () => shell,
+  path: "/search",
+  component: Search,
+  validateSearch: z.object({ q: z.string().max(200).optional().catch(undefined) }),
+});
 const files = createRoute({
   getParentRoute: () => shell,
   path: "/files",
@@ -175,6 +183,7 @@ export const routeTree = rootRoute.addChildren([
         index,
         discover,
         legacyToday,
+        search,
         work,
         automations,
         automationDetail,

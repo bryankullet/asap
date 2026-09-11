@@ -137,3 +137,43 @@ export const runEventsResponseSchema = z.object({ run: RunRow, events: z.array(R
 
 /** Drafts: copied is a fact about the draft, not a send. */
 export const markDraftCopiedResponseSchema = z.object({ draft: DraftRow });
+
+/**
+ * `GET /work-items/:id/history` — the audit history of one record (C05).
+ *
+ * Screen Map v1 C05: "never rewrite historical outcomes". The rows come from `audit_log`, which
+ * has been written since Phase 1 and outlives its brokerage (D-054, ON DELETE RESTRICT). This is
+ * the read; there is no write, and there never will be from the browser.
+ *
+ * A row is shown as it was recorded. Previous and new state are summarised into the fields that
+ * changed rather than dumped, and nothing here ever carries a document's contents or a credential
+ * (`apps/api/src/audit.ts` refuses to write those in the first place).
+ */
+export const historyEntrySchema = z.object({
+  id: z.string(),
+  /** Who: a person, ASAP, an automation, or the platform itself. */
+  actorType: z.enum(["user", "ai", "automation", "system"]),
+  actorName: z.string().nullable(),
+  /** What, in the vocabulary the writer used: "work_item.applied", "External send recorded by human". */
+  action: z.string(),
+  objectType: z.string(),
+  objectId: uuidSchema.nullable(),
+  /** Succeeded, failed, or was denied. A denial is history too and is never hidden. */
+  result: z.enum(["success", "failure", "denied"]),
+  failureReason: z.string().nullable(),
+  /** The fields that changed, as "field: before → after". Never the whole row. */
+  changed: z.array(z.string()).max(20),
+  /** Evidence references recorded with the action, if any. */
+  evidence: z.array(z.string()).max(10),
+  occurredAt: z.string(),
+});
+export type HistoryEntry = z.infer<typeof historyEntrySchema>;
+
+export const historyResponseSchema = z.object({
+  recordId: uuidSchema,
+  entries: z.array(historyEntrySchema),
+  /** Rows the caller can see, and how many came back. */
+  visible: z.number().int().min(0),
+  returned: z.number().int().min(0),
+});
+export type HistoryResponse = z.infer<typeof historyResponseSchema>;

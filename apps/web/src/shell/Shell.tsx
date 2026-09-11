@@ -8,12 +8,13 @@ import { useRuns } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { ActivityChip } from "./ActivityChip.js";
 import { AskComposer } from "./AskComposer.js";
+import { NewMenu } from "./NewMenu.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
 
 /**
  * The permanent shell (UI Build Spec v1 Part 1), in the v4 prototype's frame: a 224px sidebar of
- * white against the wash, Today · Work · Automations, Search and + New, and the profile control
+ * white against the wash, Discover · Work · Automations, Search and + New, and the profile control
  * (C01) at the bottom, which opens the brokerage switcher, Members, Agreements, Client files and
  * Sign out. Ask is the docked bar at the foot of the workspace, reachable from every screen; the
  * Activity chip sits on its meta row. Under 900px the destinations become a bottom bar and the
@@ -60,20 +61,14 @@ export function Shell() {
         <div className="px-2 pb-5">{brand}</div>
         <ShellNav />
         <div className="mx-2 my-4 h-px bg-line-soft" />
-        <div className="flex flex-col gap-0.5 px-2">
+        <div className="relative flex flex-col gap-0.5 px-2">
           <Link
-            to="/work"
-            search={{ view: "recent" }}
+            to="/search"
             className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink"
           >
             Search
           </Link>
-          <span
-            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-muted"
-            title="Creating records arrives with import in a later phase"
-          >
-            + New
-          </span>
+          <NewMenu />
         </div>
         <div className="mt-auto">{profile}</div>
       </aside>
@@ -81,7 +76,7 @@ export function Shell() {
       <div className="flex min-h-screen flex-col min-[900px]:col-start-2">
         <header className="sticky top-0 z-12 flex h-[58px] items-center gap-3 border-b border-line-soft bg-wash/90 px-4 backdrop-blur-md min-[900px]:hidden">
           {brand}
-          <div className="ml-auto">{profile}</div>
+          <div className="ml-auto min-w-0 max-w-[60%]">{profile}</div>
         </header>
         <main className="flex-1 pb-[190px] min-[900px]:pb-[210px]">
           <Page>

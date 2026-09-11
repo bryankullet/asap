@@ -1,4 +1,7 @@
 import {
+  historyResponseSchema,
+  type HistoryEntry,
+  type HistoryResponse,
   DRAFT_COLUMNS,
   DraftRow,
   RUN_COLUMNS,
@@ -32,7 +35,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Logger } from "pino";
-import { requireActiveOrganization, resolveContext } from "../context.js";
+import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { applyAction } from "../engine/apply.js";
 import { loadGuardFacts } from "../facts.js";
 import {
@@ -464,6 +467,83 @@ export function workRoutes(deps: WorkDeps) {
     );
   });
 
+
+  /**
+   * The audit history of one record (C05: never rewrite historical outcomes).
+   *
+   * Read-only, under the caller's RLS, and gated on `audit:view` so a role without it is told so
+   * by name rather than shown an empty list. Rows are summarised into the fields that changed;
+   * `apps/api/src/audit.ts` already refuses to write document contents or credentials, so there
+   * is nothing here to redact a second time.
+   */
+  app.get("/work-items/:id/history", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "audit", "view")) {
+      throw new HttpError(403, "forbidden", "Your role does not include the audit history");
+    }
+    // The record must resolve for this caller first: history is not a way around RLS.
+    const item = await loadItem(db, id);
+
+    const { data, error } = await db
+      .from("audit_log")
+      .select(
+        "id, actor_type, actor_user_id, action, object_type, object_id, previous_state, new_state, evidence, result, failure_reason, occurred_at",
+      )
+      .eq("organization_id", org.id)
+      .eq("object_id", item.id)
+      .order("occurred_at", { ascending: false })
+      .limit(100);
+    if (error) return sendError(c, mapDatabaseError(error));
+
+    const rows = (data ?? []) as {
+      id: number | string;
+      actor_type: HistoryEntry["actorType"];
+      actor_user_id: string | null;
+      action: string;
+      object_type: string;
+      object_id: string | null;
+      previous_state: Record<string, unknown> | null;
+      new_state: Record<string, unknown> | null;
+      evidence: unknown;
+      result: HistoryEntry["result"];
+      failure_reason: string | null;
+      occurred_at: string;
+    }[];
+
+    // Actor names, so history reads as people rather than ids.
+    const actorIds = [...new Set(rows.map((r) => r.actor_user_id).filter((v): v is string => v !== null))];
+    const names = new Map<string, string>();
+    if (actorIds.length > 0) {
+      const u = await db.from("users").select("id, full_name, email").in("id", actorIds);
+      for (const row of (u.data ?? []) as { id: string; full_name: string | null; email: string }[]) {
+        names.set(row.id, row.full_name ?? row.email);
+      }
+    }
+
+    const body: HistoryResponse = historyResponseSchema.parse({
+      recordId: id,
+      entries: rows.map((r) => ({
+        id: String(r.id),
+        actorType: r.actor_type,
+        actorName: r.actor_user_id ? (names.get(r.actor_user_id) ?? null) : null,
+        action: r.action,
+        objectType: r.object_type,
+        objectId: r.object_id,
+        result: r.result,
+        failureReason: r.failure_reason,
+        changed: changedFields(r.previous_state, r.new_state),
+        evidence: evidenceRefs(r.evidence),
+        occurredAt: r.occurred_at,
+      })),
+      visible: rows.length,
+      returned: rows.length,
+    });
+    return c.json(body);
+  });
+
   /** One verb on one step. Guards are evaluated here and re-checked by the database at execution. */
   app.post("/work-items/:id/actions", async (c) => {
     const { db, user } = c.get("auth");
@@ -763,4 +843,43 @@ export function workRoutes(deps: WorkDeps) {
 function engineError(err: { code?: string; message?: string }): HttpError {
   if (err.code === "40001") return new HttpError(409, "version_stale");
   return mapDatabaseError(err);
+}
+
+/** The fields that changed, as "field: before → after". Never the whole row, never a document. */
+function changedFields(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+): string[] {
+  const keys = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])];
+  const out: string[] = [];
+  for (const k of keys) {
+    const b = before?.[k];
+    const a = after?.[k];
+    if (JSON.stringify(b) === JSON.stringify(a)) continue;
+    const show = (v: unknown) =>
+      v === undefined || v === null
+        ? "nothing"
+        : typeof v === "object"
+          ? Array.isArray(v)
+            ? `${v.length} item${v.length === 1 ? "" : "s"}`
+            : "changed"
+          : String(v).slice(0, 80);
+    out.push(before && after ? `${k}: ${show(b)} → ${show(a)}` : `${k}: ${show(a ?? b)}`);
+  }
+  return out.slice(0, 20);
+}
+
+/** Evidence references recorded with an action, flattened to the strings a person recorded. */
+function evidenceRefs(evidence: unknown): string[] {
+  if (evidence === null || evidence === undefined) return [];
+  if (Array.isArray(evidence)) {
+    return evidence
+      .map((e) => (typeof e === "string" ? e : typeof e === "object" && e !== null && "reference" in e ? String((e as { reference: unknown }).reference) : null))
+      .filter((v): v is string => v !== null)
+      .slice(0, 10);
+  }
+  if (typeof evidence === "object" && "reference" in (evidence as object)) {
+    return [String((evidence as { reference: unknown }).reference)];
+  }
+  return [];
 }
