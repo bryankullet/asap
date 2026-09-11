@@ -17,6 +17,7 @@ import {
   emailThreadResponseSchema,
   connectMailboxResponseSchema,
   documentDetailSchema,
+  documentFiledResponseSchema,
   uploadResponseSchema,
   reviewFieldResponseSchema,
   type ReviewFieldRequest,
@@ -245,6 +246,9 @@ export const api = {
    * Ask for somewhere to put a file. The bytes never pass through the API: it answers with a
    * signed URL the browser PUTs to, and the same bytes already on file are not an upload.
    */
+  /** Tells the API the bytes arrived: the upload is direct to storage, so it cannot know. */
+  documentFiled: (id: string) =>
+    request("POST", `/documents/${id}/filed`, documentFiledResponseSchema, {}),
   uploadDocument: (input: UploadInput) =>
     request("POST", "/documents", uploadResponseSchema, input),
   /** One person's decision about one extracted field. Extraction proposes; a person decides. */

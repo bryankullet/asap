@@ -59,7 +59,13 @@ export function Documents() {
         body: bytes,
       });
       if (!put.ok) throw new Error("The file store would not accept the file.");
-      return asked;
+      /*
+       * The upload went straight to storage, so the API has not seen it and does not know it
+       * finished. Telling it is what puts the document in the queue to be read — without this the
+       * file sits in the bucket and "ASAP reads it next" is not true.
+       */
+      const filed = await api.documentFiled(asked.document.id);
+      return { ...asked, document: filed.document };
     },
     onSuccess: (res) => {
       setUploadError(null);

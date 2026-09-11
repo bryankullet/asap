@@ -67,6 +67,7 @@ const app = createApp({
   invitationTtlHours: env.INVITATION_TOKEN_TTL_HOURS,
   exposeAcceptUrl: env.APP_ENV === "local",
   executor: createExecutor({ logger, delayMs: 400 }),
+  apiInternalKey: env.API_INTERNAL_KEY,
   bootToken,
 });
 

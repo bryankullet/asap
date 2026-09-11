@@ -14,6 +14,7 @@ import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { importRoutes } from "./routes/imports.js";
+import { internalRoutes } from "./routes/internal.js";
 import { documentRoutes } from "./routes/documents.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
@@ -35,6 +36,11 @@ export type AppDeps = {
   exposeAcceptUrl: boolean;
   /** Runs a work item run in-process; tests inject an immediate one. */
   executor: (db: SupabaseClient) => Executor;
+  /**
+   * The secret the worker tier presents. Absent in tests that do not exercise dispatch, in which
+   * case the internal surface is not mounted at all rather than mounted with an empty key.
+   */
+  apiInternalKey?: string | undefined;
   /** Identifies this process on every run it starts; recovery on boot ends runs from other tokens. */
   bootToken: string;
   /**
@@ -91,6 +97,16 @@ export function createApp(deps: AppDeps) {
 
   // Public
   app.route("/", healthRoutes(build));
+  /*
+   * The worker tier's own surface. Mounted before the session guard because it has no session:
+   * it carries a shared secret instead, and is refused without it.
+   */
+  if (deps.apiInternalKey) {
+    app.route(
+      "/",
+      internalRoutes({ logger, service: () => supabase.service(), internalKey: deps.apiInternalKey }),
+    );
+  }
   app.route("/", invitationPublicRoutes({ supabase }));
 
   // Signed-in. The middleware is bound to the authenticated path prefixes only, so an unknown

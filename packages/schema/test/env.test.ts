@@ -110,6 +110,9 @@ describe("loadWorkerEnv", () => {
       APP_ENV: "local",
       WORKER_DATABASE_URL: "postgresql://asap_worker:pw@127.0.0.1:54322/postgres",
       ENCRYPTION_KEY: KEY,
+      // Workers schedule; the API is the engine. They need somewhere to send the work and a
+      // secret proving they are not a browser — never a service key.
+      API_BASE_URL: "http://127.0.0.1:8787",
       API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
     });
     expect(env.LOG_LEVEL).toBe("info");

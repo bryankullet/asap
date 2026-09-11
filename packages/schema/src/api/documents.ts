@@ -107,6 +107,23 @@ export const documentDetailSchema = z.object({
 });
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 
+/**
+ * `POST /documents/:id/filed` — the browser says the bytes arrived.
+ *
+ * The upload is direct to storage, so the API never sees the transfer and cannot know it finished.
+ * Without this the file sits in the bucket with nothing waiting on it, and "ASAP reads it next" —
+ * which the screen says — is untrue. This is the signal that makes it true.
+ *
+ * It carries nothing. Everything it needs is on the document row, and a body would only be a way
+ * for a browser to claim something about a file the server can check for itself.
+ */
+export const documentFiledResponseSchema = z.object({
+  document: documentSummarySchema,
+  /** False when the object is not in the bucket: the upload did not finish, whatever was claimed. */
+  filed: z.boolean(),
+});
+export type DocumentFiledResponse = z.infer<typeof documentFiledResponseSchema>;
+
 export const documentsResponseSchema = z.object({ documents: z.array(documentSummarySchema) });
 export type DocumentsResponse = z.infer<typeof documentsResponseSchema>;
 

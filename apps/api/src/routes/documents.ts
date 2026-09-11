@@ -3,6 +3,7 @@ import {
   DOCUMENT_PAGE_COLUMNS,
   documentDetailSchema,
   documentsResponseSchema,
+  documentFiledResponseSchema,
   reviewFieldRequestSchema,
   reviewFieldResponseSchema,
   uploadRequestSchema,
@@ -13,6 +14,7 @@ import {
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
+import { emitEvent } from "../events/emit.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 
@@ -115,6 +117,10 @@ function safeName(filename: string): string {
   return cleaned.length > 0 ? cleaned.slice(0, 120) : "file";
 }
 
+/** The columns a document summary needs. Never the storage token, never the contents. */
+const DOCUMENT_SUMMARY_COLUMNS =
+  "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at";
+
 export function documentRoutes(deps: {
   logger: Logger;
   bucket: string;
@@ -130,7 +136,7 @@ export function documentRoutes(deps: {
     let q = db
       .from("documents")
       .select(
-        "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at",
+        DOCUMENT_SUMMARY_COLUMNS,
       )
       .eq("organization_id", org.id)
       .is("deleted_at", null);
@@ -154,7 +160,7 @@ export function documentRoutes(deps: {
     const { data, error } = await db
       .from("documents")
       .select(
-        "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at",
+        DOCUMENT_SUMMARY_COLUMNS,
       )
       .eq("organization_id", org.id)
       .eq("id", id)
@@ -233,7 +239,7 @@ export function documentRoutes(deps: {
     const { data: existing, error: existingErr } = await db
       .from("documents")
       .select(
-        "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at",
+        DOCUMENT_SUMMARY_COLUMNS,
       )
       .eq("organization_id", org.id)
       .eq("content_sha256", req.contentSha256)
@@ -270,7 +276,7 @@ export function documentRoutes(deps: {
         uploaded_by: user.id,
       })
       .select(
-        "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at",
+        DOCUMENT_SUMMARY_COLUMNS,
       )
       .single();
     if (error) return sendError(c, mapDatabaseError(error));
@@ -301,6 +307,86 @@ export function documentRoutes(deps: {
         uploadToken: signed.data.token,
         storagePath,
       }),
+    );
+  });
+
+  /**
+   * The bytes arrived.
+   *
+   * The browser uploads straight to storage, so the API never sees the transfer and would
+   * otherwise never learn it finished — the file would sit in the bucket with nothing waiting on
+   * it. This is the signal that puts the document in the queue to be read.
+   *
+   * It checks the object is really there rather than taking the browser's word for it. A client
+   * that called this without uploading anything would otherwise queue a document that does not
+   * exist, and the extractor would fail on it later and further away from the cause.
+   */
+  app.post("/documents/:id/filed", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    const found = await db
+      .from("documents")
+      .select(DOCUMENT_SUMMARY_COLUMNS)
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (found.error) return sendError(c, mapDatabaseError(found.error));
+    if (!found.data) throw new HttpError(404, "not_found", "No document with that id");
+    const row = found.data as DocumentRow;
+
+    // Already queued or read: saying so beats queueing it twice, and a retried request from a
+    // flaky connection is the ordinary case rather than the exception.
+    if (row.extraction_state !== "not_started") {
+      return c.json(
+        documentFiledResponseSchema.parse({ document: summarise(row), filed: true }),
+      );
+    }
+
+    const exists = await db.storage.from(deps.bucket).createSignedUrl(row.storage_path, 60);
+    if (exists.error || !exists.data) {
+      return c.json(documentFiledResponseSchema.parse({ document: summarise(row), filed: false }));
+    }
+
+    const queued = await db
+      .from("documents")
+      .update({ extraction_state: "queued", updated_at: new Date().toISOString() })
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .select(DOCUMENT_SUMMARY_COLUMNS)
+      .single();
+    if (queued.error) return sendError(c, mapDatabaseError(queued.error));
+
+    /*
+     * What arrived, so anything waiting for a document can act on it. The filename and kind, never
+     * a byte of the contents: a consumer that needs the document reads it from storage under its
+     * own rights.
+     */
+    await emitEvent(db, deps.logger, {
+      organizationId: org.id,
+      eventType: "document.received",
+      entityType: "document",
+      entityId: id,
+      actor: "user",
+      actorUserId: user.id,
+      payload: { kind: row.kind, filename: row.filename, clientId: row.client_id, workItemId: row.work_item_id },
+    });
+
+    await recordAudit(db, deps.logger, c, {
+      organizationId: org.id,
+      actorUserId: user.id,
+      action: "document.filed",
+      objectType: "document",
+      objectId: id,
+      result: "success",
+      newState: { filename: row.filename, kind: row.kind },
+    });
+
+    return c.json(
+      documentFiledResponseSchema.parse({ document: summarise(queued.data as DocumentRow), filed: true }),
     );
   });
 
