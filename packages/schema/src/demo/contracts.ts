@@ -205,6 +205,16 @@ export const demoAutomationSchema = z.object({
   exceptionHandling: z.string(),
   lastTest: z.string(),
   runs: z.array(z.object({ at: z.string(), outcome: z.string(), detail: z.string() })),
+  /**
+   * How the approved demo draws the automation on its grid: an icon, the short name, one sentence,
+   * the two ends of the flow line, and what it has done lately.
+   */
+  icon: z.string(),
+  headline: z.string(),
+  summary: z.string(),
+  flowFrom: z.string(),
+  flowTo: z.string(),
+  activity: z.string(),
 });
 export type DemoAutomation = z.infer<typeof demoAutomationSchema>;
 

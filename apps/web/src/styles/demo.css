@@ -1409,6 +1409,178 @@ body.demo-body {
   color: var(--muted);
 }
 
+/* ---- Automations: standing instructions, and what they have done ---------------------------- */
+.automation-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  margin-bottom: 25px;
+}
+.automation-intro > div:first-child {
+  max-width: 580px;
+}
+.automation-intro h2 {
+  font: 700 27px Manrope, sans-serif;
+  margin: 7px 0 0;
+}
+.automation-intro p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  /* The original leaves the UA's 1em paragraph margin, which Tailwind's preflight zeroes. */
+  margin: 12px 0;
+}
+.safety-card {
+  background: #ebf3ed;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.safety-card > span {
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  background: #cbe8d3;
+  color: var(--green);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.safety-card strong,
+.safety-card small {
+  display: block;
+}
+.safety-card strong {
+  font-size: 10px;
+}
+.safety-card small {
+  font-size: 8px;
+  color: #68756b;
+  margin-top: 2px;
+}
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 13px;
+}
+.automation-card {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px;
+}
+.automation-card h3 {
+  font: 700 16px Manrope, sans-serif;
+  margin: 13px 0 6px;
+}
+.automation-card p {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+.auto-top {
+  display: flex;
+  justify-content: space-between;
+}
+.auto-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  background: #eaf0eb;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+.switch input {
+  display: none;
+}
+.switch i {
+  display: block;
+  width: 35px;
+  height: 20px;
+  border-radius: 99px;
+  background: #cfd6d0;
+  position: relative;
+}
+.switch i::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  top: 3px;
+  left: 3px;
+  transition: 0.2s;
+}
+.switch input:checked + i {
+  background: #307653;
+}
+.switch input:checked + i::after {
+  left: 18px;
+}
+.flow-line {
+  margin: 15px 0;
+  background: #f6f8f6;
+  border-radius: 11px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #576359;
+}
+.automation-card footer {
+  border-top: 1px solid #edf0ed;
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.automation-card footer span {
+  font-size: 9px;
+  color: #7a857c;
+}
+.automation-card footer button,
+.automation-card footer .link {
+  border: 0;
+  background: none;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+}
+/* Chromium's own button padding, which the original's `<button>` gets for free. */
+.automation-card footer .link {
+  display: inline-block;
+  padding: 1px 6px;
+}
+.new-automation {
+  min-height: 210px;
+  border: 1px dashed #bdc8bf;
+  border-radius: 18px;
+  background: transparent;
+  color: #6c776e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none;
+}
+.new-automation span {
+  font-size: 24px;
+}
+.new-automation strong {
+  color: var(--ink);
+}
+.new-automation small {
+  font-size: 10px;
+}
+
 /* ---- Responsive: the demo's own breakpoints, 1000px and 760px ---------------------------- */
 @media (max-width: 1000px) {
   .app-shell {
@@ -1444,6 +1616,13 @@ body.demo-body {
   }
   .policy-title {
     min-width: 270px;
+  }
+  .automation-intro {
+    align-items: flex-start;
+    gap: 15px;
+  }
+  .safety-card {
+    min-width: 230px;
   }
 }
 
@@ -1529,8 +1708,18 @@ body.demo-body {
   .welcome-row h2 {
     font-size: 21px;
   }
+  .automation-grid,
   .spaces-grid {
     grid-template-columns: 1fr;
+  }
+  .automation-intro {
+    display: block;
+  }
+  .automation-intro h2 {
+    font-size: 21px;
+  }
+  .safety-card {
+    margin-top: 14px;
   }
   .job-card {
     align-items: flex-start;

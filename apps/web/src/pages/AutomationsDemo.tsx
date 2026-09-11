@@ -2,6 +2,7 @@ import { DEMO_NOTICE, type DemoAutomation } from "@asap/schema";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { MissingData } from "../components/states.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { DemoBoundary } from "../demo/DemoBoundary.js";
 import { useDemo } from "../demo/state.js";
 
@@ -20,51 +21,90 @@ export function AutomationsDemo() {
   const demo = useDemo();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const active = demo.automations.filter((a) => a.enabled).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <h1 className="font-heading text-xl font-semibold text-ink">Automations</h1>
-          <p className="text-sm text-ink-secondary">
-            Standing instructions: when this happens, and these are true, prepare that. None of them
-            sends, approves or decides anything by itself.
-          </p>
+    <>
+      <ScreenTitle
+        title="Automations"
+        meta="Teach ASAP what to watch for and prepare"
+        actions={
+          <div className="top-actions">
+            <button
+              type="button"
+              className="new-btn"
+              aria-expanded={creating}
+              onClick={() => setCreating((v) => !v)}
+            >
+              ＋ New automation
+            </button>
+          </div>
+        }
+      />
+
+      <section className="page-scroll automation-page">
+        <div className="automation-intro">
+          <div>
+            <span className="eyebrow">
+              {active} ACTIVE AUTOMATION{active === 1 ? "" : "S"}
+            </span>
+            <h2>ASAP watches. Your team decides.</h2>
+            <p>
+              Automations prepare the next step using your records, documents and email.
+              Consequential actions still wait for human approval.
+            </p>
+          </div>
+          {/* The rule that does not bend, on the face of the screen rather than in a setting. */}
+          <div className="safety-card">
+            <span aria-hidden>✓</span>
+            <div>
+              <strong>Human approval is on</strong>
+              <small>External messages and policy changes are never automatic.</small>
+            </div>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreating((v) => !v)}
-          aria-expanded={creating}
-          className="rounded-control bg-navy px-3 py-1.5 text-sm text-paper hover:bg-navy-hover"
-        >
-          Teach ASAP something new
-        </button>
-      </header>
 
-      {creating && (
-        <CreateAutomation
-          onCancel={() => setCreating(false)}
-          onCreate={(draft) => {
-            const id = demo.createAutomation(draft);
-            setCreating(false);
-            void navigate({ to: "/automations/$id", params: { id } });
-          }}
-        />
-      )}
+        {creating && (
+          <CreateAutomation
+            onCancel={() => setCreating(false)}
+            onCreate={(draft) => {
+              const id = demo.createAutomation(draft);
+              setCreating(false);
+              void navigate({ to: "/automations/$id", params: { id } });
+            }}
+          />
+        )}
 
-      <ul className="flex flex-col gap-2">
-        {demo.automations.map((a) => (
-          <li key={a.id}>
-            <AutomationCard automation={a} onToggle={() => demo.toggleAutomation(a.id)} />
-          </li>
-        ))}
-      </ul>
+        <div className="automation-grid">
+          {demo.automations.map((a) => (
+            <AutomationCard
+              key={a.id}
+              automation={a}
+              onToggle={() => demo.toggleAutomation(a.id)}
+            />
+          ))}
+          <button type="button" className="new-automation" onClick={() => setCreating(true)}>
+            <span aria-hidden>＋</span>
+            <strong>Create an automation</strong>
+            <small>Describe what ASAP should watch for</small>
+          </button>
+        </div>
 
-      <DemoBoundary>{DEMO_NOTICE} Switching one on changes demonstration state only.</DemoBoundary>
-    </div>
+        <DemoBoundary>
+          {DEMO_NOTICE} Switching one on changes demonstration state only.
+        </DemoBoundary>
+      </section>
+    </>
   );
 }
 
+/**
+ * One automation on the grid, in the approved demo's card: the icon and its switch, the name, one
+ * sentence, the flow line from trigger to prepared step, and what it has done lately.
+ *
+ * The switch is the real state, and a paused card says it is paused rather than looking identical
+ * to a running one.
+ */
 function AutomationCard({
   automation,
   onToggle,
@@ -73,46 +113,34 @@ function AutomationCard({
   onToggle: () => void;
 }) {
   return (
-    <article className="flex flex-col gap-2 rounded-card border border-line-strong bg-paper p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <Link
-          to="/automations/$id"
-          params={{ id: automation.id }}
-          className="font-medium text-ink hover:underline"
-        >
-          {automation.name}
-        </Link>
-        <span
-          className={`rounded-pill px-2.5 py-0.5 text-xs ${
-            automation.enabled
-              ? "bg-accent-green-soft text-accent-green-ink"
-              : "bg-wash text-ink-muted"
-          }`}
-        >
-          {automation.enabled ? "On" : "Paused"}
+    <article className="automation-card" data-state={automation.enabled ? "active" : "paused"}>
+      <div className="auto-top">
+        <span className="auto-icon" aria-hidden>
+          {automation.icon}
         </span>
+        <label className="switch">
+          <span className="sr-only">
+            {automation.enabled ? `Pause ${automation.name}` : `Switch on ${automation.name}`}
+          </span>
+          <input type="checkbox" checked={automation.enabled} onChange={onToggle} />
+          <i aria-hidden />
+        </label>
       </div>
-      <p className="text-sm text-ink-secondary">
-        When {automation.trigger.toLowerCase()}, prepare: {automation.preparedAction.toLowerCase()}.
-      </p>
-      <p className="text-xs text-ink-muted">{automation.approval}</p>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-pressed={automation.enabled}
-          className="rounded-pill border border-line-strong px-3 py-1 text-sm text-ink-secondary hover:border-ink-muted"
-        >
-          {automation.enabled ? "Pause" : "Switch on"}
-        </button>
-        <Link
-          to="/automations/$id"
-          params={{ id: automation.id }}
-          className="text-sm text-ink-secondary hover:underline"
-        >
-          Detail and history
+      <h3>{automation.headline}</h3>
+      <p>{automation.summary}</p>
+      <div className="flow-line">
+        <span>{automation.flowFrom}</span>
+        <b aria-hidden>→</b>
+        <span>{automation.flowTo}</span>
+      </div>
+      <footer>
+        <span>
+          {automation.enabled ? automation.activity : "Paused · No new runs"}
+        </span>
+        <Link to="/automations/$id" params={{ id: automation.id }} className="link">
+          Open
         </Link>
-      </div>
+      </footer>
     </article>
   );
 }
@@ -316,6 +344,13 @@ function CreateAutomation({
             ? "A person approves before anything leaves the brokerage"
             : "Prepares without asking. It still cannot send, approve or decide.",
           exceptionHandling: "If ASAP is unsure, it raises it for a person rather than guessing",
+          // How it will draw on the grid. A new automation has done nothing, and says so.
+          icon: "✦",
+          headline: name,
+          summary: action,
+          flowFrom: trigger,
+          flowTo: action,
+          activity: "New · not yet run",
         });
       }}
     >
