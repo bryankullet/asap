@@ -21,6 +21,12 @@ export type FakeDb = {
    * about the difference between "the route did not send it" and "the column has a default".
    */
   defaults?: Record<string, Record<string, unknown>>;
+  /**
+   * Unique constraints the database enforces, per table, as column lists. Without these a test
+   * of idempotency proves nothing: the route relies on the insert *failing*, and a stand-in that
+   * accepts every insert would pass while the real thing sent a second email.
+   */
+  uniques?: Record<string, string[][]>;
 };
 
 class Query {
@@ -176,7 +182,21 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
             ...(db.defaults?.[table] ?? {}),
             ...row,
           };
-          (db.tables[table] ??= []).push(stored);
+          const rows = (db.tables[table] ??= []);
+          for (const cols of db.uniques?.[table] ?? []) {
+            if (rows.some((r) => cols.every((c) => r[c] === stored[c]))) {
+              // 23505, as Postgres would answer. The route's duplicate path depends on it.
+              const conflict = { code: "23505", message: `duplicate key value violates unique constraint on ${cols.join(",")}`, details: null, hint: null };
+              return {
+                then: (resolve: (v: { error: unknown }) => unknown) => Promise.resolve(resolve({ error: conflict })),
+                select: () => ({
+                  single: async () => ({ data: null, error: conflict }),
+                  maybeSingle: async () => ({ data: null, error: conflict }),
+                }),
+              };
+            }
+          }
+          rows.push(stored);
           // Awaitable on its own, and chainable as .select(...).single() — both shapes the API
           // uses. Returning the stored row matters: a route that reads back what it wrote must
           // see the same row a real insert would have returned.
