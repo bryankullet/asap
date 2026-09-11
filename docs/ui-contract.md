@@ -1,3 +1,9 @@
+> **Superseded in part by D-064 (2026-09-11).** The approved interactive demo is now controlling
+> for the shell, the Work vocabulary and the navigation rules. Where this document and the demo disagree, the demo wins and this document is the
+> historical record. Specifically: the shell is Discover · Ask ASAP · Work · Jobs · Automations;
+> Jobs is a destination; Ask ASAP is a destination as well as the docked composer; Work's filters
+> are Active · Waiting · For review · Completed · Pinned · Recent; and "Needs you" is retired.
+
 # ASAP UI contract
 
 Ported from the v4 prototype's `interaction-contract.md` (UI Build Spec v1, Part 0) and updated to the Screen Map v3 vocabulary. The build spec wins where this file and it disagree; this file is the short version a reviewer checks a screen against.

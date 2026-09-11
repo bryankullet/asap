@@ -102,14 +102,14 @@ describe("status layers", () => {
 describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
   it("renders a with_party task as With <party>", () => {
     expect(taskLabel({ status: "with_party", party: "Jubilee", since: "2026-09-03" })).toBe(
-      "With Jubilee",
+      "Waiting on Jubilee",
     );
-    expect(taskLabel({ status: "needs_you" })).toBe("Needs you");
+    expect(taskLabel({ status: "needs_you" })).toBe("Active");
   });
 
   it("the prototype's rendered task group shares no word with the other layers", () => {
     const groups = [
-      ["Needs you", "With Jubilee", "In progress", "Done"],
+      ["Active", "Waiting on Jubilee", "In progress", "Completed"],
       Object.values(RUN_LABELS),
       Object.values(COVER_LABELS),
       Object.values(MONEY_LABELS),
@@ -129,15 +129,10 @@ describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
 });
 
 describe("banned strings", () => {
-  it("lists exactly the spec's six words", () => {
-    expect([...BANNED_STRINGS]).toEqual([
-      "Waiting",
-      "Failed",
-      "Success",
-      "Space",
-      "Job",
-      "Completed",
-    ]);
+  it("lists exactly the words that would mislead", () => {
+    // Amended by D-064: Waiting, Completed and Job are the approved vocabulary now, so banning
+    // them banned the product. What remains is what would actually mislead.
+    expect([...BANNED_STRINGS]).toEqual(["Space", "Needs you", "Success", "Failed"]);
   });
 
   it("no label in any non-task layer contains a banned word", () => {
@@ -149,19 +144,29 @@ describe("banned strings", () => {
     }
   });
 
-  it("task labels may say Completed but nothing else on the list", () => {
-    expect(bannedStringsFor("task")).not.toContain("Completed");
+  it("lets the run layer say Failed, and no other layer", () => {
+    // A job genuinely could not finish. On a business layer the same word would read as a claim
+    // about cover, a claim or money.
+    expect(bannedStringsFor("run")).not.toContain("Failed");
+    expect(containsBannedString("Could not finish", "run")).toBe(false);
+    expect(containsBannedString("Failed", "run")).toBe(false);
+    expect(containsBannedString("Failed", "cover")).toBe(true);
+  });
+
+  it("clears every approved label, on every layer", () => {
     for (const label of Object.values(TASK_LABELS)) {
       expect(containsBannedString(label, "task"), `task: "${label}"`).toBe(false);
     }
-    expect(containsBannedString("Completed", "any")).toBe(true);
-    expect(containsBannedString("Completed", "task")).toBe(false);
+    // The words D-064 adopted are no longer banned anywhere.
+    for (const word of ["Waiting", "Completed", "Active", "For review"]) {
+      expect(containsBannedString(word, "any"), word).toBe(false);
+    }
   });
 
-  it("matches whole words only", () => {
+  it("matches whole words only, and still refuses the retired vocabulary", () => {
     expect(containsBannedString("Workspace")).toBe(false);
-    expect(containsBannedString("Jobs")).toBe(false);
-    expect(containsBannedString("Job")).toBe(true);
-    expect(containsBannedString("The run Failed")).toBe(true);
+    expect(containsBannedString("Space")).toBe(true);
+    expect(containsBannedString("This needs you to look")).toBe(false);
+    expect(containsBannedString("Needs you")).toBe(true);
   });
 });

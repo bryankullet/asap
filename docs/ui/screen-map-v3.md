@@ -1,3 +1,9 @@
+> **Superseded in part by D-064 (2026-09-11).** The approved interactive demo is now controlling
+> for the shell and destination list. Where this document and the demo disagree, the demo wins and this document is the
+> historical record. Specifically: the shell is Discover · Ask ASAP · Work · Jobs · Automations;
+> Jobs is a destination; Ask ASAP is a destination as well as the docked composer; Work's filters
+> are Active · Waiting · For review · Completed · Pinned · Recent; and "Needs you" is retired.
+
 # ASAP — Space and Screen Map, version 3
 
 **This replaces version 2 entirely.** Read it alongside the v1 catalogue, which still holds the detailed entries, the evidence rules, the component library and the field lists. Where v3 and v1 disagree, v3 wins.

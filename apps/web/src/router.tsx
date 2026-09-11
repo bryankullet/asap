@@ -1,4 +1,4 @@
-import { K01View, SpaceView, WorkView } from "@asap/schema";
+import { K01View, SpaceView } from "@asap/schema";
 import {
   Outlet,
   createRootRoute,
@@ -6,13 +6,21 @@ import {
   createRouter,
   redirect,
 } from "@tanstack/react-router";
+import { Ask } from "./pages/Ask.js";
+import { Connections } from "./pages/Connections.js";
+import { DiscoverDemo } from "./pages/DiscoverDemo.js";
+import { DocumentViewer, Documents } from "./pages/Documents.js";
+import { Email, EmailThread } from "./pages/Email.js";
+import { JobDetail, Jobs } from "./pages/Jobs.js";
+import { NewThing } from "./pages/NewThing.js";
+import { WorkDemo, WorkDetail } from "./pages/WorkDemo.js";
 import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 import { AuthCallback } from "./pages/AuthCallback.js";
 import { AgreementVersion } from "./pages/AgreementVersion.js";
 import { Agreements } from "./pages/Agreements.js";
-import { AutomationDetail, Automations } from "./pages/Automations.js";
+import { AutomationDemoDetail, AutomationsDemo } from "./pages/AutomationsDemo.js";
 import { ClientFile } from "./pages/ClientFile.js";
 import { Files } from "./pages/Files.js";
 import { CreateOrganization } from "./pages/CreateOrganization.js";
@@ -21,9 +29,7 @@ import { Onboarding } from "./pages/Onboarding.js";
 import { Record } from "./pages/Record.js";
 import { SignIn } from "./pages/SignIn.js";
 import { SignUp } from "./pages/SignUp.js";
-import { Discover } from "./pages/Discover.js";
-import { Search } from "./pages/Search.js";
-import { Work } from "./pages/Work.js";
+import { SearchDemo } from "./pages/SearchDemo.js";
 import { Shell } from "./shell/Shell.js";
 
 /** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
@@ -91,7 +97,7 @@ const index = createRoute({
 const discover = createRoute({
   getParentRoute: () => shell,
   path: "/discover",
-  component: Discover,
+  component: DiscoverDemo,
   /** `?ask=` pre-fills the docked composer, so a Discover card can open Ask on its own context. */
   validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
 });
@@ -106,18 +112,23 @@ const legacyToday = createRoute({
 const work = createRoute({
   getParentRoute: () => shell,
   path: "/work",
-  component: Work,
-  validateSearch: z.object({ view: WorkView.catch("needs") }),
+  component: WorkDemo,
+  // The approved Work vocabulary (D-064). Old links carrying ?view=needs still land somewhere.
+  validateSearch: z.object({
+    view: z
+      .enum(["active", "waiting", "review", "completed", "pinned", "recent"])
+      .catch("active"),
+  }),
 });
 const automations = createRoute({
   getParentRoute: () => shell,
   path: "/automations",
-  component: Automations,
+  component: AutomationsDemo,
 });
 const automationDetail = createRoute({
   getParentRoute: () => shell,
   path: "/automations/$id",
-  component: AutomationDetail,
+  component: AutomationDemoDetail,
 });
 const record = createRoute({
   getParentRoute: () => shell,
@@ -144,7 +155,7 @@ const record = createRoute({
 const search = createRoute({
   getParentRoute: () => shell,
   path: "/search",
-  component: Search,
+  component: SearchDemo,
   validateSearch: z.object({ q: z.string().max(200).optional().catch(undefined) }),
 });
 const files = createRoute({
@@ -181,7 +192,65 @@ const legacyMembers = createRoute({
   },
 });
 
-export const routeTree = rootRoute.addChildren([
+export 
+/** Ask ASAP in full (D-064): a destination as well as the composer docked on every surface. */
+const ask = createRoute({
+  getParentRoute: () => shell,
+  path: "/ask",
+  component: Ask,
+  validateSearch: z.object({ scenario: z.string().max(80).optional().catch(undefined) }),
+});
+/** Jobs — what ASAP is processing. Kept separate from Work, which is what a person owns. */
+const jobs = createRoute({
+  getParentRoute: () => shell,
+  path: "/jobs",
+  component: Jobs,
+  validateSearch: z.object({
+    filter: z
+      .enum(["running", "waiting", "needs_human", "completed", "failed"])
+      .catch("running"),
+  }),
+});
+const jobDetail = createRoute({
+  getParentRoute: () => shell,
+  path: "/jobs/$jobId",
+  component: JobDetail,
+});
+const workDetail = createRoute({
+  getParentRoute: () => shell,
+  path: "/work/$workId",
+  component: WorkDetail,
+});
+const newThing = createRoute({
+  getParentRoute: () => shell,
+  path: "/new",
+  component: NewThing,
+  validateSearch: z.object({ kind: z.string().max(40).optional().catch(undefined) }),
+});
+const email = createRoute({ getParentRoute: () => shell, path: "/email", component: Email });
+const emailThread = createRoute({
+  getParentRoute: () => shell,
+  path: "/email/$threadId",
+  component: EmailThread,
+  validateSearch: z.object({ scenario: z.string().max(80).optional().catch(undefined) }),
+});
+const documents = createRoute({
+  getParentRoute: () => shell,
+  path: "/documents",
+  component: Documents,
+});
+const documentViewer = createRoute({
+  getParentRoute: () => shell,
+  path: "/documents/$documentId",
+  component: DocumentViewer,
+});
+const connections = createRoute({
+  getParentRoute: () => shell,
+  path: "/settings/connections",
+  component: Connections,
+});
+
+const routeTree = rootRoute.addChildren([
   signIn,
   signUp,
   authCallback,
@@ -194,6 +263,16 @@ export const routeTree = rootRoute.addChildren([
         index,
         discover,
         legacyToday,
+        ask,
+        jobs,
+        jobDetail,
+        workDetail,
+        newThing,
+        email,
+        emailThread,
+        documents,
+        documentViewer,
+        connections,
         search,
         work,
         automations,

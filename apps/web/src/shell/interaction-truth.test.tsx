@@ -55,11 +55,18 @@ describe("+ New", () => {
 });
 
 describe("the shell's destinations", () => {
-  it("is Discover, Work, Automations — three, and Jobs is not one of them", () => {
-    expect(NAV.map((n) => n.label)).toEqual(["Discover", "Work", "Automations"]);
-    expect(NAV).toHaveLength(3);
-    // D-060: the richer run experience lives in Activity, run history and Work.
-    expect(NEVER_NAV).toContain("Jobs");
+  it("is the approved five, and Jobs is one of them (D-064)", () => {
+    expect(NAV.map((n) => n.label)).toEqual([
+      "Discover",
+      "Ask ASAP",
+      "Work",
+      "Jobs",
+      "Automations",
+    ]);
+    expect(NAV).toHaveLength(5);
+    // Jobs left NEVER_NAV with D-064: the approved demo gives it a surface, and §45 rule 16 bans
+    // insurance modules, which Jobs is not. The module tree is still banned.
+    expect(NEVER_NAV).not.toContain("Jobs");
     expect(NEVER_NAV).toContain("Spaces");
   });
 });

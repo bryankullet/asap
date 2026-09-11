@@ -56,8 +56,11 @@ export type StatusLayer = (typeof STATUS_LAYERS)[number];
  * the fixed prefix, and the component refuses to render without a party and a since date.
  */
 export const TASK_LABELS: Readonly<Record<TaskStatus, string>> = {
-  needs_you: "Needs you",
-  with_party: "With",
+  // D-064: the approved demo's Work vocabulary. "Needs you" is gone from the product's visible
+  // language entirely; the `needs_you` enum value stays because it is a database value and
+  // renaming it would be a migration that changes nothing a person sees.
+  needs_you: "Active",
+  with_party: "Waiting on",
   in_progress: "In progress",
   done: "Done",
 };
@@ -117,22 +120,29 @@ export const LABELS_BY_LAYER: Readonly<Record<StatusLayer, Readonly<Record<strin
 };
 
 /**
- * Words that must never appear in rendered status output. "Completed" is the one exception:
- * it is the task layer's own label for `done` and is banned everywhere else.
- * Components test their rendered text against `bannedStringsFor(layer)`.
+ * Words that must never appear in rendered status output (amended by D-064).
+ *
+ * The list used to ban Waiting, Completed and Job outright. Those are now the approved product's
+ * own vocabulary — Work is Active · Waiting · For review · Completed, and Jobs is a destination —
+ * so banning them banned the thing being built. What survives is the list of words that would
+ * actually mislead:
+ *
+ *  - **Space** — the internal name for what a person sees as Work. It must never surface.
+ *  - **Needs you** — the vocabulary D-064 retired. Nothing may reintroduce it.
+ *  - **Success** — an outcome claim. ASAP reports what happened, not that it went well.
+ *  - **Failed** — reserved for the Jobs layer, where a run genuinely could not finish. On any
+ *    business layer it would read as a claim about cover, a claim or money.
+ *
+ * The separation the old list was reaching for still holds, and is enforced where it matters: an
+ * insurance layer (cover, money, file, stock) may share no word with the task layer, so nobody can
+ * mistake "the task is done" for "the cover is confirmed".
  */
-export const BANNED_STRINGS = [
-  "Waiting",
-  "Failed",
-  "Success",
-  "Space",
-  "Job",
-  "Completed",
-] as const;
+export const BANNED_STRINGS = ["Space", "Needs you", "Success", "Failed"] as const;
 export type BannedString = (typeof BANNED_STRINGS)[number];
 
 export function bannedStringsFor(layer: StatusLayer | "any"): readonly BannedString[] {
-  return layer === "task" ? BANNED_STRINGS.filter((s) => s !== "Completed") : BANNED_STRINGS;
+  // The run layer legitimately says a job Failed; no other layer may.
+  return layer === "run" ? BANNED_STRINGS.filter((s) => s !== "Failed") : BANNED_STRINGS;
 }
 
 /** True when `text` contains a banned word for the given layer, matched as a whole word. */

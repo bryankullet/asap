@@ -8,7 +8,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../lib/api.js";
-import { NEVER_NAV } from "../shell/nav.js";
+import { NAV } from "../shell/nav.js";
 import { renderInRouter } from "../test-utils.js";
 import { PinButton, PinList } from "./PinButton.js";
 
@@ -49,10 +49,10 @@ describe("pins", () => {
     await waitFor(() => expect(container.querySelector("section")).toBeNull());
   });
 
-  it("is never a navigation destination", () => {
-    // The shell test walks NEVER_NAV against the rendered nav; this pins the words themselves, so
-    // adding a Pinned tab fails here as well as there.
-    expect(NEVER_NAV).toContain("Pinned");
-    expect(NEVER_NAV).toContain("Kept");
+  it("is a Work filter, never a destination of its own (D-064)", () => {
+    // Pinned became an approved *filter* inside Work. It is still not a destination: what proves
+    // that is its absence from NAV, not a word list.
+    expect(NAV.map((n) => n.label)).not.toContain("Pinned");
+    expect(NAV.map((n) => n.to)).not.toContain("/pinned");
   });
 });

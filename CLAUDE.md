@@ -189,31 +189,60 @@ ASAP will not:
 |---|---|---|
 | `docs/ui/spec.txt` | 113-screen UI specification in generator-contract format | The screen inventory |
 | `docs/ui/ASAP-UI-Changes.md` | Consolidated change list on top of the spec | **Wins where it conflicts with spec.txt** — it is newer |
-| `docs/ui/prototype/` | Static HTML/CSS/JS prototype of the Intent OS | Look and feel only |
+| The approved interactive demo | `ASAP_Interactive_Demo.zip` + its full description | **Controlling for the visible product** (D-064) — shell, screens, scenarios, interaction |
+| `docs/ui/prototype/` | Earlier static prototype | Superseded by the approved demo |
 | `docs/ASAP-Architecture-v3.1.md` §18, §34, §36, §37 | Generative UI contract, permissions, system states, responsive rules | Wins over all three above |
 
-The prototype is a **built demo with hardcoded seed data**, not source. Do not import from it, do not extend it, do not port its DOM. Read it to see what a Space should feel like, then build the real thing in React.
+The approved demo is the **acceptance specification** for the frontend (D-064): every screen,
+drawer, filter, card, action and scenario in it is a thing to implement, not a suggestion.
+
+Do not import from it, extend it, or port its DOM — it is a static prototype and shipping it would
+be one unauthenticated HTML application. Reimplement it faithfully in React, over the shared Zod
+contracts, the authenticated APIs and real application state. **"Do not copy the DOM" does not mean
+"redesign or simplify."** The React implementation reproduces the approved structure, hierarchy,
+interactions and visual experience.
 
 ### The shape of the product
 
-There is no module navigation. No `Work / Clients / Policies / Renewals / Claims / Money` menu tree — §45 forbids rebuilding it, and no insurance module ever becomes a primary destination. The permanent shell is (D-060, amending D-058 and Screen Map v3 §1.1):
+**The approved interactive demo is the controlling source for the visible product** (D-064). It
+decides the shell, navigation, layouts, scenarios, screen behaviour and interaction design. Where an
+older frontend decision conflicts with it, amend the decision — do not omit the screen.
+
+There is still no insurance-module navigation. No `Work / Clients / Policies / Renewals / Claims /
+Money` menu tree: §45 rule 16 forbids it, and no insurance module ever becomes a destination. The
+permanent shell is (D-064, amending D-058 and D-060):
 
 ```text
 ASAP
 ────────────────
 ✦ Discover
-▣ Work
-⚡ Automations
+⌁ Ask ASAP
+▱ Work
+◴ Jobs
+⌘ Automations
 ────────────────
-+ New
 ⌕ Search
+＋ New
 ────────────────
 Profile
 ```
 
-**Ask ASAP is persistent and is not a destination** — it is available from every surface and always carries the current context. **Activity is where ASAP's runs appear**: a chip beside the Ask composer, a record's run history, and an item in Work when a run stops — never a navigation item. `Jobs` is in `NEVER_NAV` and the shell test asserts it. Business objects surface contextually inside Spaces.
+**Ask ASAP is both.** It stays permanently reachable as the docked composer on every surface, and it
+is a full destination where the whole conversation, its context chip, the generated Work panel and
+the evidence live.
 
-Architecture §42 lists `Discover · Spaces · Jobs · Automations`. Discover is now the first destination (D-060); `Spaces` is called **Work** on screen and the word "Space" never appears in the product; `Jobs` is not a destination. Screen Map v3 and `docs/ui-contract.md` win on what a person sees; the architecture wins on everything behind it (D-058).
+**Jobs is a destination** (D-064, superseding D-060). It answers a different question from Work:
+Jobs is what *ASAP* is processing; Work is what a *person* owns. Keeping them apart is the point of
+showing both — a finished Job means ASAP produced an output, never that a policy renewed, a claim
+was accepted or money arrived.
+
+**Work's vocabulary is Active · Waiting · For review · Completed · Pinned · Recent.** "Needs you" is
+retired from every visible surface; `vocabulary.test.ts` fails if it returns. Pinned is a filter,
+not a destination. "Space" never appears on screen — it is called Work.
+
+**Demo mode** (`VITE_PUBLIC_DEMO_MODE=on`) seeds the approved fictional brokerage, lets Ask answer
+from the approved scenarios with no model configured, and shows the presenter bar. Every surface it
+touches is labelled demonstration data, and a simulated send says so rather than implying delivery.
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 

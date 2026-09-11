@@ -612,3 +612,54 @@ rule 13.
 
 Every firing is recorded, including the ones that did nothing, with each condition's result. A
 silent automation is worse than none, and "why did nothing happen?" has to have an answer.
+
+## D-064 — The approved interactive demo controls the frontend experience
+
+**2026-09-11.** A deliberate product-direction change by the operator. The approved demo at
+`asap-policy-demo.info913882.chatgpt.site` is now the controlling source for the visible product:
+shell, navigation, layouts, scenarios, screen behaviour and interaction design.
+
+**The hierarchy of truth for frontend work is now:**
+
+1. Security, tenant isolation, evidence integrity, permissions, approvals and audit — unchanged and
+   untouchable.
+2. The approved demo, for everything a person sees.
+3. Existing frontend documents, decisions and tests.
+4. Existing frontend implementation.
+
+An earlier frontend decision is no longer a reason to omit an approved screen. Where one conflicts,
+the decision is amended — which is what this entry does.
+
+**Superseded, with the reasoning:**
+
+- **Three destinations (D-058, D-060).** The shell is now Discover · Ask ASAP · Work · Jobs ·
+  Automations. The count was never the rule: §45 rule 16 bans *insurance modules* as navigation —
+  Clients, Policies, Renewals, Claims, Money — and none of these five is one.
+- **Jobs may never be a destination (D-060).** Jobs has left `NEVER_NAV`. It answers a different
+  question from Work — what *ASAP* is processing, rather than what a *person* owns — and showing
+  both separately is how a broker sees the software working without being misled about what a
+  finished job means.
+- **Ask ASAP is only a docked composer.** It stays permanently reachable and is now also a full
+  destination, which is how the approved demo presents it.
+- **The prototype is a loose visual reference.** It is the acceptance specification. The static DOM
+  is still never copied: this is React, over shared Zod contracts, authenticated APIs and real
+  state. "Do not copy the DOM" never meant "simplify the design".
+- **Pinned may not appear in navigation (D-062).** Pinned is now an approved Work *filter*. It is
+  still not a destination, and what proves that is its absence from `NAV`.
+- **`BANNED_STRINGS` (D-056 lineage).** The list banned Waiting, Completed and Job — the approved
+  product's own vocabulary. It now bans only what would mislead: `Space` (called Work on screen),
+  `Needs you` (retired), `Success` (an outcome claim), and `Failed` outside the run layer.
+- **"Needs you" as a status word.** Gone from every visible surface. The `needs_you` enum stays,
+  because it is a database value and renaming it would be a migration that changes nothing a person
+  sees. `vocabulary.test.ts` walks every label map so it cannot come back.
+
+**What did not change, and will not:** multi-tenant isolation, RLS, server-side organization and
+permission resolution, evidence requirements, human approval for consequential actions, audit
+history, no unrestricted model SQL, no model-authored business facts or status, no uncontrolled
+external communication, the provider-neutral gateway, private document storage, idempotency,
+outcome-unknown handling, the separation of Work, Job and insurance status, and no n8n.
+
+**Demo mode.** `VITE_PUBLIC_DEMO_MODE=on` seeds the approved fictional brokerage, lets Ask answer
+from the approved scenarios when no model is configured, and shows the presenter bar. Everything it
+touches is labelled as demonstration data, and a simulated send says so rather than implying a
+provider delivered it. Production keeps real OAuth, real approval and real provider evidence.

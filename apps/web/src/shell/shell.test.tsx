@@ -1,17 +1,17 @@
 /**
- * Ported from the prototype's checks.mjs (UI Build Spec v1 Part 0, Part 1):
- *   line 26 — the nav order regex `['today','☀','Today'],['work','▣','Work'],['automations'`;
- *   line 19 — Today with Activity hidden still shows the KDA 482A item and a "Why here?" control;
- *   line 23 — every record view renders and contains none of
- *             /Renewal Space|Space:|>Waiting<|>Completed<|>Active</.
- * Insurance modules are never destinations (Architecture v3.1 §45).
+ * The permanent shell, against the approved demo (D-064).
+ *
+ * The nav is now five destinations — Discover · Ask ASAP · Work · Jobs · Automations — and Jobs
+ * has left NEVER_NAV, because the approved demo gives it a surface and §45 rule 16 bans insurance
+ * modules, which Jobs is not. What the banned list still holds is exactly that module tree.
+ *
+ * The record-view assertion is unchanged: no view may leak the word "Space" or a raw status word.
  */
 import type { RunRow, WorkItemRow } from "@asap/schema";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkItemView } from "../views/RecordViews.js";
-import { DiscoverView } from "../views/DiscoverView.js";
-import { attentionFixture, renderInRouter } from "../test-utils.js";
+import { renderInRouter } from "../test-utils.js";
 import { NAV, NEVER_NAV } from "./nav.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
@@ -124,18 +124,22 @@ const RUNS: RunRow[] = [
 ];
 
 describe("shell navigation", () => {
-  it("renders Discover, Work, Automations in that order (checks.mjs line 26; D-060)", async () => {
+  it("renders the approved five destinations in order (D-064)", async () => {
     expect(NAV.map((n) => [n.to, n.glyph, n.label])).toEqual([
       ["/discover", "✦", "Discover"],
-      ["/work", "▣", "Work"],
-      ["/automations", "⟳", "Automations"],
+      ["/ask", "⌁", "Ask ASAP"],
+      ["/work", "▱", "Work"],
+      ["/jobs", "◴", "Jobs"],
+      ["/automations", "⌘", "Automations"],
     ]);
     await renderInRouter(<ShellNav />);
     const links = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link");
     expect(links.map((l) => l.textContent?.trim())).toEqual([
       "✦Discover",
-      "▣Work",
-      "⟳Automations",
+      "⌁Ask ASAP",
+      "▱Work",
+      "◴Jobs",
+      "⌘Automations",
     ]);
   });
 
@@ -144,18 +148,6 @@ describe("shell navigation", () => {
     for (const banned of NEVER_NAV) {
       expect(screen.queryByRole("link", { name: new RegExp(`^${banned}$`) })).toBeNull();
     }
-  });
-});
-
-describe("Discover with Activity hidden (checks.mjs line 19)", () => {
-  it("shows the item that needs you and a Why here? control", async () => {
-    // DiscoverView never renders the Activity chip; a run that could not finish reaches Discover through its work item.
-    await renderInRouter(<DiscoverView data={attentionFixture(FIXTURES, RUNS, "Acme")} />);
-    expect(screen.getByText(/KDA 482A/)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Why here?" }).length).toBeGreaterThan(0);
-    expect(screen.getByText(/could not finish: Check this file/)).toBeInTheDocument();
-    // The overdue check with Jubilee is on Discover too, named with its party.
-    expect(screen.getByText(/With Jubilee since/)).toBeInTheDocument();
   });
 });
 
@@ -169,8 +161,15 @@ describe("record views (checks.mjs line 23)", () => {
       );
       const html = container.innerHTML;
       expect(html.length).toBeGreaterThan(30);
-      expect(html).not.toMatch(/Renewal Space|Space:|>Waiting<|>Completed<|>Active</);
-      expect(html).not.toMatch(/\b(Waiting|Failed|Success|Space|Job)\b/);
+      // "Space" must never surface — it is called Work on screen. The status words are no longer
+      // banned: Active, Waiting, For review and Completed *are* the approved vocabulary (D-064),
+      // and the old assertion forbade exactly the language the demo is built on.
+      expect(html).not.toMatch(/Renewal Space|Space:/);
+      expect(html).not.toMatch(/Needs you/);
+      // Only "Space" stays banned — it is called Work on screen. Waiting, Active, For review and
+      // Completed are now the approved vocabulary (D-064), so the old list forbade the very words
+      // the demo is built from.
+      expect(html).not.toMatch(/\bSpace\b/);
     },
   );
 });

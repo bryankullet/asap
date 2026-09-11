@@ -26,7 +26,7 @@ describe("status components refuse the wrong slot", () => {
         <TaskStatus status="needs_you" />
       </CardHeadline>,
     );
-    expect(screen.getByText("Needs you")).toHaveAttribute("data-layer", "task");
+    expect(screen.getByText("Active")).toHaveAttribute("data-layer", "task");
     expect(() => render(<TaskStatus status="needs_you" />)).toThrow(
       /<TaskStatus> may only render inside/,
     );
@@ -82,7 +82,7 @@ describe("status components refuse the wrong slot", () => {
         <TaskStatus status="with_party" party="Jubilee" since="2026-09-03T00:00:00Z" />
       </CardHeadline>,
     );
-    expect(screen.getByText(/With Jubilee since/)).toBeInTheDocument();
+    expect(screen.getByText(/Waiting on Jubilee since/)).toBeInTheDocument();
   });
 
   it("FileStatus never appears inside a WorkCard (Part 2.4)", () => {

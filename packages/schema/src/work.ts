@@ -152,11 +152,11 @@ export const WorkView = z.enum(["needs", "with", "review", "recent", "done"]);
 export type WorkView = z.infer<typeof WorkView>;
 
 export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
-  needs: "Needs you",
-  with: "With others",
+  needs: "Active",
+  with: "Waiting",
   review: "For review",
   recent: "Recent",
-  done: "Done",
+  done: "Completed",
 };
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */

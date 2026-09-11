@@ -21,7 +21,8 @@ export const AttentionSection = z.enum(["needs_you", "checks_due"]);
 export type AttentionSection = z.infer<typeof AttentionSection>;
 
 export const ATTENTION_SECTION_LABELS: Readonly<Record<AttentionSection, string>> = {
-  needs_you: "Needs you",
+  // D-064: Discover leads with the demo's own question rather than a status word.
+  needs_you: "What matters now",
   checks_due: "Checks due",
 };
 

@@ -18,6 +18,14 @@ export const publicEnvSchema = z.object({
    * the existing record page. The old renderer stays in place either way, so this is the rollback.
    */
   VITE_PUBLIC_RENEWAL_SPACE: z.enum(["on", "off"]).default("off"),
+  /**
+   * Demo mode (D-064). "on" seeds the approved fictional brokerage, makes Ask answerable without a
+   * model, and shows the presenter bar. Every surface it touches is labelled as demonstration data.
+   *
+   * It never appears in production: the presenter controls are gated on it, and a simulated send
+   * says so on its face rather than claiming a provider delivered anything.
+   */
+  VITE_PUBLIC_DEMO_MODE: z.enum(["on", "off"]).default("off"),
 });
 
 export type PublicEnv = z.infer<typeof publicEnvSchema>;

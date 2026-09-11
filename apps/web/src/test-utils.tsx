@@ -131,7 +131,7 @@ export function attentionFixture(
     generatedAt: now.toISOString(),
     items: [...rows(needsYou, "needs_you"), ...rows(checksDue, "checks_due")],
     sections: [
-      { key: "needs_you", label: "Needs you", visible: needsYou.length, returned: needsYou.length },
+      { key: "needs_you", label: "What matters now", visible: needsYou.length, returned: needsYou.length },
       {
         key: "checks_due",
         label: "Checks due",

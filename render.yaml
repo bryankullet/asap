@@ -127,5 +127,10 @@ services:
       # kind, which is the rollback: flip to "on" in the dashboard and redeploy the static site.
       - key: VITE_PUBLIC_RENEWAL_SPACE
         value: "off"
+      # The approved interactive demo (D-064). "on" seeds the fictional brokerage, answers Ask
+      # without a model, and shows the presenter bar — every part of it labelled as demonstration
+      # data. Set "off" for a real brokerage.
+      - key: VITE_PUBLIC_DEMO_MODE
+        value: "on"
       - key: NODE_VERSION
         value: "22.22.2"

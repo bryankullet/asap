@@ -331,10 +331,10 @@ describe("GET /attention", () => {
     );
   });
 
-  it("puts Needs you before Checks due and ranks each section from 1", async () => {
+  it("puts what matters now before Checks due and ranks each section from 1", async () => {
     const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
     const sections = body.items.map((i: { section: string }) => i.section);
-    // The click-through document: "Today shows Needs you and Checks due, in that order."
+    // The click-through document, in the D-064 vocabulary: what matters now, then Checks due.
     expect(sections).toEqual([
       "needs_you",
       "needs_you",
@@ -420,7 +420,7 @@ describe("GET /attention", () => {
     expect(titles).not.toContain("Otieno household — new business quote");
     // A hidden row is never a number: the counts describe what the caller can see.
     expect(body.sections).toEqual([
-      { key: "needs_you", label: "Needs you", visible: 4, returned: 4 },
+      { key: "needs_you", label: "What matters now", visible: 4, returned: 4 },
       { key: "checks_due", label: "Checks due", visible: 1, returned: 1 },
     ]);
     expect(body.orphanRuns.map((r: { title: string }) => r.title)).not.toContain("Beta run");
@@ -443,7 +443,7 @@ describe("GET /attention", () => {
     expect(needs).toHaveLength(12);
     expect(body.sections[0]).toEqual({
       key: "needs_you",
-      label: "Needs you",
+      label: "What matters now",
       visible: 44,
       returned: 12,
     });
@@ -460,11 +460,11 @@ describe("GET /work", () => {
       readJson(await app.request(`/work?view=${v}`, { headers: auth("tok-amina") }));
 
     const needs = await view("needs");
-    expect(needs.label).toBe("Needs you");
+    expect(needs.label).toBe("Active");
     expect(needs.items).toHaveLength(4);
 
     const withOthers = await view("with");
-    expect(withOthers.label).toBe("With others");
+    expect(withOthers.label).toBe("Waiting");
     expect(withOthers.items.map((i: { item: { title: string } }) => i.item.title).sort()).toEqual([
       "Acme Motors — renewal terms from Jubilee",
       "Acme — insurer endorsement acknowledgement",

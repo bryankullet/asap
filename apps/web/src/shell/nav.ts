@@ -1,32 +1,60 @@
 /**
- * The permanent shell (UI Build Spec v1 Part 1, docs/ui-contract.md): three destinations, then
- * Ask, then the Activity chip. Order is asserted by shell.test.tsx. Insurance modules are never
- * navigation (Architecture v3.1 §45 rule 16).
+ * The permanent shell, per the approved interactive demo (D-064).
  *
- * Position 1 is **Discover** since D-060, which renamed Today. Still three destinations: the
- * count is what Screen Map v3 fixes, and the label is what the architecture's §42 already used.
- * `Jobs` stays in NEVER_NAV below — the richer run experience lives in the Activity chip, on a
- * record's run history and in Work, never as a fourth destination.
+ * The demo is now controlling for the visible product experience, which changed three things that
+ * earlier decisions had fixed:
+ *
+ *  - **Five destinations, not three.** D-058 and D-060 capped the shell at three. The approved
+ *    demo's sidebar is Discover · Ask ASAP · Work · Jobs · Automations, and the count was never
+ *    the point — §45 rule 16 forbids *insurance modules* as navigation (Clients, Policies,
+ *    Renewals, Claims, Money), and none of these five is one.
+ *  - **Ask ASAP is a destination as well as a composer.** It stays permanently reachable from
+ *    every surface; it is now also openable in full, which is how the demo presents it.
+ *  - **Jobs is a destination.** D-060 put it in NEVER_NAV. The demo shows Jobs as its own
+ *    surface, and it earns one: Jobs is what *ASAP* is processing, which is a different question
+ *    from what a *person* owns in Work. Keeping the two separate is the point of showing both.
+ *
+ * What has not changed, and must not: no insurance module is ever a destination.
  */
 export const NAV = [
   { to: "/discover", label: "Discover", glyph: "✦" },
-  { to: "/work", label: "Work", glyph: "▣" },
-  { to: "/automations", label: "Automations", glyph: "⟳" },
+  { to: "/ask", label: "Ask ASAP", glyph: "⌁" },
+  { to: "/work", label: "Work", glyph: "▱" },
+  { to: "/jobs", label: "Jobs", glyph: "◴" },
+  { to: "/automations", label: "Automations", glyph: "⌘" },
 ] as const;
 
 export type NavTo = (typeof NAV)[number]["to"];
 
-/** Words that must never be a destination. Tested. */
-export const NEVER_NAV = [
-  "Clients",
-  "Policies",
-  "Renewals",
-  "Claims",
-  "Money",
-  "Spaces",
-  "Jobs",
-  // A pin is a personal marker, not a state work is in. Giving it a destination would make a list
-  // page for a thing, which is the old product leaking back in (0033, D-062).
-  "Pinned",
-  "Kept",
-];
+/**
+ * Words that must never be a destination. Tested.
+ *
+ * `Jobs` and `Pinned` left this list in D-064: Jobs is an approved destination, and Pinned is an
+ * approved Work *filter* (still not a destination of its own — it is not in NAV). What remains is
+ * exactly §45 rule 16's insurance-module tree, plus `Spaces`, which is called Work on screen.
+ */
+export const NEVER_NAV = ["Clients", "Policies", "Renewals", "Claims", "Money", "Spaces"];
+
+/**
+ * Work's filters, in the approved order. "Needs you" is gone from the product's vocabulary
+ * entirely (D-064) — a filter test asserts it appears nowhere visible.
+ */
+export const WORK_FILTERS = [
+  { id: "active", label: "Active" },
+  { id: "waiting", label: "Waiting" },
+  { id: "review", label: "For review" },
+  { id: "completed", label: "Completed" },
+  { id: "pinned", label: "Pinned" },
+  { id: "recent", label: "Recent" },
+] as const;
+export type WorkFilterId = (typeof WORK_FILTERS)[number]["id"];
+
+/** What ASAP is processing. Deliberately a different vocabulary from Work's. */
+export const JOB_FILTERS = [
+  { id: "running", label: "Running" },
+  { id: "waiting", label: "Waiting" },
+  { id: "needs_human", label: "Needs a person" },
+  { id: "completed", label: "Completed" },
+  { id: "failed", label: "Failed" },
+] as const;
+export type JobFilterId = (typeof JOB_FILTERS)[number]["id"];

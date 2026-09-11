@@ -8,19 +8,24 @@ import { useRuns } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { ActivityChip } from "./ActivityChip.js";
 import { AskComposer } from "./AskComposer.js";
-import { NewMenu } from "./NewMenu.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 import { ShellNav } from "./ShellNav.js";
+import { PresenterBar } from "../demo/PresenterBar.js";
+import { useDemo } from "../demo/state.js";
 
 /**
- * The permanent shell (UI Build Spec v1 Part 1), in the v4 prototype's frame: a 224px sidebar of
- * white against the wash, Discover · Work · Automations, Search and + New, and the profile control
- * (C01) at the bottom, which opens the brokerage switcher, Members, Agreements, Client files and
- * Sign out. Ask is the docked bar at the foot of the workspace, reachable from every screen; the
- * Activity chip sits on its meta row. Under 900px the destinations become a bottom bar and the
- * dock lifts above it.
+ * The permanent shell, matching the approved demo (D-064): a 224px sidebar of white against the
+ * wash carrying Discover · Ask ASAP · Work · Jobs · Automations, then Search and + New, then the
+ * profile control (C01) — brokerage switcher, Members, Agreements, Client files, Sign out.
+ *
+ * Ask is both: a destination in the sidebar and the bar docked at the foot of every other screen,
+ * so it is never more than one move away whatever a person is looking at. The Activity chip sits
+ * on the dock's meta row. Under 900px the destinations become a bottom bar and the dock lifts
+ * above it.
  */
 export function Shell() {
+  // The sidebar is fixed to the viewport; without this offset the presenter bar covers the brand.
+  const { isDemo } = useDemo();
   const me = useMe();
   const invalidate = useInvalidateMe();
   const org = me.data?.active_organization;
@@ -56,8 +61,14 @@ export function Shell() {
   );
 
   return (
-    <div className="min-h-screen bg-wash min-[900px]:grid min-[900px]:grid-cols-[224px_1fr]">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-sidebar flex-col border-r border-line-soft bg-paper px-3.5 py-5 min-[900px]:flex">
+    <div className="min-h-screen bg-wash">
+      <PresenterBar />
+      <div className="min-[900px]:grid min-[900px]:grid-cols-[224px_1fr]">
+      <aside
+        className={`fixed bottom-0 left-0 z-20 hidden w-sidebar flex-col border-r border-line-soft bg-paper px-3.5 py-5 min-[900px]:flex ${
+          isDemo ? "top-9" : "top-0"
+        }`}
+      >
         <div className="px-2 pb-5">{brand}</div>
         <ShellNav />
         <div className="mx-2 my-4 h-px bg-line-soft" />
@@ -68,13 +79,18 @@ export function Shell() {
           >
             Search
           </Link>
-          <NewMenu />
+          <Link
+            to="/new"
+            className="rounded-compact px-2 py-2 text-sm font-semibold text-ink-secondary hover:bg-wash hover:text-ink"
+          >
+            + New
+          </Link>
         </div>
         <div className="mt-auto">{profile}</div>
       </aside>
 
       <div className="flex min-h-screen flex-col min-[900px]:col-start-2">
-        <header className="sticky top-0 z-12 flex h-[58px] items-center gap-3 border-b border-line-soft bg-wash/90 px-4 backdrop-blur-md min-[900px]:hidden">
+        <header className={`sticky z-12 flex h-[58px] items-center gap-3 border-b border-line-soft bg-wash/90 px-4 backdrop-blur-md min-[900px]:hidden ${isDemo ? "top-9" : "top-0"}`}>
           {brand}
           <div className="ml-auto min-w-0 max-w-[60%]">{profile}</div>
         </header>
@@ -94,6 +110,7 @@ export function Shell() {
         <footer className="fixed inset-x-0 bottom-0 z-28 h-16 border-t border-line-strong bg-paper/95 p-1.5 backdrop-blur-sm min-[900px]:hidden">
           <ShellNav orientation="horizontal" />
         </footer>
+      </div>
       </div>
     </div>
   );
