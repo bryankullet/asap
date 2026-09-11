@@ -7,6 +7,7 @@ import {
 } from "@asap/schema";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { WORK_FILTERS } from "../shell/nav.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { useState } from "react";
 import { MissingData } from "../components/states.js";
 import { PinList } from "../components/PinButton.js";
@@ -23,12 +24,6 @@ import { useDemo } from "../demo/state.js";
  * Every item opens a full context: why it is where it is, what it rests on, what ASAP has done
  * for it, and what a person can do next.
  */
-const STATE_TONE: Record<DemoWork["state"], string> = {
-  active: "bg-accent-green-soft text-accent-green-ink",
-  waiting: "bg-accent-gold-soft text-accent-gold-ink",
-  review: "bg-accent-gold-soft text-accent-gold-ink",
-  completed: "bg-wash text-ink-muted",
-};
 const STATE_WORD: Record<DemoWork["state"], string> = {
   active: "Active",
   waiting: "Waiting",
@@ -41,9 +36,15 @@ export function WorkDemo() {
   const demo = useDemo();
   const active = view ?? "active";
 
+  /**
+   * Active is everything a person still owns, which is what the approved demo's Work grid opens
+   * on — not only the items whose own state word is "active". Waiting, For review and Completed
+   * are the narrower reads.
+   */
   const shown = demo.work.filter((w) => {
     if (active === "pinned") return demo.pinned.includes(w.id);
     if (active === "recent") return true;
+    if (active === "active") return w.state !== "completed";
     return w.state === active;
   });
   const ordered =
@@ -52,112 +53,92 @@ export function WorkDemo() {
       : shown;
 
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold text-ink">Work</h1>
-        <p className="text-sm text-ink-secondary">
-          Everything the brokerage is carrying. Each item holds the evidence, the history and the
-          next action for one task.
-        </p>
-      </header>
+    <>
+      <ScreenTitle
+        title="Work"
+        meta="Every task, decision and follow-up in one place"
+        actions={
+          <Link to="/ask" className="new-btn">
+            ✦ Ask ASAP
+          </Link>
+        }
+      />
 
-      <nav aria-label="Work filters" className="flex flex-wrap gap-1.5">
-        {WORK_FILTERS.map((f) => {
-          const count =
-            f.id === "pinned"
-              ? demo.pinned.length
-              : f.id === "recent"
-                ? demo.work.length
-                : demo.work.filter((w) => w.state === f.id).length;
-          return (
-            <Link
-              key={f.id}
-              to="/work"
-              search={{ view: f.id }}
-              aria-current={f.id === active ? "page" : undefined}
-              className={`rounded-pill px-3 py-1 text-sm ${
-                f.id === active
-                  ? "bg-navy text-paper"
-                  : "border border-line-strong text-ink-secondary hover:border-ink-muted"
-              }`}
-            >
-              {f.label}
-              <span className="ml-1.5 text-xs opacity-70">{count}</span>
-            </Link>
-          );
-        })}
-      </nav>
+      <section className="page-scroll spaces-page">
+          <nav className="tab-row work-tabs" aria-label="Work filters">
+            {WORK_FILTERS.map((f) => {
+              // The demo counts only the three live filters; Completed, Pinned and Recent carry none.
+              const count =
+                f.id === "active"
+                  ? demo.work.filter((w) => w.state !== "completed").length
+                  : f.id === "waiting" || f.id === "review"
+                    ? demo.work.filter((w) => w.state === f.id).length
+                    : 0;
+              return (
+                <Link
+                  key={f.id}
+                  to="/work"
+                  search={{ view: f.id }}
+                  aria-current={f.id === active ? "page" : undefined}
+                  className={`tab ${f.id === active ? "selected" : ""}`}
+                >
+                  {f.label}{" "}
+                  {/*
+                    The count is read from the same state the grid filters on. The approved demo
+                    prints a fixed 8/5/3 here that its own eight tiles contradict; a number that
+                    disagrees with the list under it is not worth reproducing.
+                  */}
+                  {count > 0 && <b>{count}</b>}
+                </Link>
+              );
+            })}
+          </nav>
 
-      {/*
-        Outside demo mode the Pinned filter shows what a person actually kept, read from the API
-        under their own session. In demo mode the rows above already carry the session's pins.
-      */}
-      {active === "pinned" && !demo.isDemo && <PinList />}
+          {/*
+            Outside demo mode the Pinned filter shows what a person actually kept, read from the
+            API under their own session. In demo mode the rows already carry the session's pins.
+          */}
+          {active === "pinned" && !demo.isDemo && <PinList />}
 
-      {ordered.length === 0 ? (
-        <p className="rounded-card border border-line-soft bg-paper p-4 text-sm text-ink-secondary">
-          {active === "pinned"
-            ? "You have not kept anything yet. Open an item and choose Keep to find it here."
-            : `Nothing is ${STATE_WORD[active as DemoWork["state"]]?.toLowerCase() ?? "here"} right now.`}
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {ordered.map((w) => (
-            <li key={w.id}>
-              <WorkRow
-                work={w}
-                pinned={demo.pinned.includes(w.id)}
-                onPin={() => demo.togglePin(w.id)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
-    </div>
+          {ordered.length === 0 ? (
+            <article className="space-card" style={{ padding: 24 }}>
+              <strong>
+                {active === "pinned" ? "You have not kept anything yet." : "No work in this view."}
+              </strong>
+              <p style={{ color: "#707a72", fontSize: 11 }}>
+                {active === "pinned"
+                  ? "Open an item and choose Keep to find it here."
+                  : "Completed actions and new evidence will move items here automatically."}
+              </p>
+            </article>
+          ) : (
+            <div className="spaces-grid">
+              {ordered.map((w) => (
+                <WorkTile key={w.id} work={w} />
+              ))}
+            </div>
+          )}
+      </section>
+    </>
   );
 }
 
-function WorkRow({
-  work,
-  pinned,
-  onPin,
-}: {
-  work: DemoWork;
-  pinned: boolean;
-  onPin: () => void;
-}) {
-  const client = demoClient(work.clientId);
+/**
+ * One tile on the Work grid, in the approved demo's shape: the badge floated right, the kind of
+ * work, the headline, the one-line reason, and the record it belongs to. Every string comes from
+ * the fixture — a tile that named a client would stop being a tile.
+ */
+function WorkTile({ work }: { work: DemoWork }) {
+  const tone =
+    work.pill === "High" ? "high" : work.pill === "Resolved" ? "good" : "";
   return (
-    <article className="flex flex-wrap items-start justify-between gap-3 rounded-card border border-line-strong bg-paper p-3.5">
-      <div className="flex min-w-0 flex-col gap-1">
-        <Link
-          to="/work/$workId"
-          params={{ workId: work.id }}
-          className="font-medium text-ink hover:underline"
-        >
-          {work.title}
-        </Link>
-        <p className="text-sm text-ink-secondary">{work.reason}</p>
-        <p className="text-xs text-ink-muted">
-          {client?.shortName} · {work.owner}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onPin}
-          aria-pressed={pinned}
-          className="rounded-pill border border-line-strong px-2.5 py-0.5 text-xs text-ink-secondary hover:border-ink-muted"
-        >
-          {pinned ? "★ Kept" : "☆ Keep"}
-        </button>
-        <span className={`rounded-pill px-2.5 py-0.5 text-xs ${STATE_TONE[work.state]}`}>
-          {STATE_WORD[work.state]}
-        </span>
-      </div>
-    </article>
+    <Link to="/work/$workId" params={{ workId: work.id }} className="space-tile">
+      <span className={`pill ${tone}`}>{work.pill}</span>
+      <div className="section-label">{work.workType} WORK</div>
+      <h3>{work.headline}</h3>
+      <p>{work.summary}</p>
+      <small>{work.contextLabel}</small>
+    </Link>
   );
 }
 

@@ -140,7 +140,8 @@ function NavCount({ to }: { to: string }) {
   const { work, jobs } = useDemo();
   const n =
     to === "/work"
-      ? work.filter((w) => w.state !== "completed").length
+      ? // The demo counts everything a person owns here, which is what its Work grid opens on.
+        work.length
       : to === "/jobs"
         ? jobs.filter(
             (j) => j.state === "running" || j.state === "waiting" || j.state === "needs_human",

@@ -1152,6 +1152,78 @@ body.demo-body {
   border: 1px solid #dce2dc;
 }
 
+/* ---- Work: the grid of everything a person owns ------------------------------------------- */
+.spaces-page {
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+.tab-row {
+  display: flex;
+  gap: 5px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.tab-row button,
+.tab-row .tab {
+  border: 0;
+  background: none;
+  padding: 0 14px 12px;
+  color: #707971;
+  font-size: 12px;
+  text-decoration: none;
+  display: block;
+}
+.tab-row button.selected,
+.tab-row .tab.selected {
+  color: var(--ink);
+  font-weight: 700;
+  border-bottom: 2px solid var(--ink);
+}
+.tab-row b {
+  background: #e8ece8;
+  border-radius: 99px;
+  font-size: 9px;
+  padding: 2px 5px;
+  margin-left: 4px;
+}
+.spaces-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.space-tile {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 17px;
+  cursor: pointer;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.space-tile:hover {
+  box-shadow: var(--shadow);
+}
+.space-tile .pill {
+  float: right;
+}
+.space-tile h3 {
+  font: 700 14px Manrope, sans-serif;
+  margin: 4px 0 6px;
+}
+.space-tile p {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 0;
+}
+.space-tile small {
+  display: block;
+  margin-top: 14px;
+  color: #7c867e;
+  font-size: 9px;
+}
+
 /* ---- Responsive: the demo's own breakpoints, 1000px and 760px ---------------------------- */
 @media (max-width: 1000px) {
   .app-shell {
@@ -1271,6 +1343,9 @@ body.demo-body {
   }
   .welcome-row h2 {
     font-size: 21px;
+  }
+  .spaces-grid {
+    grid-template-columns: 1fr;
   }
   .policy-strip {
     align-items: flex-start;

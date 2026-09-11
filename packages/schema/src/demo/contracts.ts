@@ -141,6 +141,16 @@ export const demoWorkSchema = z.object({
   scenarioId: z.string(),
   owner: z.string(),
   updatedAt: z.string(),
+  /**
+   * How the approved demo labels this item on the Work grid: its kind, its badge, the short
+   * headline, the one-line reason and the record it belongs to. Presentation copy lives in the
+   * fixture, not in the tile, so no component names a client or invents a label.
+   */
+  workType: z.string(),
+  pill: z.string(),
+  headline: z.string(),
+  summary: z.string(),
+  contextLabel: z.string(),
   /** Jobs ASAP has run against this item. */
   jobIds: z.array(z.string()).default([]),
   history: z.array(z.tuple([z.string(), z.string()])).default([]),
