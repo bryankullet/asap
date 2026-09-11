@@ -125,8 +125,12 @@ const record = createRoute({
   component: Record,
   validateSearch: z.object({
     panel: z.string().optional().catch(undefined),
-    /** A link that already knows the id is a policy; the page then skips the work-item probe. */
-    kind: z.literal("policy").optional().catch(undefined),
+    /**
+     * A link that already knows what the id is, so the page reads it directly instead of probing
+     * /work-items first and logging a 404 on the way to the answer. A pasted url carries no hint
+     * and still falls back through every kind in turn.
+     */
+    kind: z.enum(["policy", "run"]).optional().catch(undefined),
   }),
 });
 /** H04. A real search over what the backend can actually search, with the query in the URL. */

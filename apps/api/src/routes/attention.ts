@@ -4,6 +4,8 @@ import {
   INSURER_COLUMNS,
   POLICY_COLUMNS,
   POLICY_PERIOD_COLUMNS,
+  DRAFT_COLUMNS,
+  DraftRow,
   RUN_COLUMNS,
   RunRow,
   WORK_ITEM_COLUMNS,
@@ -61,9 +63,9 @@ const guardId = (g: WorkItemRow["steps"][number]["guards"][number]): string =>
 export function attentionRoutes() {
   const app = new Hono();
 
-  /** Open items and their runs, under RLS, for the caller's active brokerage. */
+  /** Open items, their runs and their drafts, under RLS, for the caller's active brokerage. */
   async function load(db: SupabaseClient, orgId: string) {
-    const [itemsR, runsR] = await Promise.all([
+    const [itemsR, runsR, draftsR] = await Promise.all([
       db
         .from("work_items")
         .select(WORK_ITEM_COLUMNS)
@@ -75,12 +77,20 @@ export function attentionRoutes() {
         .select(RUN_COLUMNS)
         .eq("organization_id", orgId)
         .order("started_at", { ascending: false }),
+      db
+        .from("drafts")
+        .select(DRAFT_COLUMNS)
+        .eq("organization_id", orgId)
+        .is("sent_at", null),
     ]);
     if (itemsR.error) throw mapDatabaseError(itemsR.error);
     if (runsR.error) throw mapDatabaseError(runsR.error);
+    if (draftsR.error) throw mapDatabaseError(draftsR.error);
     return {
       items: WorkItemRow.array().parse(itemsR.data ?? []),
       runs: RunRow.array().parse(runsR.data ?? []),
+      /** Prepared and not yet recorded as sent: the "For review" view is derived from these. */
+      unsentDrafts: DraftRow.array().parse(draftsR.data ?? []),
     };
   }
 
@@ -257,15 +267,19 @@ export function attentionRoutes() {
       if (e instanceof HttpError) return sendError(c, e);
       throw e;
     }
-    const { items, runs } = loaded;
+    const { items, runs, unsentDrafts } = loaded;
     const stuckByItem = new Map<string, RunRow>();
     for (const r of runs.filter(runNeedsPerson))
       if (r.work_item_id && !stuckByItem.has(r.work_item_id)) stuckByItem.set(r.work_item_id, r);
 
-    // The same four views, with the same membership rules the browser applied.
+    // "For review": ASAP prepared something and a person has not acted on it. Derived from the
+    // drafts table, never stored, so it cannot drift from what is actually waiting.
+    const awaitingReview = new Set(unsentDrafts.map((d) => d.work_item_id));
+
     const inView = items.filter((i) => {
       if (q.view === "needs") return i.task_status === "needs_you";
       if (q.view === "with") return i.task_status === "with_party";
+      if (q.view === "review") return awaitingReview.has(i.id) && i.task_status !== "done";
       if (q.view === "done") return i.task_status === "done";
       return i.task_status !== "done";
     });

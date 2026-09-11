@@ -177,3 +177,53 @@ export const historyResponseSchema = z.object({
   returned: z.number().int().min(0),
 });
 export type HistoryResponse = z.infer<typeof historyResponseSchema>;
+
+/**
+ * `GET /runs/:id` — one run in full: what ASAP did, step by step, what it produced, and what a
+ * person can safely do about it.
+ *
+ * This is the "Jobs" experience the prototype shows as a destination. It is **not** a destination
+ * here: `Jobs` is in `NEVER_NAV` and Screen Map v3 keeps runs in the Activity chip, on a record,
+ * and as an item in Work when one stops. A run is what ASAP is doing; Work is what a person owns.
+ *
+ * Run status and business outcome are separate and stay separate: a finished run means ASAP
+ * produced its output, never that a policy was renewed, cover confirmed, a claim accepted or
+ * money received. `relatedWork` is how a person gets from one to the other.
+ */
+export const runRecoverySchema = z.object({
+  /** What a person can do. `open_work` always exists; the rest appear only when they are safe. */
+  kind: z.enum(["open_work", "retry", "resume_step"]),
+  label: z.string().min(1).max(120),
+  /** Null when available; otherwise why it is not, shown disabled rather than hidden. */
+  disabledReason: z.string().max(300).nullable(),
+});
+export type RunRecovery = z.infer<typeof runRecoverySchema>;
+
+export const runDetailResponseSchema = z.object({
+  run: RunRow,
+  /** Step by step, oldest first, as persisted for SSE. */
+  events: z.array(RunEventRow),
+  /** The work item this run belongs to, so a person can reach what they own. */
+  relatedWork: z
+    .object({
+      id: uuidSchema,
+      title: z.string(),
+      taskStatus: z.string(),
+      /** The step the run left waiting, if any. */
+      nowStep: z.string().nullable(),
+    })
+    .nullable(),
+  /** Evidence recorded against the related work while or because this run ran. */
+  evidence: z.array(
+    z.object({
+      label: z.string(),
+      reference: z.string(),
+      recordedBy: z.string().nullable(),
+      recordedAt: z.string().nullable(),
+    }),
+  ).max(20),
+  /** Why a run is not finished, in its own words. Never a business outcome. */
+  waitingFor: z.string().nullable(),
+  recovery: z.array(runRecoverySchema),
+});
+export type RunDetailResponse = z.infer<typeof runDetailResponseSchema>;

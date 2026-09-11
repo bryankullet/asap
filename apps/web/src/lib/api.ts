@@ -36,6 +36,7 @@ import {
   type UpdateMemberRequest,
   attentionResponseSchema,
   historyResponseSchema,
+  runDetailResponseSchema,
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
@@ -117,6 +118,8 @@ export const api = {
   markDraftCopied: (id: string) =>
     request("POST", `/drafts/${id}/copied`, markDraftCopiedResponseSchema, {}),
   runEvents: (id: string) => request("GET", `/runs/${id}/events`, runEventsResponseSchema),
+  /** One run in full: steps, evidence, what it is waiting for, and the work it belongs to. */
+  run: (id: string) => request("GET", `/runs/${id}`, runDetailResponseSchema),
   clientFiles: (view: K01View) =>
     request("GET", `/clients?view=${view}`, clientFilesResponseSchema),
   clientFile: (id: string) => request("GET", `/clients/${id}`, clientFileResponseSchema),

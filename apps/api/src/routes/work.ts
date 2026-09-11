@@ -1,5 +1,7 @@
 import {
   historyResponseSchema,
+  runDetailResponseSchema,
+  type RunDetailResponse,
   type HistoryEntry,
   type HistoryResponse,
   DRAFT_COLUMNS,
@@ -791,6 +793,89 @@ export function workRoutes(deps: WorkDeps) {
     if (e2) return sendError(c, mapDatabaseError(e2));
     if (!data) return sendError(c, new HttpError(404, "not_found"));
     return c.json(markDraftCopiedResponseSchema.parse({ draft: DraftRow.parse(data) }));
+  });
+
+
+  /**
+   * One run in full: what ASAP did, what it produced, what it is waiting for, and what a person
+   * can safely do next. The Activity chip and a record's run history both open this.
+   *
+   * Recovery is deliberately narrow. `open_work` always exists, because a run that stopped has
+   * already created or updated the item a person owns (Screen Map v3: "a run that pauses or fails
+   * creates an item in Work first"). Retrying is offered only for a run that ended without doing
+   * its job, and only as a disabled control with its reason when the step has moved on — a
+   * person must never be able to re-run something whose record has changed underneath it.
+   */
+  app.get("/runs/:id", async (c) => {
+    const { db } = c.get("auth");
+    const id = c.req.param("id");
+    const run = await loadRun(db, id);
+    const events = await loadEvents(db, id, 0);
+
+    let relatedWork: RunDetailResponse["relatedWork"] = null;
+    let evidence: RunDetailResponse["evidence"] = [];
+    let stepMoved = false;
+    if (run.work_item_id) {
+      const { data, error } = await db
+        .from("work_items")
+        .select(WORK_ITEM_COLUMNS)
+        .eq("id", run.work_item_id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) return sendError(c, mapDatabaseError(error));
+      if (data) {
+        const item = WorkItemRow.parse(data);
+        const now = item.steps.find((st) => st.state === "now" || st.state === "blocked");
+        relatedWork = {
+          id: item.id,
+          title: item.title,
+          taskStatus: item.task_status,
+          nowStep: now?.label ?? null,
+        };
+        evidence = item.steps
+          .flatMap((st) =>
+            st.recorded.map((r) => ({
+              label: st.label,
+              reference: r.reference,
+              recordedBy: r.recordedBy,
+              recordedAt: r.recordedAt,
+            })),
+          )
+          .slice(0, 20);
+        // The step the run was working on has since been completed by someone else.
+        const ranOn = item.steps.find((st) => st.runId === run.id);
+        stepMoved = ranOn !== undefined && ranOn.state === "done";
+      }
+    }
+
+    const unfinished = run.status === "could_not_finish" || run.status === "stopped";
+    const recovery: RunDetailResponse["recovery"] = [];
+    if (relatedWork) {
+      recovery.push({ kind: "open_work", label: "Open the work", disabledReason: null });
+    }
+    if (unfinished) {
+      recovery.push({
+        kind: "retry",
+        label: "Start it again",
+        disabledReason: !relatedWork
+          ? "This run has no work item, so there is nothing to start again."
+          : stepMoved
+            ? "The step this was working on has since been completed. Open the work instead."
+            : // Starting a run is an action on a step, and the step owns its own guards.
+              "Start it again from the step on the record, so its guards are checked.",
+      });
+    }
+
+    const body: RunDetailResponse = runDetailResponseSchema.parse({
+      run,
+      events,
+      relatedWork,
+      evidence,
+      // A run says what it is waiting for in its own words, never a business outcome.
+      waitingFor: run.status === "paused" || unfinished ? run.next_step : null,
+      recovery,
+    });
+    return c.json(body);
   });
 
   app.get("/runs/:id/events", async (c) => {

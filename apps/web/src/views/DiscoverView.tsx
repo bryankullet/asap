@@ -69,7 +69,12 @@ export function DiscoverView({ data }: { data: AttentionResponse }) {
             className="rounded-card border border-accent-red/25 bg-accent-red-soft p-4 text-sm text-ink"
           >
             {r.title}: ASAP could not finish. {r.nextStep ?? "Check this run."}{" "}
-            <Link to="/r/$recordId" params={{ recordId: r.id }} className="underline">
+            <Link
+              to="/r/$recordId"
+              params={{ recordId: r.id }}
+              search={{ kind: "run" as const }}
+              className="underline"
+            >
               Open
             </Link>
           </p>

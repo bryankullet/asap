@@ -219,19 +219,3 @@ export function WorkItemView({
     </article>
   );
 }
-
-export function RunView({ run }: { run: RunRow }) {
-  return (
-    <article className="flex flex-col gap-4">
-      <h1 className="font-heading text-2xl font-semibold tracking-tight text-ink">{run.title}</h1>
-      <RunDetailSlot>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
-          <RunStatus status={run.status} />
-          <span>Started {formatSince(run.started_at)}</span>
-          {run.ended_at && <span>· ended {formatSince(run.ended_at)}</span>}
-        </div>
-      </RunDetailSlot>
-      {run.next_step && <p className="text-sm text-ink">{run.next_step}</p>}
-    </article>
-  );
-}

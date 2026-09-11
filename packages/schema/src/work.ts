@@ -140,12 +140,21 @@ export const RunRow = z.object({
 export type RunRow = z.infer<typeof RunRow>;
 
 /** Work's four views (spec Part 1.3: `/work?view=needs|with|recent|done`). */
-export const WorkView = z.enum(["needs", "with", "recent", "done"]);
+/**
+ * Work's views. `review` was added with the Jobs/Activity work: it is the items where ASAP has
+ * prepared something a person has not yet acted on — a draft written and not recorded as sent,
+ * or a run that finished and left an output. It is derived, never stored, so nothing can drift.
+ *
+ * Pinned is deliberately **not** here. `docs/ui-contract.md`: "Pinned is a personal marker, not a
+ * view." Making it one would need per-user state with its own RLS, and the contract says no.
+ */
+export const WorkView = z.enum(["needs", "with", "review", "recent", "done"]);
 export type WorkView = z.infer<typeof WorkView>;
 
 export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
   needs: "Needs you",
   with: "With others",
+  review: "For review",
   recent: "Recent",
   done: "Done",
 };

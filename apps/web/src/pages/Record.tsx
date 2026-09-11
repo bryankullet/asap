@@ -7,7 +7,8 @@ import { api, describeApiError } from "../lib/api.js";
 import { Notice } from "@asap/ui";
 import { useRun } from "../lib/queries.js";
 import { useRunStream } from "../lib/runStream.js";
-import { RunView, WorkItemView } from "../views/RecordViews.js";
+import { WorkItemView } from "../views/RecordViews.js";
+import { RunDetail } from "../views/RunDetail.js";
 import { DraftCard } from "../features/drafts/DraftCard.js";
 import { ClaimPanel } from "../views/ClaimPanel.js";
 import { EndorsementPanel } from "../views/EndorsementPanel.js";
@@ -20,15 +21,32 @@ export function Record() {
   const { recordId = "" } = useParams({ strict: false }) as { recordId?: string };
   // A link that already knows the id is a policy says so, so the page does not probe /work-items
   // first and log a 404 on the way to the answer. A pasted URL carries no hint and still probes.
-  const { kind } = useSearch({ strict: false }) as { kind?: "policy" };
+  const { kind } = useSearch({ strict: false }) as { kind?: "policy" | "run" };
   const isPolicy = kind === "policy";
+  const isRun = kind === "run";
   const full = useQuery({
     queryKey: ["work_item_full", recordId],
     queryFn: () => api.workItem(recordId),
     retry: false,
-    enabled: !isPolicy,
+    enabled: !isPolicy && !isRun,
   });
   const run = useRun(recordId);
+  const runDetail = useQuery({
+    queryKey: ["run_detail", recordId],
+    queryFn: () => api.run(recordId),
+    retry: false,
+    enabled: !isPolicy,
+  });
+  if (isRun) {
+    if (runDetail.isPending) return <LoadingList rows={2} label="Loading the run" />;
+    if (runDetail.data) return <RunDetail data={runDetail.data} />;
+    return (
+      <MissingData
+        what="No run with that id"
+        why="It may not exist, or your role in this brokerage cannot see it. Nothing is hidden on purpose without saying so."
+      />
+    );
+  }
   const policy = useQuery({
     queryKey: ["policy", recordId],
     queryFn: () => api.policy(recordId),
@@ -183,7 +201,13 @@ export function Record() {
     );
   }
   if (run.isPending) return <LoadingList rows={1} label="Loading record" />;
-  if (run.data) return <RunView run={run.data} />;
+  if (run.data) {
+    // A run id opens the full run: steps, evidence, what it is waiting for and the work it
+    // belongs to. Jobs is not a destination (D-060); this is where a run is inspected.
+    if (runDetail.isPending) return <LoadingList rows={2} label="Loading the run" />;
+    if (runDetail.data) return <RunDetail data={runDetail.data} />;
+    return <ErrorState what="This run could not load" retry={() => void runDetail.refetch()} />;
+  }
   if (policy.isPending && full.isError) return <LoadingList rows={1} label="Loading record" />;
   if (policy.data)
     return <PolicyView data={policy.data} today={new Date().toISOString().slice(0, 10)} />;

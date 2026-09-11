@@ -35,6 +35,32 @@ vi.mock("./lib/api.js", () => ({
       calls.push(`workItem:${id}`);
       return Promise.reject(Object.assign(new Error("not found"), { status: 404 }));
     },
+    run: (id: string) => {
+      calls.push(`run:${id}`);
+      return Promise.resolve({
+        run: {
+          id,
+          organization_id: ORG,
+          work_item_id: null,
+          title: "Mailbox sweep",
+          status: "could_not_finish",
+          next_step: "Nothing to sweep.",
+          started_by: null,
+          boot_token: null,
+          started_at: iso(),
+          ended_at: iso(),
+          created_at: iso(),
+          updated_at: iso(),
+        },
+        events: [],
+        relatedWork: null,
+        evidence: [],
+        waitingFor: "Nothing to sweep.",
+        recovery: [
+          { kind: "retry", label: "Start it again", disabledReason: "This run has no work item, so there is nothing to start again." },
+        ],
+      });
+    },
     policy: (id: string) => {
       calls.push(`policy:${id}`);
       return Promise.resolve({
@@ -347,5 +373,24 @@ describe("defect 6 — a policy id does not probe /work-items first", () => {
     );
     await waitFor(() => expect(calls).toContain(`policy:${POLICY}`));
     expect(calls).toContain(`workItem:${POLICY}`);
+  });
+});
+
+describe("a run id opens as a run, not as a failed work-item probe", () => {
+  const RUN = "40000000-0000-4000-8000-000000000009";
+
+  it("reads the run directly when the link says the id is a run", async () => {
+    calls.length = 0;
+    const { Record } = await import("./pages/Record.js");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await renderInRouter(
+      <QueryClientProvider client={qc}>
+        <Record />
+      </QueryClientProvider>,
+      `/r/${RUN}?kind=run`,
+    );
+    await waitFor(() => expect(calls).toContain(`run:${RUN}`));
+    // The same rule as the policy hint: no probe, so no 404 on the way to the answer.
+    expect(calls.some((c) => c.startsWith("workItem:"))).toBe(false);
   });
 });

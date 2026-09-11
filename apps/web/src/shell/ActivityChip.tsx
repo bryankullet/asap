@@ -71,6 +71,8 @@ export function ActivityChip({ runs, sessionStart }: { runs: RunRow[]; sessionSt
                   <Link
                     to="/r/$recordId"
                     params={{ recordId: r.work_item_id ?? r.id }}
+                    // A run with no work item of its own opens as a run, not as a failed probe.
+                    search={r.work_item_id ? {} : { kind: "run" as const }}
                     className="text-ink hover:underline"
                   >
                     {r.title}
