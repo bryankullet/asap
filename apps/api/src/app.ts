@@ -13,6 +13,7 @@ import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
+import { importRoutes } from "./routes/imports.js";
 import { documentRoutes } from "./routes/documents.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
@@ -129,6 +130,9 @@ export function createApp(deps: AppDeps) {
     "/runs",
     "/runs/*",
     "/search",
+    "/imports",
+    "/imports/*",
+    "/contacts",
     "/audit",
     "/email/threads",
     "/email/threads/*",
@@ -154,6 +158,7 @@ export function createApp(deps: AppDeps) {
       oauth: deps.mailboxOAuth ?? { gmail: {}, microsoft: {} },
     }),
   );
+  app.route("/", importRoutes({ logger }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
   app.route("/", spaceRoutes({ logger }));

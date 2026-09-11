@@ -180,7 +180,39 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
           };
           return chain;
         },
-        insert: (row: Record<string, unknown>) => {
+        insert: (row: Record<string, unknown> | Record<string, unknown>[]) => {
+          /*
+           * A bulk insert is one statement in Postgres and must be one here too: an importer that
+           * writes several hundred rows sends an array, and a stand-in that treated it as a single
+           * object would return one row with numeric keys — which no route could use, and which
+           * would fail for a reason that is not the route's.
+           */
+          if (Array.isArray(row)) {
+            const many = row.map((r) => {
+              db.inserts.push({ table, row: r });
+              const one: Record<string, unknown> = {
+                id: nextId(),
+                created_at: STAMP,
+                updated_at: STAMP,
+                ...(db.defaults?.[table] ?? {}),
+                ...r,
+              };
+              (db.tables[table] ??= []).push(one);
+              return one;
+            });
+            const manyResult = { data: many, error: null };
+            return {
+              then: (resolve: (v: { error: null }) => unknown) =>
+                Promise.resolve(resolve({ error: null })),
+              select: () => ({
+                ...manyResult,
+                then: (resolve: (v: typeof manyResult) => unknown) =>
+                  Promise.resolve(resolve(manyResult)),
+                single: async () => ({ data: many[0] ?? null, error: null }),
+                maybeSingle: async () => ({ data: many[0] ?? null, error: null }),
+              }),
+            };
+          }
           db.inserts.push({ table, row });
           const stored: Record<string, unknown> = {
             id: nextId(),
