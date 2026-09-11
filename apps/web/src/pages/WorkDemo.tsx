@@ -38,11 +38,10 @@ const STATE_WORD: Record<DemoWork["state"], string> = {
 export function WorkDemo() {
   const { view } = useSearch({ strict: false }) as { view?: string };
   const demo = useDemo();
-  const [pinned, setPinned] = useState<string[]>([]);
   const active = view ?? "active";
 
   const shown = demo.work.filter((w) => {
-    if (active === "pinned") return pinned.includes(w.id);
+    if (active === "pinned") return demo.pinned.includes(w.id);
     if (active === "recent") return true;
     return w.state === active;
   });
@@ -65,7 +64,7 @@ export function WorkDemo() {
         {WORK_FILTERS.map((f) => {
           const count =
             f.id === "pinned"
-              ? pinned.length
+              ? demo.pinned.length
               : f.id === "recent"
                 ? demo.work.length
                 : demo.work.filter((w) => w.state === f.id).length;
@@ -100,10 +99,8 @@ export function WorkDemo() {
             <li key={w.id}>
               <WorkRow
                 work={w}
-                pinned={pinned.includes(w.id)}
-                onPin={() =>
-                  setPinned((p) => (p.includes(w.id) ? p.filter((x) => x !== w.id) : [...p, w.id]))
-                }
+                pinned={demo.pinned.includes(w.id)}
+                onPin={() => demo.togglePin(w.id)}
               />
             </li>
           ))}

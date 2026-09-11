@@ -11,7 +11,15 @@ import {
   type DemoWorkState,
   DEMO_THREADS,
 } from "@asap/schema";
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { env } from "../env.js";
 
 /**
@@ -20,6 +28,10 @@ import { env } from "../env.js";
  * The approved demo keeps temporary state for the length of a browser session and clears it on
  * Reset. This does the same, in React, over the typed fixtures — so a presenter can send a
  * fictional email, watch Work move to Waiting, assign an owner, approve something, and start again.
+ *
+ * State lasts for the browser session, as the approved demo specifies, and Reset clears it. It is
+ * held in sessionStorage as well as React so that a presenter who reloads the page mid-walkthrough
+ * does not silently lose everything they have just demonstrated — and so it never outlives the tab.
  *
  * Two boundaries this module exists to hold:
  *
@@ -45,6 +57,13 @@ type DemoState = {
   threads: DemoThread[];
   /** Fictional sends and approvals, newest first, for the history panels. */
   events: DemoEvent[];
+  /**
+   * Work a person has kept. Session state, like everything else here — but it has to live at this
+   * level rather than inside the Work screen, or navigating to the Pinned filter unmounts the
+   * component holding it and the marker silently disappears.
+   */
+  pinned: string[];
+  togglePin: (workId: string) => void;
   setWorkState: (id: string, state: DemoWorkState, note: string) => void;
   assign: (id: string, owner: string) => void;
   toggleAutomation: (id: string) => void;
@@ -56,21 +75,60 @@ type DemoState = {
 
 const DemoContext = createContext<DemoState | null>(null);
 
+const STORE_KEY = "asap.demo.v1";
+
+type Persisted = {
+  work: DemoWork[];
+  jobs: DemoJob[];
+  automations: DemoAutomation[];
+  threads: DemoThread[];
+  events: DemoEvent[];
+  pinned: string[];
+  activeScenarioId: string;
+};
+
+/** sessionStorage can throw (private mode, blocked storage). A demo must not die for that. */
+function readStore(): Partial<Persisted> {
+  try {
+    const raw = sessionStorage.getItem(STORE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<Persisted>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStore(value: Persisted): void {
+  try {
+    sessionStorage.setItem(STORE_KEY, JSON.stringify(value));
+  } catch {
+    // Nothing to do: the demo still works, it just will not survive a reload.
+  }
+}
+
 const stamp = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export function DemoProvider({ children }: { children: ReactNode }) {
   const isDemo = env.VITE_PUBLIC_DEMO_MODE === "on";
-  const [activeScenarioId, setActiveScenarioId] = useState(DEMO_SCENARIOS[0]?.id ?? "");
-  const [work, setWork] = useState<DemoWork[]>(() => DEMO_WORK.map((w) => ({ ...w })));
-  const [jobs, setJobs] = useState<DemoJob[]>(() => DEMO_JOBS.map((j) => ({ ...j })));
-  const [automations, setAutomations] = useState<DemoAutomation[]>(() =>
-    DEMO_AUTOMATIONS.map((a) => ({ ...a })),
+  const stored = useMemo(() => (isDemo ? readStore() : {}), [isDemo]);
+  const [activeScenarioId, setActiveScenarioId] = useState(
+    stored.activeScenarioId ?? DEMO_SCENARIOS[0]?.id ?? "",
   );
-  const [threads, setThreads] = useState<DemoThread[]>(() =>
-    DEMO_THREADS.map((t) => ({ ...t, messages: [...t.messages] })),
+  const [work, setWork] = useState<DemoWork[]>(() => stored.work ?? DEMO_WORK.map((w) => ({ ...w })));
+  const [jobs, setJobs] = useState<DemoJob[]>(() => stored.jobs ?? DEMO_JOBS.map((j) => ({ ...j })));
+  const [automations, setAutomations] = useState<DemoAutomation[]>(
+    () => stored.automations ?? DEMO_AUTOMATIONS.map((a) => ({ ...a })),
   );
-  const [events, setEvents] = useState<DemoEvent[]>([]);
+  const [threads, setThreads] = useState<DemoThread[]>(
+    () => stored.threads ?? DEMO_THREADS.map((t) => ({ ...t, messages: [...t.messages] })),
+  );
+  const [events, setEvents] = useState<DemoEvent[]>(stored.events ?? []);
+  const [pinned, setPinned] = useState<string[]>(stored.pinned ?? []);
+
+  useEffect(() => {
+    if (!isDemo) return;
+    writeStore({ work, jobs, automations, threads, events, pinned, activeScenarioId });
+  }, [isDemo, work, jobs, automations, threads, events, pinned, activeScenarioId]);
 
   const record = useCallback((text: string) => {
     setEvents((prev) => [{ at: stamp(), text }, ...prev].slice(0, 40));
@@ -168,13 +226,23 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     [record, setWorkState],
   );
 
+  const togglePin = useCallback((workId: string) => {
+    setPinned((prev) => (prev.includes(workId) ? prev.filter((id) => id !== workId) : [...prev, workId]));
+  }, []);
+
   const reset = useCallback(() => {
     setWork(DEMO_WORK.map((w) => ({ ...w })));
     setJobs(DEMO_JOBS.map((j) => ({ ...j })));
     setAutomations(DEMO_AUTOMATIONS.map((a) => ({ ...a })));
     setThreads(DEMO_THREADS.map((t) => ({ ...t, messages: [...t.messages] })));
     setEvents([]);
+    setPinned([]);
     setActiveScenarioId(DEMO_SCENARIOS[0]?.id ?? "");
+    try {
+      sessionStorage.removeItem(STORE_KEY);
+    } catch {
+      // As above: a demo must not die because storage is unavailable.
+    }
   }, []);
 
   const value = useMemo<DemoState>(
@@ -190,6 +258,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       automations,
       threads,
       events,
+      pinned,
+      togglePin,
       setWorkState,
       assign,
       toggleAutomation,
@@ -207,6 +277,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       automations,
       threads,
       events,
+      pinned,
+      togglePin,
       setWorkState,
       assign,
       toggleAutomation,
