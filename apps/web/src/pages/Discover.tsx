@@ -133,9 +133,11 @@ export function Discover() {
                     one in and this becomes the list of what needs a person today.
                   </p>
                   <div className="focus-footer">
-                    <span>Start here</span>
+                    <Link to="/import" className="link">
+                      Import your book <span aria-hidden>→</span>
+                    </Link>
                     <Link to="/new" className="link">
-                      Start a piece of work <span aria-hidden>→</span>
+                      Add one client <span aria-hidden>→</span>
                     </Link>
                   </div>
                 </div>
@@ -169,7 +171,7 @@ export function Discover() {
             <Link to="/ask" search={{}} className="quick">
               Ask about the brokerage <span aria-hidden>→</span>
             </Link>
-            <Link to="/new" className="quick">
+            <Link to="/import" className="quick">
               Import client records <span aria-hidden>→</span>
             </Link>
             <Link to="/email" className="quick">
@@ -199,8 +201,8 @@ function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
           No clients, no policies, nothing waiting. Add a client, connect the mailbox the brokerage
           already works from, or give ASAP a schedule to read.
         </p>
-        <Link to="/files" search={{ view: "blocking" }} className="link">
-          Add the first client
+        <Link to="/import" className="link">
+          Import the book you already have
         </Link>
       </>
     );

@@ -15,6 +15,7 @@ import { DocumentViewer, Documents } from "./pages/Documents.js";
 import { Email, EmailThread } from "./pages/Email.js";
 import { JobDetail, Jobs } from "./pages/Jobs.js";
 import { StartWork } from "./pages/StartWork.js";
+import { ImportBook } from "./pages/ImportBook.js";
 import { Work } from "./pages/Work.js";
 import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
@@ -242,6 +243,11 @@ const newThing = createRoute({
   component: StartWork,
   validateSearch: z.object({ kind: z.string().max(40).optional().catch(undefined) }),
 });
+const importBook = createRoute({
+  getParentRoute: () => shell,
+  path: "/import",
+  component: ImportBook,
+});
 const email = createRoute({ getParentRoute: () => shell, path: "/email", component: Email });
 const emailThread = createRoute({
   getParentRoute: () => shell,
@@ -289,7 +295,8 @@ const routeTree = rootRoute.addChildren([
         jobs,
         jobDetail,
             newThing,
-        email,
+        importBook,
+    email,
         emailThread,
         documents,
         documentViewer,

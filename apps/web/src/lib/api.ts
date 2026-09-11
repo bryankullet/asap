@@ -61,6 +61,14 @@ import {
   historyResponseSchema,
   runDetailResponseSchema,
   searchResponseSchema,
+  importsResponseSchema,
+  importPreviewResponseSchema,
+  importCommitResponseSchema,
+  contactsResponseSchema,
+  contactResponseSchema,
+  type ImportPreviewRequest,
+  type ImportCommitRequest,
+  type CreateContactRequest,
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
@@ -174,6 +182,15 @@ export const api = {
     }),
   workItem: (id: string) => request("GET", `/work-items/${id}`, workItemResponseSchema),
   /** The audit history of one record (C05). Read-only, gated on audit:view server-side. */
+  imports: () => request("GET", "/imports", importsResponseSchema),
+  previewImport: (input: ImportPreviewRequest) =>
+    request("POST", "/imports", importPreviewResponseSchema, input),
+  commitImport: (id: string, input: ImportCommitRequest) =>
+    request("POST", `/imports/${id}/commit`, importCommitResponseSchema, input),
+  contacts: (clientId: string) =>
+    request("GET", `/clients/${clientId}/contacts`, contactsResponseSchema),
+  createContact: (input: CreateContactRequest) =>
+    request("POST", "/contacts", contactResponseSchema, input),
   audit: () => request("GET", "/audit", historyResponseSchema),
   search: (q: string) => request("GET", `/search?q=${encodeURIComponent(q)}`, searchResponseSchema),
   history: (id: string) => request("GET", `/work-items/${id}/history`, historyResponseSchema),

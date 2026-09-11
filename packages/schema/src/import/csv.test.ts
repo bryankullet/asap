@@ -239,3 +239,27 @@ describe("what one line means", () => {
     expect(r.problem).toMatch(/not recognised as an amount/);
   });
 });
+
+describe("a commission column whose heading is not to be trusted", () => {
+  /*
+   * Found by running a real book through: a column called "Commission" maps to an amount, but
+   * real exports put "12.5%" under that heading — and reading it as an amount records a rate of
+   * twelve and a half shillings, silently.
+   */
+  const AMOUNT_COLS: Record<string, ImportColumn | null> = {
+    Client: "client_name",
+    Commission: "commission_amount",
+  };
+
+  it("reads a percentage under an amount heading as the rate it is", () => {
+    const r = interpretRow(row({ Client: "Acme Ltd", Commission: "12.5%" }), AMOUNT_COLS, null);
+    expect(r.commissionRate).toBe("0.1250");
+    expect(r.commissionAmount).toBeNull();
+  });
+
+  it("still reads a real amount under that heading as an amount", () => {
+    const r = interpretRow(row({ Client: "Acme Ltd", Commission: "150,000" }), AMOUNT_COLS, null);
+    expect(r.commissionAmount).toBe("150000");
+    expect(r.commissionRate).toBeNull();
+  });
+});

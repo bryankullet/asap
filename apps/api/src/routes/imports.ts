@@ -465,20 +465,19 @@ export function importRoutes(deps: { logger: Logger }) {
           periodsCreated++;
 
           if (r.premiumAmount && batch.premiumBasis) {
-            const premium = await db
-              .from("policy_periods")
-              .update({
-                premium_amount: r.premiumAmount,
-                premium_currency: r.premiumCurrency ?? "KES",
-                premium_basis: batch.premiumBasis,
-                commission_rate: r.commissionRate,
-                commission_amount: r.commissionAmount,
-                // Imported, and unverified until a document backs it. It is what the brokerage's
-                // old system said, which is not the same as what a schedule says.
-                premium_source: "import",
-              })
-              .eq("organization_id", org.id)
-              .eq("id", result.period_id);
+            // Through the engine's own function, like every other write: a signed-in role has no
+            // update grant on `policy_periods` and never should.
+            const premium = await db.rpc("policy_period_record_premium", {
+              p_period_id: result.period_id,
+              p_amount: r.premiumAmount,
+              p_currency: r.premiumCurrency ?? "KES",
+              p_basis: batch.premiumBasis,
+              p_commission_rate: r.commissionRate,
+              p_commission_amount: r.commissionAmount,
+              // Imported, and unverified until a document backs it: what the brokerage's old
+              // system said is not the same as what a schedule says.
+              p_source: "import",
+            });
             if (premium.error) throw premium.error;
           }
 
@@ -498,7 +497,13 @@ export function importRoutes(deps: { logger: Logger }) {
             .eq("id", row.id);
         }
       } catch (e) {
-        const problem = e instanceof Error ? e.message : "This row could not be written.";
+        /*
+         * A Supabase error is a plain object, not an Error, so `instanceof` discarded every
+         * message and every row failed with a sentence that said nothing. What the database
+         * refused is the only useful thing here, and it goes to the person who must fix the file.
+         */
+        const problem =
+          (e as { message?: string } | null)?.message ?? "This row could not be written.";
         failures.push({ lineNumber: row.line_number, problem });
         await db.from("import_rows").update({ outcome: "failed", problem }).eq("id", row.id);
       }

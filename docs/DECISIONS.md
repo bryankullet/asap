@@ -888,3 +888,78 @@ record it belongs to, with the provider's own message id recorded against it.
 **What this costs:** there is no longer a public URL that shows the product working without a
 brokerage's data in it. A demonstration now means seeding a real brokerage on a real deployment.
 That is the honest version, and it is what a new client actually sees on their first day (D-068).
+
+## D-070 — Phase 2: the book goes in, and Ask answers
+
+**2026-09-11.** Two gaps closed from `docs/PLAN-NEXT.md`, in the order that unblocked the most.
+
+### Ask answers, through either provider
+
+The gateway was designed for two adapters and had one. `apps/api/src/ai/providers/anthropic.ts`
+is the sibling, and adding it moved nothing above the gateway — which was the point of §45 rule 3.
+Raw HTTP, matching the OpenAI adapter and for the reason already recorded there.
+
+Three things this API demands that the other does not, each now with a test that fails if it
+regresses: the key goes in `x-api-key` with a pinned `anthropic-version`; a tool is declared flat
+rather than wrapped in a function; and a tool result is a **user** turn carrying `tool_result`
+blocks — with every result of one parallel round in a *single* turn, because splitting them teaches
+the model to stop asking for tools in parallel and costs a round trip per tool thereafter.
+
+`thinking` is deliberately not sent: on current models it is on by default, the depth is the
+model's to choose, and this adapter does not get to assume which model `AI_MODEL` names.
+
+**Still required:** a key on the API service. `AI_DEFAULT_PROVIDER=anthropic`, `AI_MODEL`, and
+`ANTHROPIC_API_KEY`. Without them the gateway is absent rather than broken and Ask says so.
+
+### A brokerage's existing book
+
+The rule that shaped all of it: **an import is not a second way in.** It creates clients through
+`client_create` and policies through `policy_create` — the same functions `+ New` calls — so the
+duplicate check, the membership check, the API-caller gate and the audit row are the same ones.
+There is no quieter path that skips them because it is doing a hundred records instead of one.
+
+Two steps, deliberately. A preview stores its decision per row; the commit writes exactly that and
+never re-reads the file. Re-reading would mean the file could have been edited, a name could
+resolve differently, or a client could have been created in between — and a person would have
+approved something other than what happened.
+
+**New tables** (0039, 0040): `client_contacts`, `import_batches`, `import_rows`, and premium and
+commission on `policy_periods`. `client_contacts` is a table rather than columns because a
+corporate client has several people — the finance contact who receives invoices and the operations
+contact who reports claims are routinely different — and one primary is enforced by a partial
+unique index rather than remembered in code.
+
+**What is never inferred:**
+
+- **The premium's basis.** A brokerage's "premium" column is either gross or the total payable;
+  they differ by the statutory levies and cannot be told apart from the numbers. It is asked once
+  per file, and a file with premiums cannot be committed until it is answered.
+- **Commission.** Rate and amount are independent and both nullable. Given levies, neither can be
+  safely derived from the other, so whichever the file did not give stays missing.
+- **An ambiguous date.** 03/04/2026 is April in Nairobi and March elsewhere. It is refused with a
+  request for ISO rather than resolved — a policy that expires on the wrong one of those is a
+  repudiated claim.
+
+**Three defects found by importing a real book rather than a fixture**, each of which the unit
+tests had passed over:
+
+1. **A column called "Commission" holding "12.5%".** The synonym table mapped it to an amount, so
+   a 12.5% rate would have been recorded as twelve and a half shillings — silently. A percent sign
+   now settles it whatever the heading said; the heading decides only when the value does not.
+2. **No premium was recorded at all.** `authenticated` has no update grant on `policy_periods` and
+   never should, so the direct update failed on every row while the clients and policies landed.
+   Migration 0041 adds `policy_period_record_premium`, gated and audited like every other engine
+   write.
+3. **Every failure said "This row could not be written."** A Supabase error is a plain object, not
+   an `Error`, so `instanceof` discarded every message. What the database refused is the only
+   useful thing there, and it now reaches the person who has to fix the file.
+
+**The cap is 2,000 rows**, because the worker tier does not exist yet (Phase 3). The screen states
+it; a larger book is split. This is the one place where the honest answer today is a limit rather
+than a queue.
+
+**Verified against a real database, not only a stand-in:** a six-row book with two deliberately
+broken rows imported to three clients, three contacts, four policies and four periods, with
+12.5% stored as `0.1250`, individuals told from companies, insurers created by name once, the two
+bad rows excluded with their reasons, an audit row naming what the import did, and the same file
+refused on a second attempt.

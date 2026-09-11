@@ -5,6 +5,7 @@ import { useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
 import { api, describeApiError } from "../lib/api.js";
+import { Contacts } from "../features/contacts/Contacts.js";
 import { ClientFileView } from "../views/ClientFileView.js";
 
 export function ClientFile() {
@@ -37,6 +38,9 @@ export function ClientFile() {
   return (
     <>
       {act.isError && <Notice tone="error">{describeApiError(act.error)}</Notice>}
+      {/* Who the brokerage actually writes to. Beside the file, because that is where a person
+          looks for it and where the compliance work happens. */}
+      <Contacts clientId={clientId} />
       <ClientFileView
         file={q.data}
         onAct={(a) => act.mutate(a)}

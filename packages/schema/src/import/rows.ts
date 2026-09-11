@@ -180,11 +180,23 @@ export function interpretRow(
     );
   }
 
+  /*
+   * Commission, where the column heading is not to be trusted.
+   *
+   * A column called "Commission" holds a rate as often as an amount — 12.5% and 150,000 both
+   * appear under it in real exports. A percent sign settles it whatever the heading said, because
+   * reading "12.5%" as an amount would record a rate of twelve and a half shillings, and nothing
+   * downstream could tell. The heading decides only when the value does not.
+   */
   const commissionRateRaw = get("commission_rate");
-  const commissionRate = toRate(commissionRateRaw);
-  if (commissionRateRaw !== "" && commissionRate === null) {
-    problems.push(`"${commissionRateRaw}" was not recognised as a commission rate.`);
+  const commissionAmountRaw = get("commission_amount");
+  const amountIsReallyARate = commissionAmountRaw.includes("%");
+  const rateSource = amountIsReallyARate ? commissionAmountRaw : commissionRateRaw;
+  const commissionRate = toRate(rateSource);
+  if (rateSource !== "" && commissionRate === null) {
+    problems.push(`"${rateSource}" was not recognised as a commission rate.`);
   }
+  const commissionAmount = amountIsReallyARate ? null : toDecimal(commissionAmountRaw);
 
   const policyNumber = get("policy_number") || null;
   // A policy needs its period: cover without dates cannot be renewed, chased or reported on, and
@@ -217,7 +229,7 @@ export function interpretRow(
     premiumAmount,
     premiumCurrency: (get("premium_currency") || "KES").toUpperCase().slice(0, 3),
     commissionRate,
-    commissionAmount: toDecimal(get("commission_amount")),
+    commissionAmount,
     problem: problems.length > 0 ? problems.join(" ") : null,
   };
 }

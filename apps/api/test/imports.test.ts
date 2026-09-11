@@ -21,10 +21,12 @@ const EXISTING = "20000000-0000-4000-8000-000000000001";
 
 let created = 0;
 let policies = 0;
+let premiums: Record<string, unknown>[] = [];
 
 function makeDb(): FakeDb {
   created = 0;
   policies = 0;
+  premiums = [];
   return {
     users: { "tok-amina": AMINA },
     inserts: [],
@@ -34,6 +36,13 @@ function makeDb(): FakeDb {
       client_create: () => {
         created += 1;
         return { data: { id: `c0000000-0000-4000-8000-00000000000${created}` } };
+      },
+      // Recording a premium is an engine write like any other: a signed-in role has no update
+      // grant on policy_periods, so it goes through this function. Capturing the arguments is
+      // what proves the basis and the rate reached the database as recorded, not as derived.
+      policy_period_record_premium: (args: Record<string, unknown>) => {
+        premiums.push(args);
+        return { data: { period_id: args["p_period_id"] } };
       },
       policy_create: () => {
         policies += 1;
@@ -258,11 +267,17 @@ describe("POST /imports/:id/commit — writing what was approved", () => {
 
   it("records the premium with the basis the file was declared to have", async () => {
     await previewThenCommit();
-    const premium = db.inserts.find((i) => i.table === "policy_periods");
-    // Written as an update rather than an insert, so the assertion is on the route's behaviour:
-    // every period created carried a premium through.
-    expect(premium ?? true).toBeTruthy();
-    expect(policies).toBe(3);
+    expect(premiums).toHaveLength(3);
+    const marine = premiums.find((p) => p["p_amount"] === "1250000.00");
+    expect(marine).toMatchObject({
+      p_currency: "KES",
+      p_basis: "gross",
+      // 12.5% as a fraction of premium, never as twelve and a half shillings.
+      p_commission_rate: "0.1250",
+      p_source: "import",
+    });
+    // The file gave a rate, so the amount stays missing rather than being computed from it.
+    expect(marine!["p_commission_amount"]).toBeNull();
   });
 
   it("records the contacts the file carried", async () => {

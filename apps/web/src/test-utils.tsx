@@ -33,6 +33,7 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/discover") {
     "/new",
     "/email",
     "/documents",
+    "/import",
     "/onboarding/create",
     "/onboarding",
   ].map((path) => createRoute({ getParentRoute: () => root, path, component: page }));

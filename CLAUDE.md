@@ -328,7 +328,7 @@ Status colours are semantic and fixed: green = running or active, gold = waiting
 | Phase | UI scope |
 |---|---|
 | 1 | Sign-in, create-brokerage, invite and accept, organization switcher, member list. Plain forms — no Spaces yet. |
-| 2 | Import screens, duplicate-resolution UI, mailbox connection. |
+| 2 | Import screens, duplicate-resolution UI, mailbox connection. **Import and contacts shipped (D-070); the mailbox can start but not finish connecting.** |
 | 3 | **Extraction review interface** — required by the Phase 3 gate, not optional. Document viewer with page highlights. |
 | 4 | The permanent shell, the component registry, the UI-plan renderer and validator, streaming, system states. This is where the real UI work starts. |
 | 5 | Ask ASAP conversation surface, citation → page → highlight, read-only Spaces. |
