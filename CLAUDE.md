@@ -240,9 +240,19 @@ was accepted or money arrived.
 retired from every visible surface; `vocabulary.test.ts` fails if it returns. Pinned is a filter,
 not a destination. "Space" never appears on screen — it is called Work.
 
-**Demo mode** (`VITE_PUBLIC_DEMO_MODE=on`) seeds the approved fictional brokerage, lets Ask answer
-from the approved scenarios with no model configured, and shows the presenter bar. Every surface it
-touches is labelled demonstration data, and a simulated send says so rather than implying delivery.
+**Demo mode** (`VITE_PUBLIC_DEMO_MODE=on`) is a *public, fixture-only application*, not production
+with fixtures in it (D-065). It has no Supabase session, never requests `/me`, needs no brokerage
+membership and makes no API call of any kind: the route tree branches on `DEMO_MODE` **above** both
+authentication guards, so they are not relaxed — they are not mounted. Every destination therefore
+opens for a stranger in an incognito window, at any URL, with no redirect to sign-in. State lives in
+`sessionStorage` for the browser session and Reset restores the fixtures. Every surface it touches is
+labelled demonstration data, and a simulated send says so rather than implying delivery.
+
+With the flag off — the default, and what every real deployment runs — the session, `/me`,
+membership, RLS, permissions and real API operations all apply exactly as before, and there is no
+presenter bar and no fictional record. Never weaken a production guard to make the demo work: branch
+above it. `apps/web/src/demo/demo-entry.test.tsx` drives the real route tree in both modes and fails
+if either rule breaks.
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 

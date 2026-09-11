@@ -5,6 +5,7 @@ import {
   createRoute,
   createRouter,
   redirect,
+  type RouterHistory,
 } from "@tanstack/react-router";
 import { Ask } from "./pages/Ask.js";
 import { AuditHistory } from "./pages/AuditHistory.js";
@@ -17,6 +18,7 @@ import { NewThing } from "./pages/NewThing.js";
 import { WorkDemo, WorkDetail } from "./pages/WorkDemo.js";
 import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
+import { DEMO_MODE } from "./demo/mode.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 import { AuthCallback } from "./pages/AuthCallback.js";
 import { AgreementVersion } from "./pages/AgreementVersion.js";
@@ -65,10 +67,21 @@ const invite = createRoute({
   component: AcceptInvitation,
 });
 
+/**
+ * The demo-mode boundary (D-065).
+ *
+ * The public demonstration is a different application: fixture-only, session-scoped, and reaching
+ * nothing real. It therefore branches *here*, above the guards, rather than inside them — the
+ * guards are not relaxed, they are simply not mounted. With the flag off, which is every real
+ * deployment, both guards mount exactly as they did and production authentication is untouched.
+ *
+ * `Outlet` is the whole of the demo branch: no session lookup, no `/me`, no membership check, so
+ * `/discover` renders for anyone, in any browser, with no cookie and no redirect to sign-in.
+ */
 const authed = createRoute({
   getParentRoute: () => rootRoute,
   id: "authed",
-  component: RequireSession,
+  component: DEMO_MODE ? Outlet : RequireSession,
 });
 const onboarding = createRoute({
   getParentRoute: () => authed,
@@ -84,7 +97,7 @@ const onboardingCreate = createRoute({
 const member = createRoute({
   getParentRoute: () => authed,
   id: "member",
-  component: RequireMembership,
+  component: DEMO_MODE ? Outlet : RequireMembership,
 });
 const shell = createRoute({ getParentRoute: () => member, id: "shell", component: Shell });
 
@@ -294,12 +307,22 @@ const routeTree = rootRoute.addChildren([
   ]),
 ]);
 
-export const router = createRouter({
-  routeTree,
-  defaultNotFoundComponent: () => (
-    <p className="m-6 text-sm text-ink-secondary">There is nothing at this address.</p>
-  ),
-});
+/**
+ * The application's route tree, as a factory so a test can drive it with a memory history and
+ * assert what a real visit does — whether `/discover` renders or lands on sign-in — against the
+ * routes the browser actually gets, not a reconstruction of them.
+ */
+export function createAppRouter(options: { history?: RouterHistory } = {}) {
+  return createRouter({
+    routeTree,
+    defaultNotFoundComponent: () => (
+      <p className="m-6 text-sm text-ink-secondary">There is nothing at this address.</p>
+    ),
+    ...options,
+  });
+}
+
+export const router = createAppRouter();
 
 declare module "@tanstack/react-router" {
   interface Register {

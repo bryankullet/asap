@@ -20,7 +20,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { env } from "../env.js";
+import { DEMO_MODE } from "./mode.js";
 
 /**
  * Demo state (D-064).
@@ -114,7 +114,8 @@ const stamp = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export function DemoProvider({ children }: { children: ReactNode }) {
-  const isDemo = env.VITE_PUBLIC_DEMO_MODE === "on";
+  // One source of truth for the boundary: the router branches on the same constant (D-065).
+  const isDemo = DEMO_MODE;
   const stored = useMemo(() => (isDemo ? readStore() : {}), [isDemo]);
   const [activeScenarioId, setActiveScenarioId] = useState(
     stored.activeScenarioId ?? DEMO_SCENARIOS[0]?.id ?? "",

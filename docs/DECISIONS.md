@@ -663,3 +663,62 @@ outcome-unknown handling, the separation of Work, Job and insurance status, and 
 from the approved scenarios when no model is configured, and shows the presenter bar. Everything it
 touches is labelled as demonstration data, and a simulated send says so rather than implying a
 provider delivered it. Production keeps real OAuth, real approval and real provider evidence.
+
+## D-065 — Demo mode is a public application, branched above the authentication guards
+
+**Reported from the deployed site.** Opening `https://asap-web.onrender.com/discover` redirected to
+`/sign-in?next=%2Fdiscover`; after signing in it returned to `/discover` and showed "We could not
+load your account. Refresh, or sign in again." The demonstration shell never mounted.
+
+Two distinct defects, and they needed separate fixes.
+
+**1. The demonstration was the production application with fixtures inside it.** `VITE_PUBLIC_DEMO_MODE`
+changed what the screens *showed*; it did not change what stood in front of them. `RequireSession`
+and `RequireMembership` mounted above the shell either way, so a public demo asked strangers for a
+Supabase session and then for a brokerage membership neither of which exists.
+
+The boundary is now a build-time constant, `apps/web/src/demo/mode.ts`, and the route tree branches
+on it **above both guards** — they are not relaxed, they are not mounted:
+
+```ts
+const authed = createRoute({ ..., component: DEMO_MODE ? Outlet : RequireSession });
+const member = createRoute({ ..., component: DEMO_MODE ? Outlet : RequireMembership });
+```
+
+Production authentication is untouched, and `demo-entry.test.tsx` drives the real route tree in both
+modes so it stays that way: every demo destination must render for a visitor with no session, and
+`/discover` in production must still land on `/sign-in?next=/discover`.
+
+Three consequences follow, each enforced where it cannot be forgotten:
+
+- **`/me` is never requested in demo mode** (`useMe` is disabled there). A public page must not wait
+  on a 401 before it can draw anything.
+- **Nothing reaches a service.** `request()` — the single function every API call passes through —
+  throws `demo_mode_reaches_nothing` in demo mode. No read, no mutation, no email, no audit row,
+  whatever a surface forgets. `AuthProvider` likewise never looks for a session.
+- **The demonstration needs no credentials.** With demo mode on, the three production variables
+  (`VITE_PUBLIC_SUPABASE_URL`, `VITE_PUBLIC_SUPABASE_ANON_KEY`, `VITE_PUBLIC_API_BASE_URL`) default
+  to inert `.invalid` placeholders. Requiring them meant a public demo could only be deployed by
+  handing it credentials it must not use, and a blank dashboard field failed the build or threw
+  before React mounted.
+
+**2. "We could not load your account" was one sentence for five different failures.** It was wrong
+for four of them: refreshing does not fix an unreachable service, and signing in again does not
+apply a missing migration. The guard now distinguishes, and says who can fix each —
+
+| What happened | What the visitor is told |
+|---|---|
+| The request never arrived (`api_unreachable`) | The service is not answering this browser: starting up, offline, or reachable only from another address |
+| 401 / `invalid_session` | The session is no longer valid; signing in again fixes it |
+| 403 / `permission_denied`, `not_a_member` | The session was accepted and the request refused; a brokerage administrator can restore the membership |
+| 503 `schema_behind` | The service is running ahead of its database: a migration has not been applied |
+| `response_unrecognised` | The page and the service are different builds |
+| `profile_missing` | The sign-in exists but its profile record does not |
+
+Supporting changes: a rejected `fetch` is now `api_unreachable` rather than an unhandled `TypeError`
+(in a browser this is the same error whether the host is wrong, the service is down, or CORS refused
+the response, so the message names all three rather than guessing); a response that fails its Zod
+contract is `response_unrecognised` rather than a generic throw; and `mapDatabaseError` maps
+Postgres `42P01`, `42703` and `42883` to `schema_behind`. The page still shows a failure class and
+never a hostname, a variable or a database message (§45 rule 4); the console gets the whole error,
+because whoever administers a deployment has to be able to find out what broke without rebuilding it.

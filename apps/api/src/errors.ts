@@ -39,6 +39,16 @@ export function mapDatabaseError(err: PostgrestErrorLike): HttpError {
       return new HttpError(409, token && !token.includes(" ") ? token : "conflict");
     case "22023": // validation tokens: terms_not_accepted, invalid_country, invitation_expired, ...
       return new HttpError(422, token || "invalid_request");
+    case "42P01": // undefined_table
+    case "42703": // undefined_column
+      /*
+       * The database is behind the code: a migration this build needs has not been applied. It is
+       * not the caller's fault and it is not a generic fault either — saying so is what turns a
+       * mystifying "we could not load your account" into an action somebody can take.
+       */
+      return new HttpError(503, "schema_behind");
+    case "42883": // undefined_function — a migration adding an RPC has not been applied
+      return new HttpError(503, "schema_behind");
     case "PGRST301": // JWT expired / invalid
     case "PGRST302":
       return new HttpError(401, "invalid_session");

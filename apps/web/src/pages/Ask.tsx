@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { api, describeApiError } from "../lib/api.js";
 import { useDemo } from "../demo/state.js";
+import { DEMO_MODE } from "../demo/mode.js";
 
 /**
  * Ask ASAP, ported from the approved demo (D-064).
@@ -32,7 +33,12 @@ import { useDemo } from "../demo/state.js";
  *    the demo was approved with, not a model's improvisation dressed up as one.
  */
 type AskAnswer = Awaited<ReturnType<typeof api.askQuestion>>;
-type LiveTurnState = { question: string; response: AskAnswer | null };
+type LiveTurnState = {
+  question: string;
+  response: AskAnswer | null;
+  /** A question the demonstration cannot answer, answered honestly rather than by a model. */
+  unanswerableInDemo?: boolean;
+};
 
 export function Ask() {
   const { scenario: requested } = useSearch({ strict: false }) as { scenario?: string };
@@ -92,6 +98,14 @@ export function Ask() {
   }
 
   function askModel(question: string) {
+    /*
+     * The demonstration reaches nothing (D-065). A question outside the approved catalogue is not
+     * sent anywhere and is not improvised: the thread says so, and says what it can answer.
+     */
+    if (DEMO_MODE) {
+      setLiveTurns((prev) => [...prev, { question, response: null, unanswerableInDemo: true }]);
+      return;
+    }
     setLiveTurns((prev) => [...prev, { question, response: null }]);
     live.mutate(question);
   }
@@ -313,6 +327,38 @@ export function Ask() {
 
 /** A question answered by the configured model, in the demo's own message shape. */
 function LiveTurn({ turn }: { turn: LiveTurnState }) {
+  if (turn.unanswerableInDemo) {
+    return (
+      <>
+        <div className="message user">
+          <div className="bubble">{turn.question}</div>
+          <div className="mini-avatar" aria-hidden>
+            GW
+          </div>
+        </div>
+        <div className="message ai">
+          <div className="mini-avatar" aria-hidden>
+            ✦
+          </div>
+          <div className="bubble">
+            <p className="answer-lead">
+              This demonstration answers the approved questions only.
+            </p>
+            <p>
+              Nothing here reaches a model or a brokerage&rsquo;s records. Choose one of the
+              suggestions below, or pick a scenario from the presenter bar, and the full answer,
+              its evidence and its prepared actions appear as they would in the product.
+            </p>
+            <div className="inline-status">
+              <span className="pill medium">Demonstration data</span>
+              <span className="pill">Nothing was sent</span>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
   const response = turn.response;
   const message = response?.message ?? null;
   /** The first paragraph leads; the rest is the reasoning. The server wrote both. */

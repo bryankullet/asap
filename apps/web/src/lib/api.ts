@@ -52,6 +52,7 @@ import {
 import { z } from "zod";
 import { env } from "../env.js";
 import { supabase } from "./supabase.js";
+import { DEMO_MODE } from "../demo/mode.js";
 
 export class ApiRequestError extends Error {
   constructor(
@@ -76,6 +77,13 @@ async function request<S extends z.ZodTypeAny>(
   body?: unknown,
   opts: { auth?: boolean; allow?: number[] } = { auth: true },
 ): Promise<z.infer<S>> {
+  /*
+   * The demonstration reaches nothing (D-065). This is the single place every call passes through,
+   * so it is the one place that can promise it: no read, no mutation, no email, no audit row, no
+   * brokerage's data — whatever a surface forgets. A caller that lands here in demo mode has a
+   * defect to fix in the surface; the error says so plainly rather than pretending to succeed.
+   */
+  if (DEMO_MODE) throw new ApiRequestError(0, "demo_mode_reaches_nothing", { method, path });
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (opts.auth !== false) {
@@ -85,7 +93,21 @@ async function request<S extends z.ZodTypeAny>(
   }
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  const res = await fetch(new URL(path, env.VITE_PUBLIC_API_BASE_URL), init);
+  /*
+   * A rejected fetch is not "something went wrong": the request never reached the service. In a
+   * browser this is the same TypeError whether the host is wrong, the service is down, or CORS
+   * refused the response, so the message names all three rather than guessing one.
+   */
+  let res: Response;
+  try {
+    res = await fetch(new URL(path, env.VITE_PUBLIC_API_BASE_URL), init);
+  } catch (cause) {
+    throw new ApiRequestError(0, "api_unreachable", {
+      method,
+      path,
+      cause: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
   if (!res.ok && !opts.allow?.includes(res.status)) {
     const parsed = apiErrorSchema.safeParse(await res.json().catch(() => ({})));
     throw new ApiRequestError(
@@ -95,8 +117,14 @@ async function request<S extends z.ZodTypeAny>(
     );
   }
   if (!schema || res.status === 204) return undefined as z.infer<S>;
-  // Every response is validated against the shared contract: a drift fails here, not in a component.
-  return schema.parse(await res.json());
+  // Every response is validated against the shared contract: a drift fails here, not in a
+  // component. A failure here means the service is a different build from this one — which is a
+  // deployment fact worth saying, not a generic error.
+  const parsed = schema.safeParse(await res.json().catch(() => undefined));
+  if (!parsed.success) {
+    throw new ApiRequestError(0, "response_unrecognised", { path, issues: parsed.error.issues });
+  }
+  return parsed.data as z.infer<S>;
 }
 
 export const api = {
@@ -200,6 +228,16 @@ export const api = {
 export function describeApiError(err: unknown): string {
   if (!(err instanceof ApiRequestError)) return "Something went wrong. Please try again.";
   const messages: Record<string, string> = {
+    api_unreachable:
+      "We cannot reach the ASAP service. It may be starting up, offline, or configured with the wrong address.",
+    response_unrecognised:
+      "The ASAP service answered in a shape this version does not recognise. The two are on different builds.",
+    schema_behind:
+      "The ASAP service is running ahead of its database: a migration has not been applied.",
+    profile_missing: "Your sign-in exists but your profile record does not.",
+    database_error: "The ASAP service could not read its database.",
+    demo_mode_reaches_nothing:
+      "This is the demonstration. It shows fictional records only and reaches nothing real.",
     not_signed_in: "Please sign in again.",
     invalid_session: "Your session has expired. Please sign in again.",
     permission_denied: "Your role does not allow this.",

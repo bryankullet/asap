@@ -69,6 +69,9 @@ async function start(): Promise<void> {
 }
 
 start().catch((err: unknown) => {
-  // The name only — an env validation error lists variable names, which are configuration.
+  // On the page: the failure class only — an env validation error lists variable names, which are
+  // configuration (§45 rule 4). In the console: the whole thing, because whoever administers the
+  // deployment has to be able to find out what actually broke without rebuilding it.
+  if (err instanceof Error) console.error("ASAP failed to start", err);
   paintStartupFailure(err instanceof Error ? err.name : "Unknown startup error");
 });

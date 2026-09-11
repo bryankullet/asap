@@ -8,8 +8,7 @@ import { PresenterBar } from "../demo/PresenterBar.js";
 import { useDemo } from "../demo/state.js";
 import { NAV } from "./nav.js";
 
-/** The demo's own operator, from the approved fixtures. */
-const DEMO_PERSON = { name: "Grace Wanjiku", role: "Operations Manager", initials: "GW" };
+import { DEMO_PERSON } from "../demo/mode.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 
 /**

@@ -2,6 +2,7 @@ import type { MeResponse } from "@asap/schema";
 import { Button, Select } from "@asap/ui";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
+import { DEMO_MODE } from "../demo/mode.js";
 
 /**
  * C01, as the approved demo draws it: the sidebar itself shows the avatar, the person and the
@@ -12,6 +13,11 @@ import { useEffect, useId, useRef, useState } from "react";
  * It used to render its own avatar and two lines of text, which sat on top of the sidebar's and
  * produced a doubled, overlapping profile row. Pure: the shell supplies the data and the two
  * actions, so shell.test.tsx renders it in a memory router.
+ *
+ * In demo mode it offers only the paths the demonstration can actually show — the ones backed by
+ * fixtures. The brokerage switcher, the team, the insurer agreements and the client files all read
+ * a real brokerage through the API, and a menu item that leads to an error is worse than one that
+ * is not there (D-065). Sign out becomes the way back to the production sign-in page.
  */
 export function ProfileMenu({
   me,
@@ -62,7 +68,33 @@ export function ProfileMenu({
       >
         <span aria-hidden>•••</span>
       </button>
-      {open && (
+      {open && DEMO_MODE && (
+        <div
+          id={menuId}
+          role="menu"
+          aria-label="Profile"
+          className="absolute bottom-full left-0 z-20 mb-2 flex w-full flex-col gap-1 rounded-card border border-line-strong bg-paper p-2 shadow-card"
+        >
+          <p className="px-3 py-1 text-xs text-ink-muted">
+            A demonstration of ASAP. Every client, policy, claim and message here is fictional.
+          </p>
+          <Link
+            role="menuitem"
+            to="/settings/connections"
+            className={linkClass}
+            onClick={() => setOpen(false)}
+          >
+            Data and connections
+          </Link>
+          <Link role="menuitem" to="/audit" className={linkClass} onClick={() => setOpen(false)}>
+            Audit history
+          </Link>
+          <Link role="menuitem" to="/sign-in" className={linkClass} onClick={() => setOpen(false)}>
+            Leave the demonstration
+          </Link>
+        </div>
+      )}
+      {open && !DEMO_MODE && (
         <div
           id={menuId}
           role="menu"
