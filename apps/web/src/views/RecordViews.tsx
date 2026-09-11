@@ -57,7 +57,10 @@ export function WorkItemView({
   const focus = focusCard(item, step);
   const sections = RECORD_SECTIONS[item.kind];
   const stepsSection = (
-    <Card className="flex flex-col gap-3">
+    // The demo's card, around the recipe's own steps. The list itself is unchanged: what a step
+    // is, who is waiting on it and what may be done there are the engine's answers, not a style.
+    <article className="space-card">
+      <div className="space-body">
       <CardTitle>Every step</CardTitle>
       {item.steps.length === 0 ? (
         <p className="text-sm text-ink-muted">No steps recorded yet.</p>
@@ -124,7 +127,8 @@ export function WorkItemView({
         ASAP prepares and drafts. Sending, approving and paying are recorded by a person, with
         evidence.
       </p>
-    </Card>
+      </div>
+    </article>
   );
 
   const activitySection =

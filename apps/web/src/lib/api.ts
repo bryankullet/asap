@@ -35,7 +35,7 @@ import {
   type EndorsementAction,
   type K01View,
   type CreateInvitationRequest,
-  type CreateWorkItemRequest,
+  type CreateWorkItemInput,
   type CreateOrganizationRequest,
   type UpdateMemberRequest,
   attentionResponseSchema,
@@ -162,7 +162,7 @@ export const api = {
   /** Work's four views, ranked and capped by the API rather than by the browser. */
   workList: (view: WorkView, limit = 50) =>
     request("GET", `/work?view=${view}&limit=${limit}`, workListResponseSchema),
-  createWorkItem: (input: CreateWorkItemRequest) =>
+  createWorkItem: (input: CreateWorkItemInput) =>
     request("POST", "/work-items", createWorkItemResponseSchema, input, {
       auth: true,
       allow: [404, 409],

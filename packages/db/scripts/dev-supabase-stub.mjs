@@ -9,10 +9,14 @@
  *
  * **What it does not do, and must never be trusted for:**
  *
- *  - **No RLS.** It connects as the owner, so row-level security is *not* exercised. What proves
- *    RLS is `pnpm test:rls` — 395 pgTAP assertions against this same database, as `authenticated`
- *    and `asap_worker`. Never conclude from this harness that isolation holds.
- *  - **No real tokens.** A bearer token is a seeded user's email, not a verified JWT.
+ *  - **No real tokens.** A bearer token is a seeded user's email, not a verified JWT. Anyone who
+ *    can reach this port is any user they name, which is why it binds to loopback and refuses to
+ *    run outside `APP_ENV=local`.
+ *  - **RLS is exercised, but this is not what proves it.** A request carrying a user's token runs
+ *    in a transaction as `authenticated` with that user's claims, so policies apply exactly as
+ *    they do in the deployed stack — which is what makes the engine's SECURITY DEFINER wrappers
+ *    work at all here. What *proves* isolation is `pnpm test:rls`: 395 pgTAP assertions against
+ *    this same database. Never conclude from a green harness run that isolation holds.
  *
  * It therefore refuses to start unless `APP_ENV=local`, and binds to loopback only.
  *
@@ -100,18 +104,18 @@ function parseSelect(select) {
   return { columns, embeds };
 }
 
-async function resolveEmbeds(rows, embeds) {
+async function resolveEmbeds(rows, embeds, db = sql) {
   for (const embed of embeds) {
     const fk = `${embed.alias}_id`;
     const ids = [...new Set(rows.map((r) => r[fk]).filter((v) => v !== null && v !== undefined))];
     const related = ids.length
-      ? await sql`select * from ${sql(embed.table)} where id = any(${ids})`
+      ? await db`select * from ${db(embed.table)} where id = any(${ids})`
       : [];
     const byId = new Map(related.map((r) => [r.id, r]));
     for (const row of rows) {
       const found = byId.get(row[fk]) ?? null;
       row[embed.alias] = found ? project(found, embed.select) : null;
-      if (found) await resolveEmbeds([row[embed.alias]], embed.select.embeds);
+      if (found) await resolveEmbeds([row[embed.alias]], embed.select.embeds, db);
     }
   }
   return rows;
@@ -122,6 +126,36 @@ function project(row, select) {
   const out = {};
   for (const col of select.columns) out[col] = row[col];
   return out;
+}
+
+/**
+ * Run one request's work as the caller.
+ *
+ * PostgREST hands every request to PostgreSQL with `request.jwt.claims` set and the role switched
+ * to `authenticated`, and the whole engine depends on it: `auth.uid()` is how the SECURITY DEFINER
+ * wrappers know who is acting, and every RLS policy reads it. Doing the same here is what makes a
+ * write through this harness behave like a write in the deployed stack.
+ *
+ * The service key keeps owner rights, as the service role does, for the few boot-time calls the
+ * API makes with it.
+ */
+async function asCaller(token, headers, run) {
+  if (!token || token === process.env.SUPABASE_SERVICE_ROLE_KEY) return run(sql);
+  const [user] = await sql`select id from users where email = ${token}`;
+  if (!user) return { unauthorized: true };
+  return sql.begin(async (tx) => {
+    const claims = JSON.stringify({ sub: user.id, role: "authenticated" });
+    await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+    /*
+     * PostgREST hands the request's headers to PostgreSQL as `request.headers`, and the engine
+     * depends on it: `app.is_api_caller()` reads `x-asap-api-key` from there to refuse a write
+     * that came from a browser holding the anon key rather than from the API. Without it every
+     * engine write fails with `api_only`.
+     */
+    await tx`select set_config('request.headers', ${JSON.stringify(headers)}, true)`;
+    await tx`set local role authenticated`;
+    return run(tx);
+  });
 }
 
 const body = (req) =>
@@ -145,9 +179,14 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(204);
 
   try {
+    const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+    // Header names arrive lower-cased from Node, which is what PostgREST passes on too.
+    const headers = Object.fromEntries(
+      Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : (v ?? "")]),
+    );
+
     // GoTrue, as far as the API reads it: a bearer token is a seeded user's email address.
     if (url.pathname === "/auth/v1/user") {
-      const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
       const [user] = await sql`select id, email from users where email = ${token}`;
       if (!user) return send(401, { message: "invalid token" });
       return send(200, {
@@ -191,8 +230,12 @@ const server = http.createServer(async (req, res) => {
       };
       const names = Object.keys(args);
       const call = names.map((n) => `${n} => ${literal(args[n])}`).join(", ");
-      const [row] = await sql.unsafe(`select ${fn}(${call}) as result`);
-      return send(200, row?.result ?? null);
+      const out = await asCaller(token, headers, async (db) => {
+        const [row] = await db.unsafe(`select ${fn}(${call}) as result`);
+        return row?.result ?? null;
+      });
+      if (out?.unauthorized) return send(401, { message: "invalid token" });
+      return send(200, out ?? null);
     }
 
     const table = /^\/rest\/v1\/([\w]+)$/.exec(url.pathname)?.[1];
@@ -210,16 +253,20 @@ const server = http.createServer(async (req, res) => {
         if (!build) return send(400, { message: `dev-supabase-stub: operator ${op}` });
         filters.push(build(key, rest.join(".")));
       }
-      let query = sql`select * from ${sql(table)}`;
-      for (const [i, f] of filters.entries()) query = sql`${query} ${i === 0 ? sql`where` : sql`and`} ${f}`;
-      const order = url.searchParams.get("order");
-      if (order) {
-        const [col, dir] = order.split(".");
-        query = sql`${query} order by ${sql(col)} ${dir === "desc" ? sql`desc` : sql`asc`}`;
-      }
-      const limit = url.searchParams.get("limit");
-      if (limit) query = sql`${query} limit ${Number(limit)}`;
-      const rows = await resolveEmbeds([...(await query)].map((r) => ({ ...r })), select.embeds);
+      const rows = await asCaller(token, headers, async (db) => {
+        let query = db`select * from ${db(table)}`;
+        for (const [i, f] of filters.entries())
+          query = db`${query} ${i === 0 ? db`where` : db`and`} ${f}`;
+        const order = url.searchParams.get("order");
+        if (order) {
+          const [col, dir] = order.split(".");
+          query = db`${query} order by ${db(col)} ${dir === "desc" ? db`desc` : db`asc`}`;
+        }
+        const limit = url.searchParams.get("limit");
+        if (limit) query = db`${query} limit ${Number(limit)}`;
+        return resolveEmbeds([...(await query)].map((r) => ({ ...r })), select.embeds, db);
+      });
+      if (rows?.unauthorized) return send(401, { message: "invalid token" });
       const projected = rows.map((r) => {
         const out = project(r, select);
         for (const e of select.embeds) out[e.alias] = r[e.alias];
@@ -232,11 +279,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST") {
       const input = await body(req);
       const rows = Array.isArray(input) ? input : [input];
-      const inserted = [];
-      for (const row of rows) {
-        const [out] = await sql`insert into ${sql(table)} ${sql(row)} returning *`;
-        inserted.push(out);
-      }
+      const inserted = await asCaller(token, headers, async (db) => {
+        const out = [];
+        for (const row of rows) {
+          const [written] = await db`insert into ${db(table)} ${db(row)} returning *`;
+          out.push(written);
+        }
+        return out;
+      });
+      if (inserted?.unauthorized) return send(401, { message: "invalid token" });
       const projected = inserted.map((r) => project(r, select));
       return send(201, single ? (projected[0] ?? null) : projected);
     }
@@ -249,9 +300,13 @@ const server = http.createServer(async (req, res) => {
         const [op, ...rest] = value.split(".");
         filters.push(OPERATORS[op](key, rest.join(".")));
       }
-      let query = sql`update ${sql(table)} set ${sql(input)}`;
-      for (const [i, f] of filters.entries()) query = sql`${query} ${i === 0 ? sql`where` : sql`and`} ${f}`;
-      const updated = await sql`${query} returning *`;
+      const updated = await asCaller(token, headers, async (db) => {
+        let query = db`update ${db(table)} set ${db(input)}`;
+        for (const [i, f] of filters.entries())
+          query = db`${query} ${i === 0 ? db`where` : db`and`} ${f}`;
+        return db`${query} returning *`;
+      });
+      if (updated?.unauthorized) return send(401, { message: "invalid token" });
       const projected = [...updated].map((r) => project(r, select));
       return send(200, single ? (projected[0] ?? null) : projected);
     }
@@ -264,5 +319,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`dev-supabase-stub: 127.0.0.1:${PORT} → real PostgreSQL (no RLS, no real tokens)`);
+  console.log(`dev-supabase-stub: 127.0.0.1:${PORT} → real PostgreSQL (RLS on for user tokens, no real JWTs)`);
 });

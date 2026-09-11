@@ -1581,6 +1581,39 @@ body.demo-body {
   font-size: 10px;
 }
 
+/* ---- Forms, as the demo's own sheets draw them --------------------------------------------- */
+.form-row {
+  margin-bottom: 14px;
+}
+.form-row label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #69746b;
+  margin-bottom: 6px;
+}
+.form-row input,
+.form-row select,
+.form-row textarea {
+  width: 100%;
+  border: 1px solid #d7ded8;
+  border-radius: 11px;
+  padding: 10px 11px;
+  outline: 0;
+  font: inherit;
+  color: inherit;
+  background: white;
+}
+.form-row textarea {
+  min-height: 100px;
+}
+.form-row small {
+  display: block;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
 /* ---- Responsive: the demo's own breakpoints, 1000px and 760px ---------------------------- */
 @media (max-width: 1000px) {
   .app-shell {

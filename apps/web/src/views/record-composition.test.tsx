@@ -85,7 +85,9 @@ describe("record page composition", () => {
 
   it("keeps the full step list as supporting context below", async () => {
     await renderInRouter(<WorkItemView item={item({})} runs={RUNS} />);
-    const steps = screen.getByText("Every step").closest("section")!;
+    // The steps now sit in the approved demo's card (D-067), which is an <article>. What the test
+    // asserts is unchanged: the whole step list is there, below the focus card.
+    const steps = screen.getByText("Every step").closest("article")!;
     expect(within(steps).getByText("Placement approved")).toBeInTheDocument();
     expect(within(steps).getByText("Placement prepared")).toBeInTheDocument();
   });

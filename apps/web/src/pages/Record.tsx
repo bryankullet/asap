@@ -8,6 +8,7 @@ import { Notice } from "@asap/ui";
 import { useRun } from "../lib/queries.js";
 import { useRunStream } from "../lib/runStream.js";
 import { WorkItemView } from "../views/RecordViews.js";
+import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { RunDetail } from "../views/RunDetail.js";
 import { DraftCard } from "../features/drafts/DraftCard.js";
 import { ClaimPanel } from "../views/ClaimPanel.js";
@@ -172,7 +173,10 @@ export function Record() {
         </div>
       ) : null;
     return (
-      <div className="space-y-4">
+      <>
+        {/* The approved chrome (D-064): a record says where it sits, not its own name twice. */}
+        <ScreenTitle title={item.title} crumbs={["Work", item.title]} />
+        <section className="page-scroll spaces-page">
         <WorkItemView
           aside={servicingSection}
           item={item}
@@ -202,7 +206,8 @@ export function Record() {
             ) : null
           }
         />
-      </div>
+        </section>
+      </>
     );
   }
   if (run.isPending) return <LoadingList rows={1} label="Loading record" />;

@@ -36,6 +36,11 @@ export const createWorkItemRequestSchema = z
   .refine((v) => v.kind !== "claim" || (v.incidentOn && v.incidentSummary), { message: "a claim needs incidentOn and incidentSummary", path: ["incidentOn"] })
   .refine((v) => v.kind !== "endorsement" || v.requestText, { message: "an endorsement needs requestText", path: ["requestText"] });
 export type CreateWorkItemRequest = z.infer<typeof createWorkItemRequestSchema>;
+/**
+ * What a caller *sends*, as opposed to what the server has after parsing: `insurers` has a
+ * default, so a renewal need not carry it and a claim must not be made to.
+ */
+export type CreateWorkItemInput = z.input<typeof createWorkItemRequestSchema>;
 
 const clientCandidateSchema = z.object({
   id: uuidSchema,

@@ -15,6 +15,7 @@ import { DocumentViewer, Documents } from "./pages/Documents.js";
 import { Email, EmailThread } from "./pages/Email.js";
 import { JobDetail, Jobs } from "./pages/Jobs.js";
 import { NewThing } from "./pages/NewThing.js";
+import { StartWork } from "./pages/StartWork.js";
 import { WorkDemo, WorkDetail } from "./pages/WorkDemo.js";
 import { z } from "zod";
 import { RequireMembership, RequireSession } from "./lib/guards.js";
@@ -236,7 +237,11 @@ const workDetail = createRoute({
 const newThing = createRoute({
   getParentRoute: () => shell,
   path: "/new",
-  component: NewThing,
+  /*
+   * `+ New` starts real work on a real brokerage (D-067) and shows the approved demonstration's
+   * starting paths in demo mode. Both lead somewhere; neither is a menu of apologies.
+   */
+  component: DEMO_MODE ? NewThing : StartWork,
   validateSearch: z.object({ kind: z.string().max(40).optional().catch(undefined) }),
 });
 const email = createRoute({ getParentRoute: () => shell, path: "/email", component: Email });
