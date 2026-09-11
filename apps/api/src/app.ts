@@ -24,6 +24,7 @@ import { spaceRoutes } from "./routes/spaces.js";
 import { workRoutes } from "./routes/work.js";
 import type { AiProvider } from "@asap/schema";
 import type { Executor } from "./runs/executor.js";
+import type { Extractor } from "./documents/extractor.js";
 import type { SupabaseFactory } from "./supabase.js";
 
 export type AppDeps = {
@@ -41,6 +42,8 @@ export type AppDeps = {
    * case the internal surface is not mounted at all rather than mounted with an empty key.
    */
   apiInternalKey?: string | undefined;
+  /** Reads filed documents. Absent on a deployment with none: documents say they are unread. */
+  extractor?: Extractor | null | undefined;
   /** Identifies this process on every run it starts; recovery on boot ends runs from other tokens. */
   bootToken: string;
   /**
@@ -104,7 +107,13 @@ export function createApp(deps: AppDeps) {
   if (deps.apiInternalKey) {
     app.route(
       "/",
-      internalRoutes({ logger, service: () => supabase.service(), internalKey: deps.apiInternalKey }),
+      internalRoutes({
+        logger,
+        service: () => supabase.service(),
+        internalKey: deps.apiInternalKey,
+        extractor: deps.extractor ?? null,
+        bucket: deps.storage?.bucket ?? "insurance-documents",
+      }),
     );
   }
   app.route("/", invitationPublicRoutes({ supabase }));

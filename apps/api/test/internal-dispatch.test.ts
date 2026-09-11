@@ -121,8 +121,14 @@ describe("what it does with an event", () => {
     expect(res.status).toBe(200);
     const body = await readJson(res);
     expect(body.eventType).toBe("document.received");
-    expect(body.results).toHaveLength(1);
-    expect(body.results[0]).toMatchObject({ consumer: "automations", result: "success" });
+    // Both consumers ran: a filed document is read, and anything watching for one is told.
+    const byConsumer = Object.fromEntries(
+      body.results.map((r: { consumer: string }) => [r.consumer, r]),
+    );
+    expect(byConsumer["automations"]).toMatchObject({ result: "success" });
+    // No extraction service is configured in this test, and it says so rather than failing.
+    expect(byConsumer["extraction"]).toMatchObject({ result: "skipped" });
+    expect(byConsumer["extraction"].detail).toMatch(/no extraction service/i);
   });
 
   it("skips rather than fails when the event belongs to no piece of work", async () => {
@@ -133,8 +139,11 @@ describe("what it does with an event", () => {
       { method: "POST", headers: internal },
     );
     const body = await readJson(res);
-    expect(body.results[0]).toMatchObject({ consumer: "automations", result: "skipped" });
-    expect(body.results[0].detail).toMatch(/does not belong to a piece of work/i);
+    const automations = body.results.find(
+      (r: { consumer: string }) => r.consumer === "automations",
+    );
+    expect(automations).toMatchObject({ result: "skipped" });
+    expect(automations.detail).toMatch(/does not belong to a piece of work/i);
   });
 
   it("is a 404 for an event that does not exist", async () => {

@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
+import { extractDocument } from "../documents/extraction.js";
+import type { Extractor } from "../documents/extractor.js";
 import { HttpError, sendError } from "../errors.js";
 
 /**
@@ -22,6 +24,9 @@ export function internalRoutes(deps: {
   logger: Logger;
   service: () => SupabaseClient;
   internalKey: string;
+  /** Null on a deployment with no extraction service: documents are filed, and say they are unread. */
+  extractor: Extractor | null;
+  bucket: string;
 }) {
   const app = new Hono();
 
@@ -70,6 +75,34 @@ export function internalRoutes(deps: {
 
     const results: { consumer: string; result: "success" | "failure" | "skipped"; detail: string }[] =
       [];
+
+    /*
+     * Reading a filed document. This is the step that makes "ASAP reads it next" — which the
+     * upload screen says — true. What it writes is proposed, never known: a person accepts each
+     * field before any of it counts.
+     */
+    if (event.event_type === "document.received" && event.entity_type === "document" && event.entity_id) {
+      const outcome = await extractDocument(
+        db,
+        deps.logger,
+        deps.extractor,
+        deps.bucket,
+        event.entity_id,
+      );
+      results.push({
+        consumer: "extraction",
+        result:
+          outcome.state === "extracted"
+            ? "success"
+            : outcome.state === "skipped"
+              ? "skipped"
+              : "failure",
+        detail:
+          outcome.state === "extracted"
+            ? `${outcome.pages} pages read, ${outcome.fields} values proposed for review.`
+            : outcome.reason,
+      });
+    }
 
     /*
      * Automations. They hang off a work item, so an event about something else — a document not

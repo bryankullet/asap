@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "ASAP — a multi-tenant AI operating system for insurance brokerages",
+  "description": "ASAP \u2014 a multi-tenant AI operating system for insurance brokerages",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": ">=22.13.0",
@@ -26,7 +26,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify:live": "bash scripts/verify-live.sh",
-    "eval:ask": "pnpm --filter @asap/api eval:ask"
+    "eval:ask": "pnpm --filter @asap/api eval:ask",
+    "test:extractor": "cd apps/extractor && python3 -m pytest tests -q"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

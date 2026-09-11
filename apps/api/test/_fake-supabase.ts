@@ -21,6 +21,8 @@ export type FakeDb = {
    * about the difference between "the route did not send it" and "the column has a default".
    */
   defaults?: Record<string, Record<string, unknown>>;
+  /** Bytes a test wants `storage.download` to return, by path. Any path not named gets a stub. */
+  storageObjects?: Record<string, Blob>;
   /**
    * Unique constraints the database enforces, per table, as column lists. Without these a test
    * of idempotency proves nothing: the route relies on the insert *failing*, and a stand-in that
@@ -156,13 +158,21 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
         },
         // Upsert and delete, for the pin route. Both keep the table consistent so a test can read
         // back what it wrote rather than trusting the call's return.
-        upsert: async (row: Record<string, unknown>, opts?: { onConflict?: string }) => {
+        upsert: async (
+          row: Record<string, unknown> | Record<string, unknown>[],
+          opts?: { onConflict?: string },
+        ) => {
+          // An array, as a bulk upsert sends: extraction writes every page of a document at once,
+          // and treating that array as one row would store a single object with numeric keys.
+          const many = Array.isArray(row) ? row : [row];
           const keys = (opts?.onConflict ?? "id").split(",").map((k) => k.trim());
           const rows = (db.tables[table] ??= []);
-          const found = rows.find((r) => keys.every((k) => r[k] === row[k]));
-          if (found) Object.assign(found, row);
-          else rows.push({ created_at: STAMP, ...row });
-          db.inserts.push({ table, row });
+          for (const one of many) {
+            const found = rows.find((r) => keys.every((k) => r[k] === one[k]));
+            if (found) Object.assign(found, one);
+            else rows.push({ created_at: STAMP, ...one });
+            db.inserts.push({ table, row: one });
+          }
           return { error: null };
         },
         delete: () => {
@@ -255,6 +265,15 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
         from: () => ({
           createSignedUrl: async (path: string, ttl: number) => ({
             data: { signedUrl: `https://stub.invalid/${path}?ttl=${ttl}` },
+            error: null,
+          }),
+          /*
+           * The bytes. Extraction reads a filed document out of the bucket, so a stand-in with no
+           * download is a stand-in that cannot exercise the path at all. What comes back is a
+           * tiny stub: these tests are about what is done with a document, not about parsing one.
+           */
+          download: async (path: string) => ({
+            data: db.storageObjects?.[path] ?? new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])]),
             error: null,
           }),
           createSignedUploadUrl: async (path: string) => ({

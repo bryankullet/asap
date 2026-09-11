@@ -7,6 +7,11 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",
+  # Reads documents in this process. The point of it is that nothing leaves our own
+  # infrastructure (§45 rule 2), so a hosted extraction API is not an option here.
+  "pymupdf>=1.24",
+  # Multipart bodies: the API posts the document as a file.
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

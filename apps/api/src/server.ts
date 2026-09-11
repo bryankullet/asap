@@ -7,6 +7,7 @@ import { createLogger } from "./logger.js";
 import { registerApiKey } from "./boot/apiKey.js";
 import { LogMailer, ResendMailer } from "./mail/index.js";
 import { createExecutor } from "./runs/executor.js";
+import { httpExtractor } from "./documents/extractor.js";
 import { newBootToken, recoverOrphanedRuns } from "./runs/recovery.js";
 import { createSupabaseFactory } from "./supabase.js";
 
@@ -68,6 +69,18 @@ const app = createApp({
   exposeAcceptUrl: env.APP_ENV === "local",
   executor: createExecutor({ logger, delayMs: 400 }),
   apiInternalKey: env.API_INTERNAL_KEY,
+  /*
+   * The service that reads documents. Absent is a valid deployment: files are still filed, and
+   * say plainly that nothing has read them — which is better than a queue that never drains.
+   */
+  extractor:
+    env.EXTRACTOR_URL && env.EXTRACTOR_SHARED_SECRET
+      ? httpExtractor({
+          url: env.EXTRACTOR_URL,
+          secret: env.EXTRACTOR_SHARED_SECRET,
+          timeoutMs: 120_000,
+        })
+      : null,
   bootToken,
 });
 

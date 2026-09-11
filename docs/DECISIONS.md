@@ -1040,3 +1040,73 @@ book.
 `read-excel-file` (0 advisories, 20 packages) and `unpdf` (0 advisories, 2 packages). The obvious
 choice for spreadsheets, `xlsx`, carries two **high**-severity advisories with no fix available —
 prototype pollution and ReDoS — which is not acceptable for parsing files a brokerage uploads.
+
+## D-072 — Phase 3: the worker tier wakes, and documents get read
+
+**2026-09-11.** Three things that were written and never ran.
+
+### The worker schedules; the API is the engine
+
+`apps/workers` logged `no consumers registered yet` from Phase 1 until now. It runs the event
+dispatcher: it claims events nobody has handled, asks the API to run the consumers, and records
+what each one did.
+
+The split is deliberate. Workers read tenant data as `asap_worker` under RLS and hold no service
+key — their own environment schema says so and refuses one — while what must happen when an event
+lands is engine work that already exists, tested, in the API. Implementing it in both places would
+be the same rules behind two roles, which is how they drift. So `POST /internal/events/:id/dispatch`
+exists: no session, a shared secret only the API and the worker hold, not mounted at all on a
+deployment without one, and **the organization comes from the event row, never from the caller.**
+
+**Idempotency is a constraint, not a convention.** `event_deliveries` has `(event_id, consumer)` as
+its primary key, so a consumer that already ran for an event cannot run again and a retry cannot
+rewrite the first answer. That is what makes the loop safe to crash and restart, and it is tested
+against a real database — a stand-in that accepted every insert would pass while the real thing let
+a consumer run twice.
+
+A failed consumer leaves the event unprocessed with `last_error` set; after five attempts it stops
+being served, still unprocessed and still carrying its error. An event that quietly became
+"processed" after failing is what §45 rule 15 forbids.
+
+### Two things running it for real turned up
+
+1. **Nothing ever learned an upload finished.** The browser PUTs bytes straight to storage; the API
+   never sees the transfer. So the file sat in the bucket with nothing waiting on it, and "ASAP
+   reads it next" — which the upload screen says — was untrue. `POST /documents/:id/filed` is that
+   signal: it checks the object is really in the bucket rather than taking the browser's word,
+   queues the document, and emits `document.received`.
+2. **The dispatcher saw nothing at all.** `events` is a tenant table whose policy scopes every read
+   to one organization, and claiming spans tenants — so against a real database it read zero rows,
+   silently, and would have looked busy forever. The wrong fixes were a service key for the worker
+   or a relaxed policy. Migration 0042 is the narrow one: `app.claim_pending_events`, granted to
+   `asap_worker` alone, returning that an event exists, whose it is, and how often it has been
+   tried — **never its payload**, which is the brokerage's own data the worker does not need.
+   `supabase/tests/0316` proves `authenticated` and `anon` cannot call it.
+
+### Documents are read, and every value is proposed
+
+`apps/extractor` was a placeholder with a queue consumer that did nothing. It now serves
+`POST /extract` with PyMuPDF: pages with their text and dimensions, and the values a schedule
+labels, each with the rectangle it was read from.
+
+**Nothing it returns is known.** A labelled value is `known`, a document that says the same thing
+twice and differently yields `conflicting` **with both readings kept**, and a field the document
+never gave is proposed as `missing` rather than left out — so the review screen shows the absence
+instead of leaving a person to notice it. Picking a winner between two policy numbers would hide
+the exact thing a person needs to see. Every field is written `state = 'proposed'`; a person
+accepts or corrects each one (§45 rule 8).
+
+Documents never leave our own infrastructure (§45 rule 2): PyMuPDF reads the bytes in that process
+and nothing there calls out. A document already read is left alone, so a redelivered event cannot
+replace a person's accepted values with fresh guesses.
+
+### What is still not true
+
+- **`renewal.approaching` and `check.overdue` cannot fire.** They are time-based and need a
+  scheduled sweep, which does not exist. `payment.received` cannot fire either: there is no money
+  model to observe (D-070 defers it).
+- **The full upload → extraction path is proven in layers, not end to end.** The Python service
+  against a real PDF, the consumer against a stand-in, the dispatcher against real Postgres, and
+  the worker against the real API — but not all four at once, because the local stand-in has no
+  storage download.
+- `pnpm test` does not run the Python tests; `pnpm test:extractor` does.
