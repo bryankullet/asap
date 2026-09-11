@@ -80,3 +80,51 @@ Every demo destination opened with no session, no cookie and no API call.
   no harm, since nothing in demo mode reads them.
 - **asap-api**: no change is needed for the public demo. Work through the table in §2 for the
   authenticated deployment, and reproduce once afterwards — the screen now names its own cause.
+
+---
+
+## 5. Resolved, 2026-09-11 — the API was never reached, and the host was wrong
+
+With Render access, the diagnosis in §2 was finally run against the deployment rather than guessed
+at. The answer was in the request log, and it was the *absence* of a line.
+
+**`asap-api` is healthy and always was.** On commit `528e97e` it starts clean, reaches its database
+(`api key already active`, `no orphaned runs`), and answers `/health` in under a millisecond. Two
+warnings at boot, both correct and both benign: no `SENTRY_DSN`, and no `OPENAI_API_KEY`/`AI_MODEL`,
+so Ask answers with its configuration-required state instead of pretending.
+
+**No browser request has ever reached it.** Filtering the log by path `/me` across the life of the
+service returns nothing. Filtering for request logs in general returns only Render's own health
+checks and a handful of `GET /` 404s. Not one authenticated call, not one preflight, not one 4xx.
+
+That rules out most of §2's table at a stroke:
+
+| Hypothesis | Ruled out by |
+|---|---|
+| CORS rejection | A blocked request still *arrives* and is logged. Nothing arrived. |
+| Session invalid / expired token | Would be a logged 401. Nothing arrived. |
+| Missing membership | Would be a logged 200 with no organization. Nothing arrived. |
+| Schema behind / migration missing | Would be a logged 500. Nothing arrived. |
+| API down or asleep | `/health` answers continuously, including through the window in question. |
+
+What is left is that the browser sent its request somewhere that is not this service. **The service's
+URL is `https://asap-api-wx0m.onrender.com`** — Render appended `-wx0m` because `asap-api` was taken
+— **while the service is named `asap-api`.** A bundle built with `VITE_PUBLIC_API_BASE_URL` set to
+the name rather than the URL resolves nothing, and `api.ts` reports exactly what it observed:
+`api_unreachable`, "We cannot reach the ASAP service."
+
+The five-way error distinction added for D-065 was right about its own case and was the thing that
+made this findable. The failure it could not distinguish is "the host does not exist" from "the host
+is not answering" — both are `api_unreachable`, and both are true here.
+
+**Set, through the Render connector:**
+
+- `asap-web` → `VITE_PUBLIC_API_BASE_URL=https://asap-api-wx0m.onrender.com`
+- `asap-api` → `WEB_BASE_URL=https://asap-web.onrender.com` (the exact CORS origin; `cors({origin})`
+  is a single exact string, so a trailing slash or the wrong subdomain fails the preflight)
+- `asap-web` → `VITE_PUBLIC_DEMO_MODE=off`, which is what made the deployed site the demonstration.
+  The variable is removed from the code entirely in D-069; the dashboard value is now inert.
+
+**What this does not prove.** Neither service has yet served an authenticated browser request. The
+next real sign-in is the first one, and it is the thing to watch: a request appearing in the log at
+all is the fix landing, and its status code is the next question.
