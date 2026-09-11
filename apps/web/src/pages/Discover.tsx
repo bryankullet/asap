@@ -1,12 +1,10 @@
-import type { AttentionResponse, DemoWork, FocusCardView } from "@asap/schema";
+import type { AttentionResponse, FocusCardView } from "@asap/schema";
 import { Link } from "@tanstack/react-router";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { useAttention } from "../lib/queries.js";
 import { focusCardFromAttention } from "../live/adapters.js";
-import { DEMO_PERSON } from "../demo/mode.js";
-import { useDemo } from "../demo/state.js";
 
 /**
  * Discover, ported from the approved demo (D-064).
@@ -20,75 +18,11 @@ import { useDemo } from "../demo/state.js";
  * carries the urgent left border. The last is `quiet`, at 80% opacity, because a settlement that
  * has been accepted is real but not urgent.
  *
- * Every row's copy and ordering comes from the fixtures; the classes come from the demo's own
- * stylesheet, so this can be checked against it rule by rule.
+ * Every row is one of the brokerage's own attention items, ranked server-side; the classes come
+ * from the approved stylesheet, so this can be checked against it rule by rule.
  */
 
-/** The approved priority list, in the demo's own order and wording. */
-const PRIORITY: {
-  workId: string;
-  signal: "high" | "medium" | "resolved";
-  signalLabel: string;
-  headline: string;
-  detail: string;
-  workType: string;
-  action: string;
-  elapsed: string;
-  /** The demo names Acme in full and the rest short. Its wording, not a derived label. */
-  clientLabel: string;
-  urgent?: boolean;
-  quiet?: boolean;
-}[] = [
-  {
-    workId: "w-acme-kdn",
-    clientLabel: "Acme Manufacturing Ltd",
-    signal: "high",
-    signalLabel: "High",
-    headline: "New vehicle requested on cover today",
-    detail:
-      "KDN 482Q is not on the latest schedule and Meridian confirmation has not been recorded.",
-    workType: "Servicing Work",
-    action: "Review servicing",
-    elapsed: "12 min ago",
-    urgent: true,
-  },
-  {
-    workId: "w-bluewave-renewal",
-    clientLabel: "Bluewave Properties",
-    signal: "medium",
-    signalLabel: "At risk",
-    headline: "Property renewal has no usable terms",
-    detail: "Updated values and a fire inspection are holding up both approached insurers.",
-    workType: "Renewal Work",
-    action: "Review renewal",
-    elapsed: "34 days",
-  },
-  {
-    workId: "w-mara-balance",
-    clientLabel: "Mara Foods",
-    signal: "medium",
-    signalLabel: "Overdue",
-    headline: "KES 860,000 premium remains unpaid",
-    detail: "One unmatched receipt may affect the balance and needs a human choice before follow-up.",
-    workType: "Money Work",
-    action: "Review balance",
-    elapsed: "18 days",
-  },
-  {
-    workId: "w-greencare-claim",
-    clientLabel: "GreenCare Clinics",
-    signal: "resolved",
-    signalLabel: "Accepted",
-    headline: "Claim settlement is still unpaid",
-    detail: "The offer was accepted, but no bank receipt or remittance proves payment.",
-    workType: "Claim Work",
-    action: "Check settlement",
-    elapsed: "3 days",
-    quiet: true,
-  },
-];
-
-/** The date, in the demo's own format, from the clock that decided what is due. */
+/** The date, in the approved format, from the clock that decided what is due. */
 function dateLabel(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
     weekday: "long",
@@ -103,8 +37,7 @@ function greeting(now: Date, firstName: string): string {
   return firstName ? `${part}, ${firstName}` : part;
 }
 
-export function DiscoverDemo() {
-  const demo = useDemo();
+export function Discover() {
   const me = useMe();
 
   /*
@@ -116,24 +49,17 @@ export function DiscoverDemo() {
   const generatedAt = live.data?.generatedAt;
   const now = generatedAt ? new Date(generatedAt) : new Date();
 
-  const cards: FocusCardView[] = demo.isDemo
-    ? PRIORITY.flatMap((p) => {
-        const work = demo.work.find((w) => w.id === p.workId);
-        return work ? [focusCardFromDemo(p, work)] : [];
-      })
-    : (live.data?.items ?? []).map((entry, i) => focusCardFromAttention(entry, now, i));
+  const cards: FocusCardView[] = (live.data?.items ?? []).map((entry, i) =>
+    focusCardFromAttention(entry, now, i),
+  );
 
   const person = me.data?.user;
-  const firstName = demo.isDemo
-    ? DEMO_PERSON.name.split(" ")[0]!
-    : ((person?.display_name ?? person?.full_name ?? person?.email ?? "").split(/[\s@.]+/)[0] ?? "");
+  const firstName =
+    (person?.display_name ?? person?.full_name ?? person?.email ?? "").split(/[\s@.]+/)[0] ?? "";
 
   return (
     <>
-      <ScreenTitle
-        title="Discover"
-        meta={demo.isDemo ? "Thursday, 10 September" : generatedAt ? dateLabel(generatedAt) : ""}
-      />
+      <ScreenTitle title="Discover" meta={generatedAt ? dateLabel(generatedAt) : ""} />
 
       <section className="page-scroll">
         <div className="welcome-row">
@@ -150,13 +76,13 @@ export function DiscoverDemo() {
         <div className="discover-layout">
           <div>
             {/* Every system state is designed (§36), and none of them is a blank column. */}
-            {!demo.isDemo && live.isPending && (
+            {live.isPending && (
               <div className="focus-card" style={{ cursor: "default" }}>
                 <h3>Reading your book…</h3>
                 <p>Ranking what needs attention against the server’s clock.</p>
               </div>
             )}
-            {!demo.isDemo && live.isError && (
+            {live.isError && (
               <div className="focus-card urgent" style={{ cursor: "default" }}>
                 <h3>We could not read what needs attention</h3>
                 <p>{describeApiError(live.error)}</p>
@@ -191,13 +117,15 @@ export function DiscoverDemo() {
                 </div>
               </Link>
             ))}
-            {cards.length === 0 && !live.isPending && !live.isError && (
+            {cards.length === 0 &&
+              !live.isPending &&
+              !live.isError &&
               /*
                * Two different empty screens, because they are two different facts. A brokerage
                * with nothing on file is not up to date — it has not started — and telling it
                * otherwise is a lie of omission (D-068).
                */
-              (live.data?.book.clients ?? 1) === 0 && !demo.isDemo ? (
+              ((live.data?.book.clients ?? 1) === 0 ? (
                 <div className="focus-card" style={{ cursor: "default" }}>
                   <h3>Nothing is on file yet</h3>
                   <p>
@@ -216,8 +144,7 @@ export function DiscoverDemo() {
                   <h3>Nothing needs attention</h3>
                   <p>That is a real answer, not an empty screen.</p>
                 </div>
-              )
-            )}
+              ))}
             {/* A partial read says what it could not see rather than quietly showing less. */}
             {(live.data?.degraded ?? []).map((d) => (
               <div className="warning" key={d.what}>
@@ -236,20 +163,10 @@ export function DiscoverDemo() {
                 <small>Across your book</small>
               </div>
             </div>
-            {demo.isDemo ? (
-              <>
-                <h3>Three motor renewals show premium increases above 18%</h3>
-                <p>The increase is mostly from declared values, not claims experience.</p>
-                <Link to="/ask" search={{ scenario: "commission-outstanding" }} className="link">
-                  Investigate pattern
-                </Link>
-              </>
-            ) : (
-              <Noticed attention={live.data} />
-            )}
+            <Noticed attention={live.data} />
             <hr />
             <div className="quick-title">Quick actions</div>
-            <Link to="/ask" search={demo.isDemo ? { scenario: "brokerage-priorities" } : {}} className="quick">
+            <Link to="/ask" search={{}} className="quick">
               Ask about the brokerage <span aria-hidden>→</span>
             </Link>
             <Link to="/new" className="quick">
@@ -268,9 +185,9 @@ export function DiscoverDemo() {
 /**
  * What ASAP noticed, on a real brokerage: counted from the same answer, never generated.
  *
- * The approved demo shows a pattern across the book. There is no endpoint that finds patterns yet,
- * and inventing one here would be a model-authored business claim (§45 rule 9) — so this says the
- * true thing the answer already contains: how much is waiting, and what ASAP ran that stopped.
+ * The approved design shows a pattern across the book. There is no endpoint that finds patterns
+ * yet, and inventing one here would be a model-authored business claim (§45 rule 9) — so this says
+ * the true thing the answer already contains: how much is waiting, and what ASAP ran that stopped.
  */
 function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
   if (!attention) return null;
@@ -304,7 +221,9 @@ function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
     <>
       <h3>
         {needsYou} {needsYou === 1 ? "item needs" : "items need"} a person
-        {checksDue > 0 ? `, and ${checksDue} ${checksDue === 1 ? "check is" : "checks are"} overdue` : ""}
+        {checksDue > 0
+          ? `, and ${checksDue} ${checksDue === 1 ? "check is" : "checks are"} overdue`
+          : ""}
       </h3>
       <p>
         {stopped > 0
@@ -316,25 +235,4 @@ function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
       </Link>
     </>
   );
-}
-
-/** The approved demo's own priority row, as the same card. */
-function focusCardFromDemo(
-  p: (typeof PRIORITY)[number],
-  work: DemoWork,
-): FocusCardView {
-  return {
-    id: work.id,
-    href: `/work/${work.id}`,
-    tone: p.signal === "resolved" ? "resolved" : p.signal,
-    toneLabel: p.signalLabel,
-    clientLabel: p.clientLabel,
-    elapsed: p.elapsed,
-    headline: p.headline,
-    detail: p.detail,
-    workType: p.workType,
-    action: p.action,
-    urgent: p.urgent ?? false,
-    quiet: p.quiet ?? false,
-  };
 }

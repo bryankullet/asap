@@ -59,7 +59,10 @@ export const automationConditionSchema = z.object({
     "exception",
   ]),
   operator: AutomationConditionOperator,
-  value: z.union([z.string(), z.number(), z.array(z.string())]).nullable().default(null),
+  value: z
+    .union([z.string(), z.number(), z.array(z.string())])
+    .nullable()
+    .default(null),
 });
 export type AutomationCondition = z.infer<typeof automationConditionSchema>;
 

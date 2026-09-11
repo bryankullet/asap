@@ -1,21 +1,15 @@
-import {
-  DEMO_NOTICE,
-  demoClient,
-  type DemoJob,
-  type JobCardView,
-  type RunListFilter,
-} from "@asap/schema";
+import type { JobCardView, RunListFilter } from "@asap/schema";
 import { JOB_FILTERS } from "../shell/nav.js";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
-import { DemoBoundary } from "../demo/DemoBoundary.js";
-import { useDemo } from "../demo/state.js";
 import { MissingData } from "../components/states.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
-import { describeApiError } from "../lib/api.js";
+import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { useRunList } from "../lib/queries.js";
+import { useQuery } from "@tanstack/react-query";
+import { RunDetail } from "../views/RunDetail.js";
+import { LoadingList, ErrorState } from "../components/states.js";
 import { jobCardFromRow } from "../live/adapters.js";
-import { jobCardFromDemo } from "../demo/adapters.js";
 
 /**
  * Jobs — what ASAP is processing (D-064).
@@ -30,17 +24,8 @@ import { jobCardFromDemo } from "../demo/adapters.js";
  * its own evidence.
  */
 
-/** Which fixture jobs each tab shows. "Work" is everything that has stopped and needs a person. */
-function inFilter(job: DemoJob, filter: string): boolean {
-  // The board's All is everything still live; a finished job has its own tab.
-  if (filter === "all") return job.state !== "completed";
-  if (filter === "work") return job.state === "needs_human" || job.state === "failed";
-  return job.state === filter;
-}
-
 export function Jobs() {
   const { filter } = useSearch({ strict: false }) as { filter?: string };
-  const demo = useDemo();
   const me = useMe();
   const active = (filter ?? "all") as RunListFilter;
 
@@ -51,18 +36,12 @@ export function Jobs() {
    */
   const live = useRunList(me.data?.active_organization?.id, active);
 
-  const groups: { title: string; cards: JobCardView[] }[] = demo.isDemo
-    ? demoGroups(demo.jobs.filter((j) => inFilter(j, active)))
-    : (live.data?.groups ?? []).map((g) => ({
-        title: g.title,
-        cards: g.items.map((row) => jobCardFromRow(row, g.title)),
-      }));
+  const groups: { title: string; cards: JobCardView[] }[] = (live.data?.groups ?? []).map((g) => ({
+    title: g.title,
+    cards: g.items.map((row) => jobCardFromRow(row, g.title)),
+  }));
 
-  const counts: Partial<Record<RunListFilter, number>> = demo.isDemo
-    ? Object.fromEntries(
-        JOB_FILTERS.map((f) => [f.id, demo.jobs.filter((j) => inFilter(j, f.id)).length]),
-      )
-    : (live.data?.counts ?? {});
+  const counts: Partial<Record<RunListFilter, number>> = live.data?.counts ?? {};
 
   return (
     <>
@@ -100,12 +79,12 @@ export function Jobs() {
         </nav>
 
         {/* Loading, partial, error and empty are all designed states (§36). */}
-        {!demo.isDemo && live.isPending && (
+        {live.isPending && (
           <article className="space-card" style={{ padding: 24 }}>
             <strong>Reading what ASAP is doing…</strong>
           </article>
         )}
-        {!demo.isDemo && live.isError && (
+        {live.isError && (
           <article className="space-card" style={{ padding: 24 }}>
             <strong>We could not read the jobs.</strong>
             <p style={{ color: "#707a72", fontSize: 11 }}>{describeApiError(live.error)}</p>
@@ -142,7 +121,7 @@ export function Jobs() {
             ))}
           </div>
         )}
-        {!demo.isDemo && live.data && live.data.visible > live.data.returned && (
+        {live.data && live.data.visible > live.data.returned && (
           <p style={{ color: "#707a72", fontSize: 11 }}>
             Showing {live.data.returned} of {live.data.visible}.
           </p>
@@ -152,20 +131,8 @@ export function Jobs() {
   );
 }
 
-/** The demonstration's own board, grouped in the fixtures' order. */
-function demoGroups(jobs: DemoJob[]): { title: string; cards: JobCardView[] }[] {
-  const out: { title: string; cards: JobCardView[] }[] = [];
-  for (const j of jobs) {
-    const card = jobCardFromDemo(j);
-    const found = out.find((g) => g.title === card.group);
-    if (found) found.cards.push(card);
-    else out.push({ title: card.group, cards: [card] });
-  }
-  return out;
-}
-
 /**
- * One job, in the approved demo's card: its icon, the headline and badge, the record it belongs
+ * One job, in the approved card: its icon, the headline and badge, the record it belongs
  * to, the progress bar where there is progress, and the live note.
  *
  * Progress is read from the job's own steps, never authored (§45 rule 10), and the outcome
@@ -204,18 +171,30 @@ function JobCard({ card }: { card: JobCardView }) {
   );
 }
 
-/** The board tab a job belongs to, so its detail links back to where it was. */
-function tabFor(job: DemoJob): "running" | "waiting" | "work" | "completed" {
-  if (job.state === "needs_human" || job.state === "failed") return "work";
-  return job.state;
-}
-
-/** One job, its steps, and the Work it belongs to. */
+/**
+ * One job: the run ASAP actually performed, its steps, its evidence and the work it belongs to.
+ *
+ * The same `RunDetail` the record page shows, so a job reached from the board and a job reached
+ * from its record are one screen with one source — the engine's own run row (§45 rule 10).
+ */
 export function JobDetail() {
   const { jobId = "" } = useParams({ strict: false }) as { jobId?: string };
-  const demo = useDemo();
-  const job = demo.jobs.find((j) => j.id === jobId);
-  if (!job) {
+  const detail = useQuery({
+    queryKey: ["run_detail", jobId],
+    queryFn: () => api.run(jobId),
+    retry: false,
+  });
+
+  if (detail.isPending) return <LoadingList rows={3} label="Loading the job" />;
+  if (detail.isError) {
+    return (
+      <ErrorState
+        what={`We could not read this job. ${describeApiError(detail.error)}`}
+        retry={() => void detail.refetch()}
+      />
+    );
+  }
+  if (!detail.data) {
     return (
       <MissingData
         what="No job with that id"
@@ -223,72 +202,12 @@ export function JobDetail() {
       />
     );
   }
-  const client = demoClient(job.clientId);
-  const work = demo.work.find((w) => w.id === job.workId);
-
   return (
-    <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <Link
-          to="/jobs"
-          search={{ filter: tabFor(job) }}
-          className="text-sm text-ink-secondary hover:underline"
-        >
-          ← Jobs
-        </Link>
-        <h1 className="font-heading text-xl font-semibold text-ink">{job.title}</h1>
-        <p className="text-sm text-ink-secondary">{job.outcome}</p>
-        {client && <p className="text-xs text-ink-muted">{client.name}</p>}
-      </header>
-
-      <section aria-label="Steps" className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-ink">What it did</h2>
-        <ol className="flex flex-col gap-1.5">
-          {job.steps.map((s, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <span
-                aria-hidden
-                className={
-                  s.state === "done"
-                    ? "text-accent-green"
-                    : s.state === "failed"
-                      ? "text-accent-red"
-                      : s.state === "now"
-                        ? "text-accent-gold"
-                        : "text-ink-muted"
-                }
-              >
-                {s.state === "done" ? "✓" : s.state === "failed" ? "✗" : s.state === "now" ? "◴" : "○"}
-              </span>
-              <span className={s.state === "todo" ? "text-ink-muted" : "text-ink-secondary"}>
-                {s.label}
-              </span>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {/* The separation, said out loud where it matters most. */}
-      <p className="rounded-card border border-line-soft bg-wash px-3 py-2 text-sm text-ink-secondary">
-        This is what ASAP did. Whether cover was confirmed, a claim accepted or money received is a
-        separate fact, recorded against the policy with its own evidence.
-      </p>
-
-      {work && (
-        <section aria-label="Related work" className="flex flex-col gap-1.5">
-          <h2 className="text-sm font-medium text-ink">The work this belongs to</h2>
-          <Link
-            to="/work/$workId"
-            params={{ workId: work.id }}
-            className="rounded-card border border-line-strong bg-paper p-3 text-sm text-ink hover:border-ink-muted"
-          >
-            {work.title}
-            <span className="block text-xs text-ink-muted">{work.reason}</span>
-          </Link>
-        </section>
-      )}
-
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
-    </div>
+    <>
+      <Link to="/jobs" search={{ filter: "all" }} className="crumb">
+        ← Jobs
+      </Link>
+      <RunDetail data={detail.data} />
+    </>
   );
 }

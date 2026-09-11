@@ -44,10 +44,9 @@ function paintStartupFailure(detail: string): void {
 
 async function start(): Promise<void> {
   // Dynamic so a throw inside any of them is catchable rather than a blank module-evaluation error.
-  const [{ AuthProvider }, { router }, { DemoProvider }] = await Promise.all([
+  const [{ AuthProvider }, { router }] = await Promise.all([
     import("./lib/auth.js"),
     import("./router.js"),
-    import("./demo/state.js"),
     import("./styles/index.css"),
   ]);
 
@@ -59,9 +58,7 @@ async function start(): Promise<void> {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <DemoProvider>
-            <RouterProvider router={router} />
-          </DemoProvider>
+          <RouterProvider router={router} />
         </AuthProvider>
       </QueryClientProvider>
     </StrictMode>,

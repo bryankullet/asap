@@ -42,7 +42,9 @@ export const conversationMessageSchema = z.object({
   /** The resolved intent for an `asap` turn. Validated server-side before it was stored. */
   intent: UiIntent.nullable(),
   /** Which declared tools ran, and against what. Never free-form SQL; never a write. */
-  tools_used: z.array(z.object({ name: z.string(), arguments: z.record(z.string(), z.unknown()) })).default([]),
+  tools_used: z
+    .array(z.object({ name: z.string(), arguments: z.record(z.string(), z.unknown()) }))
+    .default([]),
   /** Where each named fact came from. An answer with no citation is an abstention, not a claim. */
   citations: z
     .array(
@@ -125,7 +127,9 @@ export const askResponseV2Schema = z.object({
   clarify: z
     .object({
       question: z.string(),
-      options: z.array(z.object({ id: uuidSchema, label: z.string(), hint: z.string().nullable() })).max(8),
+      options: z
+        .array(z.object({ id: uuidSchema, label: z.string(), hint: z.string().nullable() }))
+        .max(8),
     })
     .nullable()
     .default(null),

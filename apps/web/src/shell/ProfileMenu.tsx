@@ -2,7 +2,6 @@ import type { MeResponse } from "@asap/schema";
 import { Button, Select } from "@asap/ui";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
-import { DEMO_MODE } from "../demo/mode.js";
 
 /**
  * C01, as the approved demo draws it: the sidebar itself shows the avatar, the person and the
@@ -68,33 +67,7 @@ export function ProfileMenu({
       >
         <span aria-hidden>•••</span>
       </button>
-      {open && DEMO_MODE && (
-        <div
-          id={menuId}
-          role="menu"
-          aria-label="Profile"
-          className="absolute bottom-full left-0 z-20 mb-2 flex w-full flex-col gap-1 rounded-card border border-line-strong bg-paper p-2 shadow-card"
-        >
-          <p className="px-3 py-1 text-xs text-ink-muted">
-            A demonstration of ASAP. Every client, policy, claim and message here is fictional.
-          </p>
-          <Link
-            role="menuitem"
-            to="/settings/connections"
-            className={linkClass}
-            onClick={() => setOpen(false)}
-          >
-            Data and connections
-          </Link>
-          <Link role="menuitem" to="/audit" className={linkClass} onClick={() => setOpen(false)}>
-            Audit history
-          </Link>
-          <Link role="menuitem" to="/sign-in" className={linkClass} onClick={() => setOpen(false)}>
-            Leave the demonstration
-          </Link>
-        </div>
-      )}
-      {open && !DEMO_MODE && (
+      {open && (
         <div
           id={menuId}
           role="menu"
@@ -140,12 +113,7 @@ export function ProfileMenu({
           >
             Data and connections
           </Link>
-          <Link
-            role="menuitem"
-            to="/audit"
-            className={linkClass}
-            onClick={() => setOpen(false)}
-          >
+          <Link role="menuitem" to="/audit" className={linkClass} onClick={() => setOpen(false)}>
             Audit history
           </Link>
           <Link

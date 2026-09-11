@@ -16,9 +16,16 @@ const updateUser = vi.fn(async () => ({ error: null }));
 const session = { current: null as unknown };
 
 vi.mock("../lib/supabase.js", () => ({
-  supabase: { auth: { resetPasswordForEmail: (...a: unknown[]) => resetPasswordForEmail(...(a as [])), updateUser: (...a: unknown[]) => updateUser(...(a as [])) } },
+  supabase: {
+    auth: {
+      resetPasswordForEmail: (...a: unknown[]) => resetPasswordForEmail(...(a as [])),
+      updateUser: (...a: unknown[]) => updateUser(...(a as [])),
+    },
+  },
 }));
-vi.mock("../lib/auth.js", () => ({ useAuth: () => ({ session: session.current, loading: false }) }));
+vi.mock("../lib/auth.js", () => ({
+  useAuth: () => ({ session: session.current, loading: false }),
+}));
 
 const { ForgotPassword, ResetPassword } = await import("./ResetPassword.js");
 
@@ -74,6 +81,8 @@ describe("choosing a new password", () => {
     await userEvent.type(screen.getByLabelText("New password"), "correct-horse-battery");
     await userEvent.type(screen.getByLabelText("Again, to be sure"), "correct-horse-battery");
     await userEvent.click(screen.getByRole("button", { name: /Change my password/ }));
-    await waitFor(() => expect(updateUser).toHaveBeenCalledWith({ password: "correct-horse-battery" }));
+    await waitFor(() =>
+      expect(updateUser).toHaveBeenCalledWith({ password: "correct-horse-battery" }),
+    );
   });
 });

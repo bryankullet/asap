@@ -844,3 +844,47 @@ clears what could read or send with it.
 **Still to do on this path:** the OAuth callback that exchanges the code for tokens and stores them
 encrypted. Until it exists, a deployment that *has* credentials can send a person to authorise and
 cannot yet finish. That is stated on the screen rather than discovered.
+
+## D-069 — The demonstration is removed; there is one application, and it is the brokerage's own
+
+**2026-09-11.** D-065 built the public demonstration as a second application branched above the
+authentication guards. It did what it was for. It is now gone.
+
+Why: the deployed site ran `VITE_PUBLIC_DEMO_MODE=on`, so what a real user opened was the
+demonstration — the fictional brokerage, its eight work items, its answers with no model behind
+them. The product looked finished and did nothing. There is no way to have both a sales demo and a
+working product at one URL without one of them lying about the other.
+
+**What was deleted:** `packages/schema/src/demo/` (the fixtures), `apps/web/src/demo/` (mode, state,
+adapters, the presenter bar, the boundary notice), the `NewThing` page, the `VITE_PUBLIC_DEMO_MODE`
+variable from `publicEnvSchema` and from `render.yaml`, every `isDemo` branch in every page, and
+the visual-parity harnesses that drove the fixture build (`capture.mjs`, `check.mjs`, `diff.mjs`,
+`regions.mjs`, `demo-entry.mjs`).
+
+**What was kept:** the approved visual language. `styles/demo.css` is now `styles/shell.css` and is
+still the design authority — D-064 stands, and the real screens wear it.
+
+**The guards are unconditional again.** `RequireSession` and `RequireMembership` mount for every
+destination, with no branch above them and nothing to turn them off.
+`apps/web/src/routing/auth-entry.test.tsx` replaces the demo-entry suite: it drives the real route
+tree and fails if any destination becomes reachable without signing in.
+
+**Five screens stopped being fixtures and became real**, which needed four endpoints that did not
+exist:
+
+| Screen | Was | Now | Endpoint |
+|---|---|---|---|
+| Ask ASAP | 32 scripted scenarios | real turns, real citations, abstention shown as abstention | `POST /ask` (existed) |
+| Audit history | session events in memory | the brokerage's `audit_log`, denials and failures included | **`GET /audit`** (new) |
+| Search | a fixture list | clients, policies and work, by lookup under RLS | **`GET /search`** (new) |
+| Email | a fictional thread and a simulated send | the connected mailbox's own threads, read-only | **`GET /email/threads`**, **`GET /email/threads/:id`** (new) |
+| Job detail | fixture steps | the engine's own run, through `RunDetail` | `GET /runs/:id` (existed) |
+| Document viewer | a drawn page | the filed bytes, and extraction review on real fields | `GET /documents/:id` (existed) |
+
+Search is a lookup, never a vector search: "what is policy P-4471?" is an exact question (§45
+rule 7). Email is read-only here — a message leaves ASAP only through an approved draft on the
+record it belongs to, with the provider's own message id recorded against it.
+
+**What this costs:** there is no longer a public URL that shows the product working without a
+brokerage's data in it. A demonstration now means seeding a real brokerage on a real deployment.
+That is the honest version, and it is what a new client actually sees on their first day (D-068).

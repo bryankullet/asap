@@ -1,11 +1,9 @@
 import {
   AutomationTrigger,
-  DEMO_NOTICE,
   EXTERNALLY_SENDING_VERBS,
   type ActionVerb,
   type AutomationCardView,
   type CreateAutomationRequest,
-  type DemoAutomation,
 } from "@asap/schema";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
@@ -15,24 +13,22 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { automationKeys, useAutomations } from "../lib/queries.js";
+import { useQuery } from "@tanstack/react-query";
+import { ErrorState, LoadingList } from "../components/states.js";
 import { TRIGGER_LABELS, VERB_LABELS, automationCardFromRow } from "../live/adapters.js";
-import { automationCardFromDemo } from "../demo/adapters.js";
-import { DemoBoundary } from "../demo/DemoBoundary.js";
-import { useDemo } from "../demo/state.js";
 
 /**
  * Automations — what the brokerage has taught ASAP to watch for (D-064).
  *
  * Each one reads as the sentence it is: trigger, conditions, skills, prepared action, approval
- * rule, exception handling. The toggle is real within the demo, and every run is listed —
- * including the ones that decided to do nothing, because "why did nothing happen?" is the
+ * rule, exception handling. The toggle writes to the brokerage's own record, and every firing is
+ * listed — including the ones that decided to do nothing, because "why did nothing happen?" is the
  * question people actually have.
  *
  * The rule that does not bend: an automation prepares. Approval stays with a person for anything
  * that leaves the brokerage, and the card says so on its face.
  */
-export function AutomationsDemo() {
-  const demo = useDemo();
+export function Automations() {
   const me = useMe();
   const navigate = useNavigate();
   const invalidate = useQueryClient();
@@ -49,12 +45,13 @@ export function AutomationsDemo() {
   const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       api.setAutomationEnabled(id, enabled),
-    onSuccess: () => void invalidate.invalidateQueries({ queryKey: automationKeys.list(orgId ?? "none") }),
+    onSuccess: () =>
+      void invalidate.invalidateQueries({ queryKey: automationKeys.list(orgId ?? "none") }),
   });
 
-  const cards: AutomationCardView[] = demo.isDemo
-    ? demo.automations.map(automationCardFromDemo)
-    : (live.data?.automations ?? []).map((a) => automationCardFromRow(a, undefined));
+  const cards: AutomationCardView[] = (live.data?.automations ?? []).map((a) =>
+    automationCardFromRow(a, undefined),
+  );
   const active = cards.filter((c) => c.enabled).length;
 
   return (
@@ -98,17 +95,7 @@ export function AutomationsDemo() {
           </div>
         </div>
 
-        {creating && demo.isDemo && (
-          <CreateAutomation
-            onCancel={() => setCreating(false)}
-            onCreate={(draft) => {
-              const id = demo.createAutomation(draft);
-              setCreating(false);
-              void navigate({ to: "/automations/$id", params: { id } });
-            }}
-          />
-        )}
-        {creating && !demo.isDemo && (
+        {creating && (
           <CreateLiveAutomation
             busy={create.isPending}
             error={create.isError ? describeApiError(create.error) : null}
@@ -124,12 +111,12 @@ export function AutomationsDemo() {
           />
         )}
 
-        {!demo.isDemo && live.isPending && (
+        {live.isPending && (
           <article className="automation-card">
             <h3>Reading your automations…</h3>
           </article>
         )}
-        {!demo.isDemo && live.isError && (
+        {live.isError && (
           <article className="automation-card">
             <h3>We could not read your automations.</h3>
             <p>{describeApiError(live.error)}</p>
@@ -154,11 +141,7 @@ export function AutomationsDemo() {
               key={c.id}
               card={c}
               busy={toggle.isPending}
-              onToggle={() =>
-                demo.isDemo
-                  ? demo.toggleAutomation(c.id)
-                  : toggle.mutate({ id: c.id, enabled: !c.enabled })
-              }
+              onToggle={() => toggle.mutate({ id: c.id, enabled: !c.enabled })}
             />
           ))}
           <button type="button" className="new-automation" onClick={() => setCreating(true)}>
@@ -167,17 +150,13 @@ export function AutomationsDemo() {
             <small>Describe what ASAP should watch for</small>
           </button>
         </div>
-
-        <DemoBoundary>
-          {DEMO_NOTICE} Switching one on changes demonstration state only.
-        </DemoBoundary>
       </section>
     </>
   );
 }
 
 /**
- * One automation on the grid, in the approved demo's card: the icon and its switch, the name, one
+ * One automation on the grid, in the approved card: the icon and its switch, the name, one
  * sentence, the flow line from trigger to prepared step, and what it has done lately.
  *
  * The switch is the real state, and a paused card says it is paused rather than looking identical
@@ -223,14 +202,34 @@ function AutomationCard({
   );
 }
 
-export function AutomationDemoDetail() {
+export function AutomationDetail() {
   const { id = "" } = useParams({ strict: false }) as { id?: string };
-  const demo = useDemo();
-  const navigate = useNavigate();
-  const [testResult, setTestResult] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [draftAction, setDraftAction] = useState("");
-  const a = demo.automations.find((x) => x.id === id);
+  const me = useMe();
+  const orgId = me.data?.active_organization?.id;
+  const invalidate = useQueryClient();
+  const list = useAutomations(orgId);
+  const runs = useQuery({
+    queryKey: ["automation_runs", id],
+    queryFn: () => api.automationRuns(id),
+    enabled: Boolean(id),
+    retry: false,
+  });
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => api.setAutomationEnabled(id, enabled),
+    onSuccess: () =>
+      void invalidate.invalidateQueries({ queryKey: automationKeys.list(orgId ?? "none") }),
+  });
+
+  if (list.isPending) return <LoadingList rows={3} label="Loading the automation" />;
+  if (list.isError) {
+    return (
+      <ErrorState
+        what={`We could not read your automations. ${describeApiError(list.error)}`}
+        retry={() => void list.refetch()}
+      />
+    );
+  }
+  const a = list.data?.automations.find((x) => x.id === id);
   if (!a) {
     return (
       <MissingData
@@ -257,133 +256,93 @@ export function AutomationDemoDetail() {
           </span>
           <button
             type="button"
-            onClick={() => demo.toggleAutomation(a.id)}
+            disabled={toggle.isPending}
+            onClick={() => toggle.mutate(!a.enabled)}
             className="rounded-pill border border-line-strong px-3 py-0.5 text-xs text-ink-secondary hover:border-ink-muted"
           >
             {a.enabled ? "Pause" : "Switch on"}
           </button>
-          <button
-            type="button"
-            onClick={() => setTestResult(demo.testAutomation(a.id))}
-            className="rounded-pill border border-line-strong px-3 py-0.5 text-xs text-ink-secondary hover:border-ink-muted"
-          >
-            Test it
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraftAction(a.preparedAction);
-              setEditing((v) => !v);
-            }}
-            aria-expanded={editing}
-            className="rounded-pill border border-line-strong px-3 py-0.5 text-xs text-ink-secondary hover:border-ink-muted"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              demo.deleteAutomation(a.id);
-              void navigate({ to: "/automations" });
-            }}
-            className="rounded-pill border border-line-strong px-3 py-0.5 text-xs text-accent-red hover:border-accent-red"
-          >
-            Delete
-          </button>
         </div>
+        {toggle.isError && (
+          <p role="alert" className="text-xs text-accent-red">
+            That switch did not take: {describeApiError(toggle.error)} The automation is still as it
+            was.
+          </p>
+        )}
       </header>
 
-      {/* A test says what it *would* prepare. It never performs the action. */}
-      {testResult && (
-        <p role="status" className="rounded-card border border-line-soft bg-wash px-3 py-2 text-sm text-ink-secondary">
-          {testResult}
-        </p>
-      )}
-
-      {editing && (
-        <form
-          aria-label="Edit automation"
-          className="flex flex-col gap-2 rounded-card border border-line-strong bg-paper p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            demo.updateAutomation(a.id, {
-              preparedAction: draftAction,
-              // Editing what it prepares invalidates the last test. Saying so beats a stale pass.
-              lastTest: "Not tested since the last change",
-            });
-            setEditing(false);
-          }}
-        >
-          <label htmlFor="edit-action" className="text-xs uppercase tracking-wide text-ink-muted">
-            Then prepare…
-          </label>
-          <input
-            id="edit-action"
-            value={draftAction}
-            onChange={(e) => setDraftAction(e.target.value)}
-            className="min-h-[38px] rounded-control border border-line-strong px-3 text-sm"
-          />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              className="rounded-control bg-navy px-3 py-1.5 text-sm text-paper hover:bg-navy-hover"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
-      )}
-
       <dl className="flex flex-col gap-3 rounded-card border border-line-strong bg-paper p-4">
-        <Row label="Trigger">{a.trigger}</Row>
+        <Row label="Trigger">{TRIGGER_LABELS[a.trigger_event] ?? a.trigger_event}</Row>
         <Row label="Conditions">
-          <ul className="list-disc pl-4">
-            {a.conditions.map((c) => (
-              <li key={c}>{c}</li>
-            ))}
-          </ul>
+          {a.conditions.length === 0 ? (
+            "Every firing of the trigger."
+          ) : (
+            <ul className="list-disc pl-4">
+              {a.conditions.map((c, i) => (
+                <li key={i}>
+                  {c.fact} {c.operator} {String(c.value)}
+                </li>
+              ))}
+            </ul>
+          )}
         </Row>
-        <Row label="Skills ASAP uses">{a.skills.join(" · ")}</Row>
-        <Row label="Prepared action">{a.preparedAction}</Row>
-        <Row label="Approval">{a.approval}</Row>
-        <Row label="If something is wrong">{a.exceptionHandling}</Row>
-        <Row label="Last test">{a.lastTest}</Row>
+        <Row label="Skill ASAP uses">{a.skill}</Row>
+        <Row label="Prepared action">{VERB_LABELS[a.prepared_verb] ?? a.prepared_verb}</Row>
+        <Row label="Approval">
+          {a.approval === "always" ? "A person approves every time." : "Runs unattended."}
+        </Row>
+        <Row label="Reaches outside the brokerage">
+          {a.sends_externally
+            ? "Yes — a person always approves before anything leaves."
+            : "No. It only prepares work inside ASAP."}
+        </Row>
       </dl>
 
       <section aria-label="Run history" className="flex flex-col gap-2">
         <h2 className="text-sm font-medium text-ink">What it has done</h2>
-        {a.runs.length === 0 ? (
+        {runs.isPending && <p className="text-sm text-ink-muted">Reading its history…</p>}
+        {runs.isError && (
+          <p role="alert" className="text-sm text-accent-red">
+            We could not read its history. {describeApiError(runs.error)}
+          </p>
+        )}
+        {runs.data && runs.data.runs.length === 0 && (
           <p className="text-sm text-ink-muted">
             It has not fired yet. Every firing is recorded here, including the ones that decide to
             do nothing.
           </p>
-        ) : (
+        )}
+        {runs.data && runs.data.runs.length > 0 && (
           <ul className="flex flex-col gap-1.5">
-            {a.runs.map((r, i) => (
+            {runs.data.runs.map((r) => (
               <li
-                key={i}
+                key={r.id}
                 className="flex flex-wrap items-baseline gap-2 rounded-card border border-line-soft bg-paper px-3 py-2 text-sm"
               >
-                <span className="text-ink">{r.outcome}</span>
-                <span className="text-ink-secondary">{r.detail}</span>
-                <span className="ml-auto text-xs text-ink-muted">{r.at}</span>
+                <span className="text-ink">{OUTCOME_WORD[r.outcome] ?? r.outcome}</span>
+                <span className="text-ink-secondary">
+                  {r.reason ?? `Fired on ${r.event_name}.`}
+                </span>
+                <time className="ml-auto text-xs text-ink-muted" dateTime={r.started_at}>
+                  {new Date(r.started_at).toLocaleString()}
+                </time>
               </li>
             ))}
           </ul>
         )}
       </section>
-
-      <DemoBoundary>{DEMO_NOTICE}</DemoBoundary>
     </div>
   );
 }
+
+/** A firing's outcome, in the words a broker reads. The enum is a database value. */
+const OUTCOME_WORD: Readonly<Record<string, string>> = {
+  prepared: "Prepared an action",
+  held_for_approval: "Waiting for approval",
+  conditions_not_met: "Did nothing",
+  skipped: "Did nothing",
+  failed: "Could not finish",
+};
 
 /**
  * Teaching ASAP a new rule, in the sentence the automation actually is.
@@ -518,136 +477,7 @@ const BUILDABLE_VERBS: readonly ActionVerb[] = [
   "record_send",
 ];
 
-function CreateAutomation({
-  onCancel,
-  onCreate,
-}: {
-  onCancel: () => void;
-  onCreate: (draft: Omit<DemoAutomation, "id" | "runs" | "lastTest">) => void;
-}) {
-  const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState("A client email arrives");
-  const [condition, setCondition] = useState("");
-  const [action, setAction] = useState("");
-  const [external, setExternal] = useState(true);
-
-  return (
-    <form
-      aria-label="New automation"
-      className="flex flex-col gap-3 rounded-card border border-line-strong bg-paper p-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        onCreate({
-          name,
-          enabled: false,
-          trigger,
-          conditions: condition ? [condition] : [],
-          skills: ["email.classify", "policy.match"],
-          preparedAction: action,
-          // The rule that does not bend: anything outward-facing waits for a person.
-          approval: external
-            ? "A person approves before anything leaves the brokerage"
-            : "Prepares without asking. It still cannot send, approve or decide.",
-          exceptionHandling: "If ASAP is unsure, it raises it for a person rather than guessing",
-          // How it will draw on the grid. A new automation has done nothing, and says so.
-          icon: "✦",
-          headline: name,
-          summary: action,
-          flowFrom: trigger,
-          flowTo: action,
-          activity: "New · not yet run",
-        });
-      }}
-    >
-      <Field id="a-name" label="What should this be called?">
-        <input
-          id="a-name"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Monitor claims that have stopped moving"
-          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
-        />
-      </Field>
-      <Field id="a-trigger" label="When should it look?">
-        <select
-          id="a-trigger"
-          value={trigger}
-          onChange={(e) => setTrigger(e.target.value)}
-          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
-        >
-          {[
-            "A client email arrives",
-            "An insurer sends terms",
-            "A claim has no recorded movement for five days",
-            "A policy period is 60 days from its end",
-            "An insurer statement is received",
-            "A payment lands",
-          ].map((t) => (
-            <option key={t}>{t}</option>
-          ))}
-        </select>
-      </Field>
-      <Field id="a-condition" label="Only when…">
-        <input
-          id="a-condition"
-          value={condition}
-          onChange={(e) => setCondition(e.target.value)}
-          placeholder="The client has an active policy"
-          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
-        />
-      </Field>
-      <Field id="a-action" label="Then prepare…">
-        <input
-          id="a-action"
-          required
-          value={action}
-          onChange={(e) => setAction(e.target.value)}
-          placeholder="Open claim work and draft the notification"
-          className="min-h-[38px] w-full rounded-control border border-line-strong px-3 text-sm"
-        />
-      </Field>
-      <label className="flex items-center gap-2 text-sm text-ink-secondary">
-        <input
-          type="checkbox"
-          checked={external}
-          onChange={(e) => setExternal(e.target.checked)}
-        />
-        This could reach a client or an insurer
-      </label>
-      {external && (
-        <p className="text-xs text-ink-muted">
-          Then a person approves every time. That is not a setting.
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          className="rounded-control bg-navy px-3 py-1.5 text-sm text-paper hover:bg-navy-hover"
-        >
-          Create, switched off
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-control border border-line-strong px-3 py-1.5 text-sm text-ink"
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function Field({
-  id,
-  label,
-  children,
-}: {
-  id: string;
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={id} className="text-xs uppercase tracking-wide text-ink-muted">

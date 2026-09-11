@@ -5,18 +5,15 @@ import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
 import { useRunList, useWorkList } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
-import { PresenterBar } from "../demo/PresenterBar.js";
-import { useDemo } from "../demo/state.js";
 import { NAV } from "./nav.js";
 
-import { DEMO_PERSON } from "../demo/mode.js";
 import { ProfileMenu } from "./ProfileMenu.js";
 
 /**
  * The permanent shell, ported from the approved demo (D-064).
  *
- * Structure and dimensions are the demo's, not an interpretation of it: a 44px presenter bar, then
- * a `228px 1fr` grid filling exactly `calc(100vh - 44px)`. The sidebar is `#f1f4f0` with a
+ * Structure and dimensions are the demo's, not an interpretation of it: a `228px 1fr` grid
+ * filling the viewport. The sidebar is `#f1f4f0` with a
  * `#e0e5e0` right border; each destination is a 42px row with a 13px radius, and the active one is
  * a white pill with a 1px shadow. Under 900px the sidebar becomes a 58px bottom bar, as it does
  * there.
@@ -28,7 +25,6 @@ import { ProfileMenu } from "./ProfileMenu.js";
  * every screen. Those stay.
  */
 export function Shell() {
-  const { isDemo } = useDemo();
   const me = useMe();
   const invalidate = useInvalidateMe();
   const org = me.data?.active_organization;
@@ -48,16 +44,11 @@ export function Shell() {
 
   const person = me.data?.user;
   const membershipRole = me.data?.memberships.find((m) => m.organization.id === org?.id)?.role.name;
-  // In demo mode the sidebar shows the fictional brokerage's own person, as the approved demo does.
-  // Outside it, the signed-in person and their real role.
-  const demoPerson = DEMO_PERSON;
-  const displayName = isDemo
-    ? demoPerson.name
-    : (person?.display_name ?? person?.full_name ?? person?.email ?? "");
-  const subtitle = isDemo ? demoPerson.role : (membershipRole ?? org?.name ?? "");
-  const initials = isDemo
-    ? demoPerson.initials
-    : displayName
+  // The signed-in person and the role their membership actually carries.
+  const displayName = person?.display_name ?? person?.full_name ?? person?.email ?? "";
+  const subtitle = membershipRole ?? org?.name ?? "";
+  const initials =
+    displayName
       .split(/[\s@.]+/)
       .filter(Boolean)
       .slice(0, 2)
@@ -66,8 +57,7 @@ export function Shell() {
 
   return (
     <div className="demo-root">
-      <PresenterBar />
-      <div className={`app-shell${isDemo ? "" : " no-bar"}`}>
+      <div className="app-shell no-bar">
         <aside className="sidebar">
           <Link to="/discover" className="brand">
             <span aria-hidden className="brand-mark">
@@ -138,31 +128,24 @@ export function Shell() {
 /**
  * The counts beside Work and Jobs — read from the same source the screen itself reads.
  *
- * On a real brokerage that is the API, through the queries the boards already run, so the number
- * in the sidebar and the list behind it come from one answer and cannot disagree. In demo mode it
- * is the fixtures. A count nobody can reach the rows for is worse than no count, so both return
- * nothing until they have one.
+ * It is the API, through the queries the boards already run, so the number in the sidebar and the
+ * list behind it come from one answer and cannot disagree. A count nobody can reach the rows for
+ * is worse than no count, so it shows nothing until it has one.
  */
 function NavCount({ to }: { to: string }) {
-  const demo = useDemo();
   const me = useMe();
   const orgId = me.data?.active_organization?.id;
   // The same query keys the boards use, so this costs nothing extra when a board is open.
-  const work = useWorkList(demo.isDemo ? undefined : orgId, "needs");
-  const jobs = useRunList(demo.isDemo ? undefined : orgId, "all");
+  const work = useWorkList(orgId, "needs");
+  const jobs = useRunList(orgId, "all");
 
   const n =
     to === "/work"
-      ? demo.isDemo
-        ? // The demo counts everything a person owns here, which is what its Work grid opens on.
-          demo.work.length
-        : (work.data?.counts.needs ?? 0)
+      ? (work.data?.counts.needs ?? 0)
       : to === "/jobs"
-        ? demo.isDemo
-          ? // What ASAP itself is still carrying. A job stopped for a person is on the board's
-            // Work tab, where a person looks for it, not in the count of what is running.
-            demo.jobs.filter((j) => j.state === "running" || j.state === "waiting").length
-          : (jobs.data?.counts.running ?? 0) + (jobs.data?.counts.waiting ?? 0)
+        ? // What ASAP itself is still carrying. A job stopped for a person is on the board's Work
+          // tab, where a person looks for it, not in the count of what is running.
+          (jobs.data?.counts.running ?? 0) + (jobs.data?.counts.waiting ?? 0)
         : 0;
   if (n === 0) return null;
   return <span className="nav-count">{n}</span>;

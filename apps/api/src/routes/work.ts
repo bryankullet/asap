@@ -13,6 +13,9 @@ import {
   setPinRequestSchema,
   setPinResponseSchema,
   historyResponseSchema,
+  searchResponseSchema,
+  type SearchResult,
+  WORK_KIND_LABELS,
   runDetailResponseSchema,
   type RunDetailResponse,
   type HistoryEntry,
@@ -551,7 +554,6 @@ export function workRoutes(deps: WorkDeps) {
     );
   });
 
-
   /**
    * The audit history of one record (C05: never rewrite historical outcomes).
    *
@@ -579,7 +581,11 @@ export function workRoutes(deps: WorkDeps) {
       .order("created_at", { ascending: false })
       .limit(50);
     if (error) return sendError(c, mapDatabaseError(error));
-    const rows = (data ?? []) as { work_item_id: string; note: string | null; created_at: string }[];
+    const rows = (data ?? []) as {
+      work_item_id: string;
+      note: string | null;
+      created_at: string;
+    }[];
     if (rows.length === 0) return c.json(pinsResponseSchema.parse({ pins: [] }));
 
     // Titles come from the record, read under the same session. A pin on something the caller can
@@ -589,9 +595,14 @@ export function workRoutes(deps: WorkDeps) {
       .select("id, title")
       .eq("organization_id", org.id)
       .is("deleted_at", null)
-      .in("id", rows.map((r) => r.work_item_id));
+      .in(
+        "id",
+        rows.map((r) => r.work_item_id),
+      );
     if (itemsErr) return sendError(c, mapDatabaseError(itemsErr));
-    const titles = new Map(((items ?? []) as { id: string; title: string }[]).map((i) => [i.id, i.title]));
+    const titles = new Map(
+      ((items ?? []) as { id: string; title: string }[]).map((i) => [i.id, i.title]),
+    );
     return c.json(
       pinsResponseSchema.parse({
         pins: rows
@@ -651,6 +662,117 @@ export function workRoutes(deps: WorkDeps) {
     return c.json(setPinResponseSchema.parse({ pinned: true }));
   });
 
+  /**
+   * The brokerage's own history — the same audit rows, not scoped to one record (§45 rule 15).
+   *
+   * Read-only, under the caller's RLS, and gated on `audit:view` so a role without it is told so
+   * by name rather than shown an empty list. AI actions, automation runs and failures are in here
+   * with everything else: a history that quietly omitted them would be worse than none.
+   */
+  /**
+   * Search across the brokerage's own records (D-064).
+   *
+   * Three lookups under the caller's RLS — clients by name, policies by number, work by title —
+   * run together and returned in the order a person scans them. No vector search: "what is policy
+   * P-4471?" is a lookup (§45 rule 7). A table that cannot be read degrades that group rather than
+   * failing the whole answer.
+   */
+  app.get("/search", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const q = (c.req.query("q") ?? "").trim().slice(0, 120);
+    if (q === "") return c.json(searchResponseSchema.parse({ query: "", results: [] }));
+    // Escape PostgREST's own pattern characters so a typed % is a literal, not a wildcard.
+    const like = `%${q.replace(/[%_,()]/g, " ")}%`;
+
+    const [clients, policies, items] = await Promise.all([
+      db
+        .from("clients")
+        .select("id, name, kind, file_status")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .ilike("name", like)
+        .limit(10),
+      db
+        .from("policies")
+        .select("id, policy_number, class_of_business")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .ilike("policy_number", like)
+        .limit(10),
+      db
+        .from("work_items")
+        .select("id, title, kind, task_status")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .ilike("title", like)
+        .limit(10),
+    ]);
+
+    const degraded: { what: string; because: string }[] = [];
+    const results: SearchResult[] = [];
+    if (clients.error) degraded.push({ what: "Clients", because: "They could not be read." });
+    for (const r of (clients.data ?? []) as {
+      id: string;
+      name: string;
+      kind: string;
+      file_status: string;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "client",
+        title: r.name,
+        subtitle: `${r.kind === "corporate" ? "Corporate" : "Individual"} client`,
+        to: `/clients/${r.id}`,
+      });
+    }
+    if (policies.error) degraded.push({ what: "Policies", because: "They could not be read." });
+    for (const r of (policies.data ?? []) as {
+      id: string;
+      policy_number: string;
+      class_of_business: string;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "policy",
+        title: r.policy_number,
+        subtitle: r.class_of_business,
+        to: `/r/${r.id}?kind=policy`,
+      });
+    }
+    if (items.error) degraded.push({ what: "Work", because: "It could not be read." });
+    for (const r of (items.data ?? []) as { id: string; title: string; kind: string }[]) {
+      results.push({
+        id: r.id,
+        kind: "work",
+        title: r.title,
+        subtitle: WORK_KIND_LABELS[r.kind as keyof typeof WORK_KIND_LABELS] ?? "Work",
+        to: `/r/${r.id}`,
+      });
+    }
+    return c.json(searchResponseSchema.parse({ query: q, results, degraded }));
+  });
+
+  app.get("/audit", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "audit", "view")) {
+      throw new HttpError(403, "forbidden", "Your role does not include the audit history");
+    }
+    const { data, error } = await db
+      .from("audit_log")
+      .select(
+        "id, actor_type, actor_user_id, action, object_type, object_id, previous_state, new_state, evidence, result, failure_reason, occurred_at",
+      )
+      .eq("organization_id", org.id)
+      .order("occurred_at", { ascending: false })
+      .limit(100);
+    if (error) return sendError(c, mapDatabaseError(error));
+    return c.json(await summariseHistory(db, null, (data ?? []) as AuditRow[]));
+  });
+
   app.get("/work-items/:id/history", async (c) => {
     const { db, user } = c.get("auth");
     const id = c.req.param("id");
@@ -673,50 +795,7 @@ export function workRoutes(deps: WorkDeps) {
       .limit(100);
     if (error) return sendError(c, mapDatabaseError(error));
 
-    const rows = (data ?? []) as {
-      id: number | string;
-      actor_type: HistoryEntry["actorType"];
-      actor_user_id: string | null;
-      action: string;
-      object_type: string;
-      object_id: string | null;
-      previous_state: Record<string, unknown> | null;
-      new_state: Record<string, unknown> | null;
-      evidence: unknown;
-      result: HistoryEntry["result"];
-      failure_reason: string | null;
-      occurred_at: string;
-    }[];
-
-    // Actor names, so history reads as people rather than ids.
-    const actorIds = [...new Set(rows.map((r) => r.actor_user_id).filter((v): v is string => v !== null))];
-    const names = new Map<string, string>();
-    if (actorIds.length > 0) {
-      const u = await db.from("users").select("id, full_name, email").in("id", actorIds);
-      for (const row of (u.data ?? []) as { id: string; full_name: string | null; email: string }[]) {
-        names.set(row.id, row.full_name ?? row.email);
-      }
-    }
-
-    const body: HistoryResponse = historyResponseSchema.parse({
-      recordId: id,
-      entries: rows.map((r) => ({
-        id: String(r.id),
-        actorType: r.actor_type,
-        actorName: r.actor_user_id ? (names.get(r.actor_user_id) ?? null) : null,
-        action: r.action,
-        objectType: r.object_type,
-        objectId: r.object_id,
-        result: r.result,
-        failureReason: r.failure_reason,
-        changed: changedFields(r.previous_state, r.new_state),
-        evidence: evidenceRefs(r.evidence),
-        occurredAt: r.occurred_at,
-      })),
-      visible: rows.length,
-      returned: rows.length,
-    });
-    return c.json(body);
+    return c.json(await summariseHistory(db, id, (data ?? []) as AuditRow[]));
   });
 
   /** One verb on one step. Guards are evaluated here and re-checked by the database at execution. */
@@ -968,7 +1047,6 @@ export function workRoutes(deps: WorkDeps) {
     return c.json(markDraftCopiedResponseSchema.parse({ draft: DraftRow.parse(data) }));
   });
 
-
   /**
    * One run in full: what ASAP did, what it produced, what it is waiting for, and what a person
    * can safely do next. The Activity chip and a record's run history both open this.
@@ -1038,7 +1116,9 @@ export function workRoutes(deps: WorkDeps) {
 
     // The work each run is advancing: its title, so a job leads to what a person owns, and its
     // steps, which are the only honest source of progress.
-    const workIds = [...new Set(shown.map((r) => r.work_item_id).filter((v): v is string => v !== null))];
+    const workIds = [
+      ...new Set(shown.map((r) => r.work_item_id).filter((v): v is string => v !== null)),
+    ];
     const degraded: RunListResponse["degraded"] = [];
     const items = new Map<string, WorkItemRow>();
     if (workIds.length > 0) {
@@ -1065,7 +1145,10 @@ export function workRoutes(deps: WorkDeps) {
       const r = await db
         .from("run_events")
         .select("id, run_id, seq, kind, message, created_at")
-        .in("run_id", shown.map((x) => x.id))
+        .in(
+          "run_id",
+          shown.map((x) => x.id),
+        )
         .order("seq", { ascending: true });
       if (r.error) {
         degraded.push({
@@ -1073,7 +1156,8 @@ export function workRoutes(deps: WorkDeps) {
           because: "The run event rows could not be read.",
         });
       } else {
-        for (const ev of RunEventRow.array().parse(r.data ?? [])) lastEvent.set(ev.run_id, ev.message);
+        for (const ev of RunEventRow.array().parse(r.data ?? []))
+          lastEvent.set(ev.run_id, ev.message);
       }
     }
 
@@ -1281,7 +1365,13 @@ function evidenceRefs(evidence: unknown): string[] {
   if (evidence === null || evidence === undefined) return [];
   if (Array.isArray(evidence)) {
     return evidence
-      .map((e) => (typeof e === "string" ? e : typeof e === "object" && e !== null && "reference" in e ? String((e as { reference: unknown }).reference) : null))
+      .map((e) =>
+        typeof e === "string"
+          ? e
+          : typeof e === "object" && e !== null && "reference" in e
+            ? String((e as { reference: unknown }).reference)
+            : null,
+      )
       .filter((v): v is string => v !== null)
       .slice(0, 10);
   }
@@ -1289,4 +1379,60 @@ function evidenceRefs(evidence: unknown): string[] {
     return [String((evidence as { reference: unknown }).reference)];
   }
   return [];
+}
+
+/** One audit row as it is selected above. Shared by the record history and the brokerage's own. */
+type AuditRow = {
+  id: number | string;
+  actor_type: HistoryEntry["actorType"];
+  actor_user_id: string | null;
+  action: string;
+  object_type: string;
+  object_id: string | null;
+  previous_state: Record<string, unknown> | null;
+  new_state: Record<string, unknown> | null;
+  evidence: unknown;
+  result: HistoryEntry["result"];
+  failure_reason: string | null;
+  occurred_at: string;
+};
+
+/**
+ * Audit rows as history a person can read: actor names instead of ids, and the fields that
+ * changed rather than the whole row. Nothing is redacted a second time here — `audit.ts` refuses
+ * to write document contents or credentials in the first place.
+ */
+async function summariseHistory(
+  db: SupabaseClient,
+  recordId: string | null,
+  rows: AuditRow[],
+): Promise<HistoryResponse> {
+  const actorIds = [
+    ...new Set(rows.map((r) => r.actor_user_id).filter((v): v is string => v !== null)),
+  ];
+  const names = new Map<string, string>();
+  if (actorIds.length > 0) {
+    const u = await db.from("users").select("id, full_name, email").in("id", actorIds);
+    for (const row of (u.data ?? []) as { id: string; full_name: string | null; email: string }[]) {
+      names.set(row.id, row.full_name ?? row.email);
+    }
+  }
+  return historyResponseSchema.parse({
+    recordId,
+    entries: rows.map((r) => ({
+      id: String(r.id),
+      actorType: r.actor_type,
+      actorName: r.actor_user_id ? (names.get(r.actor_user_id) ?? null) : null,
+      action: r.action,
+      objectType: r.object_type,
+      objectId: r.object_id,
+      result: r.result,
+      failureReason: r.failure_reason,
+      changed: changedFields(r.previous_state, r.new_state),
+      evidence: evidenceRefs(r.evidence),
+      occurredAt: r.occurred_at,
+    })),
+    visible: rows.length,
+    returned: rows.length,
+  });
 }

@@ -1,151 +1,112 @@
-import { scenarioById, type DemoPanel } from "@asap/schema";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { api, describeApiError } from "../lib/api.js";
-import { useDemo } from "../demo/state.js";
-import { DEMO_MODE } from "../demo/mode.js";
+import { useMe } from "../lib/me.js";
 
 /**
- * Ask ASAP, ported from the approved demo (D-064).
+ * Ask ASAP — the conversation surface (D-064).
  *
- * The demo's own structure, rule for rule: a crumb topbar, the policy strip naming the record the
- * question is being asked inside, then the two-column `.workspace` — the conversation on the left
- * with its head, thread and docked composer, and the generated Work panel on the right.
+ * The approved structure, rule for rule: a crumb topbar, the context strip naming what the
+ * question is being asked across, then the two-column `.workspace` — the conversation on the left
+ * with its head, thread and docked composer, and the answer's own panel on the right.
  *
- * The panel body is built in the demo's order, which is the order a person reads it in:
- *
- *   facts · attention · current state · the calculation · meaningful changes · what happened ·
- *   the evidence · the prepared draft · the prepared actions
- *
- * Note `.issue`: the demo puts the **meta** in the `<h4>` and the **sentence** in the `<p>`, so the
- * severity reads first. That is not a transcription slip, it is the design.
- *
- * The safety rules are unchanged (§45 rules 9, 10, 12). An answer never asserts cover, an approval
- * or a payment; evidence carries a condition rather than a percentage; a prepared action is
- * prepared, and a person performs it.
- *
- * Two ways to answer, and the surface says which it used:
- *
- *  - **A configured model**, through the provider-neutral gateway — grounded in declared tools,
- *    checked before it is shown, and able to abstain.
- *  - **The approved scenarios**, when no model is configured. The reasoning shown is the reasoning
- *    the demo was approved with, not a model's improvisation dressed up as one.
+ * Every turn is a real `POST /ask` under the caller's session. The answer, its citations and its
+ * abstention all come from the server; nothing is improvised in the browser, and no business value
+ * on this screen was written by a model (§45 rule 9) — the citations name the record each fact was
+ * read from, and an answer with none is an abstention rather than a claim.
  */
+
 type AskAnswer = Awaited<ReturnType<typeof api.askQuestion>>;
-type LiveTurnState = {
-  question: string;
-  response: AskAnswer | null;
-  /** A question the demonstration cannot answer, answered honestly rather than by a model. */
-  unanswerableInDemo?: boolean;
-};
+type Turn = { question: string; response: AskAnswer | null };
+
+/** Openers a brokerage can actually have answered from its own rows on the first day. */
+const OPENERS: readonly string[] = [
+  "What needs me today?",
+  "Which policies expire in the next 30 days?",
+  "What premium is still outstanding?",
+  "Which claims are waiting on the insurer?",
+];
 
 export function Ask() {
-  const { scenario: requested } = useSearch({ strict: false }) as { scenario?: string };
-  const demo = useDemo();
+  const me = useMe();
   const navigate = useNavigate();
   const thread = useRef<HTMLDivElement>(null);
-
-  const activeId = requested ?? demo.activeScenarioId;
-  const scenario = useMemo(
-    () => scenarioById(activeId) ?? demo.scenarios[0],
-    [activeId, demo.scenarios],
-  );
-
-  /**
-   * The demo pre-fills the composer with the question it is answering, so a person can edit and
-   * re-ask it. Typing replaces it; changing scenario restores it.
-   */
-  const [typed, setTyped] = useState(scenario?.ask ?? "");
-  const askText = scenario?.ask;
-  useEffect(() => {
-    setTyped(askText ?? "");
-  }, [askText]);
-
-  /** Turns answered by the configured model, newest last. Empty when none is configured. */
-  const [liveTurns, setLiveTurns] = useState<LiveTurnState[]>([]);
+  const [typed, setTyped] = useState("");
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
 
   const live = useMutation({
     mutationFn: (question: string) =>
-      api.askQuestion({ question, conversationId: null, scope: { kind: "brokerage", id: null } }),
-    onSuccess: (res) =>
-      setLiveTurns((prev) => {
+      api.askQuestion({ question, conversationId, scope: { kind: "brokerage", id: null } }),
+    onSuccess: (res) => {
+      setConversationId(res.conversationId);
+      setTurns((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
         if (last && last.response === null) next[next.length - 1] = { ...last, response: res };
         return next;
-      }),
-    onError: () => setLiveTurns((prev) => prev.slice(0, -1)),
+      });
+      // A workspace answer is a Space, not a paragraph: open it where Spaces live.
+      if (res.planRecordId) {
+        void navigate({
+          to: "/r/$recordId",
+          params: { recordId: res.planRecordId },
+          search: res.planView ? { view: res.planView } : {},
+        });
+      }
+    },
+    // The question stays in the composer rather than vanishing into a failed turn.
+    onError: () => setTurns((prev) => prev.slice(0, -1)),
   });
 
   /**
-   * The demo keeps the newest turn in view by setting the thread's own scrollTop. Doing it with
+   * Keep the newest turn in view by setting the thread's own scrollTop. Doing it with
    * `scrollIntoView` on a trailing sentinel instead scrolls every scrollable ancestor, which left
    * the thread scrolled at viewports where the conversation actually fits.
    */
   useEffect(() => {
     const el = thread.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [activeId, liveTurns.length]);
+  }, [turns.length, live.isPending]);
 
-  if (!scenario) return null;
-  const ctx = scenario.context;
-
-  function open(id: string) {
-    void navigate({ to: "/ask", search: { scenario: id } });
-    demo.setScenario(id);
-    setLiveTurns([]);
-  }
-
-  function askModel(question: string) {
-    /*
-     * The demonstration reaches nothing (D-065). A question outside the approved catalogue is not
-     * sent anywhere and is not improvised: the thread says so, and says what it can answer.
-     */
-    if (DEMO_MODE) {
-      setLiveTurns((prev) => [...prev, { question, response: null, unanswerableInDemo: true }]);
-      return;
-    }
-    setLiveTurns((prev) => [...prev, { question, response: null }]);
+  function ask(question: string) {
+    setTurns((prev) => [...prev, { question, response: null }]);
     live.mutate(question);
   }
 
   function submit(e: FormEvent | KeyboardEvent) {
     e.preventDefault();
     const question = typed.trim();
-    if (!question) return;
-    const q = question.toLowerCase();
-
-    // An approved scenario is the better answer when one matches: it is the reasoning this demo
-    // was signed off with, and it arrives with its panel, evidence and prepared actions.
-    const hit =
-      demo.scenarios.find((s) => s.ask.toLowerCase() === q) ??
-      demo.scenarios.find((s) => s.ask.toLowerCase().includes(q)) ??
-      demo.scenarios.find((s) => s.name.toLowerCase().includes(q)) ??
-      demo.scenarios.find((s) =>
-        q.split(/\s+/).some((w) => w.length > 3 && s.ask.toLowerCase().includes(w)),
-      );
-    if (hit) {
-      open(hit.id);
-      return;
-    }
-    // Nothing matched. Ask the configured model, which grounds its answer in declared tools and
-    // abstains when the evidence is not there. With none configured it answers not_configured,
-    // and the thread says so rather than showing an empty answer.
-    askModel(question);
+    if (!question || live.isPending) return;
+    ask(question);
     setTyped("");
   }
+
+  const org = me.data?.active_organization;
+  const person = me.data?.user;
+  const displayName = person?.display_name ?? person?.full_name ?? person?.email ?? "";
+  const initials =
+    displayName
+      .split(/[\s@.]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "A";
+  const orgName = org?.name ?? "your brokerage";
+  const last = turns[turns.length - 1]?.response ?? null;
+  const suggestions = last?.suggestions.length ? last.suggestions : OPENERS;
 
   return (
     <>
       <header className="topbar">
         <div className="crumbs">
-          <span>Policies</span>
+          <span>{orgName}</span>
           <b>/</b>
-          <strong>{ctx.title}</strong>
+          <strong>Ask ASAP</strong>
         </div>
         <div className="top-actions">
-          {/* One text node each, as the original has them: a flex gap changes both widths. */}
+          {/* One text node each, as the approved design has them: a flex gap changes both widths. */}
           <Link to="/search" search={{ q: "" }} className="icon-btn" aria-label="Search">
             ⌕
           </Link>
@@ -154,34 +115,6 @@ export function Ask() {
           </Link>
         </div>
       </header>
-
-      <section className="policy-strip" aria-label="The record this question is about">
-        <div className="client-logo" aria-hidden>
-          {ctx.initials}
-        </div>
-        <div className="policy-title">
-          <div className="eyebrow">{ctx.client}</div>
-          <h1>{ctx.title}</h1>
-          <div className="policy-meta">
-            <span>{ctx.number}</span>
-            <i aria-hidden />
-            <span>{ctx.insurer}</span>
-            <i aria-hidden />
-            <span>{ctx.period}</span>
-          </div>
-        </div>
-        <div className="policy-facts">
-          {ctx.facts.map(([label, value]) => (
-            <div key={label}>
-              <small>{label}</small>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-        <Link to="/audit" className="more-btn" aria-label="Everything recorded about this record">
-          •••
-        </Link>
-      </section>
 
       <section className="workspace">
         <div className="conversation">
@@ -192,44 +125,42 @@ export function Ask() {
               </span>
               <div>
                 <strong>Ask ASAP</strong>
-                <small>Working with {ctx.client.replace(/ LTD| LIMITED/, "")} context</small>
+                <small>Working across {orgName}</small>
               </div>
             </div>
-            <button type="button" onClick={() => setLiveTurns([])}>
+            <button
+              type="button"
+              onClick={() => {
+                setTurns([]);
+                setConversationId(null);
+              }}
+            >
               ＋ New thread
             </button>
           </div>
 
           <div className="thread" ref={thread}>
-            <div className="message user">
-              <div className="bubble">{scenario.ask}</div>
-              <div className="mini-avatar" aria-hidden>
-                GW
-              </div>
-            </div>
-            <div className="message ai">
-              <div className="mini-avatar" aria-hidden>
-                ✦
-              </div>
-              <div className="bubble">
-                <p className="answer-lead">{scenario.lead}</p>
-                <p>{scenario.text}</p>
-                <div className="inline-status">
-                  <span className="pill good">Policy context matched</span>
-                  <span className="pill">Evidence retained</span>
-                  {(scenario.name.includes("Coverage") || scenario.name.includes("Claim")) && (
-                    <span className="pill high">Human decision required</span>
-                  )}
+            {/* An empty thread is a designed state (§36), not a blank column. */}
+            {turns.length === 0 && !live.isPending && (
+              <div className="message ai">
+                <div className="mini-avatar" aria-hidden>
+                  ✦
                 </div>
-                <Link to="/audit" className="source-link">
-                  ▱ View reasoning and sources
-                </Link>
+                <div className="bubble">
+                  <p className="answer-lead">Ask anything about {orgName}.</p>
+                  <p>
+                    ASAP reads only the records, documents and email your role can see, and cites
+                    where every figure came from. When the evidence is not there it says so rather
+                    than guessing.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
-            {liveTurns.map((turn, i) => (
-              <LiveTurn key={i} turn={turn} />
+            {turns.map((turn, i) => (
+              <LiveTurn key={i} turn={turn} initials={initials} />
             ))}
+
             {live.isPending && (
               <div className="message ai">
                 <div className="mini-avatar" aria-hidden>
@@ -250,16 +181,7 @@ export function Ask() {
                 </div>
                 <div className="bubble">
                   <p>{describeApiError(live.error)}</p>
-                  <button
-                    type="button"
-                    className="source-link"
-                    onClick={() => {
-                      const last = liveTurns[liveTurns.length - 1];
-                      if (last) live.mutate(last.question);
-                    }}
-                  >
-                    Try that question again
-                  </button>
+                  <p>Nothing was recorded and nothing was sent.</p>
                 </div>
               </div>
             )}
@@ -267,15 +189,11 @@ export function Ask() {
 
           <div className="composer-wrap">
             <div className="context-chip">
-              <span aria-hidden>{ctx.initials}</span>{" "}
-              {ctx.client.replace(/ LTD| LIMITED| EXPORTERS/, "")} · {ctx.title}{" "}
-              <button type="button" aria-label="Change context" onClick={() => open(scenario.id)}>
-                ×
-              </button>
+              <span aria-hidden>{initials}</span> {orgName} · Everything you can see
             </div>
             <form className="composer" onSubmit={submit}>
               <label htmlFor="ask-input" className="sr-only">
-                Ask anything about this policy
+                Ask anything about your brokerage
               </label>
               <textarea
                 id="ask-input"
@@ -285,28 +203,15 @@ export function Ask() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) submit(e);
                 }}
-                placeholder="Ask anything about this policy…"
+                placeholder="Ask anything about your brokerage…"
               />
-              <button type="button" className="attach" aria-label="Attach">
-                ⌕
-              </button>
-              <button type="submit" className="send" aria-label="Send">
+              <button type="submit" className="send" aria-label="Send" disabled={live.isPending}>
                 ↑
               </button>
             </form>
             <div className="suggestions">
-              {scenario.suggest.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => {
-                    const next =
-                      demo.scenarios.find((x) => x.ask.toLowerCase() === s.toLowerCase()) ??
-                      demo.scenarios.find((x) => x.name.toLowerCase() === s.toLowerCase());
-                    if (next) open(next.id);
-                    else askModel(s);
-                  }}
-                >
+              {suggestions.map((s) => (
+                <button key={s} type="button" disabled={live.isPending} onClick={() => ask(s)}>
                   {s}
                 </button>
               ))}
@@ -317,48 +222,16 @@ export function Ask() {
           </div>
         </div>
 
-        <aside className="space-panel" aria-label="Generated work">
-          <WorkPanel panel={scenario.panel} />
+        <aside className="space-panel" aria-label="Evidence">
+          <Evidence answer={last} />
         </aside>
       </section>
     </>
   );
 }
 
-/** A question answered by the configured model, in the demo's own message shape. */
-function LiveTurn({ turn }: { turn: LiveTurnState }) {
-  if (turn.unanswerableInDemo) {
-    return (
-      <>
-        <div className="message user">
-          <div className="bubble">{turn.question}</div>
-          <div className="mini-avatar" aria-hidden>
-            GW
-          </div>
-        </div>
-        <div className="message ai">
-          <div className="mini-avatar" aria-hidden>
-            ✦
-          </div>
-          <div className="bubble">
-            <p className="answer-lead">
-              This demonstration answers the approved questions only.
-            </p>
-            <p>
-              Nothing here reaches a model or a brokerage&rsquo;s records. Choose one of the
-              suggestions below, or pick a scenario from the presenter bar, and the full answer,
-              its evidence and its prepared actions appear as they would in the product.
-            </p>
-            <div className="inline-status">
-              <span className="pill medium">Demonstration data</span>
-              <span className="pill">Nothing was sent</span>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-
+/** One question and its answer, in the approved message shape. */
+function LiveTurn({ turn, initials }: { turn: Turn; initials: string }) {
   const response = turn.response;
   const message = response?.message ?? null;
   /** The first paragraph leads; the rest is the reasoning. The server wrote both. */
@@ -371,7 +244,7 @@ function LiveTurn({ turn }: { turn: LiveTurnState }) {
       <div className="message user">
         <div className="bubble">{turn.question}</div>
         <div className="mini-avatar" aria-hidden>
-          GW
+          {initials}
         </div>
       </div>
       {response && (
@@ -387,9 +260,22 @@ function LiveTurn({ turn }: { turn: LiveTurnState }) {
             {!message && (
               <p className="answer-lead">
                 {response.state === "not_configured"
-                  ? "Ask is not configured to answer freely on this server yet. The approved questions below still answer in full."
+                  ? "Ask is not configured to answer on this server yet. Everything else in ASAP works without it."
                   : "Ask could not answer that from the permitted records."}
               </p>
+            )}
+            {response.clarify && (
+              <>
+                <p>{response.clarify.question}</p>
+                <ul>
+                  {response.clarify.options.map((o) => (
+                    <li key={o.id}>
+                      {o.label}
+                      {o.hint ? ` — ${o.hint}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
             {abstained && abstained.missing.length > 0 && (
               <p>Still missing: {abstained.missing.join(", ")}.</p>
@@ -407,132 +293,66 @@ function LiveTurn({ turn }: { turn: LiveTurnState }) {
 }
 
 /**
- * The generated Work panel — the demo's `.space-card`, built in its own order. Every business
- * value here comes from the fixture, never from model text (§45 rule 9).
+ * Where the last answer came from.
+ *
+ * Every citation is openable — a citation you cannot open is not a citation — and the panel shows
+ * which declared tools ran, so "how does it know that?" has an answer on the screen rather than in
+ * a log.
  */
-function WorkPanel({ panel }: { panel: DemoPanel }) {
+function Evidence({ answer }: { answer: AskAnswer | null }) {
+  const message = answer?.message ?? null;
+  if (!message) {
+    return (
+      <article className="space-card">
+        <div className="section-label">EVIDENCE</div>
+        <p>
+          Ask a question and everything it read appears here: the record each figure came from, the
+          document and page behind it, and which of ASAP’s declared tools ran.
+        </p>
+      </article>
+    );
+  }
   return (
     <article className="space-card">
-      <div className="space-head">
-        <div className="space-type">
-          <span>{panel.type}</span>
-          <span className="live">● Live</span>
-        </div>
-        <h2>{panel.title}</h2>
-        <p>{panel.desc}</p>
-      </div>
-      <div className="space-body">
-        {panel.facts.length > 0 && (
-          <div className="fact-grid">
-            {panel.facts.map(([label, value]) => (
-              <div className="fact" key={label}>
-                <small>{label}</small>
-                <strong>{value}</strong>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {panel.warning && (
-          <div className="warning">
-            <strong>Attention:</strong> {panel.warning}
-          </div>
-        )}
-
-        {panel.issues.length > 0 && (
-          <>
-            <div className="section-label">Current state</div>
-            {panel.issues.map(([tone, text, meta], i) => (
-              <div className={`issue ${tone}`} key={i}>
-                <span className="sev" aria-hidden />
-                <div>
-                  <h4>{meta}</h4>
-                  <p>{text}</p>
-                </div>
-              </div>
-            ))}
-          </>
-        )}
-
-        {panel.calc.length > 0 && (
-          <div className="calc">
-            {panel.calc.map(([label, value], i) => (
-              <div className={`calc-row ${i === panel.calc.length - 1 ? "total" : ""}`} key={i}>
-                <span>{label}</span>
-                <b>{value}</b>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {panel.diff.length > 0 && (
-          <>
-            <div className="section-label">Meaningful changes</div>
-            {panel.diff.map(([what, how], i) => (
-              <div className="diff" key={i}>
-                <span>{what}</span>
-                <b>{how}</b>
-              </div>
-            ))}
-          </>
-        )}
-
-        {panel.timeline.length > 0 && (
-          <div className="timeline">
-            {panel.timeline.map(([when, what], i) => (
-              <div className="event" key={i}>
-                <small>{when}</small>
-                <strong>{what}</strong>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {panel.evidence.length > 0 && (
-          <>
-            <div className="section-label">Evidence</div>
-            <div className="evidence-row header">
-              <span>Source / fact</span>
-              <span>Finding</span>
-              <span>State</span>
-            </div>
-            {panel.evidence.map((row, i) => (
-              <div className="evidence-row" key={i}>
-                <span>{row.source}</span>
-                <span>{row.finding}</span>
-                {/* The condition, in words. Never a confidence percentage. */}
-                <span className="confidence">{row.freshness}</span>
-              </div>
-            ))}
-          </>
-        )}
-
-        {panel.draft && (
-          <>
-            <div className="section-label" style={{ marginTop: 14 }}>
-              Prepared draft
-            </div>
-            <div className="draft">
-              {panel.draft.to ? `To: ${panel.draft.to}\n` : ""}
-              {panel.draft.subject ? `Subject: ${panel.draft.subject}\n\n` : ""}
-              {panel.draft.body}
-            </div>
-          </>
-        )}
-
-        <div className="actions">
-          {panel.actions.map((a, i) => (
-            <Link
-              key={a}
-              to="/work"
-              search={{ view: "active" }}
-              className={i === 0 ? "primary" : "secondary"}
-            >
-              {a}
-            </Link>
+      <div className="section-label">EVIDENCE</div>
+      {message.citations.length === 0 ? (
+        <p>
+          This answer cites nothing, so it is not a claim about your book. ASAP says what it could
+          not establish rather than filling the gap.
+        </p>
+      ) : (
+        <ul className="evidence-list">
+          {message.citations.map((c, i) => (
+            <li key={i}>
+              {c.recordId ? (
+                <Link to="/r/$recordId" params={{ recordId: c.recordId }} search={{}}>
+                  {c.label}
+                </Link>
+              ) : (
+                <span>{c.label}</span>
+              )}
+              <small>
+                {c.recordKind}
+                {c.reference ? ` · ${c.reference}` : ""}
+                {c.page !== null ? ` · page ${c.page}` : ""}
+              </small>
+            </li>
           ))}
-        </div>
-      </div>
+        </ul>
+      )}
+      {message.tools_used.length > 0 && (
+        <>
+          <div className="section-label">WHAT IT RAN</div>
+          <ul className="evidence-list">
+            {message.tools_used.map((t, i) => (
+              <li key={i}>{t.name}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      <Link to="/audit" className="source-link">
+        ▱ Everything recorded about this answer
+      </Link>
     </article>
   );
 }
