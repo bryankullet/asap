@@ -94,6 +94,23 @@ export type DemoPanel = z.infer<typeof demoPanelSchema>;
  * `lead` is the one-sentence answer; `text` is the reasoning. Neither ever asserts a status, a
  * cover outcome or an approval — the same rule that governs a real Ask answer (§45 rules 10, 12).
  */
+/**
+ * The record Ask is working in, as the approved demo's policy strip shows it: who the client is,
+ * which policy or opportunity, its reference, insurer and period, and three headline facts.
+ *
+ * It is fixture data, per scenario, so no component ever names a client (D-064).
+ */
+export const demoContextSchema = z.object({
+  initials: z.string(),
+  client: z.string(),
+  title: z.string(),
+  number: z.string(),
+  insurer: z.string(),
+  period: z.string(),
+  facts: z.array(z.tuple([z.string(), z.string()])),
+});
+export type DemoContext = z.infer<typeof demoContextSchema>;
+
 export const demoScenarioSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -104,6 +121,8 @@ export const demoScenarioSchema = z.object({
   lead: z.string(),
   text: z.string(),
   suggest: z.array(z.string()),
+  /** The policy strip's contents for this scenario. */
+  context: demoContextSchema,
   panel: demoPanelSchema,
 });
 export type DemoScenario = z.infer<typeof demoScenarioSchema>;
