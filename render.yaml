@@ -53,6 +53,44 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+      # --- Ask ASAP's gateway (D-061). All optional -------------------------------------------
+      # With no key and no model, the gateway resolves to nothing, the API logs that it is
+      # disabled, and Ask answers with its configuration-required state — which says a model is
+      # not connected and names no provider. That is a designed state, not a failure, so the
+      # service boots and every other surface works untouched.
+      #
+      # Set OPENAI_API_KEY and AI_MODEL together to switch Ask on. Neither ever reaches the
+      # browser: there is no VITE_ equivalent of either, and the bundle check would fail the
+      # build if the name appeared (§45 rule 4).
+      - key: AI_DEFAULT_PROVIDER
+        value: openai
+      - key: AI_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # --- Documents and mailboxes. All optional ----------------------------------------------
+      # Extraction runs on our own service (§45 rule 2); until one is deployed, documents still
+      # upload and read, and extraction simply has not run.
+      - key: EXTRACTOR_URL
+        sync: false
+      - key: EXTRACTOR_SHARED_SECRET
+        sync: false
+      # OAuth for connected mailboxes. Absent means no mailbox can be connected, which the
+      # mailbox surface says; nothing else is affected.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REDIRECT_URI
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_TENANT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_REDIRECT_URI
+        sync: false
 
   - type: web
     name: asap-web

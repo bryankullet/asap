@@ -7,7 +7,7 @@
  */
 import { AUTOMATION_COLUMNS } from "@asap/schema";
 import pino from "pino";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { fireAutomationsFor, type SemanticEvent } from "../src/automations/runner.js";
 import type { Mailer } from "../src/mail/index.js";
