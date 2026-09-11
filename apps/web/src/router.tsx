@@ -22,6 +22,7 @@ import { RequireMembership, RequireSession } from "./lib/guards.js";
 import { DEMO_MODE } from "./demo/mode.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 import { AuthCallback } from "./pages/AuthCallback.js";
+import { ForgotPassword, ResetPassword } from "./pages/ResetPassword.js";
 import { AgreementVersion } from "./pages/AgreementVersion.js";
 import { Agreements } from "./pages/Agreements.js";
 import { AutomationDemoDetail, AutomationsDemo } from "./pages/AutomationsDemo.js";
@@ -55,6 +56,17 @@ const signUp = createRoute({
     email: z.string().optional().catch(undefined),
     next: z.string().startsWith("/").optional().catch(undefined),
   }),
+});
+/** Forgetting a password, and choosing a new one (D-068). Public, like sign-in. */
+const forgotPassword = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/forgot-password",
+  component: ForgotPassword,
+});
+const resetPassword = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reset-password",
+  component: ResetPassword,
 });
 const authCallback = createRoute({
   getParentRoute: () => rootRoute,
@@ -275,6 +287,8 @@ const connections = createRoute({
 const routeTree = rootRoute.addChildren([
   signIn,
   signUp,
+  forgotPassword,
+  resetPassword,
   authCallback,
   invite,
   authed.addChildren([

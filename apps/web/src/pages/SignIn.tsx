@@ -94,6 +94,12 @@ export function SignIn() {
             <Button type="button" variant="outline" full onClick={() => void magicLink()}>
               Email me a sign-in link instead
             </Button>
+            <Link
+              to="/forgot-password"
+              className="self-center text-sm text-ink-secondary underline-offset-2 hover:underline"
+            >
+              I have forgotten my password
+            </Link>
           </form>
         )}
       </Card>

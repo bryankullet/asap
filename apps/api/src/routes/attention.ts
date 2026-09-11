@@ -109,6 +109,24 @@ export function attentionRoutes() {
     }
     const { items, runs } = loaded;
 
+    /*
+     * How much of a book exists at all. Two counts, under the caller's session, so a brand-new
+     * brokerage is told it is new rather than told it is up to date (D-068). `head: true` asks for
+     * the count without the rows.
+     */
+    const [clientsR, policiesR] = await Promise.all([
+      db.from("clients").select("id", { count: "exact", head: true }).eq("organization_id", org.id).is("deleted_at", null),
+      db.from("policies").select("id", { count: "exact", head: true }).eq("organization_id", org.id).is("deleted_at", null),
+    ]);
+    if (clientsR.error || policiesR.error) {
+      degraded.push({ what: "How much is on file", because: "The client or policy counts could not be read." });
+    }
+    const book = {
+      clients: clientsR.count ?? 0,
+      policies: policiesR.count ?? 0,
+      work: items.length,
+    };
+
     const stuck = runs.filter(runNeedsPerson);
     const stuckByItem = new Map<string, RunRow>();
     for (const r of stuck) if (r.work_item_id && !stuckByItem.has(r.work_item_id)) stuckByItem.set(r.work_item_id, r);
@@ -199,6 +217,7 @@ export function attentionRoutes() {
         .map(failure),
       degraded,
       cap: ATTENTION_CAP,
+      book,
     });
     return c.json(body);
   });

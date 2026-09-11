@@ -244,6 +244,37 @@ const server = http.createServer(async (req, res) => {
     const select = parseSelect(url.searchParams.get("select") ?? "*");
     const single = (req.headers.accept ?? "").includes("vnd.pgrst.object");
 
+    /*
+     * `select("id", { count: "exact", head: true })` asks PostgREST for a count and no rows: a
+     * HEAD request whose answer is the `content-range` header. Without it a caller that only
+     * wanted a number gets nothing, and the screen degrades for no reason.
+     */
+    if (req.method === "HEAD" || (req.headers.prefer ?? "").includes("count=")) {
+      const filters = [];
+      for (const [key, value] of url.searchParams) {
+        if (["select", "order", "limit", "offset"].includes(key)) continue;
+        const [op, ...rest] = value.split(".");
+        const build = OPERATORS[op];
+        if (!build) return send(400, { message: `dev-supabase-stub: operator ${op}` });
+        filters.push(build(key, rest.join(".")));
+      }
+      const counted = await asCaller(token, headers, async (db) => {
+        let query = db`select count(*)::int as n from ${db(table)}`;
+        for (const [i, f] of filters.entries())
+          query = db`${query} ${i === 0 ? db`where` : db`and`} ${f}`;
+        const [row] = await query;
+        return row?.n ?? 0;
+      });
+      if (counted?.unauthorized) return send(401, { message: "invalid token" });
+      res.writeHead(req.method === "HEAD" ? 200 : 206, {
+        "Content-Type": "application/json",
+        "Content-Range": `0-${Math.max(0, counted - 1)}/${counted}`,
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "content-range",
+      });
+      return res.end(req.method === "HEAD" ? "" : "[]");
+    }
+
     if (req.method === "GET") {
       const filters = [];
       for (const [key, value] of url.searchParams) {

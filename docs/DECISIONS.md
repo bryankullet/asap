@@ -785,3 +785,34 @@ prove: RLS (proven by `pnpm test:rls`) and Supabase Auth (proven by `scripts/ver
 **Not yet on real records, and still fixture-backed in both modes:** Search, `+ New`, the email
 thread and draft, the document viewer and extraction review, and the Work/Job/Automation detail
 screens. Those are named in the outstanding list rather than quietly left half-wired.
+
+## D-068 — The first run: a new brokerage, from signing up
+
+The product was built from the middle outwards, so the beginning was the least travelled part of
+it. This is the path a brokerage that has never used ASAP actually takes, and what it found.
+
+**Forgetting a password had no path at all.** `/forgot-password` asks for a link and
+`/reset-password` chooses the new one. Both hold the same rule, and it is the one that is easy to
+break by being helpful: **the answer never depends on whether the address has an account.** "If that
+address has an account, a link is on its way" is the same sentence either way, so the form cannot be
+used to ask who banks with this brokerage — the same reason sign-in says "that email and password do
+not match" rather than naming which half was wrong. The reset screen requires the recovery session
+the link creates and says the link has expired when there is none, rather than showing a form that
+could not work.
+
+**"Nothing needs attention" and "you have not started" are different facts.** A brand-new brokerage
+was being congratulated on being up to date. `GET /attention` now carries `book` — how many
+clients, policies and work items exist at all, counted under the caller's session — and Discover
+says "Nothing is on file yet" with the first step, instead of "Nothing needs attention". An empty
+screen that implies everything is handled, when nothing has been entered, is a lie of omission.
+
+**What the first run proved, against a real database:** a person who has just signed up has a
+profile (the 0004 trigger makes it) and no membership, and is offered create-or-join rather than an
+empty Discover. Creating the brokerage seeds its nine system roles and makes them its owner. Every
+screen then loads with no failure state and nothing fictional on it.
+`apps/web/parity/onboarding.mjs` walks exactly that, and fails if any screen is blank, shows a
+failure state, or shows a demonstration record.
+
+**Still missing on the first-run path**, and named rather than left to be discovered: adding a
+policy has no endpoint at all; adding a client has one but no entry point from `+ New`; and
+connecting a mailbox and uploading a document have working APIs behind fixture-only screens.

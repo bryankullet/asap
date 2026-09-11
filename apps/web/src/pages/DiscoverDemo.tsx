@@ -192,10 +192,31 @@ export function DiscoverDemo() {
               </Link>
             ))}
             {cards.length === 0 && !live.isPending && !live.isError && (
-              <div className="focus-card" style={{ cursor: "default" }}>
-                <h3>Nothing needs attention</h3>
-                <p>That is a real answer, not an empty screen.</p>
-              </div>
+              /*
+               * Two different empty screens, because they are two different facts. A brokerage
+               * with nothing on file is not up to date — it has not started — and telling it
+               * otherwise is a lie of omission (D-068).
+               */
+              (live.data?.book.clients ?? 1) === 0 && !demo.isDemo ? (
+                <div className="focus-card" style={{ cursor: "default" }}>
+                  <h3>Nothing is on file yet</h3>
+                  <p>
+                    ASAP works from your own clients, policies, documents and email. Put the first
+                    one in and this becomes the list of what needs a person today.
+                  </p>
+                  <div className="focus-footer">
+                    <span>Start here</span>
+                    <Link to="/new" className="link">
+                      Start a piece of work <span aria-hidden>→</span>
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="focus-card" style={{ cursor: "default" }}>
+                  <h3>Nothing needs attention</h3>
+                  <p>That is a real answer, not an empty screen.</p>
+                </div>
+              )
             )}
             {/* A partial read says what it could not see rather than quietly showing less. */}
             {(live.data?.degraded ?? []).map((d) => (
@@ -253,6 +274,20 @@ export function DiscoverDemo() {
  */
 function Noticed({ attention }: { attention: AttentionResponse | undefined }) {
   if (!attention) return null;
+  if (attention.book.clients === 0) {
+    return (
+      <>
+        <h3>Your book is empty</h3>
+        <p>
+          No clients, no policies, nothing waiting. Add a client, connect the mailbox the brokerage
+          already works from, or give ASAP a schedule to read.
+        </p>
+        <Link to="/files" search={{ view: "blocking" }} className="link">
+          Add the first client
+        </Link>
+      </>
+    );
+  }
   const needsYou = attention.sections.find((s) => s.key === "needs_you")?.visible ?? 0;
   const checksDue = attention.sections.find((s) => s.key === "checks_due")?.visible ?? 0;
   const stopped = attention.orphanRuns.length;

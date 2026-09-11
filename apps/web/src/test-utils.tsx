@@ -151,5 +151,6 @@ export function attentionFixture(
       .map(fail),
     degraded: [],
     cap: 12,
+    book: { clients: items.length, policies: 0, work: items.length },
   };
 }

@@ -191,6 +191,18 @@ export const attentionResponseSchema = z.object({
   /** Empty when everything was read. Non-empty means a partial success, and the UI says so. */
   degraded: z.array(attentionDegradationSchema),
   cap: z.number().int().min(1),
+  /**
+   * How much of a book there is at all, counted under the caller's session.
+   *
+   * "Nothing needs attention" and "you have not put anything in yet" are different facts and a
+   * new brokerage deserves the second one: an empty screen that congratulates someone on being up
+   * to date, when they have no clients, is a lie of omission.
+   */
+  book: z.object({
+    clients: z.number().int().min(0),
+    policies: z.number().int().min(0),
+    work: z.number().int().min(0),
+  }),
 });
 export type AttentionResponse = z.infer<typeof attentionResponseSchema>;
 

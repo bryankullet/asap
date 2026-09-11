@@ -450,6 +450,25 @@ describe("GET /attention", () => {
   });
 });
 
+describe("a brokerage with nothing on file", () => {
+  it("is told it is new, not told it is up to date", async () => {
+    // Everything about this brokerage's book, counted: a screen cannot tell "nothing needs
+    // attention" from "nothing exists" without it (D-068).
+    const body = await readJson(await app.request("/attention", { headers: auth("tok-amina") }));
+    expect(body.book).toMatchObject({
+      clients: expect.any(Number),
+      policies: expect.any(Number),
+      work: expect.any(Number),
+    });
+    const mine = (db.tables["work_items"] ?? []).filter(
+      (i) =>
+        (i as { organization_id: string }).organization_id === ORG_A &&
+        (i as { deleted_at: string | null }).deleted_at === null,
+    );
+    expect(body.book.work).toBe(mine.length);
+  });
+});
+
 describe("GET /work", () => {
   it("requires a session", async () => {
     expect((await app.request("/work?view=needs")).status).toBe(401);
