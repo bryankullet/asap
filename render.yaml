@@ -129,3 +129,71 @@ services:
         value: "off"
       - key: NODE_VERSION
         value: "22.22.2"
+
+  # Python document extraction (§45 rule 2: documents are read on our own service, never sent to a
+  # third party for indexing). Its only caller is the API, over the shared secret below — it never
+  # serves a browser and never sees a session.
+  - type: web
+    name: asap-extractor
+    runtime: python
+    rootDir: apps/extractor
+    plan: starter
+    buildCommand: pip install --upgrade pip && pip install -e .
+    startCommand: python -m asap_extractor.main
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: APP_ENV
+        value: staging
+      # The service reads its own port from EXTRACTOR_PORT; Render supplies PORT.
+      - key: EXTRACTOR_PORT
+        fromService:
+          type: web
+          name: asap-extractor
+          envVarKey: PORT
+      # The same value must be set on asap-api's EXTRACTOR_SHARED_SECRET. Set in the dashboard:
+      # a generated value here could not be shared with a service in another blueprint entry
+      # without one of them holding the other's copy.
+      - key: EXTRACTOR_SHARED_SECRET
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+
+  # The worker tier (D-072). A background worker, not a web service: it opens no port. It claims
+  # events and asks the API to run the consumers — it holds no service-role key, and connects as
+  # asap_worker, which does not bypass RLS (§45, "Tenancy").
+  - type: worker
+    name: asap-worker
+    runtime: node
+    rootDir: .
+    plan: starter
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @asap/workers... build
+    startCommand: node apps/workers/dist/index.js
+    envVars:
+      - key: NODE_VERSION
+        value: "22.22.2"
+      - key: APP_ENV
+        value: staging
+      # asap_worker's connection string, not postgres'. The env schema refuses the postgres role.
+      - key: WORKER_DATABASE_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      # Where the engine lives, and the secret that proves the caller is not a browser. Both are
+      # taken from the API service itself, so they cannot drift apart.
+      - key: API_BASE_URL
+        fromService:
+          type: web
+          name: asap-api
+          envVarKey: API_BASE_URL
+      - key: API_INTERNAL_KEY
+        fromService:
+          type: web
+          name: asap-api
+          envVarKey: API_INTERNAL_KEY
+      - key: EVENT_POLL_MS
+        value: "2000"
+      # Required once APP_ENV is not local (packages/schema/src/env/worker.ts).
+      - key: SENTRY_DSN
+        sync: false
