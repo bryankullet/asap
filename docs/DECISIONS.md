@@ -1110,3 +1110,31 @@ replace a person's accepted values with fresh guesses.
   the worker against the real API — but not all four at once, because the local stand-in has no
   storage download.
 - `pnpm test` does not run the Python tests; `pnpm test:extractor` does.
+
+## D-073 — The worker is a background worker; the extractor is a web service only the API calls
+
+Phase 3 built two services and deployed neither. `render.yaml` now declares both, and the extractor
+runs on Render as `asap-extractor`.
+
+**The extractor is a web service, but not a public one in any useful sense.** Its only caller is
+the API, over `EXTRACTOR_SHARED_SECRET`; it serves no browser and sees no session. A deployment
+that sets `APP_ENV` and forgets the secret refuses to boot rather than starting without auth —
+which is what happened on the first deploy, and is the behaviour we want.
+
+**The worker is a `type: worker`, not a web service.** It opens no port: making it a web service to
+fit a tool that only creates those would mean adding an HTTP surface to a process whose whole point
+is that it has none. It takes `API_BASE_URL` and `API_INTERNAL_KEY` `fromService` the API, so the
+address and the secret cannot drift apart, and `WORKER_DATABASE_URL` is `asap_worker`'s — the env
+schema refuses the `postgres` role, because the worker must not bypass RLS.
+
+No secret value is in `render.yaml`. Every one is `sync: false`.
+
+### What is still not true
+
+- **`asap-worker` is not running yet.** The Render MCP tools can create web services, static sites
+  and cron jobs — not background workers. It needs one blueprint sync (or one dashboard create) with
+  the shape `render.yaml` now declares, and `WORKER_DATABASE_URL`, `ENCRYPTION_KEY` and `SENTRY_DSN`
+  set. Until it runs, events are emitted and nothing claims them: uploads are filed, extraction is
+  queued, and no document is read.
+- **`asap-extractor` was created directly, not from the blueprint.** The first blueprint sync will
+  want to adopt or recreate it; the same is already true of `asap-api` and `asap-web`.
