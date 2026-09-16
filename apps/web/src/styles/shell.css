@@ -2136,3 +2136,31 @@ body.demo-body {
     overflow-y: visible;
   }
 }
+
+/*
+ * The Ask dock (D-074). Ask is persistent, not a destination: it sits at the foot of the main
+ * column on every screen, with the Activity chip beside it because runs are what Ask started.
+ *
+ * `margin-top: auto` pins it to the bottom of the flex column without taking the pane out of the
+ * normal flow, so a long screen scrolls behind it rather than under it.
+ */
+.ask-dock {
+  margin-top: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 26px 16px;
+  border-top: 1px solid var(--line);
+  background: white;
+}
+.ask-dock > *:last-child {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .ask-dock {
+    padding: 10px 14px 12px;
+    flex-wrap: wrap;
+  }
+}

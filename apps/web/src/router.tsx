@@ -113,29 +113,34 @@ const index = createRoute({
   getParentRoute: () => shell,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/discover", replace: true });
+    throw redirect({ to: "/today", replace: true });
   },
 });
-const discover = createRoute({
-  getParentRoute: () => shell,
-  path: "/discover",
-  component: Discover,
-  /** `?ask=` pre-fills the docked composer, so a Discover card can open Ask on its own context. */
-  validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
-});
-/** D-060 renamed Today to Discover. Existing links, bookmarks and `?next=` values keep working. */
-const legacyToday = createRoute({
+/**
+ * Today (D-074). D-060 had renamed it Discover; the rebuilt product calls it Today, and the
+ * redirect below keeps every older link, bookmark and `?next=` value working in both directions
+ * this project has used.
+ */
+const today = createRoute({
   getParentRoute: () => shell,
   path: "/today",
+  component: Discover,
+  /** `?ask=` pre-fills the docked composer, so a Today card can open Ask on its own context. */
+  validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
+});
+const legacyDiscover = createRoute({
+  getParentRoute: () => shell,
+  path: "/discover",
   beforeLoad: () => {
-    throw redirect({ to: "/discover", replace: true });
+    throw redirect({ to: "/today", replace: true });
   },
 });
 const work = createRoute({
   getParentRoute: () => shell,
   path: "/work",
   component: Work,
-  // The approved Work vocabulary (D-064). Old links carrying ?view=needs still land somewhere.
+  // The view ids are the API's and do not change; D-074 changed only what each is called on
+  // screen. Old links carrying ?view=needs still land somewhere.
   validateSearch: z.object({
     view: z
       .enum(["active", "waiting", "review", "completed", "pinned", "recent"])
@@ -215,14 +220,23 @@ const legacyMembers = createRoute({
 });
 
 export 
-/** Ask ASAP in full (D-064): a destination as well as the composer docked on every surface. */
+/**
+ * Ask ASAP in full. **Not a destination** (D-074): it is not in the sidebar. The route exists so a
+ * conversation has an address that can be linked, reopened and returned to, and because the docked
+ * composer needs somewhere to open into when an answer outgrows it.
+ */
 const ask = createRoute({
   getParentRoute: () => shell,
   path: "/ask",
   component: Ask,
   validateSearch: z.object({ scenario: z.string().max(80).optional().catch(undefined) }),
 });
-/** Jobs — what ASAP is processing. Kept separate from Work, which is what a person owns. */
+/**
+ * Jobs — what ASAP is processing. **Not a destination** (D-074): reached from the Activity chip,
+ * from a run's own Work item, from an import or from automation history. Kept separate from Work,
+ * which is what a person owns: a finished job means ASAP produced an output, never that a policy
+ * renewed or money arrived.
+ */
 const jobs = createRoute({
   getParentRoute: () => shell,
   path: "/jobs",
@@ -289,8 +303,8 @@ const routeTree = rootRoute.addChildren([
     member.addChildren([
       shell.addChildren([
         index,
-        discover,
-        legacyToday,
+        today,
+        legacyDiscover,
         ask,
         jobs,
         jobDetail,

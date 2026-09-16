@@ -15,7 +15,7 @@ import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
  * Renders a component inside a memory router with the shell's routes registered (so <Link to>
  * resolves) but no data layer. Views under test are pure and take fixtures as props.
  */
-export async function renderInRouter(ui: ReactNode, initialPath = "/discover") {
+export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
   const root = createRootRoute({ component: () => <Outlet /> });
   const page = () => <div data-testid="routed">{ui}</div>;
   const routes = [

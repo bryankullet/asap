@@ -53,6 +53,7 @@ afterEach(() => {
 /** Every destination inside the shell. None of them is reachable without a session. */
 const GUARDED_ROUTES = [
   "/",
+  "/today",
   "/discover",
   "/ask",
   "/work",
@@ -78,9 +79,9 @@ describe("every destination requires authentication", () => {
   }
 
   it("remembers where an unauthenticated visitor was going", { timeout: TIMEOUT }, async () => {
-    const { router } = await visit("/discover");
+    const { router } = await visit("/today");
     await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"));
-    expect(router.state.location.search).toMatchObject({ next: "/discover" });
+    expect(router.state.location.search).toMatchObject({ next: "/today" });
   });
 });
 

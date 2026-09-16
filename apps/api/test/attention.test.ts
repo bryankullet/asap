@@ -479,11 +479,13 @@ describe("GET /work", () => {
       readJson(await app.request(`/work?view=${v}`, { headers: auth("tok-amina") }));
 
     const needs = await view("needs");
-    expect(needs.label).toBe("Active");
+    // The label is the shared one (D-074): the view ids are the API's contract and unchanged.
+    expect(needs.label).toBe("In progress");
     expect(needs.items).toHaveLength(4);
 
     const withOthers = await view("with");
-    expect(withOthers.label).toBe("Waiting");
+    // Never a bare "Waiting" — it names the party (D-074).
+    expect(withOthers.label).toBe("With someone else");
     expect(withOthers.items.map((i: { item: { title: string } }) => i.item.title).sort()).toEqual([
       "Acme Motors — renewal terms from Jubilee",
       "Acme — insurer endorsement acknowledgement",

@@ -118,7 +118,7 @@ export function ResetPassword() {
     }
     setDone(true);
     // The recovery session is a real session, so there is nowhere to sign in to: go to work.
-    setTimeout(() => void navigate({ to: "/discover", replace: true }), 1200);
+    setTimeout(() => void navigate({ to: "/today", replace: true }), 1200);
   }
 
   if (loading) {

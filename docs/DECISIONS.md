@@ -1138,3 +1138,40 @@ No secret value is in `render.yaml`. Every one is `sync: false`.
   queued, and no document is read.
 - **`asap-extractor` was created directly, not from the blueprint.** The first blueprint sync will
   want to adopt or recreate it; the same is already true of `asap-api` and `asap-web`.
+
+## D-074 — Three destinations. Ask is persistent, Jobs arrives through Activity
+
+Supersedes D-064's five-destination shell and restores what D-058 and D-060 had settled. The
+sidebar is **Today · Work · Automations**, then `+ New` and Search, with profile and company
+controls at the bottom.
+
+**Ask ASAP is not a destination.** It is persistent — docked at the foot of every screen — and
+being a destination as well would make it two things competing for the same attention. It keeps its
+address (`/ask`) so a conversation can be linked and reopened, and so the composer has somewhere to
+open into when an answer outgrows it. It is simply not in the sidebar.
+
+**Jobs is not a destination.** What ASAP is processing reaches a person through the Activity chip
+beside Ask; a run opens in full from there, from its own Work item, from an import or from
+automation history. The rule that makes this safe is the one that was always true: a run may never
+be the only place something important lives, so anything needing a person is in Work first and
+Activity can be ignored at no cost.
+
+**Today, not Discover.** D-060 renamed it; the rebuilt product calls it Today. `/discover`
+redirects, so older links, bookmarks and `?next=` values keep working.
+
+**A bare "Waiting" joins "Needs you" in retirement.** Waiting means nothing a person can act on
+until it names who is being waited on. A card says *With APA since 15 Sep*; the filter that
+collects those cards is **With someone else**. Work's filters are In progress · With someone else ·
+For review · Done · Pinned · Recent, and the Jobs board's are All · Working · Waiting on someone
+else · Stopped for a person · Finished. `vocabulary.test.ts` fails if either retired word returns.
+
+**The view ids did not change.** `?view=needs|with|review|recent|done` is the API's contract; only
+what each is called on screen changed, so no link breaks and no query needs rewriting.
+
+### What running it turned up
+
+**The persistent Ask composer was not mounted anywhere.** `AskComposer.tsx` and `ActivityChip.tsx`
+were both complete and neither was rendered by any screen — so "Ask is always in reach", which
+D-064 asserted and the product's own documentation repeated, was not true of the running
+application. They are now docked together in the shell's main column. Activity stays optional and
+renders nothing when no run is worth showing.

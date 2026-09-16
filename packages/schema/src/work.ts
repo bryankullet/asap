@@ -151,12 +151,19 @@ export type RunRow = z.infer<typeof RunRow>;
 export const WorkView = z.enum(["needs", "with", "review", "recent", "done"]);
 export type WorkView = z.infer<typeof WorkView>;
 
+/**
+ * What each view is called on screen (D-074). The keys are the API's and do not change.
+ *
+ * `with` is **not** called "Waiting": waiting only means something when it names who is being
+ * waited on, and a card says *With APA since 15 Sep*. A bare "Waiting" is banned, as "Needs you"
+ * has been since D-064.
+ */
 export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
-  needs: "Active",
-  with: "Waiting",
+  needs: "In progress",
+  with: "With someone else",
   review: "For review",
   recent: "Recent",
-  done: "Completed",
+  done: "Done",
 };
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */

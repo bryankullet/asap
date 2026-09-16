@@ -53,7 +53,7 @@ export function CreateOrganization() {
     mutationFn: api.createOrganization,
     onSuccess: async () => {
       await invalidate();
-      void navigate({ to: "/discover", replace: true });
+      void navigate({ to: "/today", replace: true });
     },
   });
   const errors = form.formState.errors;

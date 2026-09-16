@@ -45,19 +45,31 @@ describe("the product's visible vocabulary", () => {
     }
   });
 
-  it("uses the approved Work filters, in the approved order", () => {
+  it("uses the approved Work filters, in the approved order (D-074)", () => {
     expect(WORK_FILTERS.map((f) => f.label)).toEqual([
-      "Active",
-      "Waiting",
+      "In progress",
+      "With someone else",
       "For review",
-      "Completed",
+      "Done",
       "Pinned",
       "Recent",
     ]);
   });
 
+  it("never says a bare 'Waiting' — it names the party instead (D-074)", () => {
+    // "Waiting on someone else" is allowed and "With APA since 15 Sep" is the card's own wording.
+    // What is banned is the word alone, which tells a person nothing they can act on.
+    for (const label of EVERY_VISIBLE_LABEL) {
+      expect(label.trim(), label).not.toBe("Waiting");
+    }
+  });
+
+  it("keeps Ask ASAP and Jobs out of the destinations (D-074)", () => {
+    expect(NAV.map((n) => n.label)).toEqual(["Today", "Work", "Automations"]);
+  });
+
   it("keeps Work's and Jobs' vocabularies recognisably different", () => {
-    // They may share a word — the approved demo has Waiting in both — but a Job is never described
+    // A job is never described
     // with Work's decision language, and Work is never described with a run's.
     expect(JOB_FILTERS.map((f) => f.label)).not.toContain("For review");
     expect(WORK_FILTERS.map((f) => f.label)).not.toContain("Running");
