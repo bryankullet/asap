@@ -16,7 +16,14 @@ import {
   containsBannedString,
 } from "@asap/schema";
 import { describe, expect, it } from "vitest";
-import { JOB_FILTERS, NAV, WORK_FILTERS } from "./nav.js";
+import {
+  DEFAULT_WORK_FILTER,
+  JOB_FILTERS,
+  NAV,
+  PINNED_VIEW,
+  REVIEW_VIEW,
+  WORK_FILTERS,
+} from "./nav.js";
 
 const EVERY_VISIBLE_LABEL = [
   ...Object.values(TASK_LABELS),
@@ -29,6 +36,8 @@ const EVERY_VISIBLE_LABEL = [
   ...Object.values(EVIDENCE_CONDITION_LABELS),
   ...NAV.map((n) => n.label),
   ...WORK_FILTERS.map((f) => f.label),
+  PINNED_VIEW.label,
+  REVIEW_VIEW.label,
   ...JOB_FILTERS.map((f) => f.label),
 ];
 
@@ -45,15 +54,35 @@ describe("the product's visible vocabulary", () => {
     }
   });
 
-  it("uses the approved Work filters, in the approved order (D-074)", () => {
+  it("uses the approved Work views, in the approved order (D-075)", () => {
     expect(WORK_FILTERS.map((f) => f.label)).toEqual([
+      "Your work",
+      "With others",
       "In progress",
-      "With someone else",
-      "For review",
       "Done",
-      "Pinned",
       "Recent",
     ]);
+  });
+
+  it("keeps Pinned and For review out of the main views (D-075)", () => {
+    // A personal marker is not a state work is in, and "For review" is not the name for all
+    // human work — it appears where review is genuinely the question.
+    const main = WORK_FILTERS.map((f) => f.label);
+    expect(main).not.toContain("Pinned");
+    expect(main).not.toContain("For review");
+    expect(PINNED_VIEW.label).toBe("Pinned");
+    expect(REVIEW_VIEW.label).toBe("For review");
+  });
+
+  it("opens on Your work", () => {
+    expect(DEFAULT_WORK_FILTER).toBe("needs");
+    expect(WORK_FILTERS[0]?.id).toBe(DEFAULT_WORK_FILTER);
+  });
+
+  it("uses the API's own view names, so a label cannot drift from its query", () => {
+    for (const f of WORK_FILTERS) {
+      expect(WORK_VIEW_LABELS[f.id], f.id).toBe(f.label);
+    }
   });
 
   it("never says a bare 'Waiting' — it names the party instead (D-074)", () => {

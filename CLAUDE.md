@@ -237,11 +237,17 @@ means ASAP produced an output, never that a policy renewed, a claim was accepted
 A run may never be the only place something important lives: anything needing a person is in Work
 first, so Activity can be ignored at no cost.
 
-**Work's vocabulary is In progress · With someone else · For review · Done · Pinned · Recent.**
-"Needs you" and a bare "Waiting" are both retired from every visible surface; `vocabulary.test.ts`
-fails if either returns. Waiting means nothing until it names the party — a card says *With APA
-since 15 Sep*. Pinned is a filter, not a destination. "Space" never appears on screen — it is
-called Work.
+**Work's main views are Your work · With others · In progress · Done · Recent** (D-075), and four
+of them are the task-status layer itself. "Needs you" and a bare "Waiting" are both retired from
+every visible surface; `vocabulary.test.ts` fails if either returns.
+
+**When an outside party holds the work, name them:** *With CIC since 12 Aug*, *With client since
+14 Aug*, *With assessor since 16 Aug*. `<TaskStatus>` refuses to render `with_party` without both
+the party and the date.
+
+**Pinned is a personal marker, not a view** — a way of finding work, not a state work is in — and
+**"For review" is contextual**, appearing only where review is genuinely the question, never as the
+name for all human work. "Space" never appears on screen — it is called Work.
 
 **There is one application and it is the brokerage's own** (D-069). The public fixture-only
 demonstration of D-065 has been removed — fixtures, presenter bar, `VITE_PUBLIC_DEMO_MODE` and the

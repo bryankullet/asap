@@ -11,6 +11,7 @@ import {
   type WorkTileView,
   type AutomationCardView,
 } from "@asap/schema";
+import { formatSince } from "../components/status/slots.js";
 
 /**
  * Real records, as the approved demo's cards (D-064, D-066).
@@ -114,13 +115,20 @@ export function focusCardFromAttention(
 function workPill(row: WorkListResponse["items"][number]): { pill: string; tone: BoardTone } {
   if (row.runFailure) return { pill: "Could not finish", tone: "high" };
   if (row.item.exception) return { pill: "High", tone: "high" };
-  if (row.item.task_status === "done") return { pill: "Completed", tone: "resolved" };
+  if (row.item.task_status === "done") return { pill: "Done", tone: "resolved" };
   if (row.item.task_status === "with_party") {
-    // Waiting on somebody, and the row knows which somebody.
-    return { pill: row.item.task_party ? `Waiting on ${row.item.task_party}` : "Waiting", tone: "medium" };
+    /*
+     * D-075: name the party and say since when — "With CIC since 12 Aug". A bare "Waiting" is
+     * banned because it tells a person nothing they can act on, and the fallback here used to be
+     * exactly that. A `with_party` row without a party is a defect upstream, not a state to draw,
+     * so it reads as the work it still is rather than inventing a party.
+     */
+    if (!row.item.task_party) return { pill: "Your work", tone: "high" };
+    const since = row.item.task_since ? ` since ${formatSince(row.item.task_since)}` : "";
+    return { pill: `With ${row.item.task_party}${since}`, tone: "medium" };
   }
   if (row.item.task_status === "in_progress") return { pill: "In progress", tone: "neutral" };
-  return { pill: "Active", tone: "high" };
+  return { pill: "Your work", tone: "high" };
 }
 
 export function workTileFromRow(row: WorkListResponse["items"][number]): WorkTileView {

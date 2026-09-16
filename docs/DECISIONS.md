@@ -1175,3 +1175,32 @@ were both complete and neither was rendered by any screen — so "Ask is always 
 D-064 asserted and the product's own documentation repeated, was not true of the running
 application. They are now docked together in the shell's main column. Activity stays optional and
 renders nothing when no run is worth showing.
+
+## D-075 — Work's views are the task-status layer. Name the party
+
+The main views are **Your work** (default) · With others · In progress · Done · Recent.
+
+Four of the five are the task-status layer itself — `needs_you`, `with_party`, `in_progress`,
+`done` — which is why `progress` had to become a view: "Your work" and "In progress" are different
+questions, and collapsing them into one made the first mean nothing. The API gained the view;
+`?view=` is still the API's own vocabulary, so a label cannot drift from the query behind it, and
+a test asserts each label comes from `WORK_VIEW_LABELS`.
+
+**Pinned is not a main view.** It is a personal marker with its own endpoint: a way of *finding*
+work, not a state work is *in*. It sits beside the views.
+
+**"For review" is contextual.** It collects what ASAP prepared and nobody has acted on, and it
+appears only when something is in it. It is not the name for all human work — that was the mistake
+D-074 made in calling the needs-a-person view "For review".
+
+**When an outside party holds the work, name them and say since when.** A card reads *With CIC
+since 12 Aug*, *With client since 14 Aug*, *With assessor since 16 Aug*. The prefix is "With", not
+"Waiting on": where the work is, not a complaint about it. `<TaskStatus>` still refuses to render
+`with_party` without both the party and the date.
+
+### The defect this turned up
+
+`adapters.ts` rendered a **bare "Waiting"** whenever a `with_party` row had no party — the exact
+word D-074 retired, reachable in production through a fallback nobody had looked at. A row in that
+state is a defect upstream, not a state to draw, so the tile now reads as the work it still is
+rather than inventing a party to blame.

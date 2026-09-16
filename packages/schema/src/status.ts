@@ -56,11 +56,17 @@ export type StatusLayer = (typeof STATUS_LAYERS)[number];
  * the fixed prefix, and the component refuses to render without a party and a since date.
  */
 export const TASK_LABELS: Readonly<Record<TaskStatus, string>> = {
-  // D-064: the approved demo's Work vocabulary. "Needs you" is gone from the product's visible
-  // language entirely; the `needs_you` enum value stays because it is a database value and
-  // renaming it would be a migration that changes nothing a person sees.
-  needs_you: "Active",
-  with_party: "Waiting on",
+  /*
+   * D-075. "Needs you" is gone from the product's visible language entirely (D-064); the
+   * `needs_you` enum value stays because it is a database value and renaming it would be a
+   * migration that changes nothing a person sees.
+   *
+   * `with_party` is the prefix only: <TaskStatus> renders "With CIC since 12 Aug", and refuses to
+   * render at all without both the party and the date. "Waiting on" was the old prefix and read as
+   * a complaint; "With" reads as a fact about where the work is.
+   */
+  needs_you: "Your work",
+  with_party: "With",
   in_progress: "In progress",
   done: "Done",
 };

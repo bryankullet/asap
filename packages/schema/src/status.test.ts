@@ -100,16 +100,22 @@ describe("status layers", () => {
 });
 
 describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
-  it("renders a with_party task as With <party>", () => {
-    expect(taskLabel({ status: "with_party", party: "Jubilee", since: "2026-09-03" })).toBe(
-      "Waiting on Jubilee",
+  it("renders a with_party task as With <party> (D-075)", () => {
+    // The prefix is "With", not "Waiting on": where the work is, not a complaint about it. The
+    // component appends " since 12 Aug" from the date it refuses to render without.
+    expect(taskLabel({ status: "with_party", party: "CIC", since: "2026-08-12" })).toBe("With CIC");
+    expect(taskLabel({ status: "with_party", party: "client", since: "2026-08-14" })).toBe(
+      "With client",
     );
-    expect(taskLabel({ status: "needs_you" })).toBe("Active");
+    expect(taskLabel({ status: "with_party", party: "assessor", since: "2026-08-16" })).toBe(
+      "With assessor",
+    );
+    expect(taskLabel({ status: "needs_you" })).toBe("Your work");
   });
 
   it("the prototype's rendered task group shares no word with the other layers", () => {
     const groups = [
-      ["Active", "Waiting on Jubilee", "In progress", "Completed"],
+      ["Your work", "With Jubilee", "In progress", "Done"],
       Object.values(RUN_LABELS),
       Object.values(COVER_LABELS),
       Object.values(MONEY_LABELS),

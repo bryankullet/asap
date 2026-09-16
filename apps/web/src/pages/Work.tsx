@@ -4,47 +4,61 @@ import { describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
 import { useWorkList } from "../lib/queries.js";
 import { workTileFromRow } from "../live/adapters.js";
-import { WORK_FILTERS } from "../shell/nav.js";
+import {
+  DEFAULT_WORK_FILTER,
+  LEGACY_WORK_FILTERS,
+  PINNED_VIEW,
+  REVIEW_VIEW,
+  WORK_FILTERS,
+} from "../shell/nav.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { PinList } from "../components/PinButton.js";
 
 /**
- * Work — the persistent library of tasks, decisions, investigations and follow-ups (D-064).
+ * Work — the persistent library of tasks, decisions, investigations and follow-ups.
  *
- * The approved vocabulary throughout: Active, Waiting, For review, Completed, Pinned, Recent.
- * "Needs you" appears nowhere. Pinned is a filter here, not a destination — a personal marker is
- * a way of finding work, not a state work is in, and the distinction survives D-062.
+ * The main views are the task-status layer (D-075): **Your work** (the default) · With others ·
+ * In progress · Done · Recent. "Needs you" and a bare "Waiting" appear nowhere.
+ *
+ * Two things sit beside the views rather than among them, because neither is a state work is in:
+ * **Pinned**, a personal marker with its own endpoint, and **For review**, which is contextual —
+ * it collects what ASAP prepared and nobody has acted on, and it only appears when there is
+ * something in it.
  *
  * Every item opens a full context: why it is where it is, what it rests on, what ASAP has done
  * for it, and what a person can do next.
  */
-/** The Work filters, as the API's own views. The labels already agree: `WORK_VIEW_LABELS`. */
-const VIEW_FOR_FILTER: Record<string, WorkView> = {
-  active: "needs",
-  waiting: "with",
-  review: "review",
-  completed: "done",
-  recent: "recent",
-};
+/** `?view=` is already the API's own vocabulary, so this resolves legacy ids and nothing else. */
+function viewFor(raw: string | undefined): string {
+  if (!raw) return DEFAULT_WORK_FILTER;
+  return LEGACY_WORK_FILTERS[raw] ?? raw;
+}
 
 export function Work() {
   const { view } = useSearch({ strict: false }) as { view?: string };
   const me = useMe();
-  const active = view ?? "active";
+  const active = viewFor(view);
 
   /*
    * A real brokerage's Work, ranked and capped by the API under the caller's session. Pinned is
    * the exception: it is a personal marker with its own endpoint, so `PinList` renders it.
    */
-  const live = useWorkList(me.data?.active_organization?.id, VIEW_FOR_FILTER[active] ?? "needs");
+  const live = useWorkList(
+    me.data?.active_organization?.id,
+    (active === PINNED_VIEW.id ? DEFAULT_WORK_FILTER : active) as WorkView,
+  );
 
   const tiles = (live.data?.items ?? []).map(workTileFromRow);
-  const counts: Record<string, number> = {
-    active: live.data?.counts.needs ?? 0,
-    waiting: live.data?.counts.with ?? 0,
+  // The API counts every view in one pass, so a tab's number and the list under it are one answer.
+  const counts = {
+    needs: live.data?.counts.needs ?? 0,
+    with: live.data?.counts.with ?? 0,
+    progress: live.data?.counts.progress ?? 0,
     review: live.data?.counts.review ?? 0,
-  };
-  const pinnedTab = active === "pinned";
+  } satisfies Record<string, number>;
+  const pinnedTab = active === PINNED_VIEW.id;
+  // For review earns its place only when something is in it (D-075).
+  const showReview = counts.review > 0 || active === REVIEW_VIEW.id;
 
   return (
     <>
@@ -60,9 +74,13 @@ export function Work() {
 
       <section className="page-scroll spaces-page">
         <nav className="tab-row work-tabs" aria-label="Work filters">
-          {WORK_FILTERS.map((f) => {
-            // Only the three live filters carry a count; Completed, Pinned and Recent do not.
-            const count = counts[f.id] ?? 0;
+          {[
+            ...WORK_FILTERS,
+            ...(showReview ? [REVIEW_VIEW] : []),
+            PINNED_VIEW,
+          ].map((f) => {
+            // Done and Recent carry no count: neither is a queue.
+            const count = (counts as Record<string, number>)[f.id] ?? 0;
             return (
               <Link
                 key={f.id}

@@ -45,22 +45,51 @@ export const NEVER_NAV = [
 ];
 
 /**
- * Work's filters. The `id` is the API's `?view=` value and does not change; the label is what a
- * person reads.
+ * Work's main views (D-075). The `id` is the API's own `?view=` value; the label is what a person
+ * reads, and comes from `WORK_VIEW_LABELS` so the sidebar, the board and the API cannot disagree.
  *
- * Two words are banned from this product's vocabulary and a test enforces both: **"Needs you"**,
- * retired in D-064, and a bare **"Waiting"** — retired in D-074, because waiting is only
- * meaningful when it names who is being waited on. A card says *With APA since 15 Sep*; the filter
- * that collects those cards says With someone else.
+ * Four of these are the task-status layer: work nobody has picked up, work held by an outside
+ * party, work in progress, work done. **Your work is the default** — it is the question a person
+ * opens Work to answer.
+ *
+ * Not here, on purpose:
+ *
+ *  - **Pinned** is a personal marker, not a workflow state. It has its own control and its own
+ *    endpoint (`PINNED_VIEW` below), because a way of finding work is not a state work is in.
+ *  - **For review** is contextual. It collects what ASAP prepared and nobody has acted on, and it
+ *    appears where that is the question — never as the name for all human work.
+ *
+ * Two words are banned outright and a test enforces both: **"Needs you"** (D-064) and a bare
+ * **"Waiting"** (D-074). Waiting only means something once it names the party, which is why a card
+ * reads *With CIC since 12 Aug*, *With client since 14 Aug*, *With assessor since 16 Aug*.
  */
 export const WORK_FILTERS = [
-  { id: "active", label: "In progress" },
-  { id: "waiting", label: "With someone else" },
-  { id: "review", label: "For review" },
-  { id: "completed", label: "Done" },
-  { id: "pinned", label: "Pinned" },
+  { id: "needs", label: "Your work" },
+  { id: "with", label: "With others" },
+  { id: "progress", label: "In progress" },
+  { id: "done", label: "Done" },
   { id: "recent", label: "Recent" },
 ] as const;
+
+/** The default view: what Work opens on. */
+export const DEFAULT_WORK_FILTER = "needs" as const;
+
+/** A personal marker, beside the views rather than among them. */
+export const PINNED_VIEW = { id: "pinned", label: "Pinned" } as const;
+
+/** Contextual, never a main view: what ASAP prepared and nobody has acted on yet. */
+export const REVIEW_VIEW = { id: "review", label: "For review" } as const;
+
+/**
+ * Older links keep working. `?view=active` was "Active" and meant the task-status the product now
+ * calls Your work; `completed` was Done; `waiting` was With others.
+ */
+export const LEGACY_WORK_FILTERS: Readonly<Record<string, string>> = {
+  active: "needs",
+  waiting: "with",
+  completed: "done",
+};
+
 export type WorkFilterId = (typeof WORK_FILTERS)[number]["id"];
 
 /**

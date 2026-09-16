@@ -148,19 +148,27 @@ export type RunRow = z.infer<typeof RunRow>;
  * Pinned is deliberately **not** here. `docs/ui-contract.md`: "Pinned is a personal marker, not a
  * view." Making it one would need per-user state with its own RLS, and the contract says no.
  */
-export const WorkView = z.enum(["needs", "with", "review", "recent", "done"]);
+export const WorkView = z.enum(["needs", "with", "progress", "review", "recent", "done"]);
 export type WorkView = z.infer<typeof WorkView>;
 
 /**
- * What each view is called on screen (D-074). The keys are the API's and do not change.
+ * What each view is called on screen (D-075).
+ *
+ * Four of the six are the task-status layer itself — `needs_you`, `with_party`, `in_progress`,
+ * `done` — which is why `progress` exists as a view at all: "Your work" and "In progress" are
+ * genuinely different questions, and collapsing them made the first one mean nothing.
  *
  * `with` is **not** called "Waiting": waiting only means something when it names who is being
- * waited on, and a card says *With APA since 15 Sep*. A bare "Waiting" is banned, as "Needs you"
+ * waited on, and a card says *With CIC since 12 Aug*. A bare "Waiting" is banned, as "Needs you"
  * has been since D-064.
+ *
+ * `review` is **contextual**, not the name for all human work: it collects the items where ASAP
+ * has prepared something nobody has acted on yet. It is not a main view.
  */
 export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
-  needs: "In progress",
-  with: "With someone else",
+  needs: "Your work",
+  with: "With others",
+  progress: "In progress",
   review: "For review",
   recent: "Recent",
   done: "Done",

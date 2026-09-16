@@ -142,9 +142,25 @@ const work = createRoute({
   // The view ids are the API's and do not change; D-074 changed only what each is called on
   // screen. Old links carrying ?view=needs still land somewhere.
   validateSearch: z.object({
+    /*
+     * The API's own view names (D-075), plus `pinned`, which is a personal marker rather than a
+     * view. The three legacy ids stay accepted so older links and bookmarks still land where the
+     * person meant: the board maps them through LEGACY_WORK_FILTERS.
+     */
     view: z
-      .enum(["active", "waiting", "review", "completed", "pinned", "recent"])
-      .catch("active"),
+      .enum([
+        "needs",
+        "with",
+        "progress",
+        "done",
+        "recent",
+        "review",
+        "pinned",
+        "active",
+        "waiting",
+        "completed",
+      ])
+      .catch("needs"),
   }),
 });
 const automations = createRoute({
