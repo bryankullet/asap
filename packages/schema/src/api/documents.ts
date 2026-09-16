@@ -284,3 +284,112 @@ export const emailThreadResponseSchema = z.object({
   messages: z.array(emailMessageSchema),
 });
 export type EmailThreadResponse = z.infer<typeof emailThreadResponseSchema>;
+
+/* ---- What a person is told about a document (D-076) ------------------------------------------ */
+
+/**
+ * The state a person reads, derived from `extraction_state` and the fields' own conditions.
+ *
+ * `extraction_state` is where the *machine* has got to. It is not what a person needs to know:
+ * `extracted` covers a document that is ready to check, one where two pages disagree, and one
+ * where nothing could be read at all. Those are three different jobs, so they are three states.
+ *
+ * **Uploading a document is never described as reading it.** A file in the bucket that nothing has
+ * looked at is `uploaded`, and says so.
+ */
+export const ReadingState = z.enum([
+  /** In the bucket. Nothing has read it. */
+  "uploaded",
+  /** Waiting for the worker to claim it. */
+  "queued",
+  /** Our own extractor has it now. */
+  "reading",
+  /** Read, and every value is waiting for a person. */
+  "ready_for_review",
+  /** Read, but the document never gave something it was expected to. */
+  "missing_information",
+  /** Read, and two readings disagree. Both are kept; a person decides. */
+  "conflict_found",
+  /** Reading failed. The reason is in plain language and it can be tried again. */
+  "failed",
+  /** Nothing to read — not a document we extract from. */
+  "not_applicable",
+  /** Every value has been accepted, corrected or rejected by a person. */
+  "reviewed",
+]);
+export type ReadingState = z.infer<typeof ReadingState>;
+
+export const READING_STATE_LABELS: Readonly<Record<ReadingState, string>> = {
+  uploaded: "Uploaded",
+  queued: "Queued",
+  reading: "Reading",
+  ready_for_review: "Ready for review",
+  missing_information: "Missing information",
+  conflict_found: "Conflict found",
+  failed: "Failed",
+  not_applicable: "Not read",
+  reviewed: "Reviewed",
+};
+
+export type ReadingStatus = {
+  state: ReadingState;
+  label: string;
+  /** True only from `failed`: nothing else is a retry, and a retry of a success would re-propose
+   * over a person's accepted values. */
+  retryable: boolean;
+  /** How many fields still have nobody's decision on them. */
+  awaiting: number;
+};
+
+/**
+ * Derived, never stored. A stored copy of this would be one more thing that can disagree with the
+ * rows it was computed from.
+ *
+ * Precedence among read documents: a conflict outranks a gap, and a gap outranks "ready" — because
+ * a person who is told "ready for review" and then finds two contradictory policy numbers has been
+ * misled by the label that was meant to help them.
+ */
+export function readingStatus(input: {
+  extractionState: ExtractionState;
+  fields: readonly Pick<DocumentField, "state" | "condition">[];
+}): ReadingStatus {
+  const { extractionState, fields } = input;
+  const awaiting = fields.filter((f) => f.state === "proposed").length;
+  const done = (state: ReadingState): ReadingStatus => ({
+    state,
+    label: READING_STATE_LABELS[state],
+    retryable: state === "failed",
+    awaiting,
+  });
+
+  if (extractionState === "failed") return done("failed");
+  if (extractionState === "not_applicable") return done("not_applicable");
+  if (extractionState === "not_started") return done("uploaded");
+  if (extractionState === "queued") return done("queued");
+  if (extractionState === "working") return done("reading");
+
+  // extracted. What a person does next depends on what was read, not on the fact that it was.
+  const undecided = fields.filter((f) => f.state === "proposed");
+  if (undecided.some((f) => f.condition === "conflicting")) return done("conflict_found");
+  if (fields.length === 0 || undecided.some((f) => f.condition === "missing")) {
+    return done("missing_information");
+  }
+  if (awaiting > 0) return done("ready_for_review");
+  return done("reviewed");
+}
+
+/**
+ * `POST /documents/:id/extraction/retry` — read it again.
+ *
+ * Only from `failed`. A retry from any other state would re-propose over values a person has
+ * already accepted, which is the one thing extraction must never do.
+ *
+ * It carries nothing, and `retried: false` with the document's current state is the answer when
+ * the document was not in a state a retry applies to — a second click on a queued document is the
+ * ordinary case, not an error.
+ */
+export const retryExtractionResponseSchema = z.object({
+  document: documentSummarySchema,
+  retried: z.boolean(),
+});
+export type RetryExtractionResponse = z.infer<typeof retryExtractionResponseSchema>;

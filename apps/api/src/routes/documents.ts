@@ -5,6 +5,7 @@ import {
   documentsResponseSchema,
   documentFiledResponseSchema,
   reviewFieldRequestSchema,
+  retryExtractionResponseSchema,
   reviewFieldResponseSchema,
   uploadRequestSchema,
   uploadResponseSchema,
@@ -391,6 +392,134 @@ export function documentRoutes(deps: {
   });
 
   /**
+   * Read it again, after a failure.
+   *
+   * Extraction can fail for reasons that pass: the extractor was redeploying, a scan was slow, the
+   * network went. A person who can see "Failed" and nothing else has to re-upload the same file,
+   * which makes a second document out of one.
+   *
+   * **Only from `failed`.** From anywhere else a retry would re-propose over values somebody has
+   * already accepted or corrected, and a machine overwriting a person's decision is the failure
+   * this whole review flow exists to prevent. A retry of a queued document answers
+   * `retried: false` and changes nothing — a second click is ordinary, not an error.
+   */
+  app.post("/documents/:id/extraction/retry", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    // Reading a document again changes what the brokerage will be told it says, so it is gated
+    // like the review itself rather than open to anyone who can open the file.
+    if (!hasPermission(ctx, "document", "edit")) {
+      await recordAudit(db, deps.logger, c, {
+        organizationId: org.id,
+        actorUserId: user.id,
+        action: "document.extraction_retry",
+        objectType: "document",
+        objectId: id,
+        result: "denied",
+        failureReason: "missing document:edit",
+      });
+      throw new HttpError(403, "forbidden", "Your role cannot ask for a document to be read again.");
+    }
+
+    const found = await db
+      .from("documents")
+      .select(DOCUMENT_SUMMARY_COLUMNS)
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (found.error) return sendError(c, mapDatabaseError(found.error));
+    if (!found.data) throw new HttpError(404, "not_found", "No document with that id");
+    const row = found.data as DocumentRow;
+
+    if (row.extraction_state !== "failed") {
+      return c.json(
+        retryExtractionResponseSchema.parse({ document: summarise(row), retried: false }),
+      );
+    }
+
+    // The bytes have to still be there. Queueing a read of an object that is gone would turn one
+    // honest failure into a second one with a more confusing reason.
+    const exists = await db.storage.from(deps.bucket).createSignedUrl(row.storage_path, 60);
+    if (exists.error || !exists.data) {
+      throw new HttpError(
+        409,
+        "file_missing",
+        "The file is no longer in storage, so it cannot be read again. Upload it once more.",
+      );
+    }
+
+    const queued = await db
+      .from("documents")
+      .update({
+        extraction_state: "queued",
+        // The constraint allows an error only while failed, so it clears with the state.
+        extraction_error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      // Only if nobody else has already moved it: two people clicking Try again queue one read.
+      .eq("extraction_state", "failed")
+      .select(DOCUMENT_SUMMARY_COLUMNS)
+      .maybeSingle();
+    if (queued.error) return sendError(c, mapDatabaseError(queued.error));
+    if (!queued.data) {
+      // Somebody else won the race. Their queue is the one that counts.
+      const after = await db
+        .from("documents")
+        .select(DOCUMENT_SUMMARY_COLUMNS)
+        .eq("organization_id", org.id)
+        .eq("id", id)
+        .single();
+      if (after.error) return sendError(c, mapDatabaseError(after.error));
+      return c.json(
+        retryExtractionResponseSchema.parse({
+          document: summarise(after.data as DocumentRow),
+          retried: false,
+        }),
+      );
+    }
+
+    await emitEvent(db, deps.logger, {
+      organizationId: org.id,
+      eventType: "document.received",
+      entityType: "document",
+      entityId: id,
+      actor: "user",
+      actorUserId: user.id,
+      payload: {
+        kind: row.kind,
+        filename: row.filename,
+        clientId: row.client_id,
+        workItemId: row.work_item_id,
+        retry: true,
+      },
+    });
+
+    await recordAudit(db, deps.logger, c, {
+      organizationId: org.id,
+      actorUserId: user.id,
+      action: "document.extraction_retried",
+      objectType: "document",
+      objectId: id,
+      result: "success",
+      previousState: { extraction_state: "failed", reason: row.extraction_error },
+      newState: { extraction_state: "queued" },
+    });
+
+    return c.json(
+      retryExtractionResponseSchema.parse({
+        document: summarise(queued.data as DocumentRow),
+        retried: true,
+      }),
+    );
+  });
+
+  /**
    * A person's decision about one extracted field (Phase 3's extraction review, required by its
    * gate). Accepting a figure off a schedule is a business action, so it is audited with what it
    * was and what it became.
@@ -435,6 +564,22 @@ export function documentRoutes(deps: {
     if (error) return sendError(c, mapDatabaseError(error));
     if (!data) throw new HttpError(404, "not_found", "That field is not available.");
     const before = toField(data as FieldRow);
+
+    /*
+     * The same decision twice is one decision.
+     *
+     * Accept is a button a person double-clicks — on a slow connection, deliberately. Without this
+     * the second click writes a second audit event saying the value changed from accepted to
+     * accepted, which is noise in the one record that is supposed to be trustworthy. A *different*
+     * decision is not a repeat and does go through: correcting an accepted value is a real change.
+     */
+    const repeat =
+      (decision === "accept" && before.state === "accepted") ||
+      (decision === "reject" && before.state === "rejected") ||
+      (decision === "correct" && before.state === "corrected" && before.correctedValue === value);
+    if (repeat) {
+      return c.json(reviewFieldResponseSchema.parse({ field: before }));
+    }
 
     const now = new Date().toISOString();
     const patch =

@@ -18,6 +18,7 @@ import {
   connectMailboxResponseSchema,
   documentDetailSchema,
   documentFiledResponseSchema,
+  retryExtractionResponseSchema,
   uploadResponseSchema,
   reviewFieldResponseSchema,
   type ReviewFieldRequest,
@@ -249,6 +250,9 @@ export const api = {
   /** Tells the API the bytes arrived: the upload is direct to storage, so it cannot know. */
   documentFiled: (id: string) =>
     request("POST", `/documents/${id}/filed`, documentFiledResponseSchema, {}),
+  /** Read a failed document again. Answers `retried: false` from any other state. */
+  retryExtraction: (id: string) =>
+    request("POST", `/documents/${id}/extraction/retry`, retryExtractionResponseSchema, {}),
   uploadDocument: (input: UploadInput) =>
     request("POST", "/documents", uploadResponseSchema, input),
   /** One person's decision about one extracted field. Extraction proposes; a person decides. */

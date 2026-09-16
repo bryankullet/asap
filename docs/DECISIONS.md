@@ -1204,3 +1204,48 @@ since 12 Aug*, *With client since 14 Aug*, *With assessor since 16 Aug*. The pre
 word D-074 retired, reachable in production through a fallback nobody had looked at. A row in that
 state is a defect upstream, not a state to draw, so the tile now reads as the work it still is
 rather than inventing a party to blame.
+
+## D-076 — What a person is told about a document is derived, and an upload is never a read
+
+`extraction_state` is where the *machine* got to. It is not what a person needs to know:
+`extracted` covers a document that is ready to check, one where two readings disagree, and one
+where nothing could be read at all. Those are three different jobs, so `readingStatus()` derives
+nine states from the row **and its fields' own conditions** — Uploaded · Queued · Reading · Ready
+for review · Missing information · Conflict found · Failed · Not read · Reviewed.
+
+Derived, never stored: a stored copy would be one more thing that can disagree with the rows it
+came from. Among read documents a **conflict outranks a gap, and a gap outranks "ready"** — a
+person told "ready for review" who then finds two contradictory policy numbers has been misled by
+the label meant to help them.
+
+**A retry exists, and only from `failed`.** Extraction fails for reasons that pass — the extractor
+redeploying, a slow scan, the network. Without a retry a person has to upload the same file again,
+which makes a second document out of one. From any other state a retry would re-propose over
+values somebody has already accepted, and a machine overwriting a person's decision is the failure
+this whole review flow exists to prevent. It is permission-gated on `document:edit`, audited, and
+conditional on the row still being `failed`, so two people clicking Try again queue one read.
+
+**The same decision twice is one decision.** Accept is a button people double-click. A repeat now
+returns the standing decision and writes nothing; a *different* decision — correcting a value that
+was accepted — is a real change and is recorded.
+
+### Three defects this turned up, two of them in front of a person
+
+1. **Every document's state pill was blank.** `EXTRACTION_LABEL` was keyed
+   `pending/running/done/not_attempted` and `ExtractionState` is
+   `not_started/queued/working/extracted/failed/not_applicable` — so the lookup returned
+   `undefined` for every document ever listed. Nobody had ever seen a state on that screen.
+2. **The highlight did not exist.** The file said "the viewer puts the highlight where the value was
+   read", and it did not: every "Page 1" was a number a person had to take on trust. There is now a
+   region drawn in the page's own coordinates, with a link through to the file at that page, and a
+   value with no position still says so rather than offering a citation that opens nothing.
+3. **The extractor could not read an ordinary schedule.** Against a real two-column PDF — labels in
+   one column, values in another, as every schedule is laid out — **seven of eight fields came back
+   `missing`**, and the eighth proposed *"of business"* as the class of business: the label "class"
+   matched before "class of business" and the rest of the heading became the answer. Lines are now
+   assembled from baseline geometry rather than the PDF's own line numbering, which is how the same
+   problem was already solved for imported tables; labels are tried longest-first; and a value that
+   is itself a label spelling is refused. All eight fields now read, each with its rectangle.
+
+The third was only visible by running the service against a document laid out like a real one. The
+existing tests all used a single-column PDF where label and value share a text run.

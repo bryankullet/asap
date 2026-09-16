@@ -121,3 +121,91 @@ def test_a_label_with_no_value_proposes_nothing() -> None:
     fields = _by_key(read_document(_pdf(["Premium:", "Policy No: X-1"]), "a.pdf", "application/pdf"))
     assert fields["premium"][0].value is None
     assert fields["premium"][0].condition == "missing"
+
+
+def _two_column_pdf(rows: list[tuple[str, str]]) -> bytes:
+    """A schedule laid out as real ones are: labels in one column, values in another, each a
+    separate text insertion.
+
+    This is the case the reader used to fail. The PDF's own idea of a "line" put the label and its
+    value on different lines, so seven of eight fields came back `missing` from a document that
+    plainly stated all eight.
+    """
+    parts = ["BT /F1 11 Tf ET"]
+    y = 740
+    for label, value in rows:
+        parts.append(f"BT /F1 11 Tf 50 {y} Td ({label}) Tj ET")
+        parts.append(f"BT /F1 11 Tf 240 {y} Td ({value}) Tj ET")
+        y -= 22
+    content = "\n".join(parts)
+    objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+    ]
+    out = "%PDF-1.4\n"
+    offsets = []
+    for i, o in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n" + "".join(
+        f"{o:010d} 00000 n \n" for o in offsets
+    )
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    return out.encode("latin-1")
+
+
+TWO_COLUMN = [
+    ("Policy No:", "MC-4471-2026"),
+    ("Insured:", "Acme Manufacturing Ltd"),
+    ("Insurer:", "Jubilee Allianz"),
+    ("Class of business:", "Commercial Motor"),
+    ("From:", "2026-01-01"),
+    ("To:", "2026-12-31"),
+    ("Sum Insured:", "4,200,000.00"),
+    ("Premium:", "214,500.00"),
+]
+
+
+def test_reads_a_two_column_schedule_the_way_real_ones_are_laid_out() -> None:
+    result = read_document(_two_column_pdf(TWO_COLUMN), "schedule.pdf", "application/pdf")
+    got = _by_key(result)
+    expected = {
+        "policy_number": "MC-4471-2026",
+        "insured_name": "Acme Manufacturing Ltd",
+        "insurer_name": "Jubilee Allianz",
+        "class_of_business": "Commercial Motor",
+        "period_start": "2026-01-01",
+        "period_end": "2026-12-31",
+        "sum_insured": "4,200,000.00",
+        "premium": "214,500.00",
+    }
+    for key, value in expected.items():
+        assert key in got, f"{key} was not read at all"
+        assert got[key][0].value == value, key
+        assert got[key][0].condition == "known", key
+
+
+def test_the_highlight_covers_the_value_not_the_label() -> None:
+    result = read_document(_two_column_pdf(TWO_COLUMN), "schedule.pdf", "application/pdf")
+    field = _by_key(result)["policy_number"][0]
+    assert field.region is not None
+    # The value column starts at x=240; a highlight over the label would point at the question.
+    assert field.region["x"] >= 200, field.region
+
+
+def test_a_heading_is_never_offered_as_its_own_value() -> None:
+    """"Class of business:" once proposed "of business" as the class of business — the shorter
+    label matched first and the rest of the heading became the answer."""
+    result = read_document(
+        _two_column_pdf([("Class of business:", "Commercial Motor")]),
+        "schedule.pdf",
+        "application/pdf",
+    )
+    values = [f.value for f in result.fields if f.value is not None]
+    assert "of business" not in values
+    assert "Commercial Motor" in values

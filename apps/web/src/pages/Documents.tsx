@@ -6,7 +6,7 @@ import { useMe } from "../lib/me.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
-import type { DocumentField } from "@asap/schema";
+import { readingStatus, type DocumentField, type PageRegion } from "@asap/schema";
 
 /**
  * Documents, the viewer and extraction review (D-064).
@@ -150,8 +150,13 @@ export function Documents() {
                 params={{ documentId: d.id }}
                 className="space-tile"
               >
+                {/*
+                    The state a person reads, derived from where the machine got to *and* what it
+                    read (D-076). `extractionState` alone cannot tell "ready to check" from "two
+                    pages disagree" from "nothing could be read", and those are three jobs.
+                  */}
                 <span className={`pill ${d.extractionState === "failed" ? "high" : ""}`}>
-                  {EXTRACTION_LABEL[d.extractionState]}
+                  {readingStatus({ extractionState: d.extractionState, fields: [] }).label}
                 </span>
                 <div className="section-label">{d.kind.replace(/_/g, " ")}</div>
                 <h3>{d.filename}</h3>
@@ -171,14 +176,6 @@ export function Documents() {
   );
 }
 
-/** What has happened to a document so far, in words rather than an enum. */
-const EXTRACTION_LABEL: Record<string, string> = {
-  pending: "Waiting to be read",
-  running: "Being read",
-  done: "Read",
-  failed: "Could not be read",
-  not_attempted: "Not read",
-};
 
 /**
  * One document: the pages ASAP read, and every value it proposes, each awaiting a person.
@@ -208,6 +205,16 @@ export function DocumentViewer() {
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["document", documentId] }),
   });
+  /* Reading it again, after a failure. Only a failure offers this; see the route's own comment. */
+  const retry = useMutation({
+    mutationFn: () => api.retryExtraction(documentId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["document", documentId] });
+      void qc.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+  /** Which value the page panel is showing the region of. A citation you cannot open is not one. */
+  const [shown, setShown] = useState<string | null>(null);
 
   if (detail.isPending) return <LoadingList rows={3} label="Opening the document" />;
   if (detail.isError) {
@@ -227,6 +234,8 @@ export function DocumentViewer() {
     );
   }
   const { document: doc, fields, pages, fileUrl } = detail.data;
+  const status = readingStatus({ extractionState: doc.extractionState, fields });
+  const shownField = fields.find((f) => f.id === shown) ?? null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -240,13 +249,55 @@ export function DocumentViewer() {
           {doc.pageCount === null ? "not read yet" : `${doc.pageCount} pages`} ·{" "}
           {new Date(doc.createdAt).toLocaleDateString()}
         </p>
+        <p className="flex flex-wrap items-center gap-2 text-xs">
+          <span className={`pill ${status.state === "failed" ? "high" : ""}`}>{status.label}</span>
+          {status.awaiting > 0 && (
+            <span className="text-ink-secondary">
+              {status.awaiting} {status.awaiting === 1 ? "value" : "values"} waiting for you
+            </span>
+          )}
+        </p>
         {doc.extractionError && (
           <p className="text-sm text-accent-red">ASAP could not read it: {doc.extractionError}</p>
+        )}
+        {status.retryable && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="secondary"
+              disabled={retry.isPending}
+              onClick={() => retry.mutate()}
+            >
+              {retry.isPending ? "Asking for another read…" : "Try reading it again"}
+            </button>
+            <span className="text-xs text-ink-muted">
+              The file is already on file. Nothing is uploaded again.
+            </span>
+          </div>
+        )}
+        {retry.isError && (
+          <p role="alert" className="text-sm text-accent-red">
+            It could not be queued again: {describeApiError(retry.error)}
+          </p>
+        )}
+        {retry.data?.retried === false && (
+          <p className="text-sm text-ink-secondary">
+            Nothing was queued — this document is {readingStatus({ extractionState: retry.data.document.extractionState, fields: [] }).label.toLowerCase()} already.
+          </p>
         )}
       </header>
 
       <div className="grid gap-4 min-[1000px]:grid-cols-[minmax(0,1fr)_22rem]">
         <figure className="flex flex-col gap-2">
+          {shownField && shownField.page !== null && shownField.region && (
+            <PageHighlight
+              page={pages.find((p) => p.pageNumber === shownField.page) ?? null}
+              pageNumber={shownField.page}
+              region={shownField.region}
+              label={shownField.fieldKey.replace(/_/g, " ")}
+              {...(fileUrl === null ? {} : { fileUrl })}
+            />
+          )}
           {fileUrl ? (
             <object
               data={fileUrl}
@@ -283,6 +334,8 @@ export function DocumentViewer() {
                 key={field.id}
                 field={field}
                 busy={review.isPending}
+                shown={field.id === shown}
+                onShow={() => setShown(field.id === shown ? null : field.id)}
                 onDecide={(decision, value) =>
                   review.mutate({ fieldId: field.id, decision, value })
                 }
@@ -305,10 +358,14 @@ export function DocumentViewer() {
 function FieldReview({
   field,
   busy,
+  shown,
+  onShow,
   onDecide,
 }: {
   field: DocumentField;
   busy: boolean;
+  shown: boolean;
+  onShow: () => void;
   onDecide: (decision: "accept" | "correct" | "reject", value: string | null) => void;
 }) {
   const [corrected, setCorrected] = useState(field.correctedValue ?? field.proposedValue ?? "");
@@ -327,9 +384,21 @@ function FieldReview({
           ? "Rejected — this value is missing, not known."
           : (field.correctedValue ?? field.proposedValue ?? "Nothing was read for this field.")}
       </p>
-      <p className="text-xs text-ink-muted">
-        {field.page === null ? "ASAP could not place this on a page." : `Page ${field.page}`}
-        {field.reviewedAt ? ` · decided ${new Date(field.reviewedAt).toLocaleDateString()}` : ""}
+      <p className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+        {field.page === null || !field.region ? (
+          // Honest about it, rather than a link that opens nothing.
+          <span>ASAP could not place this on a page.</span>
+        ) : (
+          <button
+            type="button"
+            onClick={onShow}
+            aria-pressed={shown}
+            className="rounded-pill border border-line-strong px-2 py-0.5 text-xs text-ink-secondary hover:border-line-hover"
+          >
+            {shown ? "Hide where it was read" : `Show where it was read · page ${field.page}`}
+          </button>
+        )}
+        {field.reviewedAt ? <span>decided {new Date(field.reviewedAt).toLocaleDateString()}</span> : null}
       </p>
       {!decided && (
         <div className="flex flex-wrap items-center gap-2">
@@ -366,5 +435,80 @@ function FieldReview({
         </div>
       )}
     </article>
+  );
+}
+
+/**
+ * Where on the page a value was read.
+ *
+ * **A citation you cannot open is not a citation.** The screen claimed to put a highlight where a
+ * value came from and never drew one, so every "Page 1" was a number a person had to take on
+ * trust. This draws the rectangle the extractor recorded, in that page's own coordinates, over a
+ * plain outline of the page — which places correctly on any rendering of it, including none.
+ *
+ * It is deliberately not a rendering of the document. The bytes are behind a short-lived signed
+ * URL and shown by the browser's own viewer below; overlaying that is not something we can do
+ * honestly across viewers. What this answers is the question the citation raises: *whereabouts on
+ * the page should I be looking?* — with a link to open the file itself at that page.
+ */
+function PageHighlight({
+  page,
+  pageNumber,
+  region,
+  label,
+  fileUrl,
+}: {
+  page: { pageNumber: number; width: number; height: number; text: string } | null;
+  pageNumber: number;
+  region: PageRegion;
+  label: string;
+  fileUrl?: string;
+}) {
+  // A page we have no dimensions for cannot be drawn to scale. A4 at 72dpi is the extractor's
+  // own default and is stated as an assumption rather than presented as the page's real size.
+  const width = page?.width ?? 595;
+  const height = page?.height ?? 842;
+  return (
+    <div className="flex flex-col gap-1 rounded-card border border-line-strong bg-paper p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-xs uppercase tracking-wide text-ink-muted">
+          {label} · page {pageNumber}
+        </span>
+        {fileUrl && (
+          <a
+            href={`${fileUrl}#page=${pageNumber}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-ink-secondary underline"
+          >
+            Open the file at this page
+          </a>
+        )}
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Page ${pageNumber}, with the region ${label} was read from marked`}
+        className="max-h-[22rem] w-full rounded-control border border-line-soft bg-wash"
+        preserveAspectRatio="xMidYMin meet"
+      >
+        <rect x={0} y={0} width={width} height={height} fill="var(--color-paper, #ffffff)" />
+        <rect
+          x={region.x}
+          y={region.y}
+          width={region.width}
+          height={region.height}
+          fill="var(--color-accent-gold-soft, #fbf4dc)"
+          stroke="var(--color-accent-gold, #d9a62e)"
+          strokeWidth={2}
+        />
+      </svg>
+      {!page && (
+        <p className="text-xs text-ink-muted">
+          The page's own size was not recorded, so this is drawn against a standard page. The
+          region is exactly what was recorded.
+        </p>
+      )}
+    </div>
   );
 }

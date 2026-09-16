@@ -48,8 +48,13 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     path: "/settings/agreements/$agreementId",
     component: page,
   });
+  const document = createRoute({
+    getParentRoute: () => root,
+    path: "/documents/$documentId",
+    component: page,
+  });
   const router = createRouter({
-    routeTree: root.addChildren([...routes, record, file, agreement]),
+    routeTree: root.addChildren([...routes, record, file, agreement, document]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   // Test-only router; the app's typed router registration does not apply here.

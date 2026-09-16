@@ -262,4 +262,107 @@ describe("documents", () => {
     const denied = db.inserts.filter((i) => i.table === "audit_log" && i.row["result"] === "denied");
     expect(denied).toHaveLength(1);
   });
+
+  /* ---- The same decision twice is one decision (D-076) --------------------------------------- */
+
+  const auditRows = (action: string) =>
+    db.inserts.filter((i) => i.table === "audit_log" && i.row["action"] === action);
+
+  it("accepts once however many times Accept is clicked", async () => {
+    const first = await readJson(await review("tok-amina", FIELD, { decision: "accept" }));
+    expect(first.field.state).toBe("accepted");
+    const reviewedAt = first.field.reviewedAt;
+
+    const second = await readJson(await review("tok-amina", FIELD, { decision: "accept" }));
+    expect(second.field.state).toBe("accepted");
+    // The first decision stands, with its own timestamp and its own single audit row.
+    expect(second.field.reviewedAt).toBe(reviewedAt);
+    expect(auditRows("document.field_accepted")).toHaveLength(1);
+  });
+
+  it("writes one audit row for a repeated rejection, and one for a repeated identical correction", async () => {
+    await review("tok-amina", FIELD, { decision: "reject" });
+    await review("tok-amina", FIELD, { decision: "reject" });
+    expect(auditRows("document.field_rejected")).toHaveLength(1);
+
+    await review("tok-amina", UNPLACED, { decision: "correct", value: "4200000" });
+    await review("tok-amina", UNPLACED, { decision: "correct", value: "4200000" });
+    expect(auditRows("document.field_corrected")).toHaveLength(1);
+  });
+
+  it("still records a genuine change of mind", async () => {
+    await review("tok-amina", FIELD, { decision: "accept" });
+    const corrected = await readJson(
+      await review("tok-amina", FIELD, { decision: "correct", value: "MC-4472" }),
+    );
+    // Correcting a value that was accepted is a real change, not a repeat.
+    expect(corrected.field.state).toBe("corrected");
+    expect(corrected.field.correctedValue).toBe("MC-4472");
+    // And what the extractor read is still there beside it, for the audit.
+    expect(corrected.field.proposedValue).toBe("MC-4471");
+    expect(auditRows("document.field_corrected")).toHaveLength(1);
+  });
+
+  /* ---- Reading it again, after a failure (D-076) ---------------------------------------------- */
+
+  const retry = (token: string, id = DOC) =>
+    app.request(`/documents/${id}/extraction/retry`, { method: "POST", headers: hdr(token) });
+
+  const failTheDocument = () => {
+    const row = db.tables["documents"]?.find((d) => d["id"] === DOC);
+    if (row) {
+      row["extraction_state"] = "failed";
+      row["extraction_error"] = "The extractor could not be reached.";
+    }
+  };
+
+  it("queues a failed document to be read again, and says why in the audit", async () => {
+    failTheDocument();
+    const body = await readJson(await retry("tok-amina"));
+    expect(body.retried).toBe(true);
+    expect(body.document.extractionState).toBe("queued");
+    // The reason clears with the state: 0034 allows an error only while failed.
+    expect(body.document.extractionError).toBeNull();
+    expect(auditRows("document.extraction_retried")).toHaveLength(1);
+
+    // And something is now waiting for it: without the event nothing would read it.
+    const events = db.inserts.filter((i) => i.table === "events");
+    expect(events).toHaveLength(1);
+    expect(events[0]?.row["event_type"]).toBe("document.received");
+    // The payload names the file, never its contents.
+    expect(JSON.stringify(events[0]?.row["payload"])).not.toContain("Policy MC-4471");
+  });
+
+  it("refuses to re-read a document that did not fail, so a person's accepted values survive", async () => {
+    // The fixture document is `extracted` and its fields have been decided by people.
+    const body = await readJson(await retry("tok-amina"));
+    expect(body.retried).toBe(false);
+    expect(body.document.extractionState).toBe("extracted");
+    expect(db.inserts.filter((i) => i.table === "events")).toHaveLength(0);
+    expect(auditRows("document.extraction_retried")).toHaveLength(0);
+  });
+
+  it("queues one read however many times Try again is clicked", async () => {
+    failTheDocument();
+    const first = await readJson(await retry("tok-amina"));
+    const second = await readJson(await retry("tok-amina"));
+    expect(first.retried).toBe(true);
+    expect(second.retried).toBe(false);
+    expect(db.inserts.filter((i) => i.table === "events")).toHaveLength(1);
+    expect(auditRows("document.extraction_retried")).toHaveLength(1);
+  });
+
+  it("tells a role that cannot ask for a re-read, and records the refusal", async () => {
+    failTheDocument();
+    const res = await retry("tok-reader");
+    expect(res.status).toBe(403);
+    expect(db.inserts.filter((i) => i.table === "events")).toHaveLength(0);
+    const denied = db.inserts.filter((i) => i.table === "audit_log" && i.row["result"] === "denied");
+    expect(denied).toHaveLength(1);
+  });
+
+  it("does not re-read another brokerage's document", async () => {
+    const res = await retry("tok-amina", "90000000-0000-4000-8000-00000000000b");
+    expect(res.status).toBe(404);
+  });
 });
