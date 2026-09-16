@@ -199,3 +199,236 @@ describe("a citation you cannot open is not a citation", () => {
     expect(screen.queryByRole("button", { name: /Show where it was read/ })).toBeNull();
   });
 });
+
+/**
+ * Applying to a record, and uploading honestly (D-077).
+ *
+ * The rules these hold: ASAP suggests and says why, a person chooses and confirms, nothing is
+ * applied that a person has not ticked, and a premium is never written without saying what the
+ * figure is. On upload: bytes moving is visible, cancelling is not a success, and a retry cannot
+ * make a second document.
+ */
+
+const PERIOD = "91000000-0000-4000-8000-0000000000c1";
+
+const TARGETS = {
+  suggestions: [
+    {
+      targetType: "policy_period",
+      targetId: PERIOD,
+      label: "Acme Manufacturing Ltd · Commercial Motor · 2026",
+      reason: 'This document is filed against the work "Acme — 2026 renewal", which is about this period of cover.',
+      condition: "known",
+    },
+  ],
+  whyNoTarget: null,
+  applicableFields: {
+    policy_period: ["period_start", "period_end", "premium"],
+    policy: ["policy_number"],
+    client: ["insured_name"],
+  },
+};
+
+const PREVIEW = {
+  target: {
+    targetType: "policy_period",
+    targetId: PERIOD,
+    label: "Acme Manufacturing Ltd · Commercial Motor · 2026",
+    reason: "Chosen by you.",
+    condition: "known",
+  },
+  fields: [
+    {
+      documentFieldId: "91000000-0000-4000-8000-00000000000a",
+      fieldKey: "premium",
+      currentValue: null,
+      proposedValue: "214500.00",
+      page: 1,
+      region: { x: 240, y: 292, width: 55, height: 15 },
+      condition: "known",
+      state: "accepted",
+      unchanged: false,
+      blockedBecause: null,
+    },
+    {
+      documentFieldId: "91000000-0000-4000-8000-00000000000b",
+      fieldKey: "period_end",
+      currentValue: "2026-12-31",
+      proposedValue: "2026-12-31",
+      page: 1,
+      region: null,
+      condition: "known",
+      state: "accepted",
+      unchanged: true,
+      blockedBecause: null,
+    },
+    {
+      documentFieldId: "91000000-0000-4000-8000-00000000000c",
+      fieldKey: "insured_name",
+      currentValue: null,
+      proposedValue: "Acme Manufacturing Ltd",
+      page: 1,
+      region: null,
+      condition: "known",
+      state: "accepted",
+      unchanged: false,
+      blockedBecause: "A policy period does not hold this.",
+    },
+  ],
+  missing: ["period_start"],
+};
+
+let applied: unknown[] = [];
+
+function stubApplyApi(reviewedDetail: unknown) {
+  applied = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const u = String(url);
+    const method = (init as RequestInit | undefined)?.method ?? "GET";
+    const json = (v: unknown) =>
+      new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
+    if (u.endsWith("/me")) return json(ME);
+    if (u.includes("/apply-targets")) return json(TARGETS);
+    if (u.includes("/apply-preview")) return json(PREVIEW);
+    if (u.includes("/apply") && method === "POST") {
+      const body = JSON.parse(String((init as RequestInit).body));
+      applied.push(body);
+      return json({
+        applicationId: "a9000000-0000-4000-8000-00000000000a",
+        targetType: body.targetType,
+        targetId: body.targetId,
+        appliedAt: "2026-09-16T12:00:00Z",
+        changes: body.fields.map((f: { fieldKey: string; from: string | null; to: string }) => ({
+          fieldKey: f.fieldKey,
+          documentFieldId: null,
+          from: f.from,
+          to: f.to,
+          page: 1,
+        })),
+        repeat: false,
+      });
+    }
+    if (u.includes(`/documents/${DOC}`)) return json(reviewedDetail);
+    return json({});
+  });
+}
+
+const reviewed = detail({
+  fields: [
+    field({ state: "accepted", condition: "known", reviewedAt: "2026-09-16T11:00:00Z" }),
+  ],
+});
+
+describe("applying a document to a record", () => {
+  it("names the suggested record and why, and applies to nothing until a person chooses", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    const suggestion = await screen.findByText("Acme Manufacturing Ltd · Commercial Motor · 2026");
+    expect(suggestion).toBeInTheDocument();
+    expect(screen.getByText(/filed against the work/)).toBeInTheDocument();
+    // Nothing is applied by showing a suggestion.
+    expect(applied).toHaveLength(0);
+  });
+
+  it("shows the record's value, the proposed one, what would not change and what it cannot hold", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+
+    // Two fields hold nothing on the record; both say so rather than showing a confident blank.
+    expect((await screen.findAllByText(/now: nothing/)).length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getByText("The record already holds this. Applying it would change nothing."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("A policy period does not hold this.")).toBeInTheDocument();
+    // A field the record holds that the document never gave is stated, not omitted.
+    expect(screen.getByText(/which the document did not give/)).toBeInTheDocument();
+  });
+
+  it("will not write a premium until the person says what the figure is", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+    await userEvent.click(screen.getByRole("checkbox"));
+
+    expect(
+      screen.getByText(/Is this figure the gross premium, or everything payable\?/),
+    ).toBeInTheDocument();
+    const applyButton = screen.getByRole("button", { name: /Apply 1 value/ });
+    expect(applyButton).toBeDisabled();
+
+    await userEvent.selectOptions(screen.getByRole("combobox"), "gross");
+    expect(applyButton).toBeEnabled();
+    await userEvent.click(applyButton);
+
+    await waitFor(() => expect(applied).toHaveLength(1));
+    expect(applied[0]).toMatchObject({
+      targetType: "policy_period",
+      targetId: PERIOD,
+      fields: [{ fieldKey: "premium", from: null, to: "214500.00", premiumBasis: "gross" }],
+    });
+  });
+
+  it("sends only the ticked field, and sends what the record held so the server can refuse a stale write", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+    // Only the premium is tickable: one is unchanged and one the record cannot hold.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "total_payable");
+    await userEvent.click(screen.getByRole("button", { name: /Apply 1 value/ }));
+
+    await waitFor(() => expect(applied).toHaveLength(1));
+    const body = applied[0] as { fields: { fieldKey: string }[]; idempotencyKey: string };
+    expect(body.fields.map((f) => f.fieldKey)).toEqual(["premium"]);
+    // One key for one press, so the server can write once however many times it arrives.
+    expect(body.idempotencyKey.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("lets a person correct a value before applying it", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+    const input = screen.getByLabelText("Value to apply for premium");
+    await userEvent.clear(input);
+    await userEvent.type(input, "214000.00");
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "gross");
+    await userEvent.click(screen.getByRole("button", { name: /Apply 1 value/ }));
+
+    await waitFor(() => expect(applied).toHaveLength(1));
+    expect(applied[0]).toMatchObject({ fields: [{ to: "214000.00" }] });
+  });
+
+  it("cancels without writing anything", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(applied).toHaveLength(0);
+    // Back to choosing, with the suggestion offered again.
+    expect(await screen.findByRole("button", { name: "Apply to this" })).toBeInTheDocument();
+  });
+
+  it("shows a receipt naming both sides of every change, and the evidence link", async () => {
+    stubApplyApi(reviewed);
+    await open();
+    await userEvent.click(await screen.findByRole("button", { name: "Apply to this" }));
+    await userEvent.click(screen.getByRole("checkbox"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "gross");
+    await userEvent.click(screen.getByRole("button", { name: /Apply 1 value/ }));
+
+    expect(await screen.findByText("Applied to the record.")).toBeInTheDocument();
+    expect(screen.getByText(/nothing → 214500.00/)).toBeInTheDocument();
+    expect(screen.getByText(/read from page 1/)).toBeInTheDocument();
+    expect(screen.getByText(/linked to the record as the evidence/)).toBeInTheDocument();
+  });
+
+  it("offers nothing to apply while every value is still only proposed", async () => {
+    stubApplyApi(detail());
+    await open();
+    await waitFor(() => expect(screen.getByText("Ready for review")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Apply to this" })).toBeNull();
+  });
+});

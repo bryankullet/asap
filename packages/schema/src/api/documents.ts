@@ -393,3 +393,150 @@ export const retryExtractionResponseSchema = z.object({
   retried: z.boolean(),
 });
 export type RetryExtractionResponse = z.infer<typeof retryExtractionResponseSchema>;
+
+/* ---- Applying a document to the record it is about (D-077) ----------------------------------- */
+
+/**
+ * The kinds of record a document's values can be applied to.
+ *
+ * Narrow on purpose. A kind that is not here cannot be applied to, which is better than a kind
+ * that can be applied to wrongly, and adding one is a migration that names exactly which fields
+ * it accepts.
+ */
+export const ApplyTargetType = z.enum(["policy_period", "policy", "client"]);
+export type ApplyTargetType = z.infer<typeof ApplyTargetType>;
+
+/** Which extracted field can go where. The server is the authority; the UI reads this. */
+export const APPLICABLE_FIELDS: Readonly<Record<ApplyTargetType, readonly string[]>> = {
+  policy_period: ["period_start", "period_end", "premium"],
+  policy: ["policy_number"],
+  client: ["insured_name"],
+};
+
+/**
+ * A record ASAP believes this document is about, and **why it believes it**.
+ *
+ * The reason is not decoration. A person is being asked to confirm a target, and a suggestion
+ * they cannot check is a suggestion they have to take on trust. `condition` says how well it is
+ * known in the same six words used everywhere else: `known` when the document is already filed
+ * against the record, `inferred` when it was matched on what the document says.
+ */
+export const applyTargetSchema = z.object({
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  /** What to call it on screen — "Acme Manufacturing · Commercial Motor · 2026". */
+  label: z.string(),
+  /** Why this record: in plain words, naming what the link rests on. */
+  reason: z.string(),
+  condition: EvidenceCondition,
+});
+export type ApplyTarget = z.infer<typeof applyTargetSchema>;
+
+export const applyTargetsResponseSchema = z.object({
+  suggestions: z.array(applyTargetSchema),
+  /**
+   * Why there is nothing to suggest, when there is nothing. Never null *and* empty: a person
+   * needs to know whether ASAP found nothing or was never able to look.
+   */
+  whyNoTarget: z.string().nullable(),
+  /** Which fields each kind of target accepts, so the UI never offers one that cannot apply. */
+  applicableFields: z.record(ApplyTargetType, z.array(z.string())),
+});
+export type ApplyTargetsResponse = z.infer<typeof applyTargetsResponseSchema>;
+
+/** One row of the before-and-after a person sees before anything is written. */
+export const applyPreviewFieldSchema = z.object({
+  documentFieldId: uuidSchema,
+  fieldKey: z.string(),
+  /** What the record holds now. Null means the record has nothing there yet. */
+  currentValue: z.string().nullable(),
+  /** What would be written: the person's correction if they made one, else what was read. */
+  proposedValue: z.string().nullable(),
+  page: z.number().int().nullable(),
+  region: pageRegionSchema.nullable(),
+  condition: EvidenceCondition,
+  state: FieldState,
+  /** True when the record already holds exactly this. Applying it would change nothing. */
+  unchanged: z.boolean(),
+  /** Why this field cannot be applied to this target, when it cannot. */
+  blockedBecause: z.string().nullable(),
+});
+export type ApplyPreviewField = z.infer<typeof applyPreviewFieldSchema>;
+
+export const applyPreviewResponseSchema = z.object({
+  target: applyTargetSchema,
+  fields: z.array(applyPreviewFieldSchema),
+  /** Fields this target accepts but the document never gave. Stated, not omitted. */
+  missing: z.array(z.string()),
+});
+export type ApplyPreviewResponse = z.infer<typeof applyPreviewResponseSchema>;
+
+/**
+ * `POST /documents/:id/apply` — write the chosen values to the named record.
+ *
+ * Three things are required rather than convenient:
+ *
+ *  - **`targetType` and `targetId`.** There is no "best guess" path. A document with no target a
+ *    person has named is not applied.
+ *  - **`from` on every field**: the value the browser showed. The server checks it against the
+ *    record before writing anything, and refuses the whole apply if the record has moved.
+ *  - **`idempotencyKey`**: one press of Apply. The same key returns the first receipt and writes
+ *    nothing.
+ */
+export const applyRequestSchema = z.object({
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  idempotencyKey: z.string().min(8).max(200),
+  fields: z
+    .array(
+      z.object({
+        documentFieldId: uuidSchema,
+        fieldKey: z.string().min(1),
+        /** What the record held when the person looked. Null when it held nothing. */
+        from: z.string().nullable(),
+        /** What to write. A person may correct it here before applying. */
+        to: z.string().min(1),
+        /**
+         * A premium's basis — required for `premium`, meaningless for anything else.
+         *
+         * The database refuses an amount without a currency and a basis, and a schedule states a
+         * figure without saying whether it is the gross premium or everything payable. Nobody can
+         * derive one from the other once levies are involved, so the person chooses and the apply
+         * is refused without it. Currency defaults to the brokerage's own, which is a fact about
+         * the organization rather than a guess about the document.
+         */
+        premiumBasis: z.enum(["gross", "total_payable"]).optional(),
+        premiumCurrency: z.string().length(3).optional(),
+      }),
+    )
+    .min(1),
+});
+export type ApplyRequest = z.infer<typeof applyRequestSchema>;
+
+export const applyResponseSchema = z.object({
+  applicationId: uuidSchema,
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  appliedAt: z.string(),
+  /** What was written, both sides of each field. This is the receipt. */
+  changes: z.array(
+    z.object({
+      fieldKey: z.string(),
+      documentFieldId: uuidSchema.nullable(),
+      from: z.string().nullable(),
+      to: z.string(),
+      page: z.number().int().nullable(),
+    }),
+  ),
+  /** True when this key had already been applied: the receipt is the first one's. */
+  repeat: z.boolean(),
+});
+export type ApplyResponse = z.infer<typeof applyResponseSchema>;
+
+/** What the record held instead, when an apply was refused for being out of date. */
+export const applyConflictSchema = z.object({
+  fieldKey: z.string(),
+  expected: z.string().nullable(),
+  found: z.string().nullable(),
+});
+export type ApplyConflict = z.infer<typeof applyConflictSchema>;

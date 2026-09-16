@@ -1249,3 +1249,87 @@ was accepted — is a real change and is recorded.
 
 The third was only visible by running the service against a document laid out like a real one. The
 existing tests all used a single-column PDF where label and value share a text run.
+
+## D-077 — Applying a document to a record: named by a person, checked, receipted
+
+Accepting an extracted value marked the *field* accepted and changed no business record. A person
+could accept a premium off a schedule and the policy period would still hold nothing. Applying
+closes that, and the shape is the point.
+
+**ASAP suggests; a person names the target.** `GET /documents/:id/apply-targets` answers with
+records and **why it believes each one**, in the same six evidence words used everywhere: `known`
+when the document is already filed against the record, `inferred` when it was matched on something
+the document states. When nothing can be suggested the answer says *why* — "no suggestions" and
+"could not look" are different situations and an empty list cannot tell them apart. A name on a
+schedule never becomes a suggested client: §45 rule 8, and saying so is more use than silence.
+
+**Nothing is written before a person has seen what would change.**
+`GET /documents/:id/apply-preview` gives, per field: what the record holds now, what would be
+written, whether that is a change at all, and why a field cannot be applied to this target. Fields
+the target accepts and the document never gave are listed as missing rather than left out.
+
+**The write is one transaction in a definer function** (0043), because the three things that make
+it safe have to happen together or not at all: the record still holding what the person was shown,
+the record changing, and the receipt that says it did. `document_applications` is the evidence
+link, the receipt and the idempotency ledger in one row — `(organization_id, idempotency_key)` is
+unique, so a double-clicked Apply writes once and the second call returns the first receipt. The
+audit row carries both sides of every field. `authenticated` may read that table and has no
+insert, update or delete policy at all.
+
+**What can receive values today:** `policy_period` (period start, period end, premium),
+`policy` (policy number), `client` (insured name). Narrow on purpose — a kind that is not there
+cannot be applied to, which is better than one that can be applied to wrongly, and adding one is a
+migration naming exactly which fields it accepts.
+
+### Four defects, three of which only a connected run could show
+
+1. **The premium's basis was missing.** 0039 refuses an amount without a currency and a basis — "a
+   number without units" — and my first function wrote the amount alone. The constraint caught it.
+   A schedule states a figure without saying whether it is the gross premium or everything payable,
+   and nobody can derive one from the other once levies are on top, so the **person** says which
+   and the apply is refused without it. Currency defaults to the brokerage's own, which is a fact
+   about the organization rather than a guess about the document.
+2. **`214,500.00` could not be written.** A schedule prints a premium with a thousands separator,
+   a person accepts it as printed, and `::numeric` failed with an opaque `database_error` —
+   effectively asking somebody to retype a figure to remove a comma the document itself printed.
+   `app.text_to_amount` reads the `1,234.56` shape; anything else is refused *by name* so the
+   interface can say so, because reading `1.234,56` either way would be a guess about the size of a
+   premium.
+3. **A valid apply failed on the way back out.** `jsonb_strip_nulls` removed `from` from the
+   receipt when the record had held nothing, and the response then failed its own schema: the
+   write had happened and the person was shown an error.
+4. **An applied premium looked unapplied.** The preview compared `214500.00` against `214,500.00`
+   as strings and offered the same write again. Amount fields now compare as numbers.
+
+### Uploading, honestly
+
+The transfer goes straight to storage, so the browser is the only thing that knows how it went.
+XHR replaces `fetch` for two things `fetch` cannot do: report how many bytes have actually gone,
+and be aborted mid-transfer. A percentage appears **only** where the transport reported both
+numbers — a progress bar nobody measured is a lie that looks like progress. Cancelling is neither
+a success nor an error. A retry re-PUTs the same allocated path and re-asks with the same hash, so
+the API answers "already on file" rather than making a second document.
+
+### The chain, proven in one pass
+
+Browser-shaped upload → storage → document row → `document.received` → **the real worker** claimed
+it → `POST /internal/events/:id/dispatch` → **the real extractor** read the bytes → eight fields
+with page positions → review → suggested target with its reason → preview → apply → the business
+record, its evidence link, its audit row → reopened and re-read. Four seconds from filed to
+extracted.
+
+This ran against a **local** stack, not Render. Two things stop the same pass running there, and
+neither is a code change: `asap-worker` **does not exist as a Render service** (only `asap-web`,
+`asap-api` and `asap-extractor` do), and this session's egress policy answers 403 to `CONNECT` for
+both `*.onrender.com` and the Supabase project host, so nothing here can reach staging at all.
+
+The local stand-in had **no storage routes whatsoever**, which is the real reason the chain had only
+ever been provable in layers. Four routes were added to it — harness code, `APP_ENV=local` only.
+
+### Dependencies, pinned
+
+`pyproject.toml` pins every direct dependency with `==` and `requirements.lock.txt` pins the whole
+closure, generated from a clean virtualenv. A fresh environment installs from the lock file and
+runs all 15 Python tests with no manual step — which is the only way "the tests pass" says anything
+about whether the deployed service can start. `.venv`, `__pycache__`, `*.egg-info` and the caches
+are ignored, and the tracked `egg-info` directory was removed.

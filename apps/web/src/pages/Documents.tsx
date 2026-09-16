@@ -6,6 +6,7 @@ import { useMe } from "../lib/me.js";
 import { ScreenTitle } from "../shell/ScreenTitle.js";
 import { EvidenceConditionChip } from "../components/EvidenceCondition.js";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
+import { ApplyToRecord } from "../features/documents/ApplyToRecord.js";
 import { readingStatus, type DocumentField, type PageRegion } from "@asap/schema";
 
 /**
@@ -39,8 +40,19 @@ export function Documents() {
    *      prefix, because a path the browser chose could name another brokerage's folder;
    *   3. PUT the bytes straight to storage. They never pass through the API.
    */
+  /*
+   * The upload's own state, because a mutation's `isPending` cannot say *how far*.
+   *
+   * `sent`/`total` come from the transport and are only shown when it reports them: a percentage
+   * nobody measured is worse than no percentage. `controller` is what Cancel aborts.
+   */
+  const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
+  const [inFlight, setInFlight] = useState<XMLHttpRequest | null>(null);
+  const [lastFile, setLastFile] = useState<File | null>(null);
+
   const upload = useMutation({
     mutationFn: async (file: File) => {
+      setLastFile(file);
       const bytes = await file.arrayBuffer();
       const digest = await crypto.subtle.digest("SHA-256", bytes);
       const contentSha256 = [...new Uint8Array(digest)]
@@ -53,12 +65,35 @@ export function Documents() {
         contentSha256,
       });
       if (asked.outcome === "already_on_file") return asked;
-      const put = await fetch(asked.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: bytes,
+
+      /*
+       * XHR rather than fetch, for two things fetch cannot do: report how many bytes have
+       * actually gone, and be aborted mid-transfer. Both are things a person uploading a 30MB
+       * scan on a Nairobi mobile connection needs.
+       *
+       * Retrying re-PUTs the same object path, so a retry cannot make a second document: the row
+       * and its path were allocated once, before any byte moved.
+       */
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        setInFlight(xhr);
+        xhr.open("PUT", asked.uploadUrl, true);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        xhr.upload.onprogress = (e) => {
+          // Only when the transport actually knows. `lengthComputable` false means no percentage.
+          if (e.lengthComputable) setProgress({ sent: e.loaded, total: e.total });
+        };
+        xhr.onload = () =>
+          xhr.status >= 200 && xhr.status < 300
+            ? resolve()
+            : reject(new Error("The file store would not accept the file."));
+        xhr.onerror = () => reject(new Error("The file store could not be reached."));
+        xhr.onabort = () => reject(new Error("upload_cancelled"));
+        xhr.send(bytes);
+      }).finally(() => {
+        setInFlight(null);
+        setProgress(null);
       });
-      if (!put.ok) throw new Error("The file store would not accept the file.");
       /*
        * The upload went straight to storage, so the API has not seen it and does not know it
        * finished. Telling it is what puts the document in the queue to be read — without this the
@@ -76,7 +111,16 @@ export function Documents() {
       );
       void qc.invalidateQueries({ queryKey: ["documents"] });
     },
-    onError: (e) => setUploadError(e instanceof Error ? e.message : describeApiError(e)),
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : describeApiError(e);
+      // Cancelling is not a failure, and the file is genuinely not on file either way.
+      setUploadError(
+        message === "upload_cancelled"
+          ? "Upload cancelled. Nothing was filed."
+          : `${message} Nothing was filed — the file is not on file.`,
+      );
+      setUploaded(null);
+    },
   });
 
   const documents = live.data?.documents ?? [];
@@ -92,27 +136,70 @@ export function Documents() {
               A schedule, a quote, a statement, a cover note. ASAP reads it and proposes what it
               found; a person accepts each value before it counts as known.
             </p>
-            <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
-              {upload.isPending ? "Filing…" : "Choose a file"}
-              <input
-                type="file"
-                className="sr-only"
-                disabled={upload.isPending}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) upload.mutate(file);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            {uploaded && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <label className="secondary" style={{ display: "inline-block", cursor: "pointer" }}>
+                {upload.isPending ? "Uploading…" : "Choose a file"}
+                <input
+                  type="file"
+                  className="sr-only"
+                  disabled={upload.isPending}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setUploadError(null);
+                      setUploaded(null);
+                      upload.mutate(file);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+
+              {/* Cancel stops the transfer itself, not just the waiting. */}
+              {upload.isPending && (
+                <button type="button" className="secondary" onClick={() => inFlight?.abort()}>
+                  Cancel
+                </button>
+              )}
+
+              {/*
+                  Retry re-sends the same file to the same allocated path, so it cannot make a
+                  second document. Only offered after a failure, and only while we still hold the
+                  file the person chose.
+                */}
+              {!upload.isPending && uploadError && lastFile && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setUploadError(null);
+                    upload.mutate(lastFile);
+                  }}
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+
+            {/*
+                While bytes are moving. The percentage appears only when the transport reported
+                both numbers — a progress bar nobody measured is a lie that looks like progress.
+              */}
+            {upload.isPending && (
+              <p style={{ fontSize: 11, color: "#3e4941", marginTop: 10 }} role="status">
+                {progress
+                  ? `Uploading — ${Math.floor((progress.sent / progress.total) * 100)}% of ${Math.ceil(progress.total / 1024)}KB sent.`
+                  : "Uploading. Nothing is on file until this finishes."}
+              </p>
+            )}
+            {uploaded && !upload.isPending && (
               <p style={{ fontSize: 11, color: "#3e4941", marginTop: 10 }} role="status">
                 {uploaded}
               </p>
             )}
             {uploadError && (
-              <div className="warning" style={{ marginTop: 10 }}>
-                <strong>Nothing was filed:</strong> {uploadError}
+              <div className="warning" style={{ marginTop: 10 }} role="alert">
+                {uploadError}
               </div>
             )}
           </div>
@@ -347,6 +434,15 @@ export function DocumentViewer() {
               That decision was not recorded: {describeApiError(review.error)} The field is still as
               it was.
             </p>
+          )}
+
+          {/*
+              Applying is offered once a person has decided at least one value. Before that there
+              is nothing to apply: an unreviewed reading is still a proposal, and the API refuses
+              it (§45 rule 8).
+            */}
+          {fields.some((f) => f.state === "accepted" || f.state === "corrected") && (
+            <ApplyToRecord documentId={doc.id} />
           )}
         </section>
       </div>
