@@ -42,3 +42,7 @@ apps/extractor/.venv/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+
+# Visual parity captures (scripts/visual). Large, regenerable, and an app capture would
+# contain a brokerage's own records.
+.local-visual/
