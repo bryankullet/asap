@@ -1,20 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { connectionsSpace } from "../live/connections-space.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
-import { ScreenTitle } from "../shell/ScreenTitle.js";
+import { useWorkspaceTabs } from "../shell/workspace-tabs.js";
+import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * Data and connections (D-064).
+ * Data and connections, as a Space.
  *
- * Where a brokerage connects its mailbox. In demo mode a connection is simulated and says so; in
- * production the buttons begin a real OAuth flow, and until that returns, the mailbox is honestly
- * not connected. There is no state in between, and nothing here ever claims a mailbox is attached
- * when it is not.
+ * Nothing here ever claims a mailbox is attached when it is not. "Connect" begins a real OAuth
+ * flow at the provider's own page; until the provider sends the person back and a row exists, the
+ * mailbox is honestly not connected, and there is no state in between.
+ *
+ * What this Space also does is name the gap: authorising records the connection, and **nothing
+ * reads the mailbox yet** — there is no endpoint, no worker job, and nothing writes
+ * `last_synced_at`. A "Syncing" badge would be a word with no mechanism behind it.
  */
 export function Connections() {
   const me = useMe();
   const qc = useQueryClient();
+  const tabs = useWorkspaceTabs("/settings/connections");
   const [notConfigured, setNotConfigured] = useState<string | null>(null);
 
   /* What is actually connected, from the brokerage's own rows. Never a token. */
@@ -40,94 +46,36 @@ export function Connections() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["mailboxes"] }),
   });
 
-  const providers = live.data?.providers ?? [];
-  const mailboxes = live.data?.mailboxes ?? [];
+  useEffect(() => {
+    tabs.open({
+      spaceType: "route",
+      recordType: "connections",
+      recordId: "connections",
+      kind: "CONNECTIONS",
+      title: "Connections",
+      path: "/settings/connections",
+    });
+  }, []);
+
+  const space = connectionsSpace(
+    live.data,
+    { loading: live.isLoading, error: live.isError ? describeApiError(live.error) : null },
+    notConfigured,
+  );
 
   return (
-    <>
-      <ScreenTitle
-        title="Data and connections"
-        meta="What ASAP is allowed to read on the brokerage's behalf"
-      />
-      <section className="page-scroll spaces-page">
-        <div className="section-label">Mailbox</div>
-
-        {providers.map((p) => {
-          const mine = mailboxes.filter((m) => m.provider === p.id && m.status !== "disconnected");
-          return (
-            <article className="job-card" key={p.id}>
-              <div className={`job-icon ${p.available ? "" : "amber"}`} aria-hidden>
-                ✉
-              </div>
-              <div className="job-main">
-                <div className="job-title">
-                  <strong>{p.label}</strong>
-                  {mine.map((m) => (
-                    <span
-                      key={m.id}
-                      className={`job-pill ${m.status === "connected" ? "running" : "waiting"}`}
-                    >
-                      {m.status === "connected" ? "Connected" : "Needs authorising again"}
-                    </span>
-                  ))}
-                </div>
-                <p>
-                  {mine.length > 0
-                    ? mine.map((m) => m.emailAddress).join(", ")
-                    : p.available
-                      ? "Not connected."
-                      : (p.unavailableReason ?? "Not available here.")}
-                </p>
-                <small>
-                  {mine[0]?.statusReason ??
-                    (mine[0]?.lastSyncedAt
-                      ? `Last read ${new Date(mine[0].lastSyncedAt).toLocaleString()}`
-                      : "ASAP reads and replies in the same thread, and never sends without a person.")}
-                </small>
-              </div>
-              {mine.length > 0 ? (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={disconnect.isPending}
-                  onClick={() => disconnect.mutate(mine[0]!.id)}
-                >
-                  Disconnect
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={!p.available || connect.isPending}
-                  onClick={() => {
-                    setNotConfigured(null);
-                    connect.mutate(p.id);
-                  }}
-                >
-                  {p.available ? "Connect" : "Not available here"}
-                </button>
-              )}
-            </article>
-          );
-        })}
-
-        {notConfigured && (
-          <div className="warning">
-            <strong>Nothing was connected:</strong> {notConfigured}
-          </div>
-        )}
-        {live.isError && (
-          <div className="warning">
-            <strong>We could not read your connections:</strong> {describeApiError(live.error)}
-          </div>
-        )}
-        {!live.isPending && mailboxes.length === 0 && (
-          <p style={{ fontSize: 11, color: "#707a72", marginTop: 12 }}>
-            Until a mailbox is connected, ASAP works from what you put on file yourself. Nothing is
-            read from anybody&rsquo;s email without this.
-          </p>
-        )}
-      </section>
-    </>
+    <SpaceFrameView
+      space={space}
+      onAct={(action) => {
+        /*
+         * Both verbs go through the API. `prepare` starts the authorisation the server owns — the
+         * state parameter is the server's and single-use — and `exception` removes the connection.
+         * Neither is performed by the block that offered it.
+         */
+        const [what, id] = (action.stepId ?? "").split(":");
+        if (what === "connect" && (id === "gmail" || id === "microsoft")) connect.mutate(id);
+        if (what === "mailbox" && id !== undefined) disconnect.mutate(id);
+      }}
+    />
   );
 }

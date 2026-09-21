@@ -8,6 +8,8 @@ import {
 } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Connections } from "../pages/Connections.js";
+import { JobDetail, Jobs } from "../pages/Jobs.js";
 import { Search } from "../pages/Search.js";
 import { Today } from "../pages/Today.js";
 import { Work } from "../pages/Work.js";
@@ -38,7 +40,17 @@ const search = createRoute({
   component: Search,
   validateSearch: (s: Record<string, unknown>) => ({ q: (s["q"] as string | undefined) ?? "" }),
 });
-const routes = ["/automations", "/new", "/jobs", "/ask", "/import", "/email", "/clients"].map(
+const extra = [
+  createRoute({ getParentRoute: () => root, path: "/settings/connections", component: Connections }),
+  createRoute({
+    getParentRoute: () => root,
+    path: "/jobs",
+    component: Jobs,
+    validateSearch: (s: Record<string, unknown>) => ({ filter: (s["filter"] as string | undefined) ?? "all" }),
+  }),
+  createRoute({ getParentRoute: () => root, path: "/jobs/$jobId", component: JobDetail }),
+];
+const routes = ["/automations", "/new", "/ask", "/import", "/email", "/clients"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
 );
 const record = createRoute({
@@ -48,7 +60,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([...boards, search, ...routes, record]),
+  routeTree: root.addChildren([...boards, search, ...extra, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

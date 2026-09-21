@@ -5,6 +5,8 @@
  * shell's own words so that reintroducing either fails a test rather than reaching a broker.
  */
 import {
+  RUN_GROUP_LABELS,
+  RUN_LIST_FILTER_LABELS,
   ATTENTION_SECTION_LABELS,
   COVER_LABELS,
   EVIDENCE_CONDITION_LABELS,
@@ -36,6 +38,13 @@ const EVERY_VISIBLE_LABEL = [
   ...Object.values(EVIDENCE_CONDITION_LABELS),
   ...NAV.map((n) => n.label),
   ...WORK_FILTERS.map((f) => f.label),
+  /*
+   * The run vocabulary, from the schema rather than from the nav: the API returns these as group
+   * titles and filter labels, so they are screen copy. Three of them used to be "Running",
+   * "Waiting" and "Completed", which this census would have caught had it been looking.
+   */
+  ...Object.values(RUN_LIST_FILTER_LABELS),
+  ...Object.values(RUN_GROUP_LABELS),
   PINNED_VIEW.label,
   REVIEW_VIEW.label,
   ...JOB_FILTERS.map((f) => f.label),
@@ -90,6 +99,28 @@ describe("the product's visible vocabulary", () => {
     // What is banned is the word alone, which tells a person nothing they can act on.
     for (const label of EVERY_VISIBLE_LABEL) {
       expect(label.trim(), label).not.toBe("Waiting");
+    }
+  });
+
+  /*
+   * "Complete" and "Completed" are banned as *cross-layer* words. A task is Done, a run is
+   * Finished, cover is Active cover or Expired, and money is Paid or Reconciled — "completed" said
+   * of any of them reads as a business outcome that nothing has actually established.
+   */
+  it("never says 'Complete' or 'Completed' as a status", () => {
+    for (const label of EVERY_VISIBLE_LABEL) {
+      expect(label.trim(), label).not.toBe("Complete");
+      expect(label.trim(), label).not.toBe("Completed");
+    }
+  });
+
+  /*
+   * A bare "Active" is banned for the same reason as a bare "Waiting": active *at what*? Cover is
+   * "Active cover", a task is "In progress", an automation is on or paused.
+   */
+  it("never says a bare 'Active'", () => {
+    for (const label of EVERY_VISIBLE_LABEL) {
+      expect(label.trim(), label).not.toBe("Active");
     }
   });
 

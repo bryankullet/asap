@@ -41,6 +41,10 @@ const STATES = [
   { name: "ask-with-record-context", url: `${HARNESS}?at=/today&rows=2` },
   { name: "search-results", url: `${HARNESS}?at=/search%3Fq=placeholder` },
   { name: "search-nothing-typed", url: `${HARNESS}?at=/search` },
+  { name: "connections", url: `${HARNESS}?at=/settings/connections` },
+  { name: "activity", url: `${HARNESS}?at=/jobs` },
+  { name: "activity-nothing", url: `${HARNESS}?at=/jobs&rows=0` },
+  { name: "run-detail", url: `${HARNESS}?at=/jobs/50000000-0000-4000-8000-000000000001` },
 ];
 
 /**

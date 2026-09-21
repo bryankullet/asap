@@ -117,7 +117,12 @@ describe("GET /runs — the Jobs board", () => {
     expect(body.label).toBe("All");
     // Two could-not-finish runs need a person; the finished one is not in All.
     expect(body.groups.map((g: { key: string; title: string }) => [g.key, g.title])).toEqual([
-      ["work", "Work"],
+      /*
+       * The run vocabulary, not Work's. This title used to be "Work", which said nothing about
+       * what had happened; "Running", "Waiting" and "Completed" were the others, and a bare
+       * "Waiting" and a cross-layer "Completed" are both banned.
+       */
+      ["work", "Stopped for a person"],
     ]);
     expect(body.groups[0].items).toHaveLength(2);
     expect(body.counts).toMatchObject({ all: 2, running: 0, waiting: 0, work: 2, completed: 1 });

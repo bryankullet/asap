@@ -202,7 +202,99 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
       degraded: [],
     });
   }
-  if (u.includes("/runs")) return json({ runs: [] });
+  if (/\/runs\/[^/?]+$/.test(u.split("?")[0] ?? "")) {
+    const runId = "50000000-0000-4000-8000-000000000001";
+    return json({
+      run: {
+        id: runId,
+        organization_id: ORG,
+        work_item_id: ROWS[0]?.id ?? null,
+        title: "Read the placeholder schedule",
+        status: "could_not_finish",
+        next_step: "Page 2 has no readable text.",
+        started_by: null,
+        boot_token: null,
+        started_at: "2026-08-20T08:00:00.000Z",
+        ended_at: "2026-08-20T08:04:00.000Z",
+        created_at: "2026-08-20T08:00:00.000Z",
+        updated_at: "2026-08-20T08:04:00.000Z",
+      },
+      events: [
+        { id: 1, run_id: runId, seq: 1, kind: "step", message: "Opened the document", created_at: "2026-08-20T08:01:00.000Z" },
+        { id: 2, run_id: runId, seq: 2, kind: "step", message: "Read pages 1 of 2", created_at: "2026-08-20T08:02:00.000Z" },
+        { id: 3, run_id: runId, seq: 3, kind: "error", message: "Page 2 has no readable text", created_at: "2026-08-20T08:04:00.000Z" },
+      ],
+      relatedWork: ROWS[0]
+        ? { id: ROWS[0].id, title: ROWS[0].title, taskStatus: "needs_you", nowStep: "Confirm the sum insured" }
+        : null,
+      evidence: [{ label: "Uploaded file", reference: "placeholder-schedule.pdf", recordedBy: "Placeholder Owner", recordedAt: null }],
+      waitingFor: null,
+      recovery: [
+        { kind: "open_work", label: "Open the work", disabledReason: null },
+        { kind: "retry", label: "Read it again", disabledReason: null },
+      ],
+    });
+  }
+  if (u.includes("/runs")) {
+    const filter = new URL(u, location.origin).searchParams.get("filter") ?? "all";
+    const runId = "50000000-0000-4000-8000-000000000001";
+    const item = {
+      run: {
+        id: runId,
+        organization_id: ORG,
+        work_item_id: ROWS[0]?.id ?? null,
+        title: "Read the placeholder schedule",
+        status: "could_not_finish",
+        next_step: "Page 2 has no readable text.",
+        started_by: null,
+        boot_token: null,
+        started_at: "2026-08-20T08:00:00.000Z",
+        ended_at: "2026-08-20T08:04:00.000Z",
+        created_at: "2026-08-20T08:00:00.000Z",
+        updated_at: "2026-08-20T08:04:00.000Z",
+      },
+      group: "work",
+      progress: 40,
+      lastEvent: "Page 2 has no readable text",
+      waitingFor: null,
+      needsPerson: true,
+      work: ROWS[0] ? { id: ROWS[0].id, title: ROWS[0].title } : null,
+      client: { id: CLIENT, name: "Placeholder Client Ltd" },
+      period: null,
+    };
+    return json({
+      organization: { id: ORG, name: ORGANIZATION.name },
+      filter,
+      label: filter,
+      generatedAt: "2026-08-20T09:00:00.000Z",
+      groups: ROWS.length === 0 ? [] : [{ key: "work", title: "ignored", items: [item] }],
+      counts: { all: 1, running: 0, waiting: 0, work: 1, completed: 0 },
+      visible: 1,
+      returned: 1,
+      cap: 50,
+      degraded: [],
+    });
+  }
+  if (u.includes("/mailboxes")) {
+    return json({
+      mailboxes: [
+        {
+          id: "70000000-0000-4000-8000-000000000001",
+          provider: "gmail",
+          emailAddress: "broking@example.invalid",
+          displayName: null,
+          status: "connected",
+          statusReason: null,
+          lastSyncedAt: null,
+          connectedAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+      providers: [
+        { id: "gmail", label: "Gmail", available: true, unavailableReason: null },
+        { id: "microsoft", label: "Microsoft 365", available: false, unavailableReason: "This deployment has no Microsoft credentials." },
+      ],
+    });
+  }
   if (u.includes("/pins")) return json({ pins: [] });
   return json({});
 }) as typeof fetch;

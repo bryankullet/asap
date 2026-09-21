@@ -295,23 +295,33 @@ export type SetPinResponse = z.infer<typeof setPinResponseSchema>;
 export const RunListFilter = z.enum(["all", "running", "waiting", "work", "completed"]);
 export type RunListFilter = z.infer<typeof RunListFilter>;
 
+/**
+ * What each filter is called on screen.
+ *
+ * The run vocabulary is **Working · Finished · Stopped**, and it is deliberately not Work's. Three
+ * of these were "Running", "Waiting" and "Completed": a bare "Waiting" tells a person nothing they
+ * can act on, and "Completed" is a cross-layer word that reads as a business outcome when all it
+ * means is that ASAP stopped doing something. The API returns these as group titles, so they are
+ * screen copy and belong under `vocabulary.test.ts`.
+ */
 export const RUN_LIST_FILTER_LABELS: Readonly<Record<RunListFilter, string>> = {
   all: "All",
-  running: "Running",
-  waiting: "Waiting",
-  work: "Work",
-  completed: "Completed",
+  running: "Working",
+  waiting: "Waiting on someone else",
+  work: "Stopped for a person",
+  completed: "Finished",
 };
 
 /** Which group a run sits in, in the words the board prints above it. */
 export const RunGroup = z.enum(["running", "waiting_externally", "work", "completed"]);
 export type RunGroup = z.infer<typeof RunGroup>;
 
+/** The same vocabulary as the filters, because a group and a filter name the same set. */
 export const RUN_GROUP_LABELS: Readonly<Record<RunGroup, string>> = {
-  running: "Running",
-  waiting_externally: "Waiting externally",
-  work: "Work",
-  completed: "Completed",
+  running: "Working",
+  waiting_externally: "Waiting on someone else",
+  work: "Stopped for a person",
+  completed: "Finished",
 };
 
 export const runListQuerySchema = z.object({
