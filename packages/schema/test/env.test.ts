@@ -117,6 +117,41 @@ describe("loadWorkerEnv", () => {
     });
     expect(env.LOG_LEVEL).toBe("info");
   });
+
+  /*
+   * Sentry is optional for the worker, including in staging and production. It was required once
+   * APP_ENV left `local`, which meant the whole worker tier stayed down to protect error
+   * reporting — a louder failure than the quiet one it was guarding against.
+   */
+  it("starts in staging with no SENTRY_DSN", () => {
+    const env = loadWorkerEnv({
+      APP_ENV: "staging",
+      WORKER_DATABASE_URL: "postgresql://asap_worker:pw@db.example.com:5432/postgres",
+      ENCRYPTION_KEY: KEY,
+      API_BASE_URL: "https://asap-api.example.com",
+      API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
+    });
+    expect(env.SENTRY_DSN).toBeUndefined();
+  });
+
+  it("refuses a SENTRY_DSN that is present but not a DSN", () => {
+    expect(() =>
+      loadWorkerEnv({
+        APP_ENV: "staging",
+        WORKER_DATABASE_URL: "postgresql://asap_worker:pw@db.example.com:5432/postgres",
+        ENCRYPTION_KEY: KEY,
+        API_BASE_URL: "https://asap-api.example.com",
+        API_INTERNAL_KEY: "test-internal-key-with-thirty-two-characters",
+        SENTRY_DSN: "https://sentry.io/organizations/acme/projects/asap-worker/",
+      }),
+    ).toThrow(/SENTRY_DSN/);
+  });
+
+  /* The API's own Sentry handling is untouched: it accepts whatever string it is given. */
+  it("leaves the API's SENTRY_DSN validation as it was", () => {
+    const env = loadServerEnv({ ...validServer, APP_ENV: "staging", SENTRY_DSN: "anything" });
+    expect(env.SENTRY_DSN).toBe("anything");
+  });
 });
 
 describe("loadPublicEnv", () => {
