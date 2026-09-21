@@ -1,58 +1,163 @@
-/*
- * ASAP design tokens, ported from the v4 prototype's dist/styles.css :root block. This file is the
- * single source: apps/web consumes it through Tailwind v4's @theme, and nothing re-declares a
- * colour, radius or shadow of its own.
+/**
+ * The design system, taken from `ASAP.dc.html` by measurement rather than by eye.
  *
- * Status colours are semantic and fixed: green = running/active, gold = waiting, red = needs
- * review, grey = done. The *-ink values are the prototype's darker text tones for soft backgrounds;
- * the *-dot values are the status pill's leading dot.
+ * This file is the single source: apps/web consumes it through Tailwind v4's `@theme`, and nothing
+ * re-declares a colour, radius or shadow of its own.
  *
- * Fonts: Figtree for body, Outfit for headings, both from Google Fonts in apps/web/index.html with
- * a system stack behind them, so the app is legible before the webfont lands and if it never does.
+ * Every value below was read out of the prototype — its stylesheet for the globals, and a census of
+ * its inline styles for the rest, since that is where it actually keeps its layout. Where the
+ * prototype uses a value once it is still here, because "close enough" on a border tone is how a
+ * rebuild stops being recognisable as the same product.
+ *
+ * Fonts: DM Sans for interface text, Manrope for headings, both from Google Fonts in
+ * apps/web/index.html with a system stack behind them, so the app is legible before the webfont
+ * lands and if it never does.
+ *
+ * Shell geometry is here too, because the sidebar width and the Ask panel width are design tokens
+ * that three different components need to agree on. The numbers are measured
+ * (scripts/visual/capture.mjs), not chosen.
  */
 @theme {
-  --font-sans: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-heading: "Outfit", "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Manrope", "DM Sans", ui-sans-serif, system-ui, sans-serif;
 
-  --color-ink: #102a43;
-  --color-ink-secondary: #334e68;
-  --color-ink-muted: #66788a;
-  --color-ink-done: #5b6e7d;
-
-  /* The prototype names the darkest ink "navy" where it is a surface, not text. */
-  --color-navy: #102a43;
-  --color-navy-hover: #173b5d;
+  /*
+   * Ink, in the four tones the prototype actually uses. The two middle tones carry most of the
+   * interface — 30 uses each — and reading them as one grey is the single fastest way to lose the
+   * prototype's hierarchy.
+   */
+  --color-ink: #18231c;
+  --color-ink-secondary: #4c564e;
+  --color-ink-muted: #6e776f;
+  --color-ink-faint: #8b938d;
+  --color-ink-done: #7b867d;
 
   --color-paper: #ffffff;
-  --color-wash: #f6f8f9;
+  --color-wash: #fbfcfa;
+  /* A sunken surface inside a card, distinct from the page background. */
+  --color-surface-sunken: #f5f7f4;
 
-  --color-line-strong: #dfe6ea;
-  --color-line-soft: #edf1f3;
-  --color-line-hover: #b8c6ce;
+  /* The sidebar is its own surface with its own border, a shade off the main one. */
+  --color-sidebar: #f1f4f0;
+  --color-sidebar-line: #e0e5e0;
+  --color-sidebar-active: #e4e9e4;
 
-  --color-accent-green: #0f7b5a;
-  --color-accent-green-soft: #e7f5ef;
-  --color-accent-green-ink: #096348;
-  --color-accent-gold: #d9a62e;
-  --color-accent-gold-soft: #fbf4dc;
-  --color-accent-gold-ink: #755509;
-  --color-accent-gold-line: #ead490;
-  --color-accent-red: #b94a48;
-  --color-accent-red-soft: #fff0ef;
-  --color-accent-red-ink: #963b3a;
-  --color-accent-blue-soft: #eef5ff;
+  /* The main border, and the two it sits between. */
+  --color-line: #e5e9e5;
+  --color-line-strong: #d7ded8;
+  --color-line-soft: #eef1ee;
+  --color-line-dashed: #c8d2ca;
 
-  --color-dot-neutral: #91a0aa;
-  --color-surface-sunken: #e7ecef;
+  --color-accent-green: #1f6c49;
+  --color-accent-green-soft: #dff2e6;
+  --color-accent-green-tint: #eef8f1;
+  --color-accent-green-line: #b9dcc4;
 
-  --radius-card: 18px;
-  --radius-control: 12px;
+  --color-accent-red: #a43b32;
+  --color-accent-red-soft: #fdeae7;
+  --color-accent-red-line: #eec6bf;
+
+  --color-accent-blue: #275f8a;
+  --color-accent-blue-line: #cfe2f2;
+
+  --color-accent-amber-line: #ecd6a4;
+
+  /*
+   * Amber, the waiting tone. `ASAP.dc.html` shows only its border (#ecd6a4) because nothing in the
+   * captured state is waiting; the ink and fill come from the same prototype family's stylesheet,
+   * already ported in apps/web/src/styles/shell.css, so the two agree rather than drifting.
+   */
+  --color-accent-gold: #9a5a06;
+  --color-accent-gold-ink: #7a4705;
+  --color-accent-gold-soft: #fff2d7;
+  --color-accent-gold-line: #ecd6a4;
+
+  --color-accent-blue-soft: #e8f2fb;
+  --color-accent-purple: #674a94;
+  --color-accent-purple-soft: #f0eafb;
+
+  /*
+   * The prototype's darkest ink doubles as a surface on a primary control. It is the same value as
+   * the text ink, which is deliberate: the prototype has no separate brand navy.
+   */
+  --color-navy: #18231c;
+  --color-navy-hover: #24312a;
+
+  /* A hovered border steps to the strong line rather than to a tone of its own. */
+  --color-line-hover: #d7ded8;
+  --color-dot-neutral: #8b938d;
+
+  /*
+   * Radii, as counted. 13px is the card — twenty uses, more than any other value — and the
+   * gradient down to 9px is how the prototype distinguishes a card from a control from a chip.
+   */
+  --radius-card: 13px;
+  --radius-panel: 16px;
+  --radius-control: 11px;
   --radius-compact: 10px;
+  --radius-chip: 9px;
+  --radius-tight: 8px;
   --radius-pill: 99px;
 
-  --shadow-card: 0 14px 44px rgba(16, 42, 67, 0.09);
-  --shadow-lift: 0 6px 22px rgba(16, 42, 67, 0.06);
-  --shadow-dock: 0 12px 40px rgba(16, 42, 67, 0.13);
+  /* Only two things float in the prototype: a modal and a sheet. Nothing at rest has a shadow. */
+  --shadow-modal: 0 16px 50px rgba(24, 35, 28, 0.2);
+  --shadow-sheet: -20px 0 60px rgba(12, 22, 15, 0.16);
+  /*
+   * `shadow-card` is a misnomer kept only until the last caller is converted: in the prototype a
+   * card at rest has a hairline border and a 13px radius and no shadow at all. It is deliberately
+   * the softest of the three so that a card which still carries it does not stand out as wrong.
+   */
+  --shadow-card: 0 16px 50px rgba(24, 35, 28, 0.08);
+  --shadow-lift: 0 6px 22px rgba(24, 35, 28, 0.06);
+  --shadow-dock: 0 16px 50px rgba(24, 35, 28, 0.2);
 
-  --spacing-sidebar: 224px;
+  /*
+   * Type scale, at the prototype's real sizes. The half-pixel values are not a mistake: 13.5px and
+   * 12.5px are the two most common sizes in the whole file after 12px, and rounding them to 14 and
+   * 13 visibly changes the density of every row and card.
+   */
+  --text-eyebrow: 10.5px;
+  --text-micro: 11px;
+  --text-tiny: 11.5px;
+  --text-small: 12px;
+  --text-label: 12.5px;
+  --text-body: 13px;
+  --text-body-lg: 13.5px;
+  --text-base: 14px;
+  --text-lead: 14.5px;
+  --text-subtitle: 15.5px;
+  --text-title: 17.6px;
+  --text-heading: 18.7px;
+  --text-display: 22px;
+
+  /* Eyebrow and label tracking. */
+  --tracking-eyebrow: 0.12em;
+  --tracking-label: 0.08em;
+  --tracking-tight: 0.04em;
+
+  /*
+   * Shell geometry, measured at 1360×900, 1440×900 and 390×844.
+   *
+   * The Ask panel is a *fixed* 400px: going from 1360 to 1440 gives all eighty extra pixels to the
+   * workspace pane and none to Ask. Anything that treats Ask as a fraction of the viewport breaks
+   * parity at the second viewport while looking right at the first.
+   */
+  --spacing-sidebar: 228px;
+  --spacing-sidebar-collapsed: 68px;
+  --spacing-workspace-header: 61px;
+  --spacing-ask: 400px;
+  --spacing-mobilenav: 59px;
+}
+
+/*
+ * The prototype's breakpoints, named so components stop inventing their own.
+ *
+ *   980px — the Ask panel stops being a column and stacks under the workspace.
+ *   720px — the sidebar goes, the bottom navigation arrives, sheets go full width.
+ *
+ * Tailwind v4 reads these from @theme for its `max-*` variants.
+ */
+@theme {
+  --breakpoint-ask-stack: 980px;
+  --breakpoint-mobile: 720px;
 }
