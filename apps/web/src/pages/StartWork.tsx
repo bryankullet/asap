@@ -53,6 +53,11 @@ const KINDS = [
     label: "A change to a policy",
     hint: "A vehicle, an address, a sum insured. The insurer's answer writes a new policy version.",
   },
+  {
+    id: "document" as const,
+    label: "A document",
+    hint: "A schedule, a debit note, a claim form. ASAP reads it and proposes what it says; a person accepts or corrects every value before anything treats it as known.",
+  },
 ];
 
 export function StartWork() {
@@ -113,6 +118,12 @@ export function StartWork() {
   });
 
   function submit(clientId?: string, confirmNew = false) {
+    /*
+     * Filing a document opens no work item, so it has no form and never reaches here. The guard
+     * is explicit rather than a cast: if someone later gives this kind a form, the compiler stops
+     * them here instead of sending `kind: "document"` to an endpoint that has no such kind.
+     */
+    if (kind === "document") return;
     const base = clientId ? { clientId } : { clientName: clientName.trim() };
     if (kind === "client") {
       createClient.mutate({ name: clientName.trim(), kind: clientKind, confirmNew });
@@ -199,6 +210,18 @@ export function StartWork() {
             ))}
           </nav>
 
+          {kind === "document" ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-sm text-ink-secondary">
+                Filing a document does not need a client first. A schedule often arrives before
+                anyone has decided which record it belongs to, so ASAP files it, reads it, and asks
+                you which record it is about afterwards.
+              </p>
+              <Link to="/documents" className="primary self-start">
+                Choose a file to file
+              </Link>
+            </div>
+          ) : (
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -374,6 +397,7 @@ export function StartWork() {
               </button>
             </div>
           </form>
+          )}
 
           {(create.isError || createClient.isError || createPolicy.isError) && (
             <div className="warning">
