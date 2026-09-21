@@ -194,6 +194,7 @@ services:
           envVarKey: API_INTERNAL_KEY
       - key: EVENT_POLL_MS
         value: "2000"
-      # Required once APP_ENV is not local (packages/schema/src/env/worker.ts).
+      # Optional (D-078). Without it the worker starts and says so in its first log line; with it
+      # the DSN's shape is checked, because one that reports nowhere is the failure nobody notices.
       - key: SENTRY_DSN
         sync: false

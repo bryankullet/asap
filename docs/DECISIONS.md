@@ -1110,3 +1110,35 @@ replace a person's accepted values with fresh guesses.
   the worker against the real API — but not all four at once, because the local stand-in has no
   storage download.
 - `pnpm test` does not run the Python tests; `pnpm test:extractor` does.
+
+## D-078 — Sentry is optional for the worker; a supplied DSN must be a DSN
+
+**2026-09-21.** The worker refused to start when `APP_ENV` was not `local` and `SENTRY_DSN` was
+unset. The reasoning was sound — a background worker whose failures nobody sees is worse than no
+worker — but it was buying the wrong thing. The failure it produced was the whole tier staying
+down, which is louder and more expensive than the quiet one it was guarding against, and the
+worker's errors reach the platform log either way.
+
+So the DSN is optional in every environment, and the worker says which of the two error paths is
+live in its first log line: `Sentry is not configured; errors will be available in Render logs.`
+
+**What is not optional is the shape.** A DSN that is present and malformed is refused at startup,
+because a truncated copy-paste that reports nowhere is the one outcome nobody would ever notice —
+the configuration looks done and the alerts never come. The validator insists on what the Sentry
+client itself needs: an http(s) URL with a public key, no secret key, and a numeric project id.
+
+It is an opt-in validator (`sentryDsn` in `packages/schema/src/env/shared.ts`) rather than a change
+to the shared `monitoringShape`, so the API's handling is untouched — it has accepted whatever
+string it was given for months, and tightening that belongs to its own change, not this one.
+
+### What this does not do
+
+**No Sentry SDK is installed in this repository.** `SENTRY_DSN` has always been a validated but
+unused value: nothing in `apps/api`, `apps/workers` or `apps/web` sends anything to Sentry.
+`initObservability` is where a client is wired when one is added, and until then a supplied DSN is
+recorded and the startup line says plainly that no client is installed. Adding `@sentry/node` is a
+separate change — it is a new production dependency on the worker, and it was not what "make Sentry
+optional" asked for.
+
+Numbering note: this is D-078 rather than D-073 because D-073 to D-077 are taken on
+`claude/ui-integration`, which has not merged yet. A gap is cheaper than a collision.

@@ -2,10 +2,15 @@ import { createWorkerDb } from "@asap/db";
 import { loadWorkerEnv } from "@asap/schema/env/worker";
 import { createLogger } from "./logger.js";
 import { dispatchPending, httpDispatcher } from "./events/dispatcher.js";
+import { initObservability } from "./observability.js";
 
 // Fails immediately, naming the variable, if the environment is incomplete.
 const env = loadWorkerEnv();
 const logger = createLogger(env.LOG_LEVEL, env.APP_ENV === "local");
+
+// Says which of the two error paths is live before anything else runs, so the first line of the
+// log answers "will I hear about a failure?" without anyone reading the configuration.
+initObservability(env, logger);
 
 const db = createWorkerDb(env.WORKER_DATABASE_URL);
 

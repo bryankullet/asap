@@ -4,8 +4,8 @@ import {
   monitoringShape,
   parseEnv,
   postgresUrl,
-  requireInDeployedEnvironments,
   runtimeShape,
+  sentryDsn,
 } from "./shared.js";
 
 /**
@@ -32,8 +32,20 @@ export const workerEnvSchema = z
     /** How often the dispatcher looks for events nobody has handled. */
     EVENT_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
     ...monitoringShape,
-  })
-  .superRefine(requireInDeployedEnvironments(["SENTRY_DSN"]));
+    /**
+     * Optional, including in staging and production.
+     *
+     * It was required once APP_ENV left `local`, on the reasoning that a background worker whose
+     * failures nobody sees is worse than no worker. That reasoning still holds, but it was buying
+     * the wrong thing: the worker refused to start, which is a louder failure than the one it was
+     * guarding against, and its errors go to the platform log either way.
+     *
+     * So the DSN is optional and the worker says at startup which of the two is happening. What
+     * is *not* optional is the shape: a DSN that is present and malformed is refused, because a
+     * truncated copy-paste that reports nowhere is the one outcome nobody would notice.
+     */
+    SENTRY_DSN: sentryDsn,
+  });
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 

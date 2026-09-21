@@ -56,6 +56,39 @@ export const runtimeShape = {
   GITHUB_SHA: optionalNonEmpty,
 };
 
+/**
+ * A Sentry DSN, when one is supplied.
+ *
+ * Deliberately not part of `monitoringShape`: adding shape validation there would tighten every
+ * service at once, and the API has shipped for months accepting whatever string it was given. A
+ * service that wants the value checked opts in by overriding the key with this.
+ *
+ * The shape is what the Sentry client itself requires — `https://<public key>@<host>/<project id>`
+ * — so a truncated copy-paste is refused at startup rather than silently reporting nowhere.
+ */
+export const sentryDsn = z
+  .string()
+  .trim()
+  .transform((v) => (v === "" ? undefined : v))
+  .optional()
+  .superRefine((value, ctx) => {
+    if (value === undefined) return;
+    const fail = (message: string) => ctx.addIssue({ code: "custom", message });
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      fail("must be a Sentry DSN of the form https://<public key>@<host>/<project id>");
+      return;
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      fail("must be an http(s) Sentry DSN");
+    }
+    if (url.username === "") fail("is missing its public key (the part before @)");
+    if (url.password !== "") fail("must not contain a secret key; Sentry DSNs carry only a public key");
+    if (!/^\/\d+\/?$/.test(url.pathname)) fail("is missing its numeric project id (the part after the host)");
+  });
+
 export const monitoringShape = {
   SENTRY_DSN: optionalNonEmpty,
   SENTRY_ENVIRONMENT: optionalNonEmpty,
