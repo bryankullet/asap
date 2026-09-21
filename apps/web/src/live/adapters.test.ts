@@ -140,7 +140,7 @@ describe("Work's tile, from a ranked row", () => {
   it("reads as the demo's tile: kind, badge, headline, reason, context", () => {
     expect(workTileFromRow(workRow())).toMatchObject({
       workType: "Servicing / TOR",
-      pill: "Active",
+      pill: "Your work",
       pillTone: "high",
       headline: "Add KDN 482Q to Acme's cover",
       summary: "Meridian has not confirmed cover for the vehicle.",
@@ -153,7 +153,8 @@ describe("Work's tile, from a ranked row", () => {
     const row = workRow({
       item: item({ task_status: "with_party", task_party: "Meridian", task_since: "2026-09-01T00:00:00.000Z" }),
     });
-    expect(workTileFromRow(row).pill).toBe("Waiting on Meridian");
+    // D-075: the party and the date, never a bare "Waiting".
+    expect(workTileFromRow(row).pill).toMatch(/^With Meridian( since .+)?$/);
   });
 
   it("puts a run that could not finish above the task's own status", () => {

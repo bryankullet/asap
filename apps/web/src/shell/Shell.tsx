@@ -1,11 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
-import { useRunList, useWorkList } from "../lib/queries.js";
+import { useRuns, useWorkList } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { NAV } from "./nav.js";
+import { AskComposer } from "./AskComposer.js";
+import { ActivityChip } from "./ActivityChip.js";
 
 import { ProfileMenu } from "./ProfileMenu.js";
 
@@ -59,7 +61,7 @@ export function Shell() {
     <div className="demo-root">
       <div className="app-shell no-bar">
         <aside className="sidebar">
-          <Link to="/discover" className="brand">
+          <Link to="/today" className="brand">
             <span aria-hidden className="brand-mark">
               A
             </span>
@@ -119,6 +121,7 @@ export function Shell() {
 
         <main className="product-view">
           <Outlet />
+          <AskDock />
         </main>
       </div>
     </div>
@@ -126,7 +129,7 @@ export function Shell() {
 }
 
 /**
- * The counts beside Work and Jobs — read from the same source the screen itself reads.
+ * The count beside Work — read from the same source the screen itself reads.
  *
  * It is the API, through the queries the boards already run, so the number in the sidebar and the
  * list behind it come from one answer and cannot disagree. A count nobody can reach the rows for
@@ -135,18 +138,37 @@ export function Shell() {
 function NavCount({ to }: { to: string }) {
   const me = useMe();
   const orgId = me.data?.active_organization?.id;
-  // The same query keys the boards use, so this costs nothing extra when a board is open.
+  // The same query key the board uses, so this costs nothing extra when Work is open.
   const work = useWorkList(orgId, "needs");
-  const jobs = useRunList(orgId, "all");
-
-  const n =
-    to === "/work"
-      ? (work.data?.counts.needs ?? 0)
-      : to === "/jobs"
-        ? // What ASAP itself is still carrying. A job stopped for a person is on the board's Work
-          // tab, where a person looks for it, not in the count of what is running.
-          (jobs.data?.counts.running ?? 0) + (jobs.data?.counts.waiting ?? 0)
-        : 0;
+  const n = to === "/work" ? (work.data?.counts.needs ?? 0) : 0;
   if (n === 0) return null;
   return <span className="nav-count">{n}</span>;
+}
+
+/**
+ * Ask, and the runs beside it — docked on every surface (D-074).
+ *
+ * Both components existed and neither was mounted, so "Ask is always in reach" was not true of the
+ * running product. The dock is where that becomes true: it sits at the foot of the main column on
+ * every screen, and the Activity chip sits with it because runs are something Ask started.
+ *
+ * Activity stays optional. It renders nothing when no run is worth showing, and anything needing a
+ * person is in Work regardless — hiding the chip can never hide a decision or a failure.
+ *
+ * The full Ask surface is its own route, so it does not dock on top of itself.
+ */
+function AskDock() {
+  const me = useMe();
+  const orgId = me.data?.active_organization?.id;
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const runs = useRuns(orgId);
+  // One start for the session, so "finished since I got here" does not move as the clock does.
+  const sessionStart = useRef(new Date()).current;
+  if (path.startsWith("/ask")) return null;
+  return (
+    <div className="ask-dock">
+      <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
+      <AskComposer />
+    </div>
+  );
 }

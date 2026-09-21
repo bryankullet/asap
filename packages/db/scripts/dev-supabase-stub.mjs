@@ -25,6 +25,8 @@
  * It lives in `packages/db` because that is where the PostgreSQL driver is a dependency.
  */
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
 import postgres from "postgres";
 
 if ((process.env.APP_ENV ?? "local") !== "local") {
@@ -165,6 +167,36 @@ async function asCaller(token, headers, run) {
   });
 }
 
+/*
+ * Storage, on disk.
+ *
+ * Added because the chain from a browser upload to an extracted field could not be exercised in
+ * one pass without it: the stand-in had no storage at all, so "the extractor read the file the
+ * browser uploaded" was only ever provable in separate pieces. Four routes are enough, in the
+ * shapes supabase-js calls them:
+ *
+ *   POST /storage/v1/object/upload/sign/{bucket}/{path}   → a signed upload url and token
+ *   PUT  that url                                          → the bytes
+ *   POST /storage/v1/object/sign/{bucket}/{path}           → a signed read url
+ *   GET  /storage/v1/object/{bucket}/{path}                → the bytes back
+ *
+ * No authorisation and no expiry: this is a harness. Never conclude from it that storage rules
+ * hold in production.
+ */
+const STORAGE_ROOT = process.env.STUB_STORAGE_DIR ?? path.join(process.cwd(), ".stub-storage");
+
+function storagePathFor(bucketAndKey) {
+  const safe = bucketAndKey.split("/").filter((p) => p && p !== "." && p !== "..");
+  return path.join(STORAGE_ROOT, ...safe);
+}
+
+const rawBody = (req) =>
+  new Promise((resolve) => {
+    const chunks = [];
+    req.on("data", (d) => chunks.push(d));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+
 const body = (req) =>
   new Promise((resolve) => {
     let raw = "";
@@ -186,6 +218,47 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") return send(204);
 
   try {
+    // ---- Storage ---------------------------------------------------------------------------
+    const signUpload = /^\/storage\/v1\/object\/upload\/sign\/(.+)$/.exec(url.pathname);
+    if (signUpload && req.method === "POST") {
+      const key = signUpload[1];
+      /*
+       * Relative to the storage endpoint, not to the host: supabase-js joins this onto its own
+       * `/storage/v1` base without a separator, so the leading slash belongs here and the
+       * `/storage/v1` prefix does not. Getting it wrong produced
+       * `/storage/v1/storage/v1/object/...`, then `/storage/v1object/...`.
+       */
+      return send(200, {
+        url: `/object/upload/sign/${key}?token=stub-token`,
+        token: "stub-token",
+      });
+    }
+    if (signUpload && req.method === "PUT") {
+      const file = storagePathFor(signUpload[1]);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, await rawBody(req));
+      return send(200, { Key: signUpload[1] });
+    }
+    const signRead = /^\/storage\/v1\/object\/sign\/(.+)$/.exec(url.pathname);
+    if (signRead && req.method === "POST") {
+      if (!fs.existsSync(storagePathFor(signRead[1]))) {
+        return send(404, { message: "Object not found" });
+      }
+      return send(200, { signedURL: `/object/${signRead[1]}?token=stub-token` });
+    }
+    const getObject = /^\/storage\/v1\/object\/(?!sign|upload)(.+)$/.exec(url.pathname);
+    if (getObject && req.method === "GET") {
+      const file = storagePathFor(getObject[1]);
+      if (!fs.existsSync(file)) return send(404, { message: "Object not found" });
+      const bytes = fs.readFileSync(file);
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(bytes.length),
+        "Access-Control-Allow-Origin": "*",
+      });
+      return res.end(bytes);
+    }
+
     const token = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
     // Header names arrive lower-cased from Node, which is what PostgREST passes on too.
     const headers = Object.fromEntries(

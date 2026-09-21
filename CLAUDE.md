@@ -210,15 +210,13 @@ older frontend decision conflicts with it, amend the decision — do not omit th
 
 There is still no insurance-module navigation. No `Work / Clients / Policies / Renewals / Claims /
 Money` menu tree: §45 rule 16 forbids it, and no insurance module ever becomes a destination. The
-permanent shell is (D-064, amending D-058 and D-060):
+permanent shell is (D-074, superseding D-064):
 
 ```text
 ASAP
 ────────────────
-✦ Discover
-⌁ Ask ASAP
+✦ Today
 ▱ Work
-◴ Jobs
 ⌘ Automations
 ────────────────
 ⌕ Search
@@ -227,18 +225,29 @@ ASAP
 Profile
 ```
 
-**Ask ASAP is both.** It stays permanently reachable as the docked composer on every surface, and it
-is a full destination where the whole conversation, its context chip, the generated Work panel and
-the evidence live.
+**Ask ASAP is persistent, not a destination** (D-074). It is docked at the foot of every screen. It
+keeps the address `/ask` so a conversation can be linked and reopened, and so the composer has
+somewhere to open into — but it is not in the sidebar, because something always in reach is never
+somewhere to go.
 
-**Jobs is a destination** (D-064, superseding D-060). It answers a different question from Work:
-Jobs is what *ASAP* is processing; Work is what a *person* owns. Keeping them apart is the point of
-showing both — a finished Job means ASAP produced an output, never that a policy renewed, a claim
-was accepted or money arrived.
+**Jobs is not a destination** (D-074, restoring D-060). Runs arrive through the **Activity chip**
+beside Ask, and a run opens in full from there, from its Work item, from an import or from
+automation history. Jobs is what *ASAP* is processing; Work is what a *person* owns — a finished Job
+means ASAP produced an output, never that a policy renewed, a claim was accepted or money arrived.
+A run may never be the only place something important lives: anything needing a person is in Work
+first, so Activity can be ignored at no cost.
 
-**Work's vocabulary is Active · Waiting · For review · Completed · Pinned · Recent.** "Needs you" is
-retired from every visible surface; `vocabulary.test.ts` fails if it returns. Pinned is a filter,
-not a destination. "Space" never appears on screen — it is called Work.
+**Work's main views are Your work · With others · In progress · Done · Recent** (D-075), and four
+of them are the task-status layer itself. "Needs you" and a bare "Waiting" are both retired from
+every visible surface; `vocabulary.test.ts` fails if either returns.
+
+**When an outside party holds the work, name them:** *With CIC since 12 Aug*, *With client since
+14 Aug*, *With assessor since 16 Aug*. `<TaskStatus>` refuses to render `with_party` without both
+the party and the date.
+
+**Pinned is a personal marker, not a view** — a way of finding work, not a state work is in — and
+**"For review" is contextual**, appearing only where review is genuinely the question, never as the
+name for all human work. "Space" never appears on screen — it is called Work.
 
 **There is one application and it is the brokerage's own** (D-069). The public fixture-only
 demonstration of D-065 has been removed — fixtures, presenter bar, `VITE_PUBLIC_DEMO_MODE` and the
@@ -247,7 +256,7 @@ destination, unconditionally, and there is no flag that turns either off.
 `apps/web/src/routing/auth-entry.test.tsx` drives the real route tree and fails if any destination
 becomes reachable without signing in.
 
-**Every board reads the brokerage's own rows** (D-066): Discover from `GET /attention`, Work from
+**Every board reads the brokerage's own rows** (D-066): Today from `GET /attention`, Work from
 `GET /work?view=`, Jobs from `GET /runs`, Automations from `GET /automations`, Search from
 `GET /search`, Audit from `GET /audit`, Email from `GET /email/threads`. Each board renders a typed
 view model from `packages/schema/src/views/boards.ts`, produced by `apps/web/src/live/adapters.ts`.

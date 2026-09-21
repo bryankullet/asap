@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
-import { date, index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { check, date, index, integer, jsonb, numeric, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, deletedAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
 import { clients, insurers } from "./compliance.js";
+import { documents } from "./documents.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
 import { workItems } from "./work.js";
@@ -23,7 +24,25 @@ export const policies = pgTable(
   (t) => [index("policies_organization_id_idx").on(t.organizationId), index("policies_client_id_idx").on(t.clientId), index("policies_insurer_id_idx").on(t.insurerId)],
 );
 
-/** D-029 option B: the thin client-policy-year. */
+export const PREMIUM_BASES = ["gross", "total_payable"] as const;
+/** Where a figure came from, which is what decides how far it can be trusted. */
+export const PREMIUM_SOURCES = ["manual", "import", "document", "seed"] as const;
+
+/**
+ * D-029 option B: the thin client-policy-year. Money added by 0039, 0041 and 0043.
+ *
+ * Every monetary column is `numeric` with a fixed scale and read as a string: a premium is never
+ * a floating-point number, and it never passes through one on its way to or from the database.
+ *
+ * The three premium constraints are the honesty rules, and they live here rather than in the API:
+ *
+ *   * an amount, its currency and its basis exist together or not at all — a figure with no units
+ *     is not a premium, and nobody can tell a gross premium from everything payable after the fact;
+ *   * `premium_source` says where the figure came from, and defaults to `manual` because that is
+ *     what every figure predating 0039 actually is: a claim the old system made, unverified;
+ *   * `premium_verified_at` requires the document it was verified against. A premium cannot be
+ *     marked verified without the evidence a person can open.
+ */
 export const policyPeriods = pgTable(
   "policy_periods",
   {
@@ -33,8 +52,33 @@ export const policyPeriods = pgTable(
     periodStart: date("period_start").notNull(),
     periodEnd: date("period_end").notNull(),
     createdAt: createdAt(),
+    premiumAmount: numeric("premium_amount", { precision: 14, scale: 2, mode: "string" }),
+    /** ISO 4217, from the brokerage itself — never read off a document. */
+    premiumCurrency: text("premium_currency"),
+    premiumBasis: text("premium_basis"),
+    commissionRate: numeric("commission_rate", { precision: 6, scale: 4, mode: "string" }),
+    commissionAmount: numeric("commission_amount", { precision: 14, scale: 2, mode: "string" }),
+    premiumSource: text("premium_source").notNull().default("manual"),
+    premiumVerifiedAt: timestamptz("premium_verified_at"),
+    premiumEvidenceDocumentId: uuid("premium_evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
   },
-  (t) => [index("policy_periods_organization_id_idx").on(t.organizationId), index("policy_periods_policy_id_idx").on(t.policyId)],
+  (t) => [
+    index("policy_periods_organization_id_idx").on(t.organizationId),
+    index("policy_periods_policy_id_idx").on(t.policyId),
+    index("policy_periods_premium_evidence_document_id_idx").on(t.premiumEvidenceDocumentId),
+    check("policy_periods_premium_amount_check", sql`${t.premiumAmount} is null or ${t.premiumAmount} >= 0`),
+    check("policy_periods_premium_currency_check", sql`${t.premiumCurrency} is null or ${t.premiumCurrency} ~ '^[A-Z]{3}$'`),
+    check("policy_periods_premium_basis_check", sql`${t.premiumBasis} in ('gross','total_payable')`),
+    check(
+      "policy_periods_premium_is_complete",
+      sql`(${t.premiumAmount} is null and ${t.premiumCurrency} is null and ${t.premiumBasis} is null)
+          or (${t.premiumAmount} is not null and ${t.premiumCurrency} is not null and ${t.premiumBasis} is not null)`,
+    ),
+    check("policy_periods_commission_rate_check", sql`${t.commissionRate} is null or (${t.commissionRate} >= 0 and ${t.commissionRate} <= 1)`),
+    check("policy_periods_commission_amount_check", sql`${t.commissionAmount} is null or ${t.commissionAmount} >= 0`),
+    check("policy_periods_premium_source_check", sql`${t.premiumSource} in ('manual','import','document','seed')`),
+    check("policy_periods_verified_has_evidence", sql`${t.premiumVerifiedAt} is null or ${t.premiumEvidenceDocumentId} is not null`),
+  ],
 );
 
 export const policyVersions = pgTable(

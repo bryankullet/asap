@@ -18,9 +18,14 @@ import {
   connectMailboxResponseSchema,
   documentDetailSchema,
   documentFiledResponseSchema,
+  applyPreviewResponseSchema,
+  applyResponseSchema,
+  applyTargetsResponseSchema,
+  retryExtractionResponseSchema,
   uploadResponseSchema,
   reviewFieldResponseSchema,
   type ReviewFieldRequest,
+  type ApplyRequest,
   type UploadInput,
   type CreatePolicyInput,
   claimDetailSchema,
@@ -249,6 +254,22 @@ export const api = {
   /** Tells the API the bytes arrived: the upload is direct to storage, so it cannot know. */
   documentFiled: (id: string) =>
     request("POST", `/documents/${id}/filed`, documentFiledResponseSchema, {}),
+  /** The records this document might be about, each with why ASAP believes it. */
+  applyTargets: (id: string) =>
+    request("GET", `/documents/${id}/apply-targets`, applyTargetsResponseSchema),
+  /** What applying would change, before anything is written. */
+  applyPreview: (id: string, targetType: string, targetId: string) =>
+    request(
+      "GET",
+      `/documents/${id}/apply-preview?targetType=${targetType}&targetId=${targetId}`,
+      applyPreviewResponseSchema,
+    ),
+  /** Write the chosen values to the named record. */
+  applyToRecord: (id: string, input: ApplyRequest) =>
+    request("POST", `/documents/${id}/apply`, applyResponseSchema, input),
+  /** Read a failed document again. Answers `retried: false` from any other state. */
+  retryExtraction: (id: string) =>
+    request("POST", `/documents/${id}/extraction/retry`, retryExtractionResponseSchema, {}),
   uploadDocument: (input: UploadInput) =>
     request("POST", "/documents", uploadResponseSchema, input),
   /** One person's decision about one extracted field. Extraction proposes; a person decides. */

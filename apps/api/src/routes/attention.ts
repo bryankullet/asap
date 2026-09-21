@@ -252,6 +252,9 @@ export function attentionRoutes() {
     const inView2 = (item: WorkItemRow, view: WorkListResponse["view"]): boolean => {
       if (view === "needs") return item.task_status === "needs_you";
       if (view === "with") return item.task_status === "with_party";
+      // D-075: work a person has started and nobody outside is holding. "Your work" (needs) is
+      // what has not been picked up; this is what has.
+      if (view === "progress") return item.task_status === "in_progress";
       if (view === "review") return awaitingReview.has(item.id) && item.task_status !== "done";
       if (view === "done") return item.task_status === "done";
       return item.task_status !== "done";

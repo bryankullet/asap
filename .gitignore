@@ -34,3 +34,11 @@ coverage/
 .local-db/
 # A production-mode bundle built for the live-wiring harness (docs/audit/live-wiring).
 apps/web/dist-live/
+
+# python — the extractor's environment and build artefacts. The lock file is committed; these
+# never are.
+apps/extractor/.venv/
+**/__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/

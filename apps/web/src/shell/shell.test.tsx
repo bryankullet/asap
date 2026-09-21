@@ -124,23 +124,24 @@ const RUNS: RunRow[] = [
 ];
 
 describe("shell navigation", () => {
-  it("renders the approved five destinations in order (D-064)", async () => {
+  it("renders the three destinations in order (D-074)", async () => {
     expect(NAV.map((n) => [n.to, n.glyph, n.label])).toEqual([
-      ["/discover", "✦", "Discover"],
-      ["/ask", "⌁", "Ask ASAP"],
+      ["/today", "✦", "Today"],
       ["/work", "▱", "Work"],
-      ["/jobs", "◴", "Jobs"],
       ["/automations", "⌘", "Automations"],
     ]);
-    await renderInRouter(<ShellNav />);
+    await renderInRouter(<ShellNav />, "/today");
     const links = within(screen.getByRole("navigation", { name: "Main" })).getAllByRole("link");
-    expect(links.map((l) => l.textContent?.trim())).toEqual([
-      "✦Discover",
-      "⌁Ask ASAP",
-      "▱Work",
-      "◴Jobs",
-      "⌘Automations",
-    ]);
+    expect(links.map((l) => l.textContent?.trim())).toEqual(["✦Today", "▱Work", "⌘Automations"]);
+  });
+
+  it("offers neither Ask ASAP nor Jobs as a destination (D-074)", async () => {
+    // Both are reachable — Ask is docked everywhere and has its own address; a run opens from
+    // Activity. Neither is somewhere a person navigates to, so neither is in the sidebar.
+    await renderInRouter(<ShellNav />, "/today");
+    const nav = within(screen.getByRole("navigation", { name: "Main" }));
+    expect(nav.queryByRole("link", { name: /Ask ASAP/ })).toBeNull();
+    expect(nav.queryByRole("link", { name: /Jobs/ })).toBeNull();
   });
 
   it("never offers an insurance module as a destination", async () => {
@@ -166,6 +167,8 @@ describe("record views (checks.mjs line 23)", () => {
       // and the old assertion forbade exactly the language the demo is built on.
       expect(html).not.toMatch(/Renewal Space|Space:/);
       expect(html).not.toMatch(/Needs you/);
+      // A bare "Waiting" is retired too (D-074): waiting means nothing until it names the party.
+      expect(html).not.toMatch(/>\s*Waiting\s*</);
       // Only "Space" stays banned — it is called Work on screen. Waiting, Active, For review and
       // Completed are now the approved vocabulary (D-064), so the old list forbade the very words
       // the demo is built from.

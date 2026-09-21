@@ -85,6 +85,22 @@ LABELS: dict[str, tuple[str, ...]] = {
     "premium": ("premium", "gross premium", "total premium", "annual premium"),
 }
 
+# How far apart two words' baselines may be and still be one visual line, in points.
+_LINE_TOLERANCE = 3.0
+
+# Longest label first, so "class of business" is tried before "class". Matching the shorter one
+# first proposed the remainder of the heading — "of business" — as the class of business.
+_LABELS_LONGEST_FIRST: tuple[tuple[str, str], ...] = tuple(
+    sorted(
+        ((key, label) for key, labels in LABELS.items() for label in labels),
+        key=lambda pair: len(pair[1]),
+        reverse=True,
+    )
+)
+
+# Every label spelling, for rejecting a "value" that is really part of a heading.
+_EVERY_LABEL: frozenset[str] = frozenset(label for _, label in _LABELS_LONGEST_FIRST)
+
 # A value that follows its label on the same line, after a colon or run of spaces.
 _VALUE_AFTER_LABEL = re.compile(r"^[\s:.\-–]*(.+)$")
 
@@ -141,44 +157,57 @@ def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
 
     Position is the point. A figure a person cannot find on the page is a figure they cannot check,
     so every proposal carries the rectangle it was read from and the viewer can highlight it.
+
+    **Lines are assembled from geometry, not from PyMuPDF's line numbers.** A real schedule puts
+    the label in one column and the value in another, and those are separate text insertions: the
+    PDF's own idea of a "line" splits them, so a label ended up with no value beside it and seven
+    fields out of eight read as missing against an ordinary two-column schedule. Grouping words by
+    their baseline is how the same problem was solved for imported tables, and it is the same
+    problem.
     """
     words = page.get_text("words")  # (x0, y0, x1, y1, word, block, line, word_no)
     if not words:
         return
 
-    lines: dict[tuple[int, int], list[tuple[float, float, float, float, str]]] = {}
-    for x0, y0, x1, y1, word, block, line, _ in words:
-        lines.setdefault((block, line), []).append((x0, y0, x1, y1, word))
+    # Words whose baselines agree to within a couple of points are on the same visual line. The
+    # tolerance is deliberately coarse: a schedule's rows are far further apart than this.
+    lines: dict[int, list[tuple[float, float, float, float, str]]] = {}
+    for x0, y0, x1, y1, word, _block, _line, _ in words:
+        lines.setdefault(round(y0 / _LINE_TOLERANCE), []).append((x0, y0, x1, y1, word))
 
     for parts in lines.values():
         parts.sort(key=lambda w: w[0])
         text = " ".join(p[4] for p in parts)
         flat = _normalise(text)
 
-        for key, labels in LABELS.items():
-            for label in labels:
-                if not flat.startswith(label):
-                    continue
-                remainder = text[len(label):] if len(text) > len(label) else ""
-                match = _VALUE_AFTER_LABEL.match(remainder)
-                value = match.group(1).strip(" \t:.-–") if match else ""
-                if not value or not _HAS_SUBSTANCE.search(value):
-                    continue
+        for key, label in _LABELS_LONGEST_FIRST:
+            if not flat.startswith(label):
+                continue
+            remainder = text[len(label):] if len(text) > len(label) else ""
+            match = _VALUE_AFTER_LABEL.match(remainder)
+            value = match.group(1).strip(" \t:.-–") if match else ""
+            if not value or not _HAS_SUBSTANCE.search(value):
+                continue
+            # A value that is itself a label is the rest of the heading, not an answer. This
+            # is what "Class of business:" gave when the shorter label "class" matched first
+            # and the remainder "of business" was offered as the class of business.
+            if _normalise(value) in _EVERY_LABEL:
+                continue
 
-                # The rectangle covering the value's own words, not the label's: a highlight over
-                # the label would point at the question rather than the answer.
-                value_parts = [p for p in parts if p[0] >= parts[0][0] + _label_width(parts, label)]
-                region = _bounds(value_parts or parts)
-                out.fields.append(
-                    Field(
-                        field_key=key,
-                        value=value,
-                        page=page_number,
-                        region=region,
-                        condition="known",
-                    )
+            # The rectangle covering the value's own words, not the label's: a highlight over
+            # the label would point at the question rather than the answer.
+            value_parts = [p for p in parts if p[0] >= parts[0][0] + _label_width(parts, label)]
+            region = _bounds(value_parts or parts)
+            out.fields.append(
+                Field(
+                    field_key=key,
+                    value=value,
+                    page=page_number,
+                    region=region,
+                    condition="known",
                 )
-                break
+            )
+            break
 
 
 def _label_width(parts: list[tuple[float, float, float, float, str]], label: str) -> float:

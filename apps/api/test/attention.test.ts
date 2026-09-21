@@ -479,15 +479,24 @@ describe("GET /work", () => {
       readJson(await app.request(`/work?view=${v}`, { headers: auth("tok-amina") }));
 
     const needs = await view("needs");
-    expect(needs.label).toBe("Active");
+    // The label is the shared one (D-075); the view ids are the API's contract and unchanged.
+    expect(needs.label).toBe("Your work");
     expect(needs.items).toHaveLength(4);
 
     const withOthers = await view("with");
-    expect(withOthers.label).toBe("Waiting");
+    // Never a bare "Waiting" — it names the party (D-074, D-075).
+    expect(withOthers.label).toBe("With others");
     expect(withOthers.items.map((i: { item: { title: string } }) => i.item.title).sort()).toEqual([
       "Acme Motors — renewal terms from Jubilee",
       "Acme — insurer endorsement acknowledgement",
     ]);
+
+    // D-075 split work a person has started from work nobody has picked up.
+    const progress = await view("progress");
+    expect(progress.label).toBe("In progress");
+    for (const entry of progress.items as { item: { task_status: string } }[]) {
+      expect(entry.item.task_status).toBe("in_progress");
+    }
 
     const done = await view("done");
     expect(done.items).toHaveLength(1);

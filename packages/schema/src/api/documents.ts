@@ -284,3 +284,259 @@ export const emailThreadResponseSchema = z.object({
   messages: z.array(emailMessageSchema),
 });
 export type EmailThreadResponse = z.infer<typeof emailThreadResponseSchema>;
+
+/* ---- What a person is told about a document (D-076) ------------------------------------------ */
+
+/**
+ * The state a person reads, derived from `extraction_state` and the fields' own conditions.
+ *
+ * `extraction_state` is where the *machine* has got to. It is not what a person needs to know:
+ * `extracted` covers a document that is ready to check, one where two pages disagree, and one
+ * where nothing could be read at all. Those are three different jobs, so they are three states.
+ *
+ * **Uploading a document is never described as reading it.** A file in the bucket that nothing has
+ * looked at is `uploaded`, and says so.
+ */
+export const ReadingState = z.enum([
+  /** In the bucket. Nothing has read it. */
+  "uploaded",
+  /** Waiting for the worker to claim it. */
+  "queued",
+  /** Our own extractor has it now. */
+  "reading",
+  /** Read, and every value is waiting for a person. */
+  "ready_for_review",
+  /** Read, but the document never gave something it was expected to. */
+  "missing_information",
+  /** Read, and two readings disagree. Both are kept; a person decides. */
+  "conflict_found",
+  /** Reading failed. The reason is in plain language and it can be tried again. */
+  "failed",
+  /** Nothing to read — not a document we extract from. */
+  "not_applicable",
+  /** Every value has been accepted, corrected or rejected by a person. */
+  "reviewed",
+]);
+export type ReadingState = z.infer<typeof ReadingState>;
+
+export const READING_STATE_LABELS: Readonly<Record<ReadingState, string>> = {
+  uploaded: "Uploaded",
+  queued: "Queued",
+  reading: "Reading",
+  ready_for_review: "Ready for review",
+  missing_information: "Missing information",
+  conflict_found: "Conflict found",
+  failed: "Failed",
+  not_applicable: "Not read",
+  reviewed: "Reviewed",
+};
+
+export type ReadingStatus = {
+  state: ReadingState;
+  label: string;
+  /** True only from `failed`: nothing else is a retry, and a retry of a success would re-propose
+   * over a person's accepted values. */
+  retryable: boolean;
+  /** How many fields still have nobody's decision on them. */
+  awaiting: number;
+};
+
+/**
+ * Derived, never stored. A stored copy of this would be one more thing that can disagree with the
+ * rows it was computed from.
+ *
+ * Precedence among read documents: a conflict outranks a gap, and a gap outranks "ready" — because
+ * a person who is told "ready for review" and then finds two contradictory policy numbers has been
+ * misled by the label that was meant to help them.
+ */
+export function readingStatus(input: {
+  extractionState: ExtractionState;
+  fields: readonly Pick<DocumentField, "state" | "condition">[];
+}): ReadingStatus {
+  const { extractionState, fields } = input;
+  const awaiting = fields.filter((f) => f.state === "proposed").length;
+  const done = (state: ReadingState): ReadingStatus => ({
+    state,
+    label: READING_STATE_LABELS[state],
+    retryable: state === "failed",
+    awaiting,
+  });
+
+  if (extractionState === "failed") return done("failed");
+  if (extractionState === "not_applicable") return done("not_applicable");
+  if (extractionState === "not_started") return done("uploaded");
+  if (extractionState === "queued") return done("queued");
+  if (extractionState === "working") return done("reading");
+
+  // extracted. What a person does next depends on what was read, not on the fact that it was.
+  const undecided = fields.filter((f) => f.state === "proposed");
+  if (undecided.some((f) => f.condition === "conflicting")) return done("conflict_found");
+  if (fields.length === 0 || undecided.some((f) => f.condition === "missing")) {
+    return done("missing_information");
+  }
+  if (awaiting > 0) return done("ready_for_review");
+  return done("reviewed");
+}
+
+/**
+ * `POST /documents/:id/extraction/retry` — read it again.
+ *
+ * Only from `failed`. A retry from any other state would re-propose over values a person has
+ * already accepted, which is the one thing extraction must never do.
+ *
+ * It carries nothing, and `retried: false` with the document's current state is the answer when
+ * the document was not in a state a retry applies to — a second click on a queued document is the
+ * ordinary case, not an error.
+ */
+export const retryExtractionResponseSchema = z.object({
+  document: documentSummarySchema,
+  retried: z.boolean(),
+});
+export type RetryExtractionResponse = z.infer<typeof retryExtractionResponseSchema>;
+
+/* ---- Applying a document to the record it is about (D-077) ----------------------------------- */
+
+/**
+ * The kinds of record a document's values can be applied to.
+ *
+ * Narrow on purpose. A kind that is not here cannot be applied to, which is better than a kind
+ * that can be applied to wrongly, and adding one is a migration that names exactly which fields
+ * it accepts.
+ */
+export const ApplyTargetType = z.enum(["policy_period", "policy", "client"]);
+export type ApplyTargetType = z.infer<typeof ApplyTargetType>;
+
+/** Which extracted field can go where. The server is the authority; the UI reads this. */
+export const APPLICABLE_FIELDS: Readonly<Record<ApplyTargetType, readonly string[]>> = {
+  policy_period: ["period_start", "period_end", "premium"],
+  policy: ["policy_number"],
+  client: ["insured_name"],
+};
+
+/**
+ * A record ASAP believes this document is about, and **why it believes it**.
+ *
+ * The reason is not decoration. A person is being asked to confirm a target, and a suggestion
+ * they cannot check is a suggestion they have to take on trust. `condition` says how well it is
+ * known in the same six words used everywhere else: `known` when the document is already filed
+ * against the record, `inferred` when it was matched on what the document says.
+ */
+export const applyTargetSchema = z.object({
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  /** What to call it on screen — "Acme Manufacturing · Commercial Motor · 2026". */
+  label: z.string(),
+  /** Why this record: in plain words, naming what the link rests on. */
+  reason: z.string(),
+  condition: EvidenceCondition,
+});
+export type ApplyTarget = z.infer<typeof applyTargetSchema>;
+
+export const applyTargetsResponseSchema = z.object({
+  suggestions: z.array(applyTargetSchema),
+  /**
+   * Why there is nothing to suggest, when there is nothing. Never null *and* empty: a person
+   * needs to know whether ASAP found nothing or was never able to look.
+   */
+  whyNoTarget: z.string().nullable(),
+  /** Which fields each kind of target accepts, so the UI never offers one that cannot apply. */
+  applicableFields: z.record(ApplyTargetType, z.array(z.string())),
+});
+export type ApplyTargetsResponse = z.infer<typeof applyTargetsResponseSchema>;
+
+/** One row of the before-and-after a person sees before anything is written. */
+export const applyPreviewFieldSchema = z.object({
+  documentFieldId: uuidSchema,
+  fieldKey: z.string(),
+  /** What the record holds now. Null means the record has nothing there yet. */
+  currentValue: z.string().nullable(),
+  /** What would be written: the person's correction if they made one, else what was read. */
+  proposedValue: z.string().nullable(),
+  page: z.number().int().nullable(),
+  region: pageRegionSchema.nullable(),
+  condition: EvidenceCondition,
+  state: FieldState,
+  /** True when the record already holds exactly this. Applying it would change nothing. */
+  unchanged: z.boolean(),
+  /** Why this field cannot be applied to this target, when it cannot. */
+  blockedBecause: z.string().nullable(),
+});
+export type ApplyPreviewField = z.infer<typeof applyPreviewFieldSchema>;
+
+export const applyPreviewResponseSchema = z.object({
+  target: applyTargetSchema,
+  fields: z.array(applyPreviewFieldSchema),
+  /** Fields this target accepts but the document never gave. Stated, not omitted. */
+  missing: z.array(z.string()),
+});
+export type ApplyPreviewResponse = z.infer<typeof applyPreviewResponseSchema>;
+
+/**
+ * `POST /documents/:id/apply` — write the chosen values to the named record.
+ *
+ * Three things are required rather than convenient:
+ *
+ *  - **`targetType` and `targetId`.** There is no "best guess" path. A document with no target a
+ *    person has named is not applied.
+ *  - **`from` on every field**: the value the browser showed. The server checks it against the
+ *    record before writing anything, and refuses the whole apply if the record has moved.
+ *  - **`idempotencyKey`**: one press of Apply. The same key returns the first receipt and writes
+ *    nothing.
+ */
+export const applyRequestSchema = z.object({
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  idempotencyKey: z.string().min(8).max(200),
+  fields: z
+    .array(
+      z.object({
+        documentFieldId: uuidSchema,
+        fieldKey: z.string().min(1),
+        /** What the record held when the person looked. Null when it held nothing. */
+        from: z.string().nullable(),
+        /** What to write. A person may correct it here before applying. */
+        to: z.string().min(1),
+        /**
+         * A premium's basis — required for `premium`, meaningless for anything else.
+         *
+         * The database refuses an amount without a currency and a basis, and a schedule states a
+         * figure without saying whether it is the gross premium or everything payable. Nobody can
+         * derive one from the other once levies are involved, so the person chooses and the apply
+         * is refused without it. Currency defaults to the brokerage's own, which is a fact about
+         * the organization rather than a guess about the document.
+         */
+        premiumBasis: z.enum(["gross", "total_payable"]).optional(),
+        premiumCurrency: z.string().length(3).optional(),
+      }),
+    )
+    .min(1),
+});
+export type ApplyRequest = z.infer<typeof applyRequestSchema>;
+
+export const applyResponseSchema = z.object({
+  applicationId: uuidSchema,
+  targetType: ApplyTargetType,
+  targetId: uuidSchema,
+  appliedAt: z.string(),
+  /** What was written, both sides of each field. This is the receipt. */
+  changes: z.array(
+    z.object({
+      fieldKey: z.string(),
+      documentFieldId: uuidSchema.nullable(),
+      from: z.string().nullable(),
+      to: z.string(),
+      page: z.number().int().nullable(),
+    }),
+  ),
+  /** True when this key had already been applied: the receipt is the first one's. */
+  repeat: z.boolean(),
+});
+export type ApplyResponse = z.infer<typeof applyResponseSchema>;
+
+/** What the record held instead, when an apply was refused for being out of date. */
+export const applyConflictSchema = z.object({
+  fieldKey: z.string(),
+  expected: z.string().nullable(),
+  found: z.string().nullable(),
+});
+export type ApplyConflict = z.infer<typeof applyConflictSchema>;

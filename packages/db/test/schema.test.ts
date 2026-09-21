@@ -26,7 +26,31 @@ const TENANT_TABLES = [
   schema.claimDocuments,
   schema.claimNotes,
   schema.endorsements,
+  schema.conversations,
+  schema.conversationMessages,
+  schema.workItemPins,
+  schema.documents,
+  schema.documentPages,
+  schema.documentFields,
+  schema.documentApplications,
+  schema.mailboxes,
+  schema.emailThreads,
+  schema.emailMessages,
+  schema.emailAttachments,
+  schema.emailSendAttempts,
+  schema.automations,
+  schema.automationRuns,
+  schema.clientContacts,
+  schema.importBatches,
+  schema.importRows,
 ];
+
+/**
+ * The one public table with no `organization_id`, and it is deliberate: the component registry is
+ * platform configuration like `roles` and `permissions`. Every brokerage renders from the same
+ * registry, so a per-brokerage row would be wrong rather than missing.
+ */
+const PLATFORM_TABLES = [schema.componentDefinitions];
 
 describe("Drizzle schema conventions", () => {
   it("every tenant table carries a not-null organization_id referencing organizations", () => {
@@ -43,7 +67,20 @@ describe("Drizzle schema conventions", () => {
     }
   });
 
-  it("lists exactly the eleven Phase 1 tables, event_deliveries, and the 0022/0023 engine tables and the 0026/0028 servicing tables", () => {
+  it("no platform table carries an organization_id, which is what makes it platform configuration", () => {
+    for (const table of PLATFORM_TABLES) {
+      const cfg = getTableConfig(table);
+      expect(cfg.columns.find((c) => c.name === "organization_id")).toBeUndefined();
+    }
+  });
+
+  /*
+   * Every public table through migration 0043. The list is written out rather than counted so
+   * that adding a table to the database without representing it here — or representing one that
+   * no migration creates — fails this test rather than the drift check against a live database,
+   * which not every contributor can run.
+   */
+  it("lists exactly the tables the migrations create, through 0043", () => {
     const names = Object.values(schema)
       .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:Name") in v)
       .map((t) => getTableConfig(t as never).name)
@@ -53,17 +90,34 @@ describe("Drizzle schema conventions", () => {
       "agreement_versions",
       "agreements",
       "audit_log",
+      "automation_runs",
+      "automations",
       "claim_documents",
       "claim_notes",
       "claims",
+      "client_contacts",
       "client_file_documents",
       "clients",
+      "component_definitions",
+      "conversation_messages",
+      "conversations",
+      "document_applications",
+      "document_fields",
+      "document_pages",
+      "documents",
       "drafts",
+      "email_attachments",
+      "email_messages",
+      "email_send_attempts",
+      "email_threads",
       "endorsements",
       "event_deliveries",
       "events",
+      "import_batches",
+      "import_rows",
       "insurers",
       "invitations",
+      "mailboxes",
       "organization_memberships",
       "organizations",
       "permissions",
@@ -77,6 +131,7 @@ describe("Drizzle schema conventions", () => {
       "teams",
       "user_team_memberships",
       "users",
+      "work_item_pins",
       "work_items",
     ]);
   });

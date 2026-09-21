@@ -1111,6 +1111,228 @@ replace a person's accepted values with fresh guesses.
   storage download.
 - `pnpm test` does not run the Python tests; `pnpm test:extractor` does.
 
+## D-073 — The worker is a background worker; the extractor is a web service only the API calls
+
+Phase 3 built two services and deployed neither. `render.yaml` now declares both, and the extractor
+runs on Render as `asap-extractor`.
+
+**The extractor is a web service, but not a public one in any useful sense.** Its only caller is
+the API, over `EXTRACTOR_SHARED_SECRET`; it serves no browser and sees no session. A deployment
+that sets `APP_ENV` and forgets the secret refuses to boot rather than starting without auth —
+which is what happened on the first deploy, and is the behaviour we want.
+
+**The worker is a `type: worker`, not a web service.** It opens no port: making it a web service to
+fit a tool that only creates those would mean adding an HTTP surface to a process whose whole point
+is that it has none. It takes `API_BASE_URL` and `API_INTERNAL_KEY` `fromService` the API, so the
+address and the secret cannot drift apart, and `WORKER_DATABASE_URL` is `asap_worker`'s — the env
+schema refuses the `postgres` role, because the worker must not bypass RLS.
+
+No secret value is in `render.yaml`. Every one is `sync: false`.
+
+### What is still not true
+
+- **`asap-worker` is not running yet.** The Render MCP tools can create web services, static sites
+  and cron jobs — not background workers. It needs one blueprint sync (or one dashboard create) with
+  the shape `render.yaml` now declares, and `WORKER_DATABASE_URL`, `ENCRYPTION_KEY` and `SENTRY_DSN`
+  set. Until it runs, events are emitted and nothing claims them: uploads are filed, extraction is
+  queued, and no document is read.
+- **`asap-extractor` was created directly, not from the blueprint.** The first blueprint sync will
+  want to adopt or recreate it; the same is already true of `asap-api` and `asap-web`.
+
+## D-074 — Three destinations. Ask is persistent, Jobs arrives through Activity
+
+Supersedes D-064's five-destination shell and restores what D-058 and D-060 had settled. The
+sidebar is **Today · Work · Automations**, then `+ New` and Search, with profile and company
+controls at the bottom.
+
+**Ask ASAP is not a destination.** It is persistent — docked at the foot of every screen — and
+being a destination as well would make it two things competing for the same attention. It keeps its
+address (`/ask`) so a conversation can be linked and reopened, and so the composer has somewhere to
+open into when an answer outgrows it. It is simply not in the sidebar.
+
+**Jobs is not a destination.** What ASAP is processing reaches a person through the Activity chip
+beside Ask; a run opens in full from there, from its own Work item, from an import or from
+automation history. The rule that makes this safe is the one that was always true: a run may never
+be the only place something important lives, so anything needing a person is in Work first and
+Activity can be ignored at no cost.
+
+**Today, not Discover.** D-060 renamed it; the rebuilt product calls it Today. `/discover`
+redirects, so older links, bookmarks and `?next=` values keep working.
+
+**A bare "Waiting" joins "Needs you" in retirement.** Waiting means nothing a person can act on
+until it names who is being waited on. A card says *With APA since 15 Sep*; the filter that
+collects those cards is **With someone else**. Work's filters are In progress · With someone else ·
+For review · Done · Pinned · Recent, and the Jobs board's are All · Working · Waiting on someone
+else · Stopped for a person · Finished. `vocabulary.test.ts` fails if either retired word returns.
+
+**The view ids did not change.** `?view=needs|with|review|recent|done` is the API's contract; only
+what each is called on screen changed, so no link breaks and no query needs rewriting.
+
+### What running it turned up
+
+**The persistent Ask composer was not mounted anywhere.** `AskComposer.tsx` and `ActivityChip.tsx`
+were both complete and neither was rendered by any screen — so "Ask is always in reach", which
+D-064 asserted and the product's own documentation repeated, was not true of the running
+application. They are now docked together in the shell's main column. Activity stays optional and
+renders nothing when no run is worth showing.
+
+## D-075 — Work's views are the task-status layer. Name the party
+
+The main views are **Your work** (default) · With others · In progress · Done · Recent.
+
+Four of the five are the task-status layer itself — `needs_you`, `with_party`, `in_progress`,
+`done` — which is why `progress` had to become a view: "Your work" and "In progress" are different
+questions, and collapsing them into one made the first mean nothing. The API gained the view;
+`?view=` is still the API's own vocabulary, so a label cannot drift from the query behind it, and
+a test asserts each label comes from `WORK_VIEW_LABELS`.
+
+**Pinned is not a main view.** It is a personal marker with its own endpoint: a way of *finding*
+work, not a state work is *in*. It sits beside the views.
+
+**"For review" is contextual.** It collects what ASAP prepared and nobody has acted on, and it
+appears only when something is in it. It is not the name for all human work — that was the mistake
+D-074 made in calling the needs-a-person view "For review".
+
+**When an outside party holds the work, name them and say since when.** A card reads *With CIC
+since 12 Aug*, *With client since 14 Aug*, *With assessor since 16 Aug*. The prefix is "With", not
+"Waiting on": where the work is, not a complaint about it. `<TaskStatus>` still refuses to render
+`with_party` without both the party and the date.
+
+### The defect this turned up
+
+`adapters.ts` rendered a **bare "Waiting"** whenever a `with_party` row had no party — the exact
+word D-074 retired, reachable in production through a fallback nobody had looked at. A row in that
+state is a defect upstream, not a state to draw, so the tile now reads as the work it still is
+rather than inventing a party to blame.
+
+## D-076 — What a person is told about a document is derived, and an upload is never a read
+
+`extraction_state` is where the *machine* got to. It is not what a person needs to know:
+`extracted` covers a document that is ready to check, one where two readings disagree, and one
+where nothing could be read at all. Those are three different jobs, so `readingStatus()` derives
+nine states from the row **and its fields' own conditions** — Uploaded · Queued · Reading · Ready
+for review · Missing information · Conflict found · Failed · Not read · Reviewed.
+
+Derived, never stored: a stored copy would be one more thing that can disagree with the rows it
+came from. Among read documents a **conflict outranks a gap, and a gap outranks "ready"** — a
+person told "ready for review" who then finds two contradictory policy numbers has been misled by
+the label meant to help them.
+
+**A retry exists, and only from `failed`.** Extraction fails for reasons that pass — the extractor
+redeploying, a slow scan, the network. Without a retry a person has to upload the same file again,
+which makes a second document out of one. From any other state a retry would re-propose over
+values somebody has already accepted, and a machine overwriting a person's decision is the failure
+this whole review flow exists to prevent. It is permission-gated on `document:edit`, audited, and
+conditional on the row still being `failed`, so two people clicking Try again queue one read.
+
+**The same decision twice is one decision.** Accept is a button people double-click. A repeat now
+returns the standing decision and writes nothing; a *different* decision — correcting a value that
+was accepted — is a real change and is recorded.
+
+### Three defects this turned up, two of them in front of a person
+
+1. **Every document's state pill was blank.** `EXTRACTION_LABEL` was keyed
+   `pending/running/done/not_attempted` and `ExtractionState` is
+   `not_started/queued/working/extracted/failed/not_applicable` — so the lookup returned
+   `undefined` for every document ever listed. Nobody had ever seen a state on that screen.
+2. **The highlight did not exist.** The file said "the viewer puts the highlight where the value was
+   read", and it did not: every "Page 1" was a number a person had to take on trust. There is now a
+   region drawn in the page's own coordinates, with a link through to the file at that page, and a
+   value with no position still says so rather than offering a citation that opens nothing.
+3. **The extractor could not read an ordinary schedule.** Against a real two-column PDF — labels in
+   one column, values in another, as every schedule is laid out — **seven of eight fields came back
+   `missing`**, and the eighth proposed *"of business"* as the class of business: the label "class"
+   matched before "class of business" and the rest of the heading became the answer. Lines are now
+   assembled from baseline geometry rather than the PDF's own line numbering, which is how the same
+   problem was already solved for imported tables; labels are tried longest-first; and a value that
+   is itself a label spelling is refused. All eight fields now read, each with its rectangle.
+
+The third was only visible by running the service against a document laid out like a real one. The
+existing tests all used a single-column PDF where label and value share a text run.
+
+## D-077 — Applying a document to a record: named by a person, checked, receipted
+
+Accepting an extracted value marked the *field* accepted and changed no business record. A person
+could accept a premium off a schedule and the policy period would still hold nothing. Applying
+closes that, and the shape is the point.
+
+**ASAP suggests; a person names the target.** `GET /documents/:id/apply-targets` answers with
+records and **why it believes each one**, in the same six evidence words used everywhere: `known`
+when the document is already filed against the record, `inferred` when it was matched on something
+the document states. When nothing can be suggested the answer says *why* — "no suggestions" and
+"could not look" are different situations and an empty list cannot tell them apart. A name on a
+schedule never becomes a suggested client: §45 rule 8, and saying so is more use than silence.
+
+**Nothing is written before a person has seen what would change.**
+`GET /documents/:id/apply-preview` gives, per field: what the record holds now, what would be
+written, whether that is a change at all, and why a field cannot be applied to this target. Fields
+the target accepts and the document never gave are listed as missing rather than left out.
+
+**The write is one transaction in a definer function** (0043), because the three things that make
+it safe have to happen together or not at all: the record still holding what the person was shown,
+the record changing, and the receipt that says it did. `document_applications` is the evidence
+link, the receipt and the idempotency ledger in one row — `(organization_id, idempotency_key)` is
+unique, so a double-clicked Apply writes once and the second call returns the first receipt. The
+audit row carries both sides of every field. `authenticated` may read that table and has no
+insert, update or delete policy at all.
+
+**What can receive values today:** `policy_period` (period start, period end, premium),
+`policy` (policy number), `client` (insured name). Narrow on purpose — a kind that is not there
+cannot be applied to, which is better than one that can be applied to wrongly, and adding one is a
+migration naming exactly which fields it accepts.
+
+### Four defects, three of which only a connected run could show
+
+1. **The premium's basis was missing.** 0039 refuses an amount without a currency and a basis — "a
+   number without units" — and my first function wrote the amount alone. The constraint caught it.
+   A schedule states a figure without saying whether it is the gross premium or everything payable,
+   and nobody can derive one from the other once levies are on top, so the **person** says which
+   and the apply is refused without it. Currency defaults to the brokerage's own, which is a fact
+   about the organization rather than a guess about the document.
+2. **`214,500.00` could not be written.** A schedule prints a premium with a thousands separator,
+   a person accepts it as printed, and `::numeric` failed with an opaque `database_error` —
+   effectively asking somebody to retype a figure to remove a comma the document itself printed.
+   `app.text_to_amount` reads the `1,234.56` shape; anything else is refused *by name* so the
+   interface can say so, because reading `1.234,56` either way would be a guess about the size of a
+   premium.
+3. **A valid apply failed on the way back out.** `jsonb_strip_nulls` removed `from` from the
+   receipt when the record had held nothing, and the response then failed its own schema: the
+   write had happened and the person was shown an error.
+4. **An applied premium looked unapplied.** The preview compared `214500.00` against `214,500.00`
+   as strings and offered the same write again. Amount fields now compare as numbers.
+
+### Uploading, honestly
+
+The transfer goes straight to storage, so the browser is the only thing that knows how it went.
+XHR replaces `fetch` for two things `fetch` cannot do: report how many bytes have actually gone,
+and be aborted mid-transfer. A percentage appears **only** where the transport reported both
+numbers — a progress bar nobody measured is a lie that looks like progress. Cancelling is neither
+a success nor an error. A retry re-PUTs the same allocated path and re-asks with the same hash, so
+the API answers "already on file" rather than making a second document.
+
+### The chain, proven in one pass
+
+Browser-shaped upload → storage → document row → `document.received` → **the real worker** claimed
+it → `POST /internal/events/:id/dispatch` → **the real extractor** read the bytes → eight fields
+with page positions → review → suggested target with its reason → preview → apply → the business
+record, its evidence link, its audit row → reopened and re-read. Four seconds from filed to
+extracted.
+
+This ran against a **local** stack, not Render. Two things stop the same pass running there, and
+neither is a code change: `asap-worker` **does not exist as a Render service** (only `asap-web`,
+`asap-api` and `asap-extractor` do), and this session's egress policy answers 403 to `CONNECT` for
+both `*.onrender.com` and the Supabase project host, so nothing here can reach staging at all.
+
+The local stand-in had **no storage routes whatsoever**, which is the real reason the chain had only
+ever been provable in layers. Four routes were added to it — harness code, `APP_ENV=local` only.
+
+### Dependencies, pinned
+
+`pyproject.toml` pins every direct dependency with `==` and `requirements.lock.txt` pins the whole
+closure, generated from a clean virtualenv. A fresh environment installs from the lock file and
+runs all 15 Python tests with no manual step — which is the only way "the tests pass" says anything
+about whether the deployed service can start. `.venv`, `__pycache__`, `*.egg-info` and the caches
+are ignored, and the tracked `egg-info` directory was removed.
 ## D-078 — Sentry is optional for the worker; a supplied DSN must be a DSN
 
 **2026-09-21.** The worker refused to start when `APP_ENV` was not `local` and `SENTRY_DSN` was

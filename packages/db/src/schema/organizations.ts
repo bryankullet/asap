@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { check, index, jsonb, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { createdAt, deletedAt, updatedAt, uuidPrimaryKey } from "./_shared.js";
 
 export const SUBSCRIPTION_PLANS = ["trial", "standard", "professional", "enterprise"] as const;
@@ -27,6 +27,14 @@ export const organizations = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
+    /**
+     * Migration 0029. The caller's own key for one attempt at creating a brokerage.
+     *
+     * Nullable, because every brokerage created before 0029 has none and none was invented for
+     * them. Where it is present it is unique per creator, so a retried or double-submitted
+     * create request returns the brokerage it already made instead of a second one.
+     */
+    creationKey: uuid("creation_key"),
   },
   (t) => [
     check(
@@ -40,6 +48,9 @@ export const organizations = pgTable(
     index("organizations_status_idx")
       .on(t.status)
       .where(sql`${t.deletedAt} is null`),
+    uniqueIndex("organizations_created_by_creation_key")
+      .on(t.createdBy, t.creationKey)
+      .where(sql`${t.creationKey} is not null`),
   ],
 );
 
