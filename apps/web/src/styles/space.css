@@ -895,3 +895,18 @@
  * actions wrap within their own cell, which is what keeps 390px free of horizontal overflow —
  * asserted, not assumed, by `scripts/visual/capture-boards.mjs`.
  */
+
+/* ---- Search ------------------------------------------------------------------------------ */
+
+/*
+ * The query field. Part of the Space's head rather than a block, because it owns the address: a
+ * search box that does not update the URL is a search nobody can send to anybody.
+ */
+.sp-search-box {
+  max-width: 900px;
+  margin-bottom: 18px;
+}
+.sp-search-box .sp-input {
+  font-size: 15.5px;
+  padding: 11px 12px;
+}

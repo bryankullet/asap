@@ -97,6 +97,55 @@ function membership(permissions: string[]) {
           deleted_at: null,
         },
       ],
+      claims: [
+        {
+          id: "b1000000-0000-4000-8000-000000000001",
+          organization_id: ORG,
+          work_item_id: ITEM,
+          client_id: CLIENT,
+          status: "registered",
+          insurer_reference: "CL-TAMARIND-88",
+          incident_summary: "Water damage to a tamarind consignment in transit",
+          deleted_at: null,
+        },
+      ],
+      insurers: [
+        {
+          id: "b2000000-0000-4000-8000-000000000001",
+          organization_id: ORG,
+          name: "Tamarind Mutual Assurance",
+          deleted_at: null,
+        },
+      ],
+      documents: [
+        {
+          id: "b3000000-0000-4000-8000-000000000001",
+          organization_id: ORG,
+          client_id: CLIENT,
+          kind: "policy_schedule",
+          filename: "tamarind-marine-schedule.pdf",
+          extraction_state: "extracted",
+          deleted_at: null,
+        },
+        {
+          id: "b3000000-0000-4000-8000-000000000002",
+          organization_id: ORG,
+          client_id: CLIENT,
+          kind: "debit_note",
+          filename: "tamarind-debit-note.pdf",
+          extraction_state: "queued",
+          deleted_at: null,
+        },
+      ],
+      runs: [
+        {
+          id: "b4000000-0000-4000-8000-000000000001",
+          organization_id: ORG,
+          work_item_id: ITEM,
+          title: "Read the tamarind schedule",
+          status: "finished",
+        },
+      ],
       audit_log: [
         {
           id: 1,
@@ -202,6 +251,73 @@ describe("GET /search", () => {
       expect(r.title.length).toBeGreaterThan(0);
     }
     expect(body.results.map((r: { kind: string }) => r.kind)).toContain("client");
+  });
+
+  /*
+   * Eight kinds, every one a real table. A search that only looked at three while a person typed a
+   * claim reference would return nothing and imply no such claim exists.
+   */
+  it("searches every kind that has a table", async () => {
+    // Each kind is matched on its own column, so each is asked for in the words it holds: a
+    // policy is found by its number, not by its client's name.
+    const cases: [string, string][] = [
+      ["client", "tamarind"],
+      ["policy", "P-4471"],
+      ["work", "tamarind marine"],
+      ["claim", "CL-TAMARIND-88"],
+      ["insurer", "Tamarind Mutual"],
+      ["document", "tamarind-marine-schedule"],
+      ["email", "Marine renewal terms"],
+      ["run", "Read the tamarind schedule"],
+    ];
+    for (const [kind, query] of cases) {
+      const body = await readJson(
+        await build().request(`/search?q=${encodeURIComponent(query)}`, { headers: auth }),
+      );
+      const kinds = body.results.map((r: { kind: string }) => r.kind);
+      expect(kinds, `${kind} for "${query}"`).toContain(kind);
+    }
+  });
+
+  it("finds a claim by its insurer reference as well as by what happened", async () => {
+    const byRef = await readJson(await build().request("/search?q=CL-TAMARIND-88", { headers: auth }));
+    expect(byRef.results.map((r: { kind: string }) => r.kind)).toContain("claim");
+    const byIncident = await readJson(await build().request("/search?q=water%20damage", { headers: auth }));
+    const claim = byIncident.results.find((r: { kind: string }) => r.kind === "claim");
+    expect(claim.title).toBe("CL-TAMARIND-88");
+  });
+
+  /* A claim's Space is its work item's: that is where its steps and its evidence live. */
+  it("opens a claim at its work item rather than at a route that does not exist", async () => {
+    const body = await readJson(await build().request("/search?q=CL-TAMARIND-88", { headers: auth }));
+    const claim = body.results.find((r: { kind: string }) => r.kind === "claim");
+    expect(claim.to).toBe(`/r/${ITEM}`);
+  });
+
+  /* The one claim this product must not make about a document it has not read. */
+  it("never describes an unread document as read", async () => {
+    const body = await readJson(await build().request("/search?q=tamarind", { headers: auth }));
+    const docs = body.results.filter((r: { kind: string }) => r.kind === "document");
+    const unread = docs.find((d: { title: string }) => d.title.includes("debit-note"));
+    expect(unread.subtitle).toMatch(/not read yet/);
+    const read = docs.find((d: { title: string }) => d.title.includes("schedule"));
+    expect(read.subtitle).not.toMatch(/not read yet/);
+  });
+
+  /* A document called "schedule.pdf" is meaningless alone, and four of them are identical. */
+  it("names the client a hit belongs to", async () => {
+    const body = await readJson(await build().request("/search?q=tamarind", { headers: auth }));
+    const doc = body.results.find((r: { kind: string }) => r.kind === "document");
+    expect(doc.clientName).toBe("Tamarind Exporters Ltd");
+    const client = body.results.find((r: { kind: string }) => r.kind === "client");
+    // A client is its own context; repeating its name beside itself is noise.
+    expect(client.clientName).toBeNull();
+  });
+
+  it("returns nothing, and says nothing failed, for a query that matches nothing", async () => {
+    const body = await readJson(await build().request("/search?q=zzzznothing", { headers: auth }));
+    expect(body.results).toEqual([]);
+    expect(body.degraded).toEqual([]);
   });
 });
 

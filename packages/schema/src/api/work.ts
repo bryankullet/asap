@@ -370,12 +370,62 @@ export type RunListResponse = z.infer<typeof runListResponseSchema>;
  * answering it with an embedding is how search starts feeling like a guess. Every result carries
  * where it opens, because a result that goes nowhere is the failure that makes search a lie.
  */
+/**
+ * What a search hit can be.
+ *
+ * Every one of these is a real table read under the caller's session. Five things the product will
+ * eventually search are **deliberately absent**, because the tables do not exist yet — vehicles,
+ * quotes, payments and invoices are later phases, and a "Space" is not a record but a view of one
+ * of these, so searching Spaces is searching the kinds below. `SEARCH_NOT_YET_SEARCHABLE` names
+ * them so the screen can say so rather than quietly returning nothing.
+ */
+export const SearchHitKind = z.enum([
+  "client",
+  "policy",
+  "work",
+  "claim",
+  "insurer",
+  "document",
+  "email",
+  "run",
+]);
+export type SearchHitKind = z.infer<typeof SearchHitKind>;
+
+/** What each kind is called in a result badge. */
+export const SEARCH_HIT_LABELS: Readonly<Record<SearchHitKind, string>> = {
+  client: "Client",
+  policy: "Policy",
+  work: "Work",
+  claim: "Claim",
+  insurer: "Insurer",
+  document: "Document",
+  email: "Email",
+  run: "Run",
+};
+
+/**
+ * What a person may reasonably expect to find and cannot yet, with the reason.
+ *
+ * Shown on the Search Space beneath the results. An empty result for "KBX 123A" should say that
+ * vehicles are not on file yet, not imply that no such vehicle exists.
+ */
+export const SEARCH_NOT_YET_SEARCHABLE: readonly { what: string; because: string }[] = [
+  { what: "Vehicles and other insured items", because: "They are not recorded as their own records yet." },
+  { what: "Quotes and insurer responses", because: "Quotation work is not stored as its own record yet." },
+  { what: "Invoices and payments", because: "Money records are not in the database yet." },
+];
+
 export const searchResultSchema = z.object({
   id: uuidSchema,
-  kind: z.enum(["client", "policy", "work"]),
+  kind: SearchHitKind,
   title: z.string(),
   subtitle: z.string(),
   to: z.string(),
+  /**
+   * The client this hit belongs to, when it has one. A document called "schedule.pdf" is
+   * meaningless without it, and four of them are indistinguishable.
+   */
+  clientName: z.string().nullable().default(null),
 });
 export type SearchResult = z.infer<typeof searchResultSchema>;
 

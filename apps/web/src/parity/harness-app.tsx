@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Search } from "../pages/Search.js";
 import { Today } from "../pages/Today.js";
 import { Work } from "../pages/Work.js";
 import { Shell } from "../shell/Shell.js";
@@ -31,7 +32,13 @@ const boards = [
     validateSearch: (s: Record<string, unknown>) => ({ view: s["view"] as string | undefined }),
   }),
 ];
-const routes = ["/automations", "/new", "/search", "/jobs", "/ask", "/import", "/email"].map(
+const search = createRoute({
+  getParentRoute: () => root,
+  path: "/search",
+  component: Search,
+  validateSearch: (s: Record<string, unknown>) => ({ q: (s["q"] as string | undefined) ?? "" }),
+});
+const routes = ["/automations", "/new", "/jobs", "/ask", "/import", "/email", "/clients"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
 );
 const record = createRoute({
@@ -41,7 +48,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([...boards, ...routes, record]),
+  routeTree: root.addChildren([...boards, search, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

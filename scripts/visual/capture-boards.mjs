@@ -39,6 +39,8 @@ const STATES = [
   { name: "work-recent", url: `${HARNESS}?at=/work%3Fview=recent` },
   { name: "work-record-beside-ask", url: `${HARNESS}?at=/work&rows=1` },
   { name: "ask-with-record-context", url: `${HARNESS}?at=/today&rows=2` },
+  { name: "search-results", url: `${HARNESS}?at=/search%3Fq=placeholder` },
+  { name: "search-nothing-typed", url: `${HARNESS}?at=/search` },
 ];
 
 /**

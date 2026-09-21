@@ -186,6 +186,22 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
       degraded: [],
     });
   }
+  if (u.includes("/search")) {
+    const q = new URL(u, location.origin).searchParams.get("q") ?? "";
+    return json({
+      query: q,
+      results:
+        q === ""
+          ? []
+          : [
+              { id: CLIENT, kind: "client", title: "Placeholder Client Ltd", subtitle: "Corporate client", to: `/clients/${CLIENT}`, clientName: null },
+              { id: "00000000-0000-4000-8000-000000000001", kind: "policy", title: "P-PLACEHOLDER-1", subtitle: "Commercial motor", to: "/r/00000000-0000-4000-8000-000000000001?kind=policy", clientName: "Placeholder Client Ltd" },
+              { id: "00000000-0000-4000-8000-000000000002", kind: "document", title: "placeholder-schedule.pdf", subtitle: "Policy schedule · not read yet", to: "/documents/00000000-0000-4000-8000-000000000002", clientName: "Placeholder Client Ltd" },
+              { id: "00000000-0000-4000-8000-000000000003", kind: "email", title: "Placeholder thread subject", subtitle: "Email thread", to: "/email?thread=x", clientName: "Placeholder Client Ltd" },
+            ],
+      degraded: [],
+    });
+  }
   if (u.includes("/runs")) return json({ runs: [] });
   if (u.includes("/pins")) return json({ pins: [] });
   return json({});

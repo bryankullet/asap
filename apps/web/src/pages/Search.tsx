@@ -1,35 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { SearchResult } from "@asap/schema";
+import { searchSpace } from "../live/search-space.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
-import { Page } from "../shell/Page.js";
+import { useWorkspaceTabs } from "../shell/workspace-tabs.js";
+import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * Search across the brokerage's own records (D-064).
+ * Search across the brokerage's own records.
  *
- * Clients, policies and work — answered by a lookup on the server, under the caller's session, so
- * a role that cannot see a client does not find it here either. Every result opens a real context:
- * there are no result pages that go nowhere, which is the failure that makes search feel like a lie.
+ * Answered by a lookup on the server, under the caller's session, so a role that cannot see a
+ * client does not find it here either. Eight kinds, every one a real table; the four things a
+ * person may reasonably look for and cannot find yet are named on the Space rather than left to
+ * look like an empty result.
+ *
+ * Rendered through the one Space renderer — no page frame, no `Page`, no `ScreenTitle`. The only
+ * thing here that is not a block is the query field itself, which belongs to the address bar: the
+ * URL stays authoritative so a search can be linked, reloaded and reopened in its own tab.
  */
-const KIND_WORD: Record<SearchResult["kind"], string> = {
-  client: "Clients",
-  policy: "Policies",
-  work: "Work",
-};
-
 export function Search() {
   const { q = "" } = useSearch({ strict: false }) as { q?: string };
   const navigate = useNavigate();
   const me = useMe();
+  const tabs = useWorkspaceTabs("/search");
 
   // Typing is not a query per keystroke: the URL stays authoritative, the request waits for a pause.
-  const [debounced, setDebounced] = useState(q.trim());
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 200);
-    return () => clearTimeout(t);
-  }, [q]);
+  const [debounced] = useDebounced(q.trim(), 200);
 
   const search = useQuery({
     queryKey: ["search", me.data?.active_organization?.id, debounced],
@@ -38,82 +35,66 @@ export function Search() {
     retry: false,
   });
 
-  const results = search.data?.results ?? [];
-  const grouped = (Object.keys(KIND_WORD) as SearchResult["kind"][])
-    .map((kind) => ({ kind, items: results.filter((r) => r.kind === kind) }))
-    .filter((g) => g.items.length > 0);
+  /* Search is a Space, so it is a tab — one tab, whatever the query, because it is one board. */
+  useEffect(() => {
+    tabs.open({
+      spaceType: "route",
+      recordType: "search",
+      recordId: "search",
+      kind: "SEARCH",
+      title: "Search",
+      path: "/search",
+    });
+    /* Once: the query lives in the URL and does not make a second tab. */
+  }, []);
+
+  const space = searchSpace(debounced, search.data, {
+    typing: debounced !== q.trim(),
+    loading: search.isFetching,
+    error: search.isError ? describeApiError(search.error) : null,
+  });
 
   return (
-    <Page title="Search" meta="Clients, policies and work — everything your role can see">
-      <div className="search-box">
-        <label htmlFor="search-q" className="sr-only">
-          Search everything
+    <>
+      {/*
+       * The field is part of the Space's head rather than a block: a block cannot hold the focus
+       * ring, the label and the address all at once, and a search box that does not own the URL is
+       * a search you cannot send to anybody.
+       */}
+      <div className="sp-search-box">
+        <label htmlFor="search-q" className="sp-label">
+          SEARCH EVERYTHING
         </label>
         <input
           id="search-q"
+          className="sp-input"
           value={q}
           autoFocus
           onChange={(e) => void navigate({ to: "/search", search: { q: e.target.value } })}
-          placeholder="A client, a policy number, a piece of work…"
+          placeholder="A client, a policy number, a claim reference, a word from an email…"
         />
-        {debounced.length > 0 && search.data && (
-          <p className="search-count">
-            {results.length} {results.length === 1 ? "result" : "results"} for “{search.data.query}”
-          </p>
-        )}
       </div>
-
-      {/* Every state is designed (§36): nothing typed, searching, failed, nothing found. */}
-      {debounced.length === 0 && (
-        <article className="space-card" style={{ padding: 20 }}>
-          <strong>Start typing.</strong>
-          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
-            A client name, a policy number, or a word from a piece of work. ASAP looks only at the
-            records your role can see.
-          </p>
-        </article>
-      )}
-      {search.isFetching && debounced.length > 0 && (
-        <p className="quiet-line" role="status">
-          Searching your records…
-        </p>
-      )}
-      {search.isError && (
-        <div className="warning" role="alert">
-          <strong>We could not search:</strong> {describeApiError(search.error)}
-        </div>
-      )}
-      {(search.data?.degraded ?? []).map((d) => (
-        <div className="warning" key={d.what}>
-          <strong>{d.what}:</strong> {d.because} Everything else was searched.
-        </div>
-      ))}
-      {search.data && results.length === 0 && !search.isFetching && (
-        <article className="space-card" style={{ padding: 20 }}>
-          <strong>Nothing matches “{search.data.query}”.</strong>
-          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
-            Try a client name, a policy number, or a word from a piece of work.
-          </p>
-        </article>
-      )}
-
-      {grouped.length > 0 && (
-        <>
-          {grouped.map((g) => (
-            <section key={g.kind} aria-label={KIND_WORD[g.kind]}>
-              <div className="section-label">{KIND_WORD[g.kind]}</div>
-              <ul className="evidence-list">
-                {g.items.map((r) => (
-                  <li key={`${r.kind}-${r.id}`}>
-                    <Link to={r.to}>{r.title}</Link>
-                    <small>{r.subtitle}</small>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </>
-      )}
-    </Page>
+      <SpaceFrameView
+        space={space}
+        onAct={(action) => {
+          if (action.verb === "open" && action.to) void navigate({ to: action.to.path });
+        }}
+      />
+    </>
   );
+}
+
+/**
+ * A value that follows another after a pause.
+ *
+ * The request waits for a typist rather than firing per keystroke, while the URL — which is what
+ * makes a search linkable — updates immediately.
+ */
+function useDebounced(value: string, ms: number): [string, (v: string) => void] {
+  const [held, setHeld] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setHeld(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return [held, setHeld];
 }

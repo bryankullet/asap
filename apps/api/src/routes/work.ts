@@ -686,7 +686,15 @@ export function workRoutes(deps: WorkDeps) {
     // Escape PostgREST's own pattern characters so a typed % is a literal, not a wildcard.
     const like = `%${q.replace(/[%_,()]/g, " ")}%`;
 
-    const [clients, policies, items] = await Promise.all([
+    /*
+     * Eight reads, one round trip. Every one is scoped to the organization *and* runs under the
+     * caller's session, so RLS decides what exists before anything is matched: a row the caller
+     * cannot see is not returned, not counted and not hinted at.
+     *
+     * A read that fails adds a line to `degraded` and contributes nothing, rather than failing the
+     * whole search — a person typing a registration wants the four kinds that did answer.
+     */
+    const [clients, policies, items, claims, insurers, documents, threads, runs] = await Promise.all([
       db
         .from("clients")
         .select("id, name, kind, file_status")
@@ -696,22 +704,90 @@ export function workRoutes(deps: WorkDeps) {
         .limit(10),
       db
         .from("policies")
-        .select("id, policy_number, class_of_business")
+        .select("id, policy_number, class_of_business, client_id")
         .eq("organization_id", org.id)
         .is("deleted_at", null)
         .ilike("policy_number", like)
         .limit(10),
       db
         .from("work_items")
-        .select("id, title, kind, task_status")
+        .select("id, title, kind, task_status, client_id")
         .eq("organization_id", org.id)
         .is("deleted_at", null)
+        .ilike("title", like)
+        .limit(10),
+      /*
+       * A claim is found by its insurer reference or by what happened. `or` is one request rather
+       * than two: a person searching "windscreen" and a person searching "CL-4471" are both
+       * looking for the same claim.
+       */
+      db
+        .from("claims")
+        .select("id, incident_summary, insurer_reference, status, client_id, work_item_id")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .or(`incident_summary.ilike.${like},insurer_reference.ilike.${like}`)
+        .limit(10),
+      db
+        .from("insurers")
+        .select("id, name")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .ilike("name", like)
+        .limit(10),
+      db
+        .from("documents")
+        .select("id, filename, kind, client_id, extraction_state")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null)
+        .ilike("filename", like)
+        .limit(10),
+      db
+        .from("email_threads")
+        .select("id, subject, client_id, last_message_at")
+        .eq("organization_id", org.id)
+        .ilike("subject", like)
+        .limit(10),
+      db
+        .from("runs")
+        .select("id, title, status, work_item_id")
+        .eq("organization_id", org.id)
         .ilike("title", like)
         .limit(10),
     ]);
 
     const degraded: { what: string; because: string }[] = [];
     const results: SearchResult[] = [];
+
+    /*
+     * Client names, for the hits that carry a client id and nothing readable. A document called
+     * "schedule.pdf" is meaningless on its own, and four of them are indistinguishable.
+     */
+    const named = new Map<string, string>();
+    for (const r of (clients.data ?? []) as { id: string; name: string }[]) named.set(r.id, r.name);
+    const clientIds = [
+      ...new Set(
+        [
+          ...((policies.data ?? []) as { client_id: string | null }[]),
+          ...((items.data ?? []) as { client_id: string | null }[]),
+          ...((claims.data ?? []) as { client_id: string | null }[]),
+          ...((documents.data ?? []) as { client_id: string | null }[]),
+          ...((threads.data ?? []) as { client_id: string | null }[]),
+        ]
+          .map((r) => r.client_id)
+          .filter((v): v is string => v !== null && !named.has(v)),
+      ),
+    ];
+    if (clientIds.length > 0) {
+      const extra = await db.from("clients").select("id, name").in("id", clientIds);
+      if (extra.error) {
+        degraded.push({ what: "Client names on some results", because: "They could not be read." });
+      } else {
+        for (const r of (extra.data ?? []) as { id: string; name: string }[]) named.set(r.id, r.name);
+      }
+    }
+    const clientOf = (id: string | null) => (id === null ? null : (named.get(id) ?? null));
+
     if (clients.error) degraded.push({ what: "Clients", because: "They could not be read." });
     for (const r of (clients.data ?? []) as {
       id: string;
@@ -725,13 +801,16 @@ export function workRoutes(deps: WorkDeps) {
         title: r.name,
         subtitle: `${r.kind === "corporate" ? "Corporate" : "Individual"} client`,
         to: `/clients/${r.id}`,
+        clientName: null,
       });
     }
+
     if (policies.error) degraded.push({ what: "Policies", because: "They could not be read." });
     for (const r of (policies.data ?? []) as {
       id: string;
       policy_number: string;
       class_of_business: string;
+      client_id: string | null;
     }[]) {
       results.push({
         id: r.id,
@@ -739,18 +818,112 @@ export function workRoutes(deps: WorkDeps) {
         title: r.policy_number,
         subtitle: r.class_of_business,
         to: `/r/${r.id}?kind=policy`,
+        clientName: clientOf(r.client_id),
       });
     }
+
     if (items.error) degraded.push({ what: "Work", because: "It could not be read." });
-    for (const r of (items.data ?? []) as { id: string; title: string; kind: string }[]) {
+    for (const r of (items.data ?? []) as {
+      id: string;
+      title: string;
+      kind: string;
+      client_id: string | null;
+    }[]) {
       results.push({
         id: r.id,
         kind: "work",
         title: r.title,
         subtitle: WORK_KIND_LABELS[r.kind as keyof typeof WORK_KIND_LABELS] ?? "Work",
         to: `/r/${r.id}`,
+        clientName: clientOf(r.client_id),
       });
     }
+
+    if (claims.error) degraded.push({ what: "Claims", because: "They could not be read." });
+    for (const r of (claims.data ?? []) as {
+      id: string;
+      incident_summary: string;
+      insurer_reference: string | null;
+      status: string;
+      client_id: string | null;
+      work_item_id: string;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "claim",
+        title: r.insurer_reference ?? r.incident_summary,
+        subtitle: r.insurer_reference === null ? "No insurer reference on file" : r.incident_summary,
+        // A claim's Space is its work item's: that is where its steps and its evidence are.
+        to: `/r/${r.work_item_id}`,
+        clientName: clientOf(r.client_id),
+      });
+    }
+
+    if (insurers.error) degraded.push({ what: "Insurers", because: "They could not be read." });
+    for (const r of (insurers.data ?? []) as { id: string; name: string }[]) {
+      results.push({
+        id: r.id,
+        kind: "insurer",
+        title: r.name,
+        subtitle: "Insurer",
+        to: `/settings/agreements`,
+        clientName: null,
+      });
+    }
+
+    if (documents.error) degraded.push({ what: "Documents", because: "They could not be read." });
+    for (const r of (documents.data ?? []) as {
+      id: string;
+      filename: string;
+      kind: string;
+      client_id: string | null;
+      extraction_state: string;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "document",
+        title: r.filename,
+        // Never "read" unless it was: an unread document described as read is the one claim this
+        // product must not make.
+        subtitle: r.extraction_state === "extracted" ? r.kind : `${r.kind} · not read yet`,
+        to: `/documents/${r.id}`,
+        clientName: clientOf(r.client_id),
+      });
+    }
+
+    if (threads.error) degraded.push({ what: "Email", because: "It could not be read." });
+    for (const r of (threads.data ?? []) as {
+      id: string;
+      subject: string;
+      client_id: string | null;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "email",
+        title: r.subject,
+        subtitle: "Email thread",
+        to: `/email?thread=${r.id}`,
+        clientName: clientOf(r.client_id),
+      });
+    }
+
+    if (runs.error) degraded.push({ what: "Runs", because: "They could not be read." });
+    for (const r of (runs.data ?? []) as {
+      id: string;
+      title: string;
+      status: string;
+      work_item_id: string | null;
+    }[]) {
+      results.push({
+        id: r.id,
+        kind: "run",
+        title: r.title,
+        subtitle: `Run · ${r.status}`,
+        to: `/jobs?filter=all`,
+        clientName: null,
+      });
+    }
+
     return c.json(searchResponseSchema.parse({ query: q, results, degraded }));
   });
 

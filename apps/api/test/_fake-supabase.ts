@@ -74,6 +74,32 @@ class Query {
     );
     return this;
   }
+  /**
+   * PostgREST's `or`: a comma-separated list of `column.op.value`, any of which may match.
+   *
+   * Only `ilike` and `eq` are supported, which is what the routes use it for — finding a claim by
+   * either its insurer reference or what happened. An operator this does not know is a thrown
+   * error rather than a filter that quietly matches everything: a search that silently returned
+   * the whole book would pass a test it should fail.
+   */
+  or(spec: string) {
+    const clauses = spec.split(",").map((clause) => {
+      const [col, op, ...rest] = clause.split(".");
+      const value = rest.join(".");
+      if (col === undefined || op === undefined) throw new Error(`fake supabase: bad or() clause ${clause}`);
+      if (op === "ilike") {
+        const needle = value.replace(/^%|%$/g, "").toLowerCase();
+        return (r: Record<string, unknown>) =>
+          String(r[col] ?? "")
+            .toLowerCase()
+            .includes(needle);
+      }
+      if (op === "eq") return (r: Record<string, unknown>) => String(r[col] ?? "") === value;
+      throw new Error(`fake supabase: or() does not support ${op}`);
+    });
+    this.filters.push((r) => clauses.some((f) => f(r)));
+    return this;
+  }
   limit(n: number) {
     this.max = n;
     return this;

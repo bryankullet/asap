@@ -46,6 +46,13 @@ export const SpaceKind = z.union([
     "work",
     "activity",
     /*
+     * Two record kinds the recipes do not build yet. They are here rather than in `SpaceType` so
+     * recipe validation stays exactly as it is — a recipe may not produce them — and they move
+     * across when it can.
+     */
+    "client",
+    "work_item",
+    /*
      * A plain destination the application already serves — import, email, the composer — rather
      * than a Space about a record. Quick actions point at these, and naming them honestly keeps
      * them out of the tab strip: a route is not something you open a workspace on.
