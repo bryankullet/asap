@@ -44,6 +44,26 @@ export const SIGNAL_POINTS: Readonly<Record<AttentionSignalId, number>> = {
   untouched: 8,
 };
 
+/**
+ * Where the bands sit, and why there.
+ *
+ * `high` starts at the points a single signal is worth when a person must act today —
+ * `cover_uncertain`, 48 — so one such signal is enough on its own and nothing softer reaches the
+ * band by accumulation alone. `medium` starts at `evidence_missing`, 24: something is genuinely
+ * unresolved but no clock has run out. Everything else is worth watching.
+ *
+ * A band is not a fifth status layer. It orders what a person sees first; task, run, cover and
+ * money status keep their own slots and are unaffected by it.
+ */
+export const PRIORITY_BANDS = { high: 48, medium: 24 } as const;
+
+/** The band a score falls in. Deterministic: the same rows always band the same way. */
+export function priorityOf(score: number): "high" | "medium" | "low" {
+  if (score >= PRIORITY_BANDS.high) return "high";
+  if (score >= PRIORITY_BANDS.medium) return "medium";
+  return "low";
+}
+
 /** Days after which recorded evidence is treated as stale. Not a legal value — a display rule. */
 const STALE_AFTER_DAYS = 90;
 /** Days before a period ends at which the ending starts to matter. */

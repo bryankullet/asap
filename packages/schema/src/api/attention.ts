@@ -100,6 +100,37 @@ export const attentionSignalSchema = z.object({
 });
 export type AttentionSignal = z.infer<typeof attentionSignalSchema>;
 
+/**
+ * How much a person should look at this first.
+ *
+ * Computed on the server from the same signal table that ranks Discover (`priorityOf` in
+ * `apps/api/src/attention/signals.ts`), so the badge on a Work row and the order on Today cannot
+ * disagree — they are the same number banded twice. It is **not** a fifth status layer and never
+ * appears in a status slot.
+ */
+export const WorkPriority = z.enum(["high", "medium", "low"]);
+export type WorkPriority = z.infer<typeof WorkPriority>;
+
+/** What each band is called on a badge. "High" is the only one that says its own name. */
+export const WORK_PRIORITY_LABELS: Readonly<Record<WorkPriority, string>> = {
+  high: "High",
+  medium: "At risk",
+  low: "Watch",
+};
+
+/**
+ * Who owns the item, resolved to a name.
+ *
+ * A work item carries `owner_id` and nothing else, and a row showing a uuid is unreadable. The
+ * server resolves it under the caller's session exactly as it resolves the client: a person the
+ * caller may not see comes back absent, never as an id.
+ */
+export const attentionOwnerSchema = z.object({
+  id: uuidSchema,
+  name: z.string().min(1).max(200),
+});
+export type AttentionOwner = z.infer<typeof attentionOwnerSchema>;
+
 /** A run that ended without doing its job, attached to the item it left needing a person. */
 export const attentionRunFailureSchema = z.object({
   id: uuidSchema,
@@ -150,6 +181,9 @@ export const attentionItemSchema = z.object({
   /** The step waiting on a person or a party, so a card need not re-derive it. */
   nowStep: z.object({ id: z.string(), label: z.string(), actor: z.string() }).nullable(),
   client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  /** Null when the item is unassigned, or when the caller may not see who owns it. */
+  owner: attentionOwnerSchema.nullable(),
+  priority: WorkPriority,
   period: attentionPeriodSchema.nullable(),
   /** What is known, inferred, conflicting, missing, stale or waiting on this item. */
   facts: z.array(attentionFactSchema).max(12),
@@ -233,6 +267,23 @@ export const workListResponseSchema = z.object({
        */
       client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
       period: attentionPeriodSchema.nullable(),
+      /**
+       * The same three the cards need and a work item does not carry: who owns it, how much it
+       * matters, and where it opens. Resolved here rather than in React, because a route composed
+       * in the browser is a route that drifts from the one the API serves.
+       */
+      owner: attentionOwnerSchema.nullable(),
+      priority: WorkPriority,
+      links: attentionLinksSchema,
+      /** What is known, missing, stale or waiting — so a Work row can cite as Discover does. */
+      facts: z.array(attentionFactSchema).max(12),
+      /**
+       * Why this scored where it did. Unlike Discover's, this may be **empty**: Discover only ever
+       * ranks rows that need a person or have a passed check date, and every one of those has at
+       * least one signal, but Work lists everything a person owns — including completed items,
+       * which have nothing pulling at them and should not be given an invented reason.
+       */
+      signals: z.array(attentionSignalSchema),
     }),
   ),
   /** Rows the caller can see in this view, and how many came back after the cap. */

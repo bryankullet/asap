@@ -191,15 +191,127 @@ A whole-page pixel diff is deliberately not the instrument: the prototype's scre
 fabricated clients, policies and claims, and the application's are empty until Increment 3 wires
 the boards. Screenshots for both are in `.local-visual/shots/`, uncommitted.
 
+## Increment 3 — the universal Space renderer, Today and Work
+
+The prototype has **no per-screen layouts**. Its pane is one renderer: a titled workspace with a
+status, optional filter pills and a column of typed blocks. Today, Work, a client, a renewal and a
+claim are all that same thing with different blocks in it. So Increment 3 built the renderer, and
+Today and Work are two block lists rather than two designs.
+
+### The contract
+
+`packages/schema/src/spaces/frame.ts` — identity (space kind, record type, record id, workflow id),
+title, status, context, filters, blocks, related Spaces, actions, evidence, permission state, and
+the four screen states. Blocks are a **closed discriminated union** over the prototype's fourteen
+types: `facts` · `rows` · `missing` · `note` · `compare` · `table` · `calculation` · `document` ·
+`email` · `upload` · `assignment` · `automation_builder` · `approval_gate` · `timeline`.
+
+There is no `html`, no `className`, no `component` and no slot for markup anywhere in it. That is
+what makes "the model cannot invent UI" a property of the contract rather than a promise about
+prompts: an unknown type has no branch, so it cannot parse, and a block carrying markup has
+nowhere to put it. `SpacePlan` in `plan.ts` remains the wire format a recipe or model returns;
+`SpaceFrame` is the contract at the React boundary, and it imports the plan's evidence and verb
+list rather than restating them.
+
+Actions carry `open` (navigation, rendered as a real link) and the validated business verbs. A
+generic block never performs one: it calls the handler the page gave it, which goes through the
+action API. Fourteen presentation components with write access would be fourteen places for a
+mutation to hide.
+
+### The measured comparison
+
+`scripts/visual/capture-boards.mjs` — ten states × three viewports = **30 captures**, each with
+geometry, typography, colour, spacing, radii, shadow, overflow and console.
+
+| Region | 1360×900 | 1440×900 | 390×844 |
+|---|---|---|---|
+| pane | identical | identical | identical |
+| Space head | identical | identical | identical |
+| eyebrow | identical | identical | identical |
+| title | identical | identical | identical |
+| status pill | identical | identical | identical |
+
+**Block values: 0 mismatches** against the prototype's own numbers — 18px block gap, 13px card
+radius, `none` shadow, 11px/12px row padding, 13.5px row title, 12.5px note, 11px/700 badge at
+99px, the soft-green 12px/700 primary at 9px, the 10.5px/0.12em block label.
+
+**Overflow: none, in any of the 30 captures. Console errors: none, in any of the 30.**
+
+Pixel difference over the pane (`scripts/visual/pixel-diff.mjs`), cropped so the already-identical
+sidebar and header do not pad the figure: **6.07% at 1360×900, 5.57% at 1440×900, 4.54% at
+390×844.** Read it for what it is — the prototype's rows are fabricated clients and claims and the
+application's are the brokerage's own, so what differs is the *text*. Geometry is what parity is
+measured by; this is the second opinion.
+
+### What measurement caught in Increment 3
+
+1. **The heading fallback, again.** `--font-heading` carried `system-ui` before `sans-serif`; the
+   prototype's is `Manrope, sans-serif`. Measured, that was **44px** on the Today title, because
+   Manrope has not loaded when the page first paints.
+2. **Invented mobile overrides.** I had shrunk the title to 21px at 390px and stacked the row into
+   one column. The prototype does neither — its facts grid collapses on its own because `auto-fit`
+   at a 180px minimum cannot fit two columns in 346px. Both overrides are gone, and 390px is still
+   free of horizontal overflow, asserted rather than assumed.
+3. **One tab store, not one per caller.** `useWorkspaceTabs` held `useState`, and the strip lives
+   in the shell while the tabs are opened by the screens — two independent copies, so opening a
+   Space from a screen never reached the strip above it. It is a module-level store read through
+   `useSyncExternalStore` now.
+4. **`/me` had never parsed in the test helpers.** `api.ts` validates every response, and the
+   fixtures used `"o1"` for an organization id and omitted the role's `key`, `description` and
+   `is_system`. Every query that needs an organization id stayed disabled, so the Increment 2
+   helper had been asserting against a shell with no identity in it.
+5. **`signals` could not be non-empty on Work.** Discover only ranks rows that need a person, and
+   every one has a signal; Work lists everything a person owns, including completed items, which
+   have nothing pulling at them. `.min(1)` made the endpoint return 500 for any view containing
+   one — caught by the API's own tests, and the contract now allows an empty list rather than
+   inventing a reason.
+
+### API and schema changes
+
+Three values the prototype's rows need and a work item does not carry, all resolved server-side
+under the caller's session:
+
+- **`owner`** — `{ id, name }`, on both `GET /attention` items and `GET /work` items. A work item
+  carries `owner_id` and a row showing a uuid is unreadable. A person the caller may not see comes
+  back absent, never as an id (`apps/api/src/attention/record-context.ts`).
+- **`priority`** — `high` | `medium` | `low`, banded from the same signal table that ranks
+  Discover (`priorityOf` in `signals.ts`). `high` starts at 48, the points a single signal is worth
+  when a person must act today; `medium` at 24. One engine, two readings of its output, so a badge
+  in Work and the order on Today cannot disagree. It is **not** a fifth status layer.
+- **`links`, `facts` and `signals` on `GET /work` items** — Discover had them and Work did not, so
+  a Work row could neither open the right record without the browser composing a route nor cite
+  what it was reading.
+
+No migration. No RLS, permission, guard, approval, evidence, idempotency or tenant-isolation
+change of any kind.
+
+### Honest limitations
+
+- **No Increment 3 action mutates anything.** Today navigates only. Work's "Assign" takes a person
+  to the item's own Space, where the guards, the evidence and the frozen payload are, rather than
+  writing from inside a list — a mutation in a list is how a misclick reassigns the wrong item. The
+  `assignment` block is built, tested and unplaced: it goes on the record Space in Increment 4.
+- **The application is measured through the development harness**, not the deployed site, because
+  a measuring script cannot sign in from this environment. It mounts the shipping `Shell`, `Today`
+  and `Work` and the shipping stylesheets; it proves geometry, typography, colour and responsive
+  behaviour, and nothing about authentication, RLS or any real business value.
+- **Work's filter pills carry the mandated vocabulary, not the prototype's.** The prototype's own
+  pills read All · Active · Waiting · Completed · Mine. D-075 and the instruction for this
+  increment both require Your work · With others · In progress · Done · Recent, and forbid a bare
+  "Waiting". The vocabulary decision wins; this is the one deliberate departure from the
+  prototype's text in Increment 3.
+- **Pinned keeps its own component** over its own endpoint, inside the Space frame's header. It is
+  per-person state, not a view of the brokerage's work.
+
 ## Increment status
 
 | # | Increment | State |
 |---|---|---|
 | 1 | Tokens and shared primitives | **done** — `ef9c633` |
 | 2 | Complete shell | **done** — geometry identical, 36/36 |
-| 3 | Today and Work | not started |
+| 3 | Universal Space renderer + Today + Work | **done** — 30 captures, 0 block-value mismatches |
 | 4 | Every remaining authenticated route | not started |
-| 5 | Full visual and interaction testing | harness landed (`3aef109`); shell comparison run, per-screen comparison pending |
+| 5 | Full visual and interaction testing | harness landed (`3aef109`); shell and board comparisons run, remaining routes pending |
 
 ### Legacy components still in the tree
 

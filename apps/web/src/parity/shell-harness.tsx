@@ -13,18 +13,6 @@
  * It is not part of the production build. `index.html` is the only Rollup input, so nothing here
  * is emitted into `dist/`, and `scripts/check-bundle.mjs` would see it if that changed.
  */
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  RouterProvider,
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-} from "@tanstack/react-router";
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { Shell } from "../shell/Shell.js";
-import "../styles/index.css";
 
 if (import.meta.env.PROD) throw new Error("the parity harness is a development tool");
 
@@ -36,55 +24,209 @@ const json = (v: unknown) =>
  * no fictional brokerage, client or policy belongs in this codebase, and a plausible-looking one
  * here would end up quoted as if it were real.
  */
+/*
+ * A stand-in brokerage, so the boards render with content in them and can be measured.
+ *
+ * Every id is a real uuid and every body is the endpoint's own shape, because `lib/api.ts`
+ * validates each response — a fixture the API could not have produced would leave the board in
+ * its loading state and the measurement would be of a skeleton. The names are obviously
+ * placeholders: no fictional client, policy or claim belongs in this codebase, and a plausible
+ * one here would end up quoted as though it were real.
+ */
+const ORG = "10000000-0000-4000-8000-00000000000a";
+const CLIENT = "20000000-0000-4000-8000-000000000001";
+const OWNER = "30000000-0000-4000-8000-0000000000aa";
+const ORGANIZATION = {
+  id: ORG,
+  name: "Placeholder Brokerage",
+  country: "KE",
+  currency: "KES",
+  timezone: "Africa/Nairobi",
+};
+
+const params = new URLSearchParams(location.search);
+/** `?rows=0` measures the empty state; anything else measures a board with content. */
+const ROW_COUNT = Number.parseInt(params.get("rows") ?? "4", 10);
+/** `?book=0` measures a brand-new brokerage rather than one that is merely up to date. */
+const HAS_BOOK = params.get("book") !== "0";
+
+const PARTIES = ["CIC", "client", "assessor"];
+
+function row(i: number) {
+  const id = `00000000-0000-4000-8000-00000000000${i + 1}`;
+  const external = i % 3 === 1;
+  return {
+    id,
+    organization_id: ORG,
+    title: `Placeholder work item ${i + 1}`,
+    kind: (["placement", "renewal", "claim", "endorsement"] as const)[i % 4]!,
+    client_id: CLIENT,
+    policy_period_id: null,
+    insurer_id: null,
+    class_of_business: null,
+    owner_id: OWNER,
+    task_status: external ? "with_party" : "needs_you",
+    task_party: external ? PARTIES[i % PARTIES.length]! : null,
+    task_since: "2026-08-12T00:00:00.000Z",
+    task_next_check: external ? "2026-08-26T00:00:00.000Z" : null,
+    cover_status: null,
+    cover_inception_at: null,
+    money_status: null,
+    reason: "This is the reason the engine recorded against the row, shown behind one click.",
+    steps: [],
+    exception: null,
+    version: 1,
+    created_at: "2026-08-01T00:00:00.000Z",
+    updated_at: "2026-08-12T00:00:00.000Z",
+    completed_at: null,
+    deleted_at: null,
+  };
+}
+
+const ROWS = Array.from({ length: Math.max(0, ROW_COUNT) }, (_, i) => row(i));
+const SIGNAL = {
+  id: "cover_uncertain",
+  because: "Cover was requested and no confirmation is recorded.",
+  points: 48,
+};
+const context = (r: ReturnType<typeof row>) => ({
+  client: { id: CLIENT, name: "Placeholder Client Ltd" },
+  owner: { id: OWNER, name: "Placeholder Owner" },
+  priority: "high" as const,
+  period: null,
+  facts: [],
+  links: { work: `/r/${r.id}`, client: `/files/${CLIENT}`, policy: null, ask: r.title },
+});
+
 globalThis.fetch = (async (url: RequestInfo | URL) => {
   const u = String(url);
   if (u.includes("/me")) {
     return json({
       user: {
-        id: "harness",
+        id: "90000000-0000-4000-8000-000000000001",
         email: "harness@example.invalid",
         display_name: "Parity Harness",
         full_name: null,
       },
       memberships: [
         {
-          organization: { id: "harness-org", name: "Parity harness" },
-          role: { id: "harness-role", name: "Operations manager" },
+          id: "80000000-0000-4000-8000-000000000001",
+          organization: ORGANIZATION,
+          role: {
+            id: "70000000-0000-4000-8000-000000000001",
+            key: "brokerage_admin",
+            name: "Brokerage admin",
+            description: null,
+            is_system: true,
+          },
+          is_owner: true,
+          status: "active",
+          joined_at: "2026-01-04T00:00:00.000Z",
         },
       ],
-      active_organization: {
-        id: "harness-org",
-        name: "Parity harness",
-        country: "KE",
-        currency: "KES",
-        timezone: "Africa/Nairobi",
-      },
-      permissions: [],
+      active_organization: ORGANIZATION,
+      permissions: ["work_item:assign"],
     });
   }
-  if (u.includes("/work")) return json({ items: [], counts: { needs: 0 } });
+  if (u.includes("/attention")) {
+    return json({
+      organization: { id: ORG, name: ORGANIZATION.name },
+      generatedAt: "2026-08-20T09:00:00.000Z",
+      items: ROWS.map((r, i) => ({
+        section: "needs_you",
+        rank: i + 1,
+        score: 48,
+        item: r,
+        reason: r.reason,
+        signals: [SIGNAL],
+        nowStep: null,
+        runFailure: null,
+        ...context(r),
+      })),
+      sections: [
+        {
+          key: "needs_you",
+          label: "What matters now",
+          visible: ROWS.length,
+          returned: ROWS.length,
+        },
+        { key: "checks_due", label: "Checks due", visible: 0, returned: 0 },
+      ],
+      orphanRuns: [],
+      degraded: [],
+      cap: 12,
+      book: HAS_BOOK
+        ? { clients: 12, policies: 20, work: ROWS.length }
+        : { clients: 0, policies: 0, work: 0 },
+    });
+  }
+  if (u.includes("/work")) {
+    const view = new URL(u, location.origin).searchParams.get("view") ?? "needs";
+    return json({
+      organization: { id: ORG, name: ORGANIZATION.name },
+      view,
+      label: view,
+      generatedAt: "2026-08-20T09:00:00.000Z",
+      items: ROWS.map((r, i) => ({
+        rank: i + 1,
+        item:
+          view === "done"
+            ? { ...r, task_status: "done", completed_at: "2026-08-19T00:00:00.000Z" }
+            : r,
+        reason: r.reason,
+        nowStep: { id: "confirm", label: "Confirm cover", actor: "insurer" },
+        runFailure: null,
+        signals: [SIGNAL],
+        ...context(r),
+      })),
+      visible: ROWS.length,
+      returned: ROWS.length,
+      cap: 50,
+      counts: { needs: ROWS.length, with: 2, progress: 1, review: 0, recent: 3, done: 5 },
+      degraded: [],
+    });
+  }
   if (u.includes("/runs")) return json({ runs: [] });
+  if (u.includes("/pins")) return json({ pins: [] });
   return json({});
 }) as typeof fetch;
 
-const root = createRootRoute({ component: () => <Shell /> });
-const routes = ["/today", "/work", "/automations", "/new", "/search", "/jobs", "/ask"].map((path) =>
-  createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
-);
-const initial = new URLSearchParams(location.search).get("at") ?? "/today";
-const router = createRouter({
-  routeTree: root.addChildren(routes),
-  history: createMemoryHistory({ initialEntries: [initial] }),
-});
+/**
+ * A signed-in session, written where `supabase-js` looks for one.
+ *
+ * `lib/api.ts` refuses to call anything without a token — which is the point of it — so a harness
+ * that did not install one would measure five error states. The token is a placeholder and reaches
+ * nothing: every request is answered by the stub above.
+ */
+function installSession(): void {
+  const ref = new URL(import.meta.env["VITE_PUBLIC_SUPABASE_URL"] as string).hostname.split(".")[0];
+  const session = {
+    access_token: "parity-harness-token",
+    refresh_token: "parity-harness-refresh",
+    token_type: "bearer",
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: {
+      id: "90000000-0000-4000-8000-000000000001",
+      aud: "authenticated",
+      role: "authenticated",
+      email: "harness@example.invalid",
+      app_metadata: {},
+      user_metadata: {},
+      created_at: "2026-01-04T00:00:00.000Z",
+    },
+  };
+  try {
+    localStorage.setItem(`sb-${ref}-auth-token`, JSON.stringify(session));
+  } catch {
+    /* Without storage the harness still renders; it renders error states, and says so on screen. */
+  }
+}
 
-const el = document.getElementById("root");
-if (!el) throw new Error("#root not found");
-createRoot(el).render(
-  <StrictMode>
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </StrictMode>,
-);
+installSession();
+
+/*
+ * The application is imported *after* the stub and the session are in place. A static import would
+ * be hoisted above both, and the first `/me` would go out before either existed.
+ */
+await import("./harness-app.js");

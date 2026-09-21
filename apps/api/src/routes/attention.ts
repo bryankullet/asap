@@ -20,7 +20,14 @@ import {
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
-import { compareItems, factsFor, nowStepOf, scoreOf, signalsFor } from "../attention/signals.js";
+import {
+  compareItems,
+  factsFor,
+  nowStepOf,
+  priorityOf,
+  scoreOf,
+  signalsFor,
+} from "../attention/signals.js";
 import { loadRecordContext } from "../attention/record-context.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
@@ -142,7 +149,7 @@ export function attentionRoutes() {
     // Context: the client and the client-policy-year, so a card can name what it is about.
     // Shared with /work and /runs, and it degrades rather than failing (§36 partial success).
     const context = await loadRecordContext(db, org.id, inScope, now);
-    const { clientNames, clientFileStatus, periods } = context;
+    const { clientNames, clientFileStatus, ownerNames, periods } = context;
     degraded.push(...context.degraded);
 
     /** Score, explain and contextualise one section, then order it by the signal total. */
@@ -179,6 +186,11 @@ export function attentionRoutes() {
           s.item.client_id && clientNames.has(s.item.client_id)
             ? { id: s.item.client_id, name: clientNames.get(s.item.client_id)! }
             : null,
+        owner:
+          s.item.owner_id && ownerNames.has(s.item.owner_id)
+            ? { id: s.item.owner_id, name: ownerNames.get(s.item.owner_id)! }
+            : null,
+        priority: priorityOf(s.score),
         period: s.period,
         facts: s.facts,
         runFailure: stuckByItem.has(s.item.id) ? failure(stuckByItem.get(s.item.id)!) : null,
@@ -275,20 +287,51 @@ export function attentionRoutes() {
       view: q.view,
       label: WORK_VIEW_LABELS[q.view],
       generatedAt,
-      items: shown.map((item, i) => ({
-        rank: i + 1,
-        item,
-        reason: item.reason ?? `${nowStep(item)?.label ?? "This item"} is the step waiting.`,
-        nowStep: nowStep(item),
-        runFailure: stuckByItem.has(item.id) ? failure(stuckByItem.get(item.id)!) : null,
-        client:
-          item.client_id && context.clientNames.has(item.client_id)
-            ? { id: item.client_id, name: context.clientNames.get(item.client_id)! }
-            : null,
-        period: item.policy_period_id
+      items: shown.map((item, i) => {
+        const period = item.policy_period_id
           ? (context.periods.get(item.policy_period_id) ?? null)
-          : null,
-      })),
+          : null;
+        /*
+         * The same signals Discover ranks with, so a badge in Work and the order on Today cannot
+         * disagree: one engine, two readings of its output. `clientFileBlocking` is deliberately
+         * not recomputed here — it is a placement-approval signal Discover owns, and guessing at
+         * it from a list read would make the two boards differ on the same row.
+         */
+        const facts = factsFor(item, period, now);
+        const signals = signalsFor({
+          item,
+          failedRun: stuckByItem.get(item.id) ?? null,
+          period,
+          clientFileBlocking: false,
+          facts,
+          now,
+        });
+        return {
+          rank: i + 1,
+          item,
+          reason: item.reason ?? `${nowStep(item)?.label ?? "This item"} is the step waiting.`,
+          nowStep: nowStep(item),
+          runFailure: stuckByItem.has(item.id) ? failure(stuckByItem.get(item.id)!) : null,
+          client:
+            item.client_id && context.clientNames.has(item.client_id)
+              ? { id: item.client_id, name: context.clientNames.get(item.client_id)! }
+              : null,
+          period,
+          owner:
+            item.owner_id && context.ownerNames.has(item.owner_id)
+              ? { id: item.owner_id, name: context.ownerNames.get(item.owner_id)! }
+              : null,
+          priority: priorityOf(scoreOf(signals)),
+          links: {
+            work: `/r/${item.id}`,
+            client: item.client_id ? `/files/${item.client_id}` : null,
+            policy: period ? `/r/${period.id}?kind=policy` : null,
+            ask: item.title,
+          },
+          facts,
+          signals,
+        };
+      }),
       visible: inView.length,
       returned: Math.min(inView.length, q.limit),
       cap: q.limit,

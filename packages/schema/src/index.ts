@@ -23,6 +23,7 @@ export * from "./recipes/claim.js";
 export * from "./recipes/endorsement.js";
 export * from "./recipes/record.js";
 export * from "./spaces/plan.js";
+export * from "./spaces/frame.js";
 export * from "./ai/gateway.js";
 export * from "./ai/conversation.js";
 export * from "./spaces/blocks.js";

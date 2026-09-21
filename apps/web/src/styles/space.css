@@ -1,0 +1,897 @@
+/**
+ * The Space frame and its fourteen blocks, at the prototype's measured values.
+ *
+ * The prototype has one pane renderer and no per-screen layouts, so this file is the whole of
+ * every authenticated screen's composition. Every number is from `ASAP.dc.html` — its pane markup
+ * for the structure, a census of its inline styles for the values.
+ *
+ * Scoped under `.sp-space` so the legacy `shell.css` cannot reach in: that file's
+ * `.demo-root button { font: inherit }` outranks a single class, which is how three shell controls
+ * silently lost their size in Increment 2. The scope goes when the last legacy screen does.
+ *
+ * One rule to keep while editing: **a card at rest has a hairline border and a 13px radius and no
+ * shadow at all.** Only a modal and a sheet float.
+ */
+
+/* ---- The frame --------------------------------------------------------------------------- */
+
+.sp-space {
+  min-height: 0;
+}
+
+/* Title, heading and pill, in the prototype's three positions. */
+.sp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sp-head-text {
+  min-width: 0;
+}
+.sp-eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--color-accent-green);
+}
+.sp-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 24.2px;
+  margin: 6px 0 0;
+  line-height: 1.25;
+  letter-spacing: normal;
+}
+.sp-context {
+  margin: 7px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-ink-muted);
+  max-width: 660px;
+}
+.sp-status {
+  flex: none;
+  border-radius: 99px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ---- Tones ------------------------------------------------------------------------------- */
+
+/*
+ * Semantic and fixed: green is running or active, gold is waiting, red needs review, grey is done.
+ * Never re-mapped per screen, which is why they are one set of rules rather than per-block colour.
+ */
+.sp-tone-neutral {
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-secondary);
+}
+.sp-tone-active {
+  background: var(--color-accent-green-soft);
+  color: var(--color-accent-green);
+}
+.sp-tone-waiting {
+  background: var(--color-accent-gold-soft);
+  color: var(--color-accent-gold-ink);
+}
+.sp-tone-attention {
+  background: var(--color-accent-red-soft);
+  color: var(--color-accent-red);
+}
+.sp-tone-done {
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-done);
+}
+
+/* ---- Filters ----------------------------------------------------------------------------- */
+
+.sp-filters {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.sp-space .sp-filter {
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  color: var(--color-ink-secondary);
+  border-radius: 99px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+}
+.sp-space .sp-filter:hover {
+  border-color: var(--color-line-hover);
+  text-decoration: none;
+}
+.sp-space .sp-filter[aria-current="true"] {
+  border-color: var(--color-accent-green-line);
+  background: var(--color-accent-green-tint);
+  color: var(--color-accent-green);
+}
+.sp-filter-count {
+  color: var(--color-ink-faint);
+  font-weight: 600;
+}
+
+/* ---- The block column -------------------------------------------------------------------- */
+
+/*
+ * 900px is the prototype's own cap, and 18px its gap. The cap is on the column rather than the
+ * pane, so a wide screen gives the extra width to whitespace instead of stretching a row of facts
+ * to a line nobody can scan.
+ */
+.sp-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+  max-width: 900px;
+}
+.sp-block-label {
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  margin-bottom: 9px;
+}
+
+/* Every block's own loading, empty and error states (§36). None of them is a blank. */
+.sp-block-state {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-ink-muted);
+}
+.sp-block-state[data-state="error"] {
+  border-color: var(--color-accent-red-line);
+  background: var(--color-accent-red-soft);
+  color: var(--color-accent-red);
+}
+.sp-skeleton {
+  height: 11px;
+  border-radius: 99px;
+  background: var(--color-line-soft);
+  margin-top: 8px;
+}
+.sp-skeleton:first-child {
+  margin-top: 0;
+}
+
+/* ---- facts ------------------------------------------------------------------------------- */
+
+/*
+ * A 1px gap over a line-coloured ground: the dividers are the background showing through, which is
+ * how the grid keeps hairlines between cells without doubling them at the wrap.
+ */
+.sp-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1px;
+  background: var(--color-line);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+.sp-fact {
+  background: var(--color-paper);
+  padding: 11px 12px;
+}
+.sp-fact-key {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-muted);
+  font-weight: 700;
+}
+.sp-fact-value {
+  display: block;
+  font-size: 14px;
+  margin-top: 4px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+/* Abstention is a state, not a blank: a fact nobody recorded says so. */
+.sp-fact-value[data-missing="true"] {
+  color: var(--color-accent-gold-ink);
+  font-weight: 600;
+}
+
+/* ---- rows -------------------------------------------------------------------------------- */
+
+.sp-rows {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-paper);
+}
+.sp-row {
+  border-top: 1px solid var(--color-line-soft);
+  padding: 11px 12px;
+}
+/* The card's own border is the first row's top line. */
+.sp-row:first-child {
+  border-top: 0;
+}
+.sp-row-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+.sp-row-main {
+  min-width: 0;
+}
+.sp-row-title {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.sp-row-note {
+  display: block;
+  font-size: 12.5px;
+  color: var(--color-ink-muted);
+  margin-top: 3px;
+  line-height: 1.45;
+}
+.sp-row-why {
+  display: block;
+  font-size: 12.5px;
+  color: var(--color-ink-secondary);
+  margin-top: 7px;
+  background: var(--color-surface-sunken);
+  border-radius: 9px;
+  padding: 8px 9px;
+  line-height: 1.5;
+}
+.sp-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.sp-badge {
+  border-radius: 99px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ---- Controls ---------------------------------------------------------------------------- */
+
+/* The quiet control: a bordered white button, used for everything that is not the one next step. */
+.sp-space .sp-btn {
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  color: var(--color-ink-secondary);
+  border-radius: 9px;
+  padding: 5px 9px;
+  font-size: 12px;
+  text-decoration: none;
+  display: inline-block;
+}
+.sp-space .sp-btn:hover {
+  border-color: var(--color-line-hover);
+  text-decoration: none;
+}
+.sp-space .sp-btn:disabled {
+  color: var(--color-ink-faint);
+  cursor: not-allowed;
+}
+/* The one next step: soft green, no border, weight 700. One per row at most. */
+.sp-space .sp-btn-primary {
+  border: 0;
+  background: var(--color-tab-active);
+  color: var(--color-accent-green);
+  border-radius: 9px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  display: inline-block;
+}
+.sp-space .sp-btn-primary:hover {
+  background: var(--color-accent-green-soft-hover);
+  text-decoration: none;
+}
+/* A solid green control, for the two places a person commits something. */
+.sp-space .sp-btn-solid {
+  border: 0;
+  background: var(--color-accent-green);
+  color: var(--color-paper);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.sp-space .sp-btn-solid:hover {
+  background: var(--color-accent-green-hover);
+}
+.sp-space .sp-btn-solid:disabled {
+  background: var(--color-line-strong);
+  color: var(--color-ink-muted);
+  cursor: not-allowed;
+}
+/* A guard's own words, beside the control it blocks. Shown disabled, never hidden (§34). */
+.sp-blocked {
+  font-size: 12px;
+  color: var(--color-accent-red);
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* ---- missing ----------------------------------------------------------------------------- */
+
+.sp-missing {
+  border: 1px solid var(--color-accent-gold-line);
+  background: var(--color-accent-gold-wash);
+  border-radius: var(--radius-card);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sp-missing-item {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink-secondary);
+}
+.sp-missing-mark {
+  color: var(--color-accent-gold);
+  font-weight: 700;
+  flex: none;
+}
+
+/* ---- note -------------------------------------------------------------------------------- */
+
+.sp-note {
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  border-radius: var(--radius-card);
+  padding: 12px;
+}
+.sp-note-title {
+  display: block;
+  font-size: 13px;
+}
+.sp-note-text {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-secondary);
+}
+.sp-note[data-tone="active"] {
+  border-color: var(--color-accent-green-line);
+  background: var(--color-accent-green-tint);
+}
+.sp-note[data-tone="active"] .sp-note-title {
+  color: var(--color-accent-green);
+}
+.sp-note[data-tone="waiting"] {
+  border-color: var(--color-accent-gold-line);
+  background: var(--color-accent-gold-wash);
+}
+.sp-note[data-tone="waiting"] .sp-note-title {
+  color: var(--color-accent-gold-ink);
+}
+.sp-note[data-tone="attention"] {
+  border-color: var(--color-accent-red-line);
+  background: var(--color-accent-red-soft);
+}
+.sp-note[data-tone="attention"] .sp-note-title {
+  color: var(--color-accent-red);
+}
+
+/* ---- compare and table ------------------------------------------------------------------- */
+
+.sp-grid {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: auto;
+  background: var(--color-paper);
+}
+.sp-grid-head {
+  display: grid;
+  background: var(--color-surface-sunken);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+}
+.sp-grid-head > * {
+  padding: 9px 11px;
+}
+.sp-grid-row {
+  display: grid;
+  border-top: 1px solid var(--color-line-soft);
+  font-size: 13px;
+}
+.sp-grid-row > * {
+  padding: 10px 11px;
+  line-height: 1.4;
+}
+.sp-grid-term {
+  color: var(--color-ink-muted);
+}
+
+/* ---- calculation ------------------------------------------------------------------------- */
+
+.sp-calc {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-paper);
+}
+.sp-calc-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-top: 1px solid var(--color-line-soft);
+  font-size: 13.5px;
+}
+.sp-calc-line:first-child {
+  border-top: 0;
+}
+.sp-calc-key {
+  color: var(--color-ink-secondary);
+}
+.sp-calc-line[data-emphasis="true"] {
+  background: var(--color-surface-sunken);
+  font-weight: 700;
+}
+
+/* ---- document ---------------------------------------------------------------------------- */
+
+.sp-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--color-paper);
+}
+.sp-doc-name {
+  display: block;
+  font-size: 13.5px;
+}
+.sp-doc-kind {
+  display: block;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  margin-top: 3px;
+}
+/* Drawn as paper, on its own warm ground, so it never reads as one of our cards. */
+.sp-doc-paper {
+  background: var(--color-document-paper);
+  border: 1px solid var(--color-document-line);
+  border-radius: 12px;
+  padding: 22px;
+  font-family: Georgia, serif;
+  color: var(--color-ink-secondary);
+}
+.sp-doc-paper h3 {
+  font-family: Georgia, serif;
+  font-size: 15.5px;
+  text-align: center;
+  margin: 0 0 16px;
+  letter-spacing: 0.04em;
+}
+.sp-doc-line {
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0 0 9px;
+}
+.sp-doc-hit {
+  background: var(--color-accent-gold-soft);
+  padding: 1px 3px;
+}
+.sp-doc-note {
+  margin: 11px 0 0;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  line-height: 1.6;
+}
+
+/* ---- email ------------------------------------------------------------------------------- */
+
+.sp-email {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-paper);
+}
+.sp-email-head {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.sp-email-label {
+  font-size: 11px;
+  letter-spacing: 0.11em;
+  font-weight: 700;
+}
+.sp-email-meta {
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+}
+.sp-email-body {
+  padding: 12px;
+}
+.sp-email-to {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+.sp-email-subject {
+  display: block;
+  font-size: 13.5px;
+  margin-top: 6px;
+}
+.sp-email-text {
+  margin: 9px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-secondary);
+  white-space: pre-line;
+}
+.sp-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+.sp-attachment {
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--color-ink-secondary);
+}
+.sp-email-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* ---- upload ------------------------------------------------------------------------------ */
+
+.sp-upload {
+  border: 1px dashed var(--color-line-dashed);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  background: var(--color-paper);
+}
+.sp-upload-prompt {
+  display: block;
+  font-size: 13px;
+}
+.sp-upload-note {
+  display: block;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  margin-top: 4px;
+}
+.sp-upload input[type="file"] {
+  margin-top: 11px;
+  font-size: 13px;
+}
+.sp-progress {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.sp-progress-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-ink-secondary);
+}
+/*
+ * A file's own progress, and the only bar in the product. It is never a Space's progress and never
+ * a confidence: §45 rule 10 keeps progress derived, and a percentage beside a model's answer is
+ * the exact thing that rule forbids.
+ */
+.sp-progress-track {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--color-line-soft);
+  margin-top: 5px;
+  overflow: hidden;
+}
+.sp-progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent-green);
+}
+
+/* ---- assignment and automation builder --------------------------------------------------- */
+
+.sp-form {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 13px;
+  background: var(--color-paper);
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.sp-form-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.sp-field {
+  min-width: 170px;
+}
+.sp-field-narrow {
+  min-width: 150px;
+}
+.sp-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-ink-label);
+  margin-bottom: 5px;
+}
+.sp-space .sp-input {
+  width: 100%;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 13.5px;
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+.sp-form-note {
+  display: block;
+  width: 100%;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+.sp-form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---- approval gate ----------------------------------------------------------------------- */
+
+.sp-gate {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 14px;
+  padding: 13px;
+  background: var(--color-paper);
+}
+.sp-gate-heading {
+  display: block;
+  font-size: 13px;
+}
+.sp-gate-detail {
+  margin: 6px 0 11px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-ink-muted);
+}
+.sp-gate-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.sp-space .sp-btn-gate {
+  border: 0;
+  background: var(--color-accent-green);
+  color: var(--color-paper);
+  border-radius: 11px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.sp-space .sp-btn-gate:hover {
+  filter: brightness(0.95);
+}
+.sp-space .sp-btn-gate:disabled {
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-muted);
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* ---- timeline ---------------------------------------------------------------------------- */
+
+.sp-timeline {
+  display: flex;
+  flex-direction: column;
+}
+.sp-space .sp-tl-event {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 11px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0 0 14px;
+  text-decoration: none;
+  color: inherit;
+}
+.sp-space .sp-tl-event:hover {
+  opacity: 0.72;
+  text-decoration: none;
+}
+.sp-tl-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.sp-tl-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex: none;
+  background: var(--color-dot-neutral);
+}
+.sp-tl-dot[data-tone="active"] {
+  background: var(--color-accent-green);
+}
+.sp-tl-dot[data-tone="waiting"] {
+  background: var(--color-accent-gold);
+}
+.sp-tl-dot[data-tone="attention"] {
+  background: var(--color-accent-red);
+}
+.sp-tl-line {
+  width: 1px;
+  flex: 1;
+  background: var(--color-line);
+}
+.sp-tl-when {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+}
+.sp-tl-text {
+  display: block;
+  font-size: 13.5px;
+  margin-top: 3px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+.sp-tl-link {
+  display: block;
+  font-size: 11.5px;
+  color: var(--color-accent-green);
+  margin-top: 4px;
+}
+
+/* ---- Evidence ---------------------------------------------------------------------------- */
+
+/* Beneath a fact or a row. A citation that cannot be opened is not a citation. */
+.sp-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-line-soft);
+  list-style: none;
+}
+.sp-evidence li {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  line-height: 1.45;
+}
+.sp-evidence-ref {
+  color: var(--color-ink-secondary);
+}
+
+/* ---- Related ----------------------------------------------------------------------------- */
+
+.sp-related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 18px;
+  max-width: 900px;
+}
+.sp-space .sp-related-link {
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--color-ink-secondary);
+  text-decoration: none;
+}
+.sp-space .sp-related-link:hover {
+  border-color: var(--color-line-hover);
+  text-decoration: none;
+}
+.sp-related-kind {
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  font-weight: 700;
+  color: var(--color-ink-faint);
+  margin-right: 6px;
+}
+
+/* ---- The Space's own states -------------------------------------------------------------- */
+
+.sp-empty {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  padding: 22px;
+  max-width: 660px;
+}
+.sp-empty-heading {
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+.sp-empty-body {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-ink-muted);
+}
+.sp-empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+/* Partial success: what could not be read, said rather than passed off as an empty result. */
+.sp-degraded {
+  border: 1px solid var(--color-accent-gold-line);
+  background: var(--color-accent-gold-wash);
+  border-radius: var(--radius-card);
+  padding: 11px 12px;
+  margin-top: 18px;
+  max-width: 900px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-ink-secondary);
+}
+
+/* ---- Mobile ------------------------------------------------------------------------------ */
+
+/*
+ * There is no mobile override here, and that is deliberate.
+ *
+ * The prototype has none: at 390px it keeps the 24.2px title and the two-column row, and the
+ * facts grid collapses on its own because `auto-fit` with a 180px minimum cannot fit two columns
+ * in 346px. Shrinking the title and stacking the row "for mobile" was an invention, and measured
+ * against the prototype it was a 3px difference in the title and a different row shape. The
+ * actions wrap within their own cell, which is what keeps 390px free of horizontal overflow —
+ * asserted, not assumed, by `scripts/visual/capture-boards.mjs`.
+ */

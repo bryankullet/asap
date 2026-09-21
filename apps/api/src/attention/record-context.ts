@@ -28,6 +28,8 @@ import { daysToEnd } from "./signals.js";
  */
 export type RecordContext = {
   clientNames: Map<string, string>;
+  /** Owner id to the name a row shows. Absent when the caller may not see that person. */
+  ownerNames: Map<string, string>;
   clientFileStatus: Map<string, string>;
   periods: Map<string, AttentionPeriod>;
   degraded: AttentionDegradation[];
@@ -41,6 +43,7 @@ export async function loadRecordContext(
 ): Promise<RecordContext> {
   const degraded: AttentionDegradation[] = [];
   const clientNames = new Map<string, string>();
+  const ownerNames = new Map<string, string>();
   const clientFileStatus = new Map<string, string>();
   const periods = new Map<string, AttentionPeriod>();
 
@@ -55,6 +58,30 @@ export async function loadRecordContext(
       for (const row of (r.data ?? []) as { id: string; name: string; file_status: string }[]) {
         clientNames.set(row.id, row.name);
         clientFileStatus.set(row.id, row.file_status);
+      }
+    }
+  }
+
+  /*
+   * Who owns each item. Read under the caller's session like everything else here, so a person
+   * outside the caller's brokerage resolves to absent rather than to an id.
+   */
+  const ownerIds = [
+    ...new Set(items.map((i) => i.owner_id).filter((v): v is string => v !== null)),
+  ];
+  if (ownerIds.length > 0) {
+    const r = await db.from("users").select("id, display_name, full_name, email").in("id", ownerIds);
+    if (r.error) {
+      degraded.push({ what: "Owners", because: "The people rows could not be read." });
+    } else {
+      for (const row of (r.data ?? []) as {
+        id: string;
+        display_name: string | null;
+        full_name: string | null;
+        email: string | null;
+      }[]) {
+        const name = row.display_name ?? row.full_name ?? row.email;
+        if (name) ownerNames.set(row.id, name);
       }
     }
   }
@@ -111,5 +138,5 @@ export async function loadRecordContext(
     }
   }
 
-  return { clientNames, clientFileStatus, periods, degraded };
+  return { clientNames, ownerNames, clientFileStatus, periods, degraded };
 }

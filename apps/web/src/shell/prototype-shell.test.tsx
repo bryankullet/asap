@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ASK_DEFAULT_WIDTH, ASK_MAX_WIDTH, ASK_MIN_WIDTH } from "./ask-width.js";
-import { tabKey } from "./workspace-tabs.js";
+import { resetWorkspaceTabs, tabKey } from "./workspace-tabs.js";
 
 /**
  * The permanent shell (Increment 2).
@@ -19,9 +19,11 @@ import { tabKey } from "./workspace-tabs.js";
 
 beforeEach(() => {
   globalThis.localStorage?.clear();
+  resetWorkspaceTabs();
 });
 afterEach(() => {
   globalThis.localStorage?.clear();
+  resetWorkspaceTabs();
 });
 
 describe("tab identity", () => {

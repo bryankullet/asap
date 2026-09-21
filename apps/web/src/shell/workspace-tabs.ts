@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 /**
  * Open workspace tabs.
@@ -11,6 +11,12 @@ import { useCallback, useEffect, useState } from "react";
  * not delete, complete, unassign or otherwise touch the record, and nothing in this module can:
  * there is no API call in here at all. That separation is the point — a tab strip that could end a
  * renewal by being tidied up would be a trap.
+ *
+ * **One store, not one per caller.** The tab strip lives in the shell and the tabs are opened by
+ * the screens, which are different components — so this was two independent pieces of `useState`
+ * and opening a Space from a screen never reached the strip above it. The state is a module-level
+ * store read through `useSyncExternalStore`: every caller sees the same tabs, and a screen that
+ * opens one is the same act as the strip showing it.
  */
 
 /**
@@ -86,54 +92,113 @@ export type WorkspaceTabs = {
   isOpen: (id: TabIdentity) => boolean;
 };
 
-export function useWorkspaceTabs(activePath: string): WorkspaceTabs {
-  const [tabs, setTabs] = useState<WorkspaceTab[]>(() => read<WorkspaceTab[]>(OPEN_KEY, []));
-  const [recent, setRecent] = useState<WorkspaceTab[]>(() => read<WorkspaceTab[]>(RECENT_KEY, []));
+/**
+ * The store itself. Module-level, so every component that asks gets the same answer.
+ *
+ * `localStorage` is read once, on first use, and written on every change: the browser is where
+ * this belongs and where it survives a reload, but it is not the source components read from —
+ * two components reading storage independently is how they drift apart.
+ */
+type TabState = { tabs: WorkspaceTab[]; recent: WorkspaceTab[] };
 
-  useEffect(() => write(OPEN_KEY, tabs), [tabs]);
-  useEffect(() => write(RECENT_KEY, recent), [recent]);
+let state: TabState | null = null;
+const listeners = new Set<() => void>();
 
-  const open = useCallback((next: Omit<WorkspaceTab, "pinned" | "openedAt" | "lastSeenAt">) => {
-    const key = tabKey(next);
-    const now = Date.now();
-    setTabs((current) => {
-      const existing = current.find((t) => tabKey(t) === key);
-      if (existing) {
-        // Already open: keep its identity, its pin and the moment it was opened, and only note
-        // that it has been seen again. Re-opening a tab must not look like opening a new one.
-        return current.map((t) =>
-          tabKey(t) === key ? { ...t, title: next.title, path: next.path, lastSeenAt: now } : t,
-        );
-      }
-      const added: WorkspaceTab = { ...next, pinned: false, openedAt: now, lastSeenAt: now };
-      const grown = [...current, added];
-      if (grown.length <= MAX_OPEN) return grown;
+function current(): TabState {
+  state ??= {
+    tabs: read<WorkspaceTab[]>(OPEN_KEY, []),
+    recent: read<WorkspaceTab[]>(RECENT_KEY, []),
+  };
+  return state;
+}
+
+function commit(next: TabState): void {
+  state = next;
+  write(OPEN_KEY, next.tabs);
+  write(RECENT_KEY, next.recent);
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
+ * Forget everything, for tests.
+ *
+ * A module-level store outlives a render, so without this one test's tabs would arrive in the
+ * next one. Production never calls it: closing a tab is `close`, and there is no "clear all".
+ */
+export function resetWorkspaceTabs(): void {
+  state = null;
+  for (const listener of listeners) listener();
+}
+
+/** Opens a tab, or brings the existing one forward if that identity is already open. */
+function openTab(next: Omit<WorkspaceTab, "pinned" | "openedAt" | "lastSeenAt">): void {
+  const key = tabKey(next);
+  const now = Date.now();
+  const { tabs, recent } = current();
+
+  const existing = tabs.find((t) => tabKey(t) === key);
+  let nextTabs: WorkspaceTab[];
+  if (existing) {
+    // Already open: keep its identity, its pin and the moment it was opened, and only note that
+    // it has been seen again. Re-opening a tab must not look like opening a new one.
+    nextTabs = tabs.map((t) =>
+      tabKey(t) === key ? { ...t, title: next.title, path: next.path, lastSeenAt: now } : t,
+    );
+  } else {
+    const added: WorkspaceTab = { ...next, pinned: false, openedAt: now, lastSeenAt: now };
+    const grown = [...tabs, added];
+    if (grown.length <= MAX_OPEN) {
+      nextTabs = grown;
+    } else {
       // Over the cap, the oldest *unpinned* tab goes. A pinned tab is never evicted to make room:
       // pinning it is the person saying they want it kept.
       const victim = grown.filter((t) => !t.pinned).sort((a, b) => a.lastSeenAt - b.lastSeenAt)[0];
-      return victim ? grown.filter((t) => tabKey(t) !== tabKey(victim)) : grown.slice(1);
-    });
-    setRecent((current) => {
-      const without = current.filter((t) => tabKey(t) !== key);
-      return [{ ...next, pinned: false, openedAt: now, lastSeenAt: now }, ...without].slice(
-        0,
-        MAX_RECENT,
-      );
-    });
-  }, []);
+      nextTabs = victim ? grown.filter((t) => tabKey(t) !== tabKey(victim)) : grown.slice(1);
+    }
+  }
+
+  const entry: WorkspaceTab = { ...next, pinned: false, openedAt: now, lastSeenAt: now };
+  const nextRecent = [entry, ...recent.filter((t) => tabKey(t) !== key)].slice(0, MAX_RECENT);
+
+  // Nothing changed: re-opening the tab you are already on must not re-render the whole shell.
+  if (existing && sameTabs(tabs, nextTabs) && sameTabs(recent, nextRecent)) return;
+  commit({ tabs: nextTabs, recent: nextRecent });
+}
+
+/** Same tabs, same order, same titles — the comparison that decides whether to notify. */
+function sameTabs(a: WorkspaceTab[], b: WorkspaceTab[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((t, i) => {
+    const other = b[i]!;
+    return tabKey(t) === tabKey(other) && t.title === other.title && t.pinned === other.pinned;
+  });
+}
+
+export function useWorkspaceTabs(activePath: string): WorkspaceTabs {
+  const { tabs, recent } = useSyncExternalStore(subscribe, current, current);
+
+  const open = useCallback(openTab, []);
 
   const close = useCallback((id: TabIdentity) => {
     const key = tabKey(id);
     // Only the tab list changes. The record stays exactly as it was, and stays in Recent so
     // closing a tab by accident costs one click to undo.
-    setTabs((current) => current.filter((t) => tabKey(t) !== key));
+    const now = current();
+    commit({ ...now, tabs: now.tabs.filter((t) => tabKey(t) !== key) });
   }, []);
 
   const togglePin = useCallback((id: TabIdentity) => {
     const key = tabKey(id);
-    setTabs((current) =>
-      current.map((t) => (tabKey(t) === key ? { ...t, pinned: !t.pinned } : t)),
-    );
+    const now = current();
+    commit({
+      ...now,
+      tabs: now.tabs.map((t) => (tabKey(t) === key ? { ...t, pinned: !t.pinned } : t)),
+    });
   }, []);
 
   const isOpen = useCallback(
@@ -144,9 +209,12 @@ export function useWorkspaceTabs(activePath: string): WorkspaceTabs {
   // The active tab is the one whose path the router is on. Derived, never stored: a stored "active"
   // can disagree with the address bar, and then the highlighted tab is not the screen you are on.
   useEffect(() => {
-    setTabs((current) =>
-      current.map((t) => (t.path === activePath ? { ...t, lastSeenAt: Date.now() } : t)),
-    );
+    const now = current();
+    if (!now.tabs.some((t) => t.path === activePath)) return;
+    commit({
+      ...now,
+      tabs: now.tabs.map((t) => (t.path === activePath ? { ...t, lastSeenAt: Date.now() } : t)),
+    });
   }, [activePath]);
 
   return { tabs, recent, open, close, togglePin, isOpen };

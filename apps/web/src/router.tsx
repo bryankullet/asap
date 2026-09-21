@@ -10,7 +10,7 @@ import {
 import { Ask } from "./pages/Ask.js";
 import { AuditHistory } from "./pages/AuditHistory.js";
 import { Connections } from "./pages/Connections.js";
-import { Discover } from "./pages/Discover.js";
+import { Today } from "./pages/Today.js";
 import { DocumentViewer, Documents } from "./pages/Documents.js";
 import { Email, EmailThread } from "./pages/Email.js";
 import { JobDetail, Jobs } from "./pages/Jobs.js";
@@ -124,7 +124,7 @@ const index = createRoute({
 const today = createRoute({
   getParentRoute: () => shell,
   path: "/today",
-  component: Discover,
+  component: Today,
   /** `?ask=` pre-fills the docked composer, so a Today card can open Ask on its own context. */
   validateSearch: z.object({ ask: z.string().max(200).optional().catch(undefined) }),
 });

@@ -11,6 +11,11 @@
  * and Ask docked at the foot of the page.
  */
 @import "./prototype-shell.css";
+/*
+ * The Space frame and its fourteen blocks: the composition of every authenticated screen. Loaded
+ * last so that where it and the legacy card patterns describe the same thing, this wins.
+ */
+@import "./space.css";
 @source "../../../../packages/ui/src";
 
 @layer base {

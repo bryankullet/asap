@@ -1364,3 +1364,48 @@ optional" asked for.
 
 Numbering note: this is D-078 rather than D-073 because D-073 to D-077 are taken on
 `claude/ui-integration`, which has not merged yet. A gap is cheaper than a collision.
+
+## D-079 — One Space renderer, and a closed block registry at the React boundary
+
+The approved prototype has no per-screen layouts. Its pane is a single renderer: a titled
+workspace with a status, optional filter pills and a column of typed blocks. Today, Work, a client,
+a renewal and a claim are the same thing with different blocks in it.
+
+So Today and Work are **block lists, not designs**, and every remaining authenticated route can be
+one too. `packages/schema/src/spaces/frame.ts` carries the contract: identity (space kind, record
+type, record id, workflow id — the same four parts a workspace tab is keyed by), title, status,
+context, filters, blocks, related Spaces, actions, evidence, permission state, and the four screen
+states. Blocks are a closed discriminated union over the prototype's fourteen types.
+
+**Why a second Space type alongside `SpacePlan`.** `SpacePlan` is the *wire* format: component ids
+from `component_definitions` with opaque props, validated server-side against the stored JSON
+Schema. `SpaceFrame` is the contract at the *React* boundary: the same content after validation, in
+the shapes the blocks actually draw. They are two ends of one pipeline, not two versions of one
+object, and the frame imports the plan's evidence schema and verb list rather than restating them.
+
+**Why this makes §45 rule 9 provable rather than promised.** There is no `html`, no `className`, no
+`component` and no slot for markup anywhere in the frame. An unknown block type has no branch in
+the union, so it cannot parse; a block carrying markup has nowhere to put it. The registry in
+`apps/web/src/space/blocks.tsx` is typed as exhaustive over the union, so a missing component is a
+compile error and an extra one is impossible.
+
+**Actions are handed out, never performed.** A generic block calls the handler its page gave it,
+which goes through the validated action API. Fourteen presentation components with write access
+would be fourteen places for a mutation to hide, and a list is the wrong place to change anything
+— a misclick there changes the wrong item. Work's "Assign" therefore opens the item's own Space,
+where the guards, the evidence and the frozen payload are.
+
+**Priority is a band, not a fifth status layer.** `GET /attention` and `GET /work` both return
+`priority`, computed on the server by `priorityOf` from the same signal table that ranks Discover.
+`high` starts at 48 — the points a single signal is worth when a person must act today — and
+`medium` at 24. One engine, two readings of its output, so a badge in Work and the order on Today
+cannot disagree. It never appears in a status slot, and task, run, cover and money status are
+untouched by it.
+
+**The prototype's filter labels lose to the vocabulary decisions.** Its own pills read All · Active
+· Waiting · Completed · Mine. D-075 requires Your work · With others · In progress · Done · Recent
+and forbids a bare "Waiting", and a party is named with its date — *With CIC since 12 Aug*. This is
+the one deliberate departure from the prototype's text, recorded here so it is not read later as
+drift.
+
+Numbering note: D-079, continuing the gap left for `claude/ui-integration`'s D-073 to D-077.

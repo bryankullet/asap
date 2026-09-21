@@ -25,7 +25,12 @@
    * the prototype's stack, exactly.
    */
   --font-sans: "DM Sans", system-ui, sans-serif;
-  --font-heading: "Manrope", "DM Sans", system-ui, sans-serif;
+  /*
+   * The prototype's heading stack is `Manrope, sans-serif` — no `system-ui` in it. Measured, the
+   * difference is 44px on the Today title, because `system-ui` and `sans-serif` are different
+   * faces and Manrope has not loaded yet when the page first paints.
+   */
+  --font-heading: "Manrope", sans-serif;
 
   /*
    * Ink, in the four tones the prototype actually uses. The two middle tones carry most of the
@@ -49,6 +54,9 @@
   --color-sidebar-active: #e4e9e4;
   /* The mobile bottom bar, a shade lighter than the sidebar it replaces under 720px. */
   --color-mobilenav: #f3f6f3;
+  /* A hovered destination in the sidebar, and the ink on the search row beneath them. */
+  --color-sidebar-hover: #e7ebe7;
+  --color-sidebar-quiet-ink: #566058;
 
   /* The main border, and the two it sits between. */
   --color-line: #e5e9e5;
@@ -60,6 +68,9 @@
   --color-accent-green-soft: #dff2e6;
   --color-accent-green-tint: #eef8f1;
   --color-accent-green-line: #b9dcc4;
+  /* The two states of a green control: a solid button pressed, and a soft one hovered. */
+  --color-accent-green-hover: #18563a;
+  --color-accent-green-soft-hover: #e3efe7;
   /*
    * The open workspace's own surface, a shade warmer than the green tint. Measured off the
    * prototype's active tab rather than reused from the accent, because they are not the same pair.
@@ -85,6 +96,11 @@
   --color-accent-gold-ink: #7a4705;
   --color-accent-gold-soft: #fff2d7;
   --color-accent-gold-line: #ecd6a4;
+  /*
+   * The missing-data block's fill. Lighter than `--color-accent-gold-soft`, which is a badge fill:
+   * a whole block at badge strength reads as an error, and missing data is not an error.
+   */
+  --color-accent-gold-wash: #fff9ec;
 
   --color-accent-blue-soft: #e8f2fb;
   --color-accent-purple: #674a94;
@@ -94,11 +110,25 @@
    * The prototype's darkest ink doubles as a surface on a primary control. It is the same value as
    * the text ink, which is deliberate: the prototype has no separate brand navy.
    */
+  /*
+   * A source document is drawn as paper, on its own warm ground with its own border, so it never
+   * reads as one of our cards. Georgia and these two values are the prototype's.
+   */
+  --color-document-paper: #f5f5f2;
+  --color-document-line: #e0e1dc;
+
+  /* A form label. Between muted and secondary, and it is neither of them. */
+  --color-ink-label: #69746b;
+
   --color-navy: #18231c;
   --color-navy-hover: #24312a;
 
-  /* A hovered border steps to the strong line rather than to a tone of its own. */
-  --color-line-hover: #d7ded8;
+  /*
+   * A hovered border. Measured off the prototype, where every `style-hover` on a bordered control
+   * is the same value — it was #d7ded8 here, which is the *resting* strong line, so a hover moved
+   * nothing on the controls that use it.
+   */
+  --color-line-hover: #c4cfc6;
   --color-dot-neutral: #8b938d;
 
   /*

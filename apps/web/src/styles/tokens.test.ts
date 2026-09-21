@@ -57,8 +57,8 @@ describe("the prototype's typefaces", () => {
     expect(token("--font-sans")).toMatch(/^"DM Sans"/);
   });
 
-  it("uses Manrope for headings", () => {
-    expect(token("--font-heading")).toMatch(/^"Manrope"/);
+  it("uses Manrope for headings, falling back the way the prototype falls back", () => {
+    expect(token("--font-heading")).toBe('"Manrope", sans-serif');
   });
 
   /*

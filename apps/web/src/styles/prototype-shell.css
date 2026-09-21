@@ -101,7 +101,7 @@
   place-items: center;
 }
 .shell-root .shell-side-toggle:hover {
-  border-color: #c4cfc6;
+  border-color: var(--color-line-hover);
 }
 
 .shell-nav {
@@ -127,7 +127,7 @@
 }
 .shell-nav-item:hover {
   filter: brightness(0.97);
-  background: #e7ebe7;
+  background: var(--color-sidebar-hover);
   text-decoration: none;
 }
 /* The active destination is a white pill — the one place the sidebar uses the paper surface. */
@@ -162,7 +162,7 @@
   font-weight: 700;
 }
 .shell-nav-item.shell-search {
-  color: #566058;
+  color: var(--color-sidebar-quiet-ink);
 }
 .shell-nav-item kbd {
   margin-left: auto;
@@ -184,7 +184,7 @@
   min-width: 0;
 }
 .shell-profile:hover {
-  border-color: #c4cfc6;
+  border-color: var(--color-line-hover);
 }
 .shell-avatar {
   width: 30px;
@@ -340,7 +340,7 @@
   white-space: nowrap;
 }
 .shell-root .shell-wsbtn:hover {
-  border-color: #c4cfc6;
+  border-color: var(--color-line-hover);
 }
 .shell-root .shell-wsbtn[data-live="true"] {
   background: var(--color-accent-green-tint);

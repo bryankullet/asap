@@ -94,6 +94,18 @@ async function serve(dir, port) {
   throw new Error(`static server for ${dir} did not come up on ${port}`);
 }
 
+/*
+ * Only run as a script. `VIEWPORTS` and `measure` are imported by `capture-boards.mjs`, and a
+ * module that ran its own CLI on import printed a usage error and exited that caller instead.
+ */
+const invokedDirectly = process.argv[1]?.endsWith("capture.mjs") === true;
+if (!invokedDirectly) {
+  // Nothing else to do: the exports above are the whole of the module's use to an importer.
+} else {
+await main();
+}
+
+async function main() {
 const target = process.argv[2];
 const base = process.argv[3];
 if (target !== "prototype" && target !== "app") {
@@ -169,3 +181,4 @@ try {
 }
 writeFileSync(`${outDir}/geometry.json`, JSON.stringify(report, null, 2));
 console.log(`\ngeometry -> ${outDir}/geometry.json`);
+}

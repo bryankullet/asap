@@ -7,10 +7,20 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 import type { ReactNode } from "react";
 import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
+
+/**
+ * The brokerage every fixture belongs to.
+ *
+ * A real uuid, and not a detail: `api.ts` validates every response against its Zod schema, so a
+ * stub with `"o1"` in it fails `uuidSchema`, `/me` resolves to nothing, and every query that
+ * depends on an organization id stays disabled — a screen that renders its loading state forever
+ * and a test that says nothing.
+ */
+export const BOARD_ORG = "10000000-0000-4000-8000-00000000000a";
 
 /**
  * Renders a component inside a memory router with the shell's routes registered (so <Link to>
@@ -96,22 +106,43 @@ export async function renderShell(initialPath = "/today") {
       new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
     if (u.includes("/me")) {
       return json({
-        user: { id: "u1", email: "amina@acme.test", display_name: "Amina Yusuf", full_name: null },
-        memberships: [
-          {
-            organization: { id: "o1", name: "Acme Insurance Brokers" },
-            role: { id: "r1", name: "Operations manager" },
-          },
-        ],
-        active_organization: {
-          id: "o1",
-          name: "Acme Insurance Brokers",
-          country: "KE",
-          currency: "KES",
-          timezone: "Africa/Nairobi",
-        },
-        permissions: [],
-      });
+  user: {
+    id: "90000000-0000-4000-8000-000000000001",
+    email: "amina@acme.test",
+    display_name: "Amina Yusuf",
+    full_name: null,
+  },
+  memberships: [
+    {
+      id: "80000000-0000-4000-8000-000000000001",
+      organization: {
+        id: BOARD_ORG,
+        name: "Acme Insurance Brokers",
+        country: "KE",
+        currency: "KES",
+        timezone: "Africa/Nairobi",
+      },
+      role: {
+        id: "70000000-0000-4000-8000-000000000001",
+        key: "brokerage_admin",
+        name: "Brokerage admin",
+        description: null,
+        is_system: true,
+      },
+      is_owner: true,
+      status: "active",
+      joined_at: "2026-01-04T00:00:00.000Z",
+    },
+  ],
+  active_organization: {
+    id: BOARD_ORG,
+    name: "Acme Insurance Brokers",
+    country: "KE",
+    currency: "KES",
+    timezone: "Africa/Nairobi",
+  },
+  permissions: ["work_item:assign"],
+});
     }
     if (u.includes("/work")) return json({ items: [], counts: { needs: 0 } });
     if (u.includes("/runs")) return json({ runs: [] });
@@ -203,6 +234,8 @@ export function attentionFixture(
       ],
       nowStep: step(item),
       client: null,
+      owner: null,
+      priority: "medium" as const,
       period: null,
       facts: [],
       runFailure: byItem.get(item.id) ? fail(byItem.get(item.id)!) : null,
@@ -241,4 +274,122 @@ export function attentionFixture(
     cap: 12,
     book: { clients: items.length, policies: 0, work: items.length },
   };
+}
+
+/**
+ * The real shell with the real Today and Work mounted, over stubbed API responses.
+ *
+ * `renderShell` stubs the boards away, which is right for testing the frame and wrong for testing
+ * what is inside it. This mounts the shipping `Shell`, `Today` and `Work` and lets the caller
+ * decide what `GET /attention` and `GET /work?view=` return — so a test can drive a real screen
+ * through a real response and still assert on what a person sees.
+ */
+export async function renderBoards(
+  initialPath = "/today",
+  bodies: {
+    me?: unknown;
+    attention?: unknown;
+    work?: (view: string) => unknown;
+    status?: number;
+  } = {},
+) {
+  const { Shell } = await import("./shell/Shell.js");
+  const { Today } = await import("./pages/Today.js");
+  const { Work } = await import("./pages/Work.js");
+
+  const json = (v: unknown, status = 200) =>
+    new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
+
+  vi.stubGlobal("fetch", async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("/me")) {
+      return json(
+        bodies.me ?? {
+    user: {
+      id: "90000000-0000-4000-8000-000000000001",
+      email: "amina@acme.test",
+      display_name: "Amina Yusuf",
+      full_name: null,
+    },
+    memberships: [
+      {
+        id: "80000000-0000-4000-8000-000000000001",
+        organization: {
+          id: BOARD_ORG,
+          name: "Acme Insurance Brokers",
+          country: "KE",
+          currency: "KES",
+          timezone: "Africa/Nairobi",
+        },
+        role: {
+        id: "70000000-0000-4000-8000-000000000001",
+        key: "brokerage_admin",
+        name: "Brokerage admin",
+        description: null,
+        is_system: true,
+      },
+        is_owner: true,
+        status: "active",
+        joined_at: "2026-01-04T00:00:00.000Z",
+      },
+    ],
+    active_organization: {
+      id: BOARD_ORG,
+      name: "Acme Insurance Brokers",
+      country: "KE",
+      currency: "KES",
+      timezone: "Africa/Nairobi",
+    },
+    permissions: ["work_item:assign"],
+  },
+      );
+    }
+    if (u.includes("/attention")) {
+      if (bodies.status !== undefined) return json({ error: "unavailable" }, bodies.status);
+      return json(bodies.attention ?? { items: [] });
+    }
+    if (u.includes("/work")) {
+      if (bodies.status !== undefined) return json({ error: "unavailable" }, bodies.status);
+      const view = new URL(u, "http://t").searchParams.get("view") ?? "needs";
+      return json(bodies.work ? bodies.work(view) : { items: [], counts: {} });
+    }
+    if (u.includes("/runs")) return json({ runs: [] });
+    if (u.includes("/pins")) return json({ pins: [] });
+    return json({});
+  });
+
+  const root = createRootRoute({ component: () => <Shell /> });
+  const boards = [
+    createRoute({ getParentRoute: () => root, path: "/today", component: Today }),
+    createRoute({
+      getParentRoute: () => root,
+      path: "/work",
+      component: Work,
+      validateSearch: (s: Record<string, unknown>) => ({ view: s['view'] as string | undefined }),
+    }),
+  ];
+  const others = ["/automations", "/new", "/search", "/jobs", "/ask", "/import", "/email"].map(
+    (path) =>
+      createRoute({ getParentRoute: () => root, path, component: () => <div data-testid="routed" /> }),
+  );
+  const record = createRoute({
+    getParentRoute: () => root,
+    path: "/r/$recordId",
+    component: () => <div data-testid="record" />,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([...boards, ...others, record]),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
+  });
+  await router.load();
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+  });
+  const utils = render(
+    <QueryClientProvider client={qc}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("navigation", { name: "Main" });
+  return { ...utils, router };
 }
