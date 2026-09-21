@@ -21,8 +21,15 @@ import { describe, expect, it } from "vitest";
  *
  * `.confidence` in the ported stylesheet is not a meter: it is the colour of the word in the
  * evidence table's State column — Known, Missing, Waiting — never a percentage.
+ *
+ * A second exception, added with the prototype shell: the Ask panel's resize grip is a
+ * `role="slider"`, and a slider is required to carry `aria-valuenow` and friends. It is a width in
+ * pixels a person chose, not a measurement of anything — the opposite of the invented number this
+ * test exists to stop. It is named here rather than pattern-matched so a bar cannot arrive by
+ * declaring itself a slider, and the test below checks it really is one.
  */
 const PROGRESS_IS_DERIVED = "./pages/Jobs.tsx";
+const RESIZE_IS_A_SLIDER = "./shell/AskPanel.tsx";
 const SOURCES = import.meta.glob("./**/*.{ts,tsx,css}", {
   query: "?raw",
   import: "default",
@@ -37,13 +44,28 @@ describe("components that were deliberately not ported", () => {
   it("no screen renders a progress or confidence bar", () => {
     const offenders: string[] = [];
     for (const [path, source] of Object.entries(SOURCES)) {
-      if (path.endsWith("/banned-components.test.ts")) continue;
-      if (path === PROGRESS_IS_DERIVED) continue;
+      /*
+       * Tests are not screens. One that asserts a marker is absent has to name it, and one that
+       * asserts the slider exception is a slider has to quote it — flagging those would make the
+       * guard impossible to test.
+       */
+      if (/\.test\.(ts|tsx)$/.test(path)) continue;
+      if (path === PROGRESS_IS_DERIVED || path === RESIZE_IS_A_SLIDER) continue;
       for (const marker of ['role="progressbar"', "aria-valuenow", "aria-valuemax"]) {
         if (source.includes(marker)) offenders.push(`${path}: ${marker}`);
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("the one exception that is not a progress bar is a slider, and measures nothing", () => {
+    const panel = SOURCES[RESIZE_IS_A_SLIDER] ?? "";
+    // The attributes belong to a slider the person drags, not to a bar reporting a value.
+    expect(panel).toContain('role="slider"');
+    expect(panel).not.toContain('role="progressbar"');
+    expect(panel).not.toMatch(/confidence|percent|%/i);
+    // And what it reports is the width, which is the thing the person set.
+    expect(panel).toContain("aria-valuenow={width}");
   });
 
   it("the one job progress bar reads a derived value, never an authored one", () => {

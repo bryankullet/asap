@@ -132,3 +132,57 @@ describe("one source for a colour", () => {
     expect(root).not.toMatch(/#[0-9a-f]{6}/i);
   });
 });
+
+/**
+ * Three defects that measurement found and no test could have.
+ *
+ * Each of them built, passed the whole suite, and was wrong on screen: a class name that Tailwind
+ * claimed as a utility, a fallback font with different metrics, and a custom property set on the
+ * wrong side of a grid. They are asserted here because none of them announces itself.
+ */
+describe("what measurement caught", () => {
+  const shellCss = read("src/styles/prototype-shell.css");
+
+  /*
+   * `ps-ask` is not just a name: Tailwind v4 reads `ps-*` as padding-inline-start and `ask` as a
+   * spacing token, so `.ps-ask` was silently given `padding-inline-start: 400px`. Any of these
+   * prefixes would do the same, so none of them may begin a shell class.
+   */
+  it("uses no class name Tailwind would read as a spacing utility", () => {
+    const reserved = ["p", "px", "py", "ps", "pe", "pt", "pr", "pb", "pl", "m", "mx", "my", "ms", "me", "mt", "mr", "mb", "ml", "w", "h", "gap"];
+    const classes = new Set(shellCss.match(/\.[a-z][a-z0-9-]*/g)?.map((c) => c.slice(1)) ?? []);
+    const claimed = [...classes].filter((c) => reserved.includes(c.split("-")[0] ?? ""));
+    expect(claimed).toEqual([]);
+  });
+
+  /*
+   * The fallback tail is load-bearing. Until DM Sans arrives the page renders in whatever comes
+   * next, and `system-ui` and a bare `sans-serif` do not share metrics — measured, a 1px taller
+   * line at 13.5px moved the tab row by 3px. This is the prototype's stack exactly.
+   */
+  it("falls back the way the prototype falls back", () => {
+    expect(token("--font-sans")).toBe('"DM Sans", system-ui, sans-serif');
+  });
+
+  /* A second copy of the stack in the shell is how that fallback drifted in the first place. */
+  it("keeps one font stack, in the token file", () => {
+    expect(shell).not.toMatch(/font-family:\s*"DM Sans",\s*sans-serif/);
+  });
+
+  /*
+   * The Ask width sizes a grid track, so it has to be declared on the grid container. Set on the
+   * panel it would cascade nowhere useful and the grip would move a number nothing read.
+   */
+  it("declares the Ask width on the grid container, not the panel", () => {
+    const shellTsx = read("src/shell/Shell.tsx");
+    const askTsx = read("src/shell/AskPanel.tsx");
+    expect(shellTsx).toContain("--shell-ask-width");
+    expect(askTsx).not.toContain('["--shell-ask-width"');
+  });
+
+  /* The dock and the panel were never meant to exist at once, and dead CSS outlives a component. */
+  it("has no trace of the bottom Ask dock", () => {
+    expect(shell).not.toContain("ask-dock");
+    expect(shellCss).not.toContain("ask-dock");
+  });
+});

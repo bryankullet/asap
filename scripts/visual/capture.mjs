@@ -31,22 +31,46 @@ function browserPath() {
   return undefined; // let Playwright find its own
 }
 
-/** Every element whose geometry parity is asserted on. Text is deliberately not among them. */
-const MEASURED = [
-  ".asap-shell", ".asap-side", ".asap-pane", ".asap-ask", ".asap-tabs",
-  ".asap-sheet", ".asap-mobilenav",
-];
+/**
+ * Every element whose geometry parity is asserted on, by role rather than by class.
+ *
+ * The prototype and the application cannot share class names — the prototype's layout lives in
+ * inline styles and its own `asap-*` hooks, the application's in `prototype-shell.css` — so the
+ * comparison is made role by role. The workspace header is a `<header>` element in both, which is
+ * why that row needs no class at all.
+ *
+ * Text is deliberately not measured: a font size and a weight are parity, a string is content.
+ */
+const ROLES = {
+  shell: { prototype: ".asap-shell", app: ".shell-frame" },
+  side: { prototype: ".asap-side", app: ".shell-side" },
+  header: { prototype: "header", app: "header" },
+  tabs: { prototype: ".asap-tabs", app: ".shell-tabs" },
+  body: { prototype: ".asap-body", app: ".shell-body" },
+  pane: { prototype: ".asap-pane", app: ".shell-pane" },
+  ask: { prototype: ".asap-ask", app: ".shell-ask" },
+  /* The prototype navigates with buttons; the application with real links, so the routes are
+   * addressable. The box is what is compared, not the element name. */
+  navitem: { prototype: ".asap-side nav button", app: ".shell-nav-item" },
+  brandmark: { prototype: ".asap-side span", app: ".shell-brand-mark" },
+  sidetoggle: {
+    prototype: '[aria-label="Collapse menu"]',
+    app: '[aria-label="Collapse menu"]',
+  },
+  tab: { prototype: ".asap-tabs > span", app: ".shell-tab" },
+  mobilenav: { prototype: ".asap-mobilenav", app: ".shell-mobilenav" },
+};
 
-export async function measure(page) {
-  return page.evaluate((selectors) => {
+export async function measure(page, selectors) {
+  return page.evaluate((roles) => {
     const round = (n) => Math.round(n * 10) / 10;
     const out = { elements: {}, tokens: {}, overflow: null };
-    for (const sel of selectors) {
+    for (const [role, sel] of Object.entries(roles)) {
       const el = document.querySelector(sel);
-      if (!el) { out.elements[sel] = null; continue; }
+      if (!el) { out.elements[role] = null; continue; }
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
-      out.elements[sel] = {
+      out.elements[role] = {
         w: round(r.width), h: round(r.height), x: round(r.x), y: round(r.y),
         background: cs.backgroundColor, borderRight: cs.borderRightWidth,
         borderTop: cs.borderTopWidth, padding: cs.padding, radius: cs.borderRadius,
@@ -58,7 +82,7 @@ export async function measure(page) {
     // Horizontal overflow is a parity failure in its own right at 390px.
     out.overflow = { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth };
     return out;
-  }, MEASURED);
+  }, selectors);
 }
 
 async function serve(dir, port) {
@@ -77,6 +101,9 @@ if (target !== "prototype" && target !== "app") {
   process.exit(2);
 }
 
+const selectors = Object.fromEntries(
+  Object.entries(ROLES).map(([role, pair]) => [role, pair[target]]),
+);
 const outDir = resolve(`.local-visual/shots/${target}`);
 mkdirSync(outDir, { recursive: true });
 
@@ -98,13 +125,40 @@ const report = { target, url, viewports: {} };
 try {
   for (const vp of VIEWPORTS) {
     const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
+    /*
+     * The prototype boots with a workspace already open, so an empty application strip would be
+     * compared against a full one. Seeding the *interface* preference is the only honest way to
+     * line them up: it is the same localStorage key the shell writes when a tab is opened, and it
+     * carries no business value — the title below is plainly a placeholder.
+     */
+    if (target === "app") {
+      await page.addInitScript(() => {
+        const now = 1_700_000_000_000;
+        localStorage.setItem(
+          "asap.workspace.tabs.v1",
+          JSON.stringify([
+            {
+              spaceType: "client",
+              recordType: "client",
+              recordId: "measurement-only",
+              kind: "CLIENT",
+              title: "Measurement placeholder",
+              path: "/today",
+              pinned: false,
+              openedAt: now,
+              lastSeenAt: now,
+            },
+          ]),
+        );
+      });
+    }
     const consoleErrors = [];
     page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
     page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 200)}`));
     await page.goto(url, { waitUntil: "load" });
     // The prototype boots React, Babel and its store before it renders anything.
     await page.waitForTimeout(target === "prototype" ? 7000 : 2500);
-    report.viewports[vp.name] = { ...(await measure(page)), consoleErrors };
+    report.viewports[vp.name] = { ...(await measure(page, selectors)), consoleErrors };
     await page.screenshot({ path: `${outDir}/${vp.name}.png` });
     console.log(`${target} ${vp.name}: captured`);
     await page.close();

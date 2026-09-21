@@ -124,12 +124,89 @@ Approved before implementation, each forced by production truth rather than pref
 3. **Ask opens at exactly 400px**, may be resized, and the width may persist as a harmless
    `localStorage` preference. Reset returns it to 400px.
 
+## The measured comparison, Increment 2
+
+Measured with `scripts/visual/capture.mjs`, which records geometry beside the pixels because a
+pixel diff tells you *that* something moved and a measurement tells you *what to change*. Twelve
+regions, compared role by role rather than by class name — the prototype's layout lives in inline
+styles and its own `asap-*` hooks, the application's in `prototype-shell.css`.
+
+The application side is measured through `apps/web/parity/shell-harness/`, a development-only page
+that mounts the **shipping** `Shell` and the **shipping** stylesheets over a stubbed `/me` and
+empty boards. It exists because the authenticated application cannot be reached by a measuring
+script without a real session. It proves geometry, typography, colour and responsive behaviour; it
+proves nothing about authentication, RLS, permissions or any business value, and it is not in the
+production bundle — `index.html` is the only Rollup input.
+
+**Result: all 12 regions identical at all three viewports — 36 of 36.** No console errors, no
+horizontal overflow at any width.
+
+| Region | 1360×900 | 1440×900 | 390×844 |
+|---|---|---|---|
+| shell | 1360×900 | 1440×900 | 390×844 |
+| sidebar | 228×900 | 228×900 | hidden |
+| workspace header | 1132×61 | 1212×61 | 390×61 |
+| tab strip | 260×60 | 260×60 | 60.1×60 |
+| body | 1132×839 | 1212×839 | 390×724 |
+| pane | 732×839 | 812×839 | 390×560 |
+| Ask | 400×839 | 400×839 | 390×520 |
+| nav item | 199×42 | 199×42 | — |
+| brand mark | 30×30 | 30×30 | 30×30 |
+| collapse toggle | 26×26 | 26×26 | 26×26 |
+| tab | 260×44 | 260×44 | 260×44 |
+| bottom bar | hidden | hidden | 390×59 |
+
+Going from 1360 to 1440 the pane grows 732→812 and Ask does not move: the sidebar and Ask are
+fixed tracks and the pane is the only thing that absorbs width.
+
+### What measurement caught, and code review had not
+
+Five defects that built cleanly, passed the whole suite, and were wrong on screen. Each now has a
+test in `src/styles/tokens.test.ts`.
+
+1. **`ps-` is a Tailwind utility.** Tailwind v4 reads `ps-*` as `padding-inline-start` and `ask` as
+   a spacing token, so `.ps-ask` was silently given `padding-inline-start: 400px` and
+   `.ps-mobilenav` 59px. The prefix is now `shell-`, and a test rejects any shell class beginning
+   with a reserved spacing prefix.
+2. **The Ask width was on the wrong element.** `--shell-ask-width` was set on the panel, which is
+   the grid *item*; the track is sized by the grid *container*. A custom property does not cascade
+   upwards, so the grip moved a number nothing read. It is declared on `.shell-body` now.
+3. **The fallback font is load-bearing.** `document.fonts.size` is 0 in this sandbox — DM Sans is
+   blocked — so both pages rendered their fallback, and `system-ui` and a bare `sans-serif` do not
+   share metrics: a 1px taller line at 13.5px moved the tab row by 3px. The token is the
+   prototype's stack exactly, and the shell no longer keeps a second copy of it.
+4. **A legacy reset outranked the shell.** `shell.css` carries `.demo-root button { font: inherit }`
+   at specificity (0,1,1), which beats a single class: the collapse toggle rendered at 22px instead
+   of 13.5px, and two more controls at 16px. The shell's own controls are scoped to `.shell-root`
+   until the last legacy screen goes.
+5. **The bottom bar was outside the shell.** It took its 59px off the shell's height rather than out
+   of the workspace column, leaving the shell 785px tall at 390×844 instead of 844.
+
+Two differences were investigated and are **content, not geometry**: the tab strip's width (the
+prototype boots with a workspace open) and the strip at 390px (the actions beside it are as wide as
+their labels). The capture seeds one open tab — the same `localStorage` key the shell writes, with
+an obvious placeholder title — so the strip is measured with something in it.
+
+A whole-page pixel diff is deliberately not the instrument: the prototype's screens are full of
+fabricated clients, policies and claims, and the application's are empty until Increment 3 wires
+the boards. Screenshots for both are in `.local-visual/shots/`, uncommitted.
+
 ## Increment status
 
 | # | Increment | State |
 |---|---|---|
 | 1 | Tokens and shared primitives | **done** — `ef9c633` |
-| 2 | Complete shell | in progress |
+| 2 | Complete shell | **done** — geometry identical, 36/36 |
 | 3 | Today and Work | not started |
 | 4 | Every remaining authenticated route | not started |
-| 5 | Full visual and interaction testing | harness landed (`3aef109`); comparison not yet run |
+| 5 | Full visual and interaction testing | harness landed (`3aef109`); shell comparison run, per-screen comparison pending |
+
+### Legacy components still in the tree
+
+Not rendered by the shell, and named here so they are not forgotten:
+
+- `shell/ShellNav.tsx` and `shell/ActivityChip.tsx` — the previous shell's parts. Nothing mounts
+  them; only their own tests still reference them. They go with Increment 4.
+- `shell/Page.tsx` and `shell/ScreenTitle.tsx` — the older page header, still used *inside* the
+  pane by the authenticated screens. Those screens are Increments 3 and 4; a new shell around an
+  old page design is not parity, and this is where that debt is recorded.

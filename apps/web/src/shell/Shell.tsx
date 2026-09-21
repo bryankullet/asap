@@ -1,31 +1,38 @@
 import { useMutation } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api.js";
 import { useInvalidateMe, useMe } from "../lib/me.js";
 import { useRuns, useWorkList } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { NAV } from "./nav.js";
-import { AskComposer } from "./AskComposer.js";
-import { ActivityChip } from "./ActivityChip.js";
-
+import { AskPanel } from "./AskPanel.js";
+import { useAskPanel } from "./ask-width.js";
 import { ProfileMenu } from "./ProfileMenu.js";
+import { WorkspaceHeader } from "./WorkspaceHeader.js";
+import { useWorkspaceTabs } from "./workspace-tabs.js";
 
 /**
- * The permanent shell, ported from the approved demo (D-064).
+ * The permanent shell, at the prototype's measured values (docs/ui/PROTOTYPE-PARITY.md).
  *
- * Structure and dimensions are the demo's, not an interpretation of it: a `228px 1fr` grid
- * filling the viewport. The sidebar is `#f1f4f0` with a
- * `#e0e5e0` right border; each destination is a 42px row with a 13px radius, and the active one is
- * a white pill with a 1px shadow. Under 900px the sidebar becomes a 58px bottom bar, as it does
- * there.
+ * Three regions, and the reason each is where it is:
  *
- * The demo is a fixed-height application — its body does not scroll, the panes do — so `demo-body`
- * is applied to `document.body` while the shell is mounted and removed when it unmounts.
+ *   sidebar │ workspace header, spanning both columns below it
+ *           │ current Space │ Ask ASAP
  *
- * What is *not* the demo's: routing, the session, the organization switcher and the data behind
- * every screen. Those stay.
+ * The header spans the Space *and* Ask rather than sitting inside the Space, which is what makes
+ * it permanent: a header inside the pane scrolls away with the content and has to be rebuilt on
+ * every screen. The sidebar is a fixed 228px track (68px collapsed) and Ask is a fixed 400px
+ * track, so the workspace pane is the only thing that absorbs extra width — measured, going from
+ * 1360 to 1440, the pane grows 732→812 and Ask does not move.
+ *
+ * What is not the prototype's: routing, the session, the organization switcher, and every value on
+ * every screen. Those come from the API. The prototype's own store is a behaviour reference and
+ * never production persistence.
  */
+
+const SIDE_KEY = "asap.sidebar.collapsed.v1";
+
 export function Shell() {
   const me = useMe();
   const invalidate = useInvalidateMe();
@@ -37,8 +44,34 @@ export function Shell() {
     onSuccess: () => void invalidate(),
   });
 
-  // The demo's body rules: no page scroll, its own background and type. Scoped to the shell so
-  // sign-in and the onboarding screens are untouched.
+  /*
+   * Collapsed or not is a harmless interface preference, so it persists and survives navigation —
+   * a sidebar that springs back open on every route change is worse than one that never collapses.
+   */
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return globalThis.localStorage?.getItem(SIDE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleSide = useCallback(() => {
+    setCollapsed((v) => {
+      const next = !v;
+      try {
+        globalThis.localStorage?.setItem(SIDE_KEY, String(next));
+      } catch {
+        /* A preference that cannot be saved is not an error worth showing. */
+      }
+      return next;
+    });
+  }, []);
+
+  const tabs = useWorkspaceTabs(path);
+  const ask = useAskPanel();
+  const runs = useRuns(org?.id);
+
+  // The prototype is a fixed-height application: the body never scrolls, the panes do.
   useEffect(() => {
     document.body.classList.add("demo-body");
     return () => document.body.classList.remove("demo-body");
@@ -46,7 +79,6 @@ export function Shell() {
 
   const person = me.data?.user;
   const membershipRole = me.data?.memberships.find((m) => m.organization.id === org?.id)?.role.name;
-  // The signed-in person and the role their membership actually carries.
   const displayName = person?.display_name ?? person?.full_name ?? person?.email ?? "";
   const subtitle = membershipRole ?? org?.name ?? "";
   const initials =
@@ -58,55 +90,73 @@ export function Shell() {
       .join("") || "A";
 
   return (
-    <div className="demo-root">
-      <div className="app-shell no-bar">
-        <aside className="sidebar">
-          <Link to="/today" className="brand">
-            <span aria-hidden className="brand-mark">
+    <div className="shell-root demo-root">
+      <div className="shell-frame" data-side={collapsed ? "collapsed" : "expanded"}>
+        <aside className="shell-side">
+          <div className="shell-brand">
+            <Link to="/today" className="shell-brand-mark" aria-label="ASAP — Today">
               A
-            </span>
-            <span>ASAP</span>
-          </Link>
+            </Link>
+            <span className="shell-brand-word shell-navlabel">ASAP</span>
+            <button
+              type="button"
+              className="shell-side-toggle"
+              onClick={toggleSide}
+              aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+              aria-expanded={!collapsed}
+              title={collapsed ? "Expand menu" : "Collapse menu"}
+            >
+              {collapsed ? "›" : "‹"}
+            </button>
+          </div>
 
-          <nav aria-label="Main" className="side-nav">
+          <nav aria-label="Main" className="shell-nav">
             {NAV.map((item) => (
               <Link
                 key={item.to}
                 to={item.to}
-                className={`nav-item${path.startsWith(item.to) ? " active" : ""}`}
+                className="shell-nav-item"
+                title={item.label}
+                aria-current={path.startsWith(item.to) ? "page" : undefined}
               >
-                <span aria-hidden className="ico">
+                <span aria-hidden className="shell-nav-ico">
                   {item.glyph}
                 </span>
-                <span>{item.label}</span>
+                <span className="shell-navlabel">{item.label}</span>
                 <NavCount to={item.to} />
               </Link>
             ))}
           </nav>
 
-          <div className="side-bottom">
-            <Link to="/search" search={{ q: "" }} className="nav-item">
-              <span aria-hidden className="ico">
-                ⌕
-              </span>
-              <span>Search</span>
-              <kbd aria-hidden>⌘ K</kbd>
-            </Link>
-            <Link to="/new" className="nav-item">
-              <span aria-hidden className="ico">
+          <div className="shell-side-bottom">
+            {/* The prototype's order below the destinations: New, then Search, then Profile. */}
+            <Link to="/new" className="shell-nav-item shell-new" title="New">
+              <span aria-hidden className="shell-nav-ico">
                 ＋
               </span>
-              <span>New</span>
+              <span className="shell-navlabel">New</span>
+            </Link>
+            <Link
+              to="/search"
+              search={{ q: "" }}
+              className="shell-nav-item shell-search"
+              title="Search"
+            >
+              <span aria-hidden className="shell-nav-ico">
+                ⌕
+              </span>
+              <span className="shell-navlabel">Search</span>
+              <kbd aria-hidden className="shell-navlabel">
+                ⌘ K
+              </kbd>
             </Link>
 
-            <div className="profile">
-              <span aria-hidden className="avatar">
+            <div className="shell-profile">
+              <span aria-hidden className="shell-avatar">
                 {initials}
               </span>
-              <span className="profile-text">
+              <span className="shell-profile-text shell-navlabel">
                 <strong>{displayName || "Signed in"}</strong>
-                {/* The original shows the person's role here, not the brokerage — that is in the
-                    menu, beside the switcher. */}
                 <small>{subtitle}</small>
               </span>
               <ProfileMenu
@@ -119,9 +169,62 @@ export function Shell() {
           </div>
         </aside>
 
-        <main className="product-view">
-          <Outlet />
-          <AskDock />
+        <main className="shell-main">
+          <WorkspaceHeader
+            tabs={tabs}
+            activePath={path}
+            runs={runs.data ?? []}
+            askOpen={ask.open}
+            onToggleAsk={ask.toggle}
+          />
+
+          {/*
+           * The width lives here, on the grid container, because that is what sizes the Ask
+           * track. Set on the panel itself it would never reach the track and the grip would
+           * move a number nothing read.
+           */}
+          <div
+            className="shell-body"
+            data-ask={ask.open ? "open" : "collapsed"}
+            style={{ ["--shell-ask-width" as string]: `${ask.width}px` }}
+          >
+            <section className="shell-pane">
+              <Outlet />
+            </section>
+            {ask.open && <AskPanel state={ask} contextLabel={contextLabel(path, tabs.tabs)} />}
+          </div>
+
+          {/*
+           * Under 720px the sidebar is gone, so the destinations need somewhere else to live. It gets
+           * its own accessible name: two navigations both called "Main" is one ambiguous landmark to a
+           * screen reader, which is a real defect and not only a test problem.
+           */}
+          <nav className="shell-mobilenav" aria-label="Main, bottom bar">
+            {NAV.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                aria-current={path.startsWith(item.to) ? "page" : undefined}
+              >
+                <span aria-hidden className="shell-nav-ico">
+                  {item.glyph}
+                </span>
+                <span>{item.label}</span>
+              </Link>
+            ))}
+            <Link to="/new">
+              <span aria-hidden className="shell-nav-ico">
+                ＋
+              </span>
+              <span>New</span>
+            </Link>
+            <Link to="/search" search={{ q: "" }}>
+              <span aria-hidden className="shell-nav-ico">
+                ⌕
+              </span>
+              <span>Search</span>
+            </Link>
+          </nav>
         </main>
       </div>
     </div>
@@ -129,46 +232,31 @@ export function Shell() {
 }
 
 /**
- * The count beside Work — read from the same source the screen itself reads.
+ * What Ask says it is looking at.
  *
- * It is the API, through the queries the boards already run, so the number in the sidebar and the
- * list behind it come from one answer and cannot disagree. A count nobody can reach the rows for
- * is worse than no count, so it shows nothing until it has one.
+ * The open tab whose path matches wins, because that is the thing on screen and it carries the
+ * record's own name. Otherwise the destination, by name — never a guess at a record, because a
+ * context chip naming the wrong client is worse than one naming none.
+ */
+function contextLabel(path: string, tabs: { path: string; kind: string; title: string }[]): string {
+  const active = tabs.find((t) => t.path === path);
+  if (active) return `${active.kind} · ${active.title}`;
+  const nav = NAV.find((n) => path.startsWith(n.to));
+  if (nav) return nav.label;
+  return "This brokerage";
+}
+
+/**
+ * The count beside a destination — from the same query the screen itself runs.
+ *
+ * One answer feeds both, so the sidebar and the list behind it cannot disagree. A count whose rows
+ * nobody can reach is worse than no count, so it shows nothing until it has one.
  */
 function NavCount({ to }: { to: string }) {
   const me = useMe();
   const orgId = me.data?.active_organization?.id;
-  // The same query key the board uses, so this costs nothing extra when Work is open.
   const work = useWorkList(orgId, "needs");
   const n = to === "/work" ? (work.data?.counts.needs ?? 0) : 0;
   if (n === 0) return null;
-  return <span className="nav-count">{n}</span>;
-}
-
-/**
- * Ask, and the runs beside it — docked on every surface (D-074).
- *
- * Both components existed and neither was mounted, so "Ask is always in reach" was not true of the
- * running product. The dock is where that becomes true: it sits at the foot of the main column on
- * every screen, and the Activity chip sits with it because runs are something Ask started.
- *
- * Activity stays optional. It renders nothing when no run is worth showing, and anything needing a
- * person is in Work regardless — hiding the chip can never hide a decision or a failure.
- *
- * The full Ask surface is its own route, so it does not dock on top of itself.
- */
-function AskDock() {
-  const me = useMe();
-  const orgId = me.data?.active_organization?.id;
-  const path = useRouterState({ select: (s) => s.location.pathname });
-  const runs = useRuns(orgId);
-  // One start for the session, so "finished since I got here" does not move as the clock does.
-  const sessionStart = useRef(new Date()).current;
-  if (path.startsWith("/ask")) return null;
-  return (
-    <div className="ask-dock">
-      <ActivityChip runs={runs.data ?? []} sessionStart={sessionStart} />
-      <AskComposer />
-    </div>
-  );
+  return <span className="shell-nav-count shell-navlabel">{n}</span>;
 }

@@ -1,0 +1,551 @@
+/**
+ * The permanent shell, at the prototype's measured values.
+ *
+ * Every number here is from `docs/ui/PROTOTYPE-PARITY.md`, which was measured off `ASAP.dc.html`
+ * rather than read off a design. It is loaded after `shell.css` so that where the two disagree
+ * about the shell frame, this wins — the older file described a shell with no collapse state, no
+ * workspace header and Ask docked at the foot of the page.
+ *
+ * Class names are prefixed `shell-` (prototype shell) and deliberately mirror the prototype's own
+ * `asap-*` names one for one, so a geometry failure can be read straight across from
+ * `scripts/visual/capture.mjs` output to the rule that caused it.
+ */
+
+/* ---- Frame ------------------------------------------------------------------------------- */
+
+.shell-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/*
+ * Sidebar and everything else. The sidebar is a fixed track and the second column is
+ * `minmax(0, 1fr)`: a bare `1fr` resolves to `minmax(auto, 1fr)` and grows to its content's
+ * min-content width, which overflows the whole shell sideways instead of scrolling the pane.
+ */
+.shell-frame {
+  display: grid;
+  grid-template-columns: var(--spacing-sidebar) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.shell-frame[data-side="collapsed"] {
+  grid-template-columns: var(--spacing-sidebar-collapsed) minmax(0, 1fr);
+}
+
+.shell-side {
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-sidebar-line);
+  padding: 22px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.shell-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- Sidebar ----------------------------------------------------------------------------- */
+
+.shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 22px;
+  padding: 0 4px 22px;
+}
+.shell-brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--color-ink);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 16.5px;
+  flex: none;
+}
+.shell-brand-word {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+/*
+ * The shell's own controls are scoped to `.shell-root` from here on, and not for tidiness: the
+ * legacy `shell.css` carries `.demo-root button { font: inherit }`, which outranks a single class
+ * and silently reset three of them to 16px. Measured, that is what made the collapse toggle 22px.
+ * The scope can go when the last legacy screen does.
+ */
+.shell-root .shell-side-toggle {
+  border: 1px solid var(--color-sidebar-line);
+  background: var(--color-paper);
+  color: var(--color-ink-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1;
+  flex: none;
+  /* The prototype's own box, down to the user agent padding it leaves in place. */
+  padding: 1px 6px;
+  display: grid;
+  place-items: center;
+}
+.shell-root .shell-side-toggle:hover {
+  border-color: #c4cfc6;
+}
+
+.shell-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.shell-nav-item {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  width: 100%;
+  height: 42px;
+  border-radius: 13px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 15.5px;
+  text-decoration: none;
+}
+.shell-nav-item:hover {
+  filter: brightness(0.97);
+  background: #e7ebe7;
+  text-decoration: none;
+}
+/* The active destination is a white pill — the one place the sidebar uses the paper surface. */
+.shell-nav-item[aria-current="page"] {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  box-shadow: 0 1px 2px rgba(24, 35, 28, 0.06);
+}
+.shell-nav-ico {
+  width: 20px;
+  text-align: center;
+  font-size: 18.7px;
+  flex: none;
+}
+.shell-nav-count {
+  margin-left: auto;
+  background: var(--color-sidebar-active);
+  border-radius: 99px;
+  padding: 1px 7px;
+  font-size: 12.5px;
+}
+
+.shell-side-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* New is the one green control in the sidebar, and the only one at weight 700. */
+.shell-nav-item.shell-new {
+  color: var(--color-accent-green);
+  font-weight: 700;
+}
+.shell-nav-item.shell-search {
+  color: #566058;
+}
+.shell-nav-item kbd {
+  margin-left: auto;
+  color: var(--color-ink-faint);
+  font: 13px inherit;
+}
+
+.shell-profile {
+  border: 1px solid var(--color-sidebar-line);
+  background: var(--color-paper);
+  border-radius: 14px;
+  padding: 9px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+}
+.shell-profile:hover {
+  border-color: #c4cfc6;
+}
+.shell-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-ink);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 12.5px;
+  font-weight: 700;
+  flex: none;
+}
+.shell-profile-text {
+  min-width: 0;
+}
+.shell-profile-text strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shell-profile-text small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* When collapsed, every label goes and the controls centre on their icon. */
+.shell-frame[data-side="collapsed"] .shell-navlabel {
+  display: none;
+}
+.shell-frame[data-side="collapsed"] .shell-nav-item,
+.shell-frame[data-side="collapsed"] .shell-profile {
+  justify-content: center;
+}
+.shell-frame[data-side="collapsed"] .shell-brand {
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 22px;
+}
+
+/* ---- Workspace header -------------------------------------------------------------------- */
+
+/*
+ * Spans the full width above both the pane and Ask. The prototype's row measures 61px including
+ * its bottom hairline, which is why the height is written rather than left to the content: an
+ * empty tab strip would otherwise collapse the row to 28px and move every pane below it.
+ */
+.shell-wsheader {
+  flex: none;
+  min-height: var(--spacing-workspace-header);
+  border-bottom: 1px solid var(--color-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--color-paper);
+}
+
+.shell-tabs {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  min-width: 0;
+  padding: 8px 0;
+  scrollbar-width: thin;
+}
+.shell-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  color: var(--color-ink-secondary);
+  border-radius: 11px;
+  padding: 6px 8px 6px 10px;
+  flex: none;
+  max-width: 260px;
+}
+.shell-tab[data-active="true"] {
+  border-color: var(--color-tab-active-line);
+  background: var(--color-tab-active);
+  color: var(--color-ink);
+}
+.shell-root .shell-tab-open {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  /* The prototype leaves the user agent's button padding in place, and it is what makes the tab
+   * 44px rather than 41px. Tailwind's preflight zeroes it, so it is written back explicitly. */
+  padding: 1px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  text-align: left;
+}
+.shell-tab-kind {
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  font-weight: 700;
+  opacity: 0.65;
+  text-transform: uppercase;
+}
+.shell-tab-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.shell-root .shell-tab-btn {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-faint);
+  font-size: 12.5px;
+}
+.shell-root .shell-tab-btn.shell-tab-close {
+  font-size: 14.5px;
+  line-height: 1;
+}
+.shell-root .shell-tab-btn[data-pinned="true"] {
+  color: var(--color-accent-green);
+}
+
+.shell-wsactions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+.shell-root .shell-wsbtn {
+  border: 1px solid var(--color-line);
+  background: var(--color-paper);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.shell-root .shell-wsbtn:hover {
+  border-color: #c4cfc6;
+}
+.shell-root .shell-wsbtn[data-live="true"] {
+  background: var(--color-accent-green-tint);
+}
+.shell-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-green);
+  flex: none;
+}
+
+/* ---- Body: pane + Ask -------------------------------------------------------------------- */
+
+/*
+ * The Ask column is a fixed track, set from a CSS variable the panel writes. Measured: going from
+ * 1360 to 1440 the pane absorbs all eighty extra pixels and Ask does not move, so Ask must never
+ * be a fraction.
+ */
+.shell-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--shell-ask-width, var(--spacing-ask));
+  overflow: hidden;
+}
+.shell-body[data-ask="collapsed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell-pane {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px 40px;
+  background: var(--color-wash);
+}
+
+.shell-ask {
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-paper);
+  border-left: 1px solid var(--color-line);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* The resize grip. A 6px hit area on the panel's leading edge, invisible until used. */
+.shell-root .shell-ask-grip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: -3px;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  z-index: 2;
+}
+.shell-root .shell-ask-grip:hover,
+.shell-root .shell-ask-grip:focus-visible {
+  background: var(--color-accent-green-line);
+}
+
+/* ---- Mobile navigation ------------------------------------------------------------------- */
+
+/*
+ * The last row of the workspace column, not a bar floating over it. Measured, the prototype's
+ * body is 724px at 390×844 — 844 less the 61px header and the 59px bar — so the bar takes its
+ * height out of the column rather than covering the bottom of the pane.
+ */
+.shell-mobilenav {
+  display: none;
+  flex: none;
+  height: var(--spacing-mobilenav);
+  padding: 5px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-mobilenav);
+}
+
+/* ---- Responsive: the prototype's own two breakpoints ------------------------------------- */
+
+/*
+ * 980px — Ask stops being a column and stacks under the workspace. The prototype drops the panel's
+ * left border for a top one at the same time, because it is no longer beside anything.
+ */
+@media (max-width: 980px) {
+  .shell-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .shell-ask {
+    border-left: 0;
+    border-top: 1px solid var(--color-line);
+    min-height: 520px;
+  }
+  .shell-pane {
+    min-height: 560px;
+  }
+}
+
+/*
+ * 720px — the sidebar goes, the bottom navigation arrives, sheets go full width and the tab row is
+ * capped so it cannot push the header's actions off screen.
+ */
+@media (max-width: 720px) {
+  .shell-frame,
+  .shell-frame[data-side="collapsed"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .shell-side {
+    display: none;
+  }
+  .shell-mobilenav {
+    display: flex;
+    align-items: stretch;
+  }
+  .shell-mobilenav a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-ink-secondary);
+    text-decoration: none;
+  }
+  .shell-mobilenav a[aria-current="page"] {
+    color: var(--color-accent-green);
+  }
+  .shell-mobilenav .shell-nav-ico {
+    font-size: 17px;
+  }
+  .shell-tabs {
+    max-width: 52vw;
+  }
+  .shell-sheet {
+    width: 100%;
+  }
+}
+
+/* ---- Ask panel internals ----------------------------------------------------------------- */
+
+.shell-ask-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.shell-ask-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+.shell-eyebrow {
+  font-size: 10.5px;
+  letter-spacing: var(--tracking-eyebrow);
+  font-weight: 700;
+  color: var(--color-accent-green);
+}
+/* The context chip: what "this" means in the current conversation. */
+.shell-ask-context {
+  margin-top: 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Popovers and menus ------------------------------------------------------------------ */
+
+.shell-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  min-width: 240px;
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-modal);
+}
+.shell-root .shell-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: var(--radius-chip);
+  font-size: 13px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+.shell-root .shell-menu-item:hover {
+  background: var(--color-surface-sunken);
+  text-decoration: none;
+}

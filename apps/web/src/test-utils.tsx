@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import { vi } from "vitest";
 import type { ReactNode } from "react";
 import type { AttentionResponse, RunRow, WorkItemRow } from "@asap/schema";
 
@@ -72,6 +73,87 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     </QueryClientProvider>,
   );
   await utils.findByTestId("routed");
+  return { ...utils, router };
+}
+
+/**
+ * The production `Shell`, mounted with the session and queries it reads.
+ *
+ * This exercises the component that ships rather than a copy of it, which is the point: the shell
+ * is where the prototype's geometry, its tab strip and its Ask panel live, and a test against a
+ * stand-in would pass while the real one was broken.
+ *
+ * `fetch` is stubbed rather than mocked per call. Every endpoint the shell touches answers with an
+ * empty, well-shaped body, so what is under test is the shell's own behaviour and not a fixture's.
+ * Nothing here is production data and nothing is persisted beyond the interface preferences the
+ * shell itself writes.
+ */
+export async function renderShell(initialPath = "/today") {
+  const { Shell } = await import("./shell/Shell.js");
+  vi.stubGlobal("fetch", async (url: RequestInfo | URL) => {
+    const u = String(url);
+    const json = (v: unknown) =>
+      new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
+    if (u.includes("/me")) {
+      return json({
+        user: { id: "u1", email: "amina@acme.test", display_name: "Amina Yusuf", full_name: null },
+        memberships: [
+          {
+            organization: { id: "o1", name: "Acme Insurance Brokers" },
+            role: { id: "r1", name: "Operations manager" },
+          },
+        ],
+        active_organization: {
+          id: "o1",
+          name: "Acme Insurance Brokers",
+          country: "KE",
+          currency: "KES",
+          timezone: "Africa/Nairobi",
+        },
+        permissions: [],
+      });
+    }
+    if (u.includes("/work")) return json({ items: [], counts: { needs: 0 } });
+    if (u.includes("/runs")) return json({ runs: [] });
+    return json({});
+  });
+
+  const root = createRootRoute({
+    component: () => (
+      <Shell />
+    ),
+  });
+  const shellRoutes = [
+    "/today",
+    "/work",
+    "/automations",
+    "/new",
+    "/search",
+    "/jobs",
+    "/ask",
+    "/documents",
+  ].map((path) =>
+    createRoute({
+      getParentRoute: () => root,
+      path,
+      component: () => <div data-testid="routed" />,
+    }),
+  );
+  const router = createRouter({
+    routeTree: root.addChildren(shellRoutes),
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
+  });
+  await router.load();
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+  });
+  const utils = render(
+    <QueryClientProvider client={qc}>
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+      <RouterProvider router={router as any} />
+    </QueryClientProvider>,
+  );
+  await utils.findByRole("navigation", { name: "Main" });  // the sidebar, not the bottom bar
   return { ...utils, router };
 }
 

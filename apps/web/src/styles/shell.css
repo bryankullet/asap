@@ -44,8 +44,10 @@ body.demo-body {
   margin: 0;
   background: var(--cream);
   color: var(--ink);
-  font-family: "DM Sans", sans-serif;
-  font-size: 15px;
+  /* One stack, from the token file — a second copy here is how the fallback drifted before. */
+  font-family: var(--font-sans);
+  /* The prototype inherits the browser's 16px; every size that matters is written in px anyway. */
+  font-size: 16px;
   overflow: hidden;
 }
 .demo-root *,
@@ -175,7 +177,9 @@ body.demo-body {
   align-items: center;
   gap: 10px;
   color: var(--ink);
-  font: 800 20px Manrope, sans-serif;
+  font:
+    800 20px Manrope,
+    sans-serif;
   text-decoration: none;
   padding: 0 10px 25px;
 }
@@ -316,7 +320,9 @@ body.demo-body {
   gap: 13px;
 }
 .screen-title h1 {
-  font: 700 19px Manrope, sans-serif;
+  font:
+    700 19px Manrope,
+    sans-serif;
   margin: 0;
 }
 .screen-title > span {
@@ -383,7 +389,9 @@ body.demo-body {
   text-transform: uppercase;
 }
 .welcome-row h2 {
-  font: 700 27px Manrope, sans-serif;
+  font:
+    700 27px Manrope,
+    sans-serif;
   margin: 7px 0 0;
 }
 /* Measured: a plain block button, one text node, no flex gap. */
@@ -443,7 +451,9 @@ body.demo-body {
 }
 .focus-card h3,
 .noticed-card h3 {
-  font: 700 16px Manrope, sans-serif;
+  font:
+    700 16px Manrope,
+    sans-serif;
   margin: 13px 0 6px;
 }
 .focus-card p,
@@ -601,7 +611,9 @@ body.demo-body {
   color: #31573d;
   display: grid;
   place-items: center;
-  font: 700 15px Manrope, sans-serif;
+  font:
+    700 15px Manrope,
+    sans-serif;
 }
 .policy-title {
   min-width: 380px;
@@ -613,7 +625,9 @@ body.demo-body {
   font-weight: 700;
 }
 .policy-title h1 {
-  font: 700 20px Manrope, sans-serif;
+  font:
+    700 20px Manrope,
+    sans-serif;
   margin: 4px 0 6px;
 }
 .policy-meta {
@@ -970,7 +984,9 @@ body.demo-body {
   letter-spacing: 0;
 }
 .space-head h2 {
-  font: 700 19px Manrope, sans-serif;
+  font:
+    700 19px Manrope,
+    sans-serif;
   margin: 0 0 6px;
 }
 .space-head p {
@@ -1244,7 +1260,9 @@ body.demo-body {
   float: right;
 }
 .space-tile h3 {
-  font: 700 14px Manrope, sans-serif;
+  font:
+    700 14px Manrope,
+    sans-serif;
   margin: 4px 0 6px;
 }
 .space-tile p {
@@ -1429,7 +1447,9 @@ body.demo-body {
   max-width: 580px;
 }
 .automation-intro h2 {
-  font: 700 27px Manrope, sans-serif;
+  font:
+    700 27px Manrope,
+    sans-serif;
   margin: 7px 0 0;
 }
 .automation-intro p {
@@ -1481,7 +1501,9 @@ body.demo-body {
   padding: 18px;
 }
 .automation-card h3 {
-  font: 700 16px Manrope, sans-serif;
+  font:
+    700 16px Manrope,
+    sans-serif;
   margin: 13px 0 6px;
 }
 .automation-card p {
@@ -1822,7 +1844,9 @@ body.demo-body {
   padding: 28px 32px;
 }
 .coverage-sheet h2 {
-  font: 700 19px Manrope, sans-serif;
+  font:
+    700 19px Manrope,
+    sans-serif;
   margin: 0 0 4px;
 }
 .coverage-sheet > p {
@@ -1881,7 +1905,7 @@ body.demo-body {
   background: var(--cream);
   text-align: left;
   font-size: 10px;
-  letter-spacing: .08em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 600;
@@ -1894,12 +1918,16 @@ body.demo-body {
   vertical-align: top;
   color: var(--ink);
 }
-.demo-root .import-table tr:last-child td { border-bottom: 0; }
+.demo-root .import-table tr:last-child td {
+  border-bottom: 0;
+}
 
 @media (max-width: 760px) {
   /* Narrow: the table keeps its shape and scrolls sideways inside its box rather than
      collapsing, because a row read out of order is worse than a row you have to scroll to. */
-  .demo-root .import-table { min-width: 560px; }
+  .demo-root .import-table {
+    min-width: 560px;
+  }
 }
 
 /* ---- One screen, one layout -------------------------------------------------------------- */
@@ -1975,7 +2003,7 @@ body.demo-body {
 .demo-root .page-table th {
   text-align: left;
   font-size: 10px;
-  letter-spacing: .08em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
   font-weight: 600;
@@ -2146,30 +2174,3 @@ body.demo-body {
   }
 }
 
-/*
- * The Ask dock (D-074). Ask is persistent, not a destination: it sits at the foot of the main
- * column on every screen, with the Activity chip beside it because runs are what Ask started.
- *
- * `margin-top: auto` pins it to the bottom of the flex column without taking the pane out of the
- * normal flow, so a long screen scrolls behind it rather than under it.
- */
-.ask-dock {
-  margin-top: auto;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 12px 26px 16px;
-  border-top: 1px solid var(--line);
-  background: white;
-}
-.ask-dock > *:last-child {
-  flex: 1;
-  min-width: 0;
-}
-@media (max-width: 720px) {
-  .ask-dock {
-    padding: 10px 14px 12px;
-    flex-wrap: wrap;
-  }
-}
