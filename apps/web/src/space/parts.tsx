@@ -42,6 +42,25 @@ export function SpaceActions(props: {
         const key = `${action.verb}-${action.label}-${i}`;
 
         if (action.verb === "open" && action.to && blocked === null) {
+          /*
+           * Some things the product points at are not routes: a signed file URL, a message with
+           * its provider. Handing one of those to the router would navigate inside the
+           * application and land nowhere, so an absolute URL opens as a link out — which is what
+           * makes "open the original" a real thing rather than a claim.
+           */
+          if (/^https?:\/\//.test(action.to.path)) {
+            return (
+              <a
+                key={key}
+                href={action.to.path}
+                className={className}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {action.label}
+              </a>
+            );
+          }
           return (
             <Link key={key} to={action.to.path} className={className}>
               {action.label}

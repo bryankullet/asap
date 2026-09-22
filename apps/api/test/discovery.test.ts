@@ -197,9 +197,12 @@ function membership(permissions: string[]) {
           id: "a1000000-0000-4000-8000-000000000001",
           organization_id: ORG,
           thread_id: THREAD,
+          // Not null in the table: a message without the provider's own id could be imported twice.
+          provider_message_id: "gmail-msg-1",
           direction: "inbound",
           from_address: "underwriting@jubilee.test",
           to_addresses: ["broking@acme-brokers.test"],
+          cc_addresses: [],
           subject: "Marine renewal terms",
           body_text: "Terms attached.",
           snippet: "Terms attached.",

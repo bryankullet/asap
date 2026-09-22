@@ -1409,3 +1409,32 @@ the one deliberate departure from the prototype's text, recorded here so it is n
 drift.
 
 Numbering note: D-079, continuing the gap left for `claude/ui-integration`'s D-073 to D-077.
+
+## D-080 — A reply is a server row; an approval is of one exact body
+
+Communication moved onto the one Space renderer, and the reply being written moved out of React.
+
+Three things follow from making the draft a row (`email_drafts`, migration 0044) rather than
+component state:
+
+1. **Two conversations keep two replies.** The draft is keyed by thread, uniquely, so opening two
+   conversations cannot leak a recipient or a sentence from one into the other, and a refresh
+   loses neither.
+2. **An approval covers the recipients, the subject and the body exactly as they read.** The
+   digest of what was approved is stored beside the approval. The API recomputes it on every save
+   and clears the approval when it no longer matches — adding a recipient to an approved reply is
+   a material change, and the server treats it as one whatever the browser sends. A database check
+   constraint makes a half-approval impossible.
+3. **Nothing is described as sent.** This deployment has no provider send path, so the thread
+   response carries `sending: { available: false, reason }` and the Space prints the reason where
+   a Send button would be. A message is sent only when `email_send_attempts` holds the provider's
+   own id (0035), and that route does not exist yet.
+
+A thread can now also say which policy it is about (`email_threads.policy_id`). Every link is
+written by a person: ASAP may suggest one and must state why it suggested it — a contact's own
+address, or a policy number written out in the conversation — and a similar name suggests nothing,
+because two clients called Otieno are two clients.
+
+One renderer change came with it: an `open` action whose target is an absolute URL now renders as
+a link out rather than a router `Link`. A provider's copy of a message and a signed file URL are
+not application routes, and routing to one landed nowhere.

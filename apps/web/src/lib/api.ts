@@ -15,6 +15,10 @@ import {
   mailboxesResponseSchema,
   emailThreadsResponseSchema,
   emailThreadResponseSchema,
+  emailDraftSchema,
+  emailThreadLinksSchema,
+  type LinkEmailThreadRequest,
+  type SaveEmailDraftRequest,
   connectMailboxResponseSchema,
   documentDetailSchema,
   documentFiledResponseSchema,
@@ -285,6 +289,18 @@ export const api = {
   /** What is connected, and what this deployment could connect. Never a token. */
   emailThreads: () => request("GET", "/email/threads", emailThreadsResponseSchema),
   emailThread: (id: string) => request("GET", `/email/threads/${id}`, emailThreadResponseSchema),
+  /**
+   * Save the reply being written. The server decides what an edit does to an approval — this
+   * only carries what a person typed.
+   */
+  saveEmailDraft: (id: string, input: SaveEmailDraftRequest) =>
+    request("PUT", `/email/threads/${id}/draft`, z.object({ draft: emailDraftSchema.nullable() }), input),
+  /** Approve the reply exactly as it now reads. */
+  approveEmailDraft: (id: string) =>
+    request("POST", `/email/threads/${id}/draft/approve`, z.object({ draft: emailDraftSchema.nullable() })),
+  /** Say what a conversation is about, or take back a link that was wrong. */
+  linkEmailThread: (id: string, input: LinkEmailThreadRequest) =>
+    request("PUT", `/email/threads/${id}/links`, z.object({ links: emailThreadLinksSchema }), input),
   mailboxes: () => request("GET", "/mailboxes", mailboxesResponseSchema),
   /** Begin connecting one, or be told plainly that this deployment cannot. */
   connectMailbox: (provider: "gmail" | "microsoft") =>

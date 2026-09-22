@@ -326,6 +326,15 @@ export const emailThreadSummarySchema = z.object({
   workItemId: uuidSchema.nullable(),
   lastMessageAt: z.string().nullable(),
   messageCount: z.number().int().min(0),
+  /** Everyone who has written or been written to on this thread, in the order first seen. */
+  participants: z.array(z.string()).default([]),
+  /** Which mailbox it came through, and whether that mailbox still reaches the provider. */
+  provider: MailboxProviderId.nullable().default(null),
+  mailboxAddress: z.string().nullable().default(null),
+  mailboxStatus: MailboxStatus.nullable().default(null),
+  firstMessageAt: z.string().nullable().default(null),
+  /** Set when something in this conversation is a person's to deal with. */
+  unhandled: z.string().max(200).nullable().default(null),
 });
 export type EmailThreadSummary = z.infer<typeof emailThreadSummarySchema>;
 
@@ -336,11 +345,111 @@ export const emailThreadsResponseSchema = z.object({
 });
 export type EmailThreadsResponse = z.infer<typeof emailThreadsResponseSchema>;
 
+/* ---- One conversation, in full (D-078) ------------------------------------------------------- */
+
+/**
+ * An attachment as it arrived. `documentId` is set only once the bytes are in our own bucket and
+ * a document row exists — before that it is an attachment we know about, not a file we hold.
+ */
+export const emailAttachmentSchema = z.object({
+  id: uuidSchema,
+  filename: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number().int().min(0),
+  /** The provider's own id for it, which is what stops the same attachment filing twice. */
+  providerAttachmentId: z.string().nullable(),
+  /** The document it became, when it became one. Null while it is only an attachment. */
+  documentId: uuidSchema.nullable(),
+});
+export type EmailAttachment = z.infer<typeof emailAttachmentSchema>;
+
+/** A message in the timeline. The provider's id travels with it, so a person can find the original. */
+export const emailMessageDetailSchema = emailMessageSchema.extend({
+  cc: z.array(z.string()).default([]),
+  providerMessageId: z.string(),
+  /** Where the original lives with the provider, when we can address it. */
+  providerUrl: z.string().max(2000).nullable().default(null),
+  attachments: z.array(emailAttachmentSchema).default([]),
+});
+export type EmailMessageDetail = z.infer<typeof emailMessageDetailSchema>;
+
+/** What a thread is about. Every link here was set by a person, never inferred from a name. */
+export const emailThreadLinksSchema = z.object({
+  clientId: uuidSchema.nullable(),
+  clientName: z.string().nullable(),
+  policyId: uuidSchema.nullable(),
+  policyNumber: z.string().nullable(),
+  workItemId: uuidSchema.nullable(),
+  workItemTitle: z.string().nullable(),
+  workItemKind: z.string().nullable(),
+});
+export type EmailThreadLinks = z.infer<typeof emailThreadLinksSchema>;
+
+/**
+ * A link ASAP thinks is likely, and why it thinks so.
+ *
+ * A suggestion is not a relationship. Nothing here is written until a person accepts it, and the
+ * reason is shown with it so they can judge it rather than trust it — a matching surname is not
+ * evidence that two records are the same client.
+ */
+export const emailLinkSuggestionSchema = z.object({
+  target: z.enum(["client", "policy", "work_item"]),
+  id: uuidSchema,
+  label: z.string(),
+  /** In words: what in this conversation pointed here. Shown, always. */
+  because: z.string().max(300),
+  /** True only where one candidate matched unambiguously on an exact identifier. */
+  unambiguous: z.boolean(),
+});
+export type EmailLinkSuggestion = z.infer<typeof emailLinkSuggestionSchema>;
+
+/** A reply being written. Server-held, so two conversations keep two and a refresh loses neither. */
+export const emailDraftSchema = z.object({
+  id: uuidSchema,
+  to: z.array(z.string()).default([]),
+  cc: z.array(z.string()).default([]),
+  subject: z.string(),
+  body: z.string(),
+  /** Set only while the approval covers the body as it now reads. An edit clears it, server-side. */
+  approvedAt: z.string().nullable().default(null),
+  approvedByName: z.string().nullable().default(null),
+  updatedAt: z.string(),
+});
+export type EmailDraft = z.infer<typeof emailDraftSchema>;
+
+/** Whether this deployment can actually send, and if not, what a person should do instead. */
+export const emailSendingSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().max(300).nullable().default(null),
+});
+export type EmailSending = z.infer<typeof emailSendingSchema>;
+
 export const emailThreadResponseSchema = z.object({
   thread: emailThreadSummarySchema,
-  messages: z.array(emailMessageSchema),
+  messages: z.array(emailMessageDetailSchema),
+  links: emailThreadLinksSchema,
+  suggestions: z.array(emailLinkSuggestionSchema).default([]),
+  draft: emailDraftSchema.nullable().default(null),
+  sending: emailSendingSchema,
 });
 export type EmailThreadResponse = z.infer<typeof emailThreadResponseSchema>;
+
+/** Saving a reply. The server decides what an edit does to an approval; the browser does not. */
+export const saveEmailDraftRequestSchema = z.object({
+  to: z.array(z.string().max(320)).max(50).default([]),
+  cc: z.array(z.string().max(320)).max(50).default([]),
+  subject: z.string().max(500).default(""),
+  body: z.string().max(100_000).default(""),
+});
+export type SaveEmailDraftRequest = z.infer<typeof saveEmailDraftRequestSchema>;
+
+/** Setting or removing what a conversation is about. Null removes the link. */
+export const linkEmailThreadRequestSchema = z.object({
+  clientId: uuidSchema.nullable().optional(),
+  policyId: uuidSchema.nullable().optional(),
+  workItemId: uuidSchema.nullable().optional(),
+});
+export type LinkEmailThreadRequest = z.infer<typeof linkEmailThreadRequestSchema>;
 
 /* ---- What a person is told about a document (D-076) ------------------------------------------ */
 

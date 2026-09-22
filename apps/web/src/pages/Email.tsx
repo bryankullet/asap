@@ -1,22 +1,24 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { communicationListSpace, communicationSpace } from "../live/communication-space.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useMe } from "../lib/me.js";
-import { ErrorState, LoadingList, MissingData } from "../components/states.js";
-import { Page } from "../shell/Page.js";
+import { useWorkspaceTabs } from "../shell/workspace-tabs.js";
+import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * Connected email (D-064).
+ * Connected email, through the one Space renderer.
  *
- * The brokerage's own correspondence, beside the work it belongs to, read under the caller's own
- * session from the mailbox they connected.
- *
- * The line this file will not cross: **nothing is sent from here.** A message leaves ASAP only
- * through an approved draft on the record it belongs to, and only reads as sent once the provider
- * returned its own message id — that is what `email_send_attempts` exists for.
+ * The line this file will not cross: **nothing is sent from here.** A reply is written, saved on
+ * the server and approved; it leaves ASAP only through a provider send that records the
+ * provider's own message id, and this deployment has none — so the Space says so where a Send
+ * button would be, rather than offering one whose only effect is a toast.
  */
 export function Email() {
   const me = useMe();
+  const tabs = useWorkspaceTabs("/email");
+
   const threads = useQuery({
     queryKey: ["email_threads", me.data?.active_organization?.id],
     queryFn: () => api.emailThreads(),
@@ -24,139 +26,173 @@ export function Email() {
     retry: false,
   });
 
+  useEffect(() => {
+    tabs.open({
+      spaceType: "communication",
+      recordType: "organization",
+      recordId: "email",
+      kind: "COMMUNICATION",
+      title: "Communication",
+      path: "/email",
+    });
+  }, []);
+
+  const navigate = useNavigate();
+  const space = communicationListSpace(threads.data, {
+    loading: threads.isPending,
+    error: threads.isError ? describeApiError(threads.error) : null,
+  });
+
   return (
-    <Page title="Email" meta="Conversations with clients and insurers, beside the work they belong to">
-      <MailboxStatus connected={threads.data?.mailboxConnected ?? false} />
-
-      {threads.isPending && <LoadingList rows={3} label="Reading your conversations" />}
-      {threads.isError && (
-        <ErrorState
-          what={`We could not read your email. ${describeApiError(threads.error)}`}
-          retry={() => void threads.refetch()}
-        />
-      )}
-      {threads.data && threads.data.threads.length === 0 && (
-        <article className="space-card" style={{ padding: 20 }}>
-          <strong>
-            {threads.data.mailboxConnected ? "Nothing has arrived yet." : "No mailbox is connected."}
-          </strong>
-          <p style={{ fontSize: 12, color: "#707a72", margin: "6px 0 0" }}>
-            {threads.data.mailboxConnected
-              ? "New conversations appear here as they land in the connected mailbox."
-              : "Until one is, ASAP works from what you put on file yourself."}
-          </p>
-        </article>
-      )}
-
-      {threads.data && threads.data.threads.length > 0 && (
-        <ul className="evidence-list">
-          {threads.data.threads.map((t) => (
-            <li key={t.id}>
-              <Link to="/email/$threadId" params={{ threadId: t.id }}>
-                {t.subject || "(No subject)"}
-              </Link>
-              <small>
-                {t.clientName ?? "Not linked to a client yet"} · {t.messageCount}{" "}
-                {t.messageCount === 1 ? "message" : "messages"}
-                {t.lastMessageAt ? ` · ${new Date(t.lastMessageAt).toLocaleString()}` : ""}
-              </small>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Page>
+    <SpaceFrameView
+      space={space}
+      onAct={(action) => {
+        if (action.verb === "open" && action.to) void navigate({ to: action.to.path });
+      }}
+    />
   );
 }
 
-/** Whether a mailbox is connected, and how to connect one. Honest when none is. */
-function MailboxStatus({ connected }: { connected: boolean }) {
-  return (
-    <article className="job-card" aria-label="Mailbox">
-      <div className={`job-icon ${connected ? "" : "amber"}`} aria-hidden>
-        ✉
-      </div>
-      <div className="job-main">
-        <div className="job-title">
-          <strong>{connected ? "Mailbox connected" : "No mailbox connected"}</strong>
-        </div>
-        <p>
-          {connected
-            ? "ASAP reads and replies in the same thread, and never sends without a person."
-            : "Connect Gmail or Microsoft 365 to read and send from the brokerage's own mailbox."}
-        </p>
-      </div>
-      <Link to="/settings/connections" className="secondary">
-        Data and connections
-      </Link>
-    </article>
-  );
-}
-
-/** One conversation, in order, with the work it belongs to. */
+/**
+ * One conversation, as its own tab.
+ *
+ * Keyed by the thread's id, so opening the same conversation twice focuses the tab that is
+ * already there — and two open conversations never share a draft, a recipient list or a link,
+ * because the composer's state is keyed by the same id and the saved draft is a server row.
+ */
 export function EmailThread() {
   const { threadId = "" } = useParams({ strict: false }) as { threadId?: string };
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const tabs = useWorkspaceTabs(`/email/${threadId}`);
+
+  /** What is in the composer but not yet saved. Reset whenever the conversation changes. */
+  const [composer, setComposer] = useState<
+    { to: string; cc: string; subject: string; body: string } | null
+  >(null);
+  useEffect(() => setComposer(null), [threadId]);
+
   const detail = useQuery({
     queryKey: ["email_thread", threadId],
     queryFn: () => api.emailThread(threadId),
-    enabled: Boolean(threadId),
     retry: false,
   });
 
-  if (detail.isPending) return <LoadingList rows={3} label="Opening the conversation" />;
-  if (detail.isError) {
-    return (
-      <ErrorState
-        what={`We could not open this conversation. ${describeApiError(detail.error)}`}
-        retry={() => void detail.refetch()}
-      />
-    );
-  }
-  if (!detail.data) {
-    return (
-      <MissingData
-        what="No conversation with that id"
-        why="It may have been archived, or your role in this brokerage cannot see it."
-      />
-    );
-  }
-  const { thread, messages } = detail.data;
+  const title = detail.data?.thread.subject;
+  useEffect(() => {
+    if (title === undefined) return;
+    tabs.open({
+      spaceType: "communication",
+      recordType: "email_thread",
+      recordId: threadId,
+      kind: "CONVERSATION",
+      title: title || "(No subject)",
+      path: `/email/${threadId}`,
+    });
+  }, [title, threadId]);
+
+  const refresh = () => void qc.invalidateQueries({ queryKey: ["email_thread", threadId] });
+
+  const saveDraft = useMutation({
+    mutationFn: (v: { to: string; cc: string; subject: string; body: string }) =>
+      api.saveEmailDraft(threadId, {
+        to: addresses(v.to),
+        cc: addresses(v.cc),
+        subject: v.subject,
+        body: v.body,
+      }),
+    onSuccess: () => {
+      // The server's answer is the truth about the draft, including whether the approval survived.
+      setComposer(null);
+      refresh();
+    },
+  });
+
+  const approve = useMutation({
+    mutationFn: () => api.approveEmailDraft(threadId),
+    onSuccess: refresh,
+  });
+
+  const link = useMutation({
+    mutationFn: (input: Parameters<typeof api.linkEmailThread>[1]) =>
+      api.linkEmailThread(threadId, input),
+    onSuccess: refresh,
+  });
+
+  const busy = saveDraft.isPending || approve.isPending || link.isPending;
+  const space = communicationSpace(
+    detail.data,
+    {
+      loading: detail.isPending,
+      error: detail.isError ? describeApiError(detail.error) : null,
+      missing: !detail.isPending && !detail.isError && detail.data === undefined,
+      busy,
+      draft: composer,
+    },
+    threadId,
+  );
 
   return (
-    <Page title={thread.subject || "(No subject)"} crumbs={["Email", thread.subject || "(No subject)"]}>
-      <Link to="/email" className="link">
-        ← Every conversation
-      </Link>
-      <p className="quiet-line">{thread.clientName ?? "Not linked to a client yet"}</p>
+    <SpaceFrameView
+      space={space}
+      onAct={(action) => {
+        if (action.verb === "open" && action.to) {
+          /* The provider's own copy is a URL, not a route: it opens rather than navigates. */
+          if (action.to.path.startsWith("http")) window.open(action.to.path, "_blank", "noopener");
+          else void navigate({ to: action.to.path });
+          return;
+        }
+        // One change at a time, so a double click cannot write twice.
+        if (busy) return;
+        const step = action.stepId ?? "";
 
-      {messages.length === 0 ? (
-        <p className="quiet-line">This conversation has no messages ASAP can read yet.</p>
-      ) : (
-        <ol aria-label="Messages" className="thread-list">
-          {messages.map((m) => (
-            <li key={m.id} className={m.direction === "outbound" ? "outbound" : "inbound"}>
-              <div className="thread-meta">
-                {m.from} → {m.to.join(", ")} · {new Date(m.sentAt).toLocaleString()}
-                {m.hasAttachments ? " · has attachments" : ""}
-              </div>
-              <p>{m.body ?? m.snippet ?? "The body of this message has not been read."}</p>
-            </li>
-          ))}
-        </ol>
-      )}
+        if (step === "approve") {
+          approve.mutate();
+          return;
+        }
+        if (step.startsWith("link:")) {
+          const [, target, id] = step.split(":");
+          link.mutate(linkPatch(target ?? "", id ?? null));
+          return;
+        }
+        if (step.startsWith("unlink:")) {
+          const target = step.slice("unlink:".length);
+          link.mutate(linkPatch(target, null));
+          return;
+        }
 
-      {thread.workItemId && (
-        <section aria-label="Related work">
-          <div className="section-label">THE WORK THIS BELONGS TO</div>
-          <ul className="evidence-list">
-            <li>
-              <Link to="/r/$recordId" params={{ recordId: thread.workItemId }} search={{}}>
-                Open the record
-              </Link>
-              <small>Where a reply can be prepared and approved</small>
-            </li>
-          </ul>
-        </section>
-      )}
-    </Page>
+        const values = (action as { values?: Record<string, string> }).values;
+        if (values) {
+          setComposer({
+            to: values["to"] ?? "",
+            cc: values["cc"] ?? "",
+            subject: values["subject"] ?? "",
+            body: values["body"] ?? "",
+          });
+          saveDraft.mutate({
+            to: values["to"] ?? "",
+            cc: values["cc"] ?? "",
+            subject: values["subject"] ?? "",
+            body: values["body"] ?? "",
+          });
+        }
+      }}
+    />
   );
+}
+
+/** A typed recipient list, split the way a person writes one. Empty entries are not addresses. */
+function addresses(value: string): string[] {
+  return value
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+}
+
+/** Which link the action is about. Unknown targets change nothing rather than guessing. */
+function linkPatch(target: string, id: string | null) {
+  if (target === "client") return { clientId: id };
+  if (target === "policy") return { policyId: id };
+  if (target === "work_item") return { workItemId: id };
+  return {};
 }

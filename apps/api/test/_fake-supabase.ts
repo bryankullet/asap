@@ -196,7 +196,9 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
           for (const one of many) {
             const found = rows.find((r) => keys.every((k) => r[k] === one[k]));
             if (found) Object.assign(found, one);
-            else rows.push({ created_at: STAMP, ...one });
+            // A new row gets the identity Postgres would have given it: a route that reads its
+            // own write back must see an id, as it would against the real database.
+            else rows.push({ id: nextId(), created_at: STAMP, updated_at: STAMP, ...one });
             db.inserts.push({ table, row: one });
           }
           return { error: null };
