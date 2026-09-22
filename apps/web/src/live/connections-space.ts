@@ -123,8 +123,27 @@ export function connectionsSpace(
         notes.push("Nothing is being read.");
       } else if (mailbox.sync.state === "syncing") {
         notes.push("Reading messages now");
+      } else if (mailbox.sync.checkpointExpired) {
+        notes.push("The provider's checkpoint had expired, so the recent window was read again");
       } else if (mailbox.sync.state === "failed") {
         notes.push(mailbox.sync.error ?? "The last read did not finish.");
+        /*
+         * A failed pass is not a rollback. What arrived is the brokerage's own correspondence and
+         * it stays — so the row says how much of it is already here, and whether a retry resumes
+         * or starts from the window again. "It broke" alone leaves a person unable to decide.
+         */
+        if (mailbox.sync.messagesSaved > 0) {
+          notes.push(
+            `${mailbox.sync.messagesSaved} ${mailbox.sync.messagesSaved === 1 ? "message" : "messages"} had already been saved and were kept`,
+          );
+        } else {
+          notes.push("Nothing had been saved when it stopped");
+        }
+        notes.push(
+          mailbox.sync.hasCheckpoint
+            ? "A retry carries on from the last good point"
+            : "A retry starts from the recent window again",
+        );
       } else if (mailbox.sync.lastSyncedAt !== null) {
         notes.push(`Last synced ${formatSince(mailbox.sync.lastSyncedAt)}`);
       } else {

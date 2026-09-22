@@ -13,9 +13,10 @@ import { SpaceFrameView } from "../space/SpaceFrame.js";
  * flow at the provider's own page; until the provider sends the person back and a row exists, the
  * mailbox is honestly not connected, and there is no state in between.
  *
- * What this Space also does is name the gap: authorising records the connection, and **nothing
- * reads the mailbox yet** — there is no endpoint, no worker job, and nothing writes
- * `last_synced_at`. A "Syncing" badge would be a word with no mechanism behind it.
+ * Reading is now real, and so every word about it comes from a row: "Syncing" means a run row
+ * says `running`, "Sync stopped" means one failed and its reason is on it, and a last-synced time
+ * means a pass finished cleanly. The browser infers none of it — which is what stops the word
+ * appearing before the mechanism, and what stopped it appearing while there was none.
  */
 export function Connections() {
   const me = useMe();
@@ -40,6 +41,15 @@ export function Connections() {
       }
       setNotConfigured(res.reason);
     },
+  });
+  /*
+   * Asking for a pass. It returns immediately: the reading is worker work, and what the screen
+   * then shows is the run row, not a guess about how long it will take.
+   */
+  const sync = useMutation({
+    mutationFn: (id: string) => api.syncMailbox(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["mailboxes"] }),
+    onError: (e) => setNotConfigured(describeApiError(e)),
   });
   const disconnect = useMutation({
     mutationFn: (id: string) => api.disconnectMailbox(id),
@@ -75,6 +85,7 @@ export function Connections() {
         const [what, id] = (action.stepId ?? "").split(":");
         if (what === "connect" && (id === "gmail" || id === "microsoft")) connect.mutate(id);
         if (what === "mailbox" && id !== undefined) disconnect.mutate(id);
+        if (what === "sync" && id !== undefined) sync.mutate(id);
       }}
     />
   );

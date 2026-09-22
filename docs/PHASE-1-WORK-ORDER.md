@@ -214,3 +214,19 @@ These need a human answer. Claude Code should ask rather than assume.
 - [x] **Audit log survives organization deletion; must land before production.** `audit_log.organization_id` is ON DELETE RESTRICT since 0030 (was CASCADE from 0009): a brokerage with audit rows cannot be deleted, and every brokerage has them from creation. Screen Map v1 C05: "never rewrite historical outcomes". pgTAP `0307` proves it (D-054). Found when a test duplicate was deleted by hand and its creation rows went with it.
 - [ ] **Placement authority by sum insured and class — `authority_sufficient` becomes real; must land before production.** Screen Map v3 Part 9 lists "placement authority scaled by sum insured" among what is still not in the plan. Until it lands, the placement approve step carries `client_file_cleared` and `version_current` only (D-048), so any member who can approve at all can approve any sum insured.
 - [ ] Not in Phase 1 by design: personal pins, realtime invalidation, `?panel=` panels (URL reserved), the mobile bottom bar is present but untested on device.
+
+## 4A completion checklist — what is still owed
+
+These are deferred, not passed. Nothing in 4A is complete until each is done or has been reported
+as blocked with the reason.
+
+| Check | State | Why |
+|---|---|---|
+| Import and Document visual comparison at 1360×900 / 1440×900 / 390×844 | **BLOCKED** | Needs the deterministic authenticated harness; these Spaces have no unauthenticated route. |
+| Communication and Gmail visual comparison (the eleven states) | **BLOCKED** | Same. |
+| `pnpm test:rls` (pgTAP) | **BLOCKED** | No local Postgres in the build container; `DATABASE_URL` is unset. Suites `0318` and `0319` are written and committed, unrun. |
+| Migrations 0044 and 0045 applied to hosted Supabase | **NOT DONE, deliberately** | Additive and reviewed, but a hosted application needs its own production-safety review. |
+
+Before 4A is called finished: run the captures through the authenticated harness, run the RLS and
+pgTAP suites wherever a Postgres exists, and report anything still unavailable as blocked rather
+than passed.

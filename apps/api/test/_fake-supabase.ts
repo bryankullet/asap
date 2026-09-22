@@ -125,7 +125,13 @@ class Query {
     }
     if (this.max !== null) rows = rows.slice(0, this.max);
     void this.selectSpec;
-    return Promise.resolve(resolve({ data: this.single ? (rows[0] ?? null) : rows, error: null }));
+    /*
+     * A copy, as Postgres would give. Handing out the stored object means a route holding a row
+     * it read earlier silently sees later writes to it — which is the opposite of the snapshot a
+     * real read returns, and it hides exactly the races that conditional writes exist to lose.
+     */
+    const out = rows.map((r) => ({ ...r }));
+    return Promise.resolve(resolve({ data: this.single ? (out[0] ?? null) : out, error: null }));
   }
 }
 
@@ -157,25 +163,34 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
               filters.push([col, val]);
               return chain;
             },
+            /*
+             * A conditional update: `.is(col, null)` is how a route claims a row exactly once —
+             * consuming an OAuth state, advancing a checkpoint nobody else has moved. Without it
+             * here the stand-in cannot exercise the very race those routes exist to lose safely.
+             */
+            is(col: string, val: unknown) {
+              filters.push([col, val ?? null]);
+              return chain;
+            },
             select() {
               return chain;
             },
             async single() {
-              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => r[c] === v));
+              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => (r[c] ?? null) === v));
               if (!row) return { data: null, error: { code: "PGRST116", message: "no rows" } };
               Object.assign(row, patch);
               return { data: row, error: null };
             },
             /** No row is an answer, not an error — the difference `single` exists to make. */
             async maybeSingle() {
-              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => r[c] === v));
+              const row = (db.tables[table] ??= []).find((r) => filters.every(([c, v]) => (r[c] ?? null) === v));
               if (!row) return { data: null, error: null };
               Object.assign(row, patch);
               return { data: row, error: null };
             },
             then(resolve: (v: { error: null }) => unknown) {
               for (const row of db.tables[table] ?? []) {
-                if (filters.every(([c, v]) => row[c] === v)) Object.assign(row, patch);
+                if (filters.every(([c, v]) => (row[c] ?? null) === v)) Object.assign(row, patch);
               }
               return Promise.resolve(resolve({ error: null }));
             },
@@ -291,6 +306,12 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
       // private bucket is that reads are short-lived signed URLs, which is what this returns.
       storage: {
         from: () => ({
+          /* Bytes in. An email attachment is filed through the ordinary storage path. */
+          upload: async (path: string, _bytes: unknown, _opts?: unknown) => {
+            void _bytes;
+            void _opts;
+            return { data: { path }, error: null };
+          },
           createSignedUrl: async (path: string, ttl: number) => ({
             data: { signedUrl: `https://stub.invalid/${path}?ttl=${ttl}` },
             error: null,

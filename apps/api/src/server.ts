@@ -10,6 +10,7 @@ import { createExecutor } from "./runs/executor.js";
 import { httpExtractor } from "./documents/extractor.js";
 import { newBootToken, recoverOrphanedRuns } from "./runs/recovery.js";
 import { createSupabaseFactory } from "./supabase.js";
+import { gmailProvider } from "./mailbox/providers/gmail.js";
 
 // Fails immediately, naming the variable, if the environment is incomplete.
 const env = loadServerEnv();
@@ -60,6 +61,33 @@ const app = createApp({
       redirectUri: env.MICROSOFT_OAUTH_REDIRECT_URI,
     },
   },
+  /*
+   * The mailbox adapters, present only where this deployment actually holds the credentials to
+   * use them. Absent, nothing reads a mailbox and every surface says so in those words.
+   */
+  ...(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET && env.GOOGLE_OAUTH_REDIRECT_URI
+    ? {
+        mailbox: {
+          providers: {
+            gmail: gmailProvider({
+              timeoutMs: 30_000,
+              clientId: env.GOOGLE_OAUTH_CLIENT_ID,
+              clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+            }),
+          },
+          limits: {
+            windowDays: env.MAILBOX_SYNC_WINDOW_DAYS,
+            maxThreads: env.MAILBOX_SYNC_MAX_THREADS,
+            maxAttachments: env.MAILBOX_SYNC_MAX_ATTACHMENTS,
+            maxAttachmentBytes: env.MAILBOX_SYNC_MAX_ATTACHMENT_BYTES,
+            attachmentMimeTypes: env.MAILBOX_SYNC_ATTACHMENT_TYPES.split(",")
+              .map((t) => t.trim())
+              .filter((t) => t !== ""),
+          },
+          encryptionKey: env.ENCRYPTION_KEY,
+        },
+      }
+    : {}),
   logger,
   build,
   supabase,

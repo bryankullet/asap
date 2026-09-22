@@ -242,6 +242,19 @@ export const mailboxSyncSchema = z.object({
   canStart: z.boolean().default(false),
   /** Why they may not, when they may not. Shown beside the control, never instead of it (§34). */
   cannotStartReason: z.string().max(300).nullable().default(null),
+  /**
+   * What the last pass saved before it stopped.
+   *
+   * A failed sync is not a rollback: messages that arrived are the brokerage's own
+   * correspondence and stay. Saying how many arrived is the difference between "it broke" and
+   * "it broke, and these forty are already here".
+   */
+  messagesSaved: z.number().int().min(0).default(0),
+  attachmentsSaved: z.number().int().min(0).default(0),
+  /** True when a safe resume point exists, so a retry does not start from the beginning. */
+  hasCheckpoint: z.boolean().default(false),
+  /** True when the provider's own checkpoint had expired and a bounded re-read was needed. */
+  checkpointExpired: z.boolean().default(false),
 });
 export type MailboxSync = z.infer<typeof mailboxSyncSchema>;
 
@@ -266,6 +279,10 @@ export const mailboxSchema = z.object({
     error: null,
     canStart: false,
     cannotStartReason: null,
+    messagesSaved: 0,
+    attachmentsSaved: 0,
+    hasCheckpoint: false,
+    checkpointExpired: false,
   }),
 });
 export type Mailbox = z.infer<typeof mailboxSchema>;

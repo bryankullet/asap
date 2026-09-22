@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
 import { extractDocument } from "../documents/extraction.js";
+import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
+import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
 import type { Extractor } from "../documents/extractor.js";
 import { HttpError, sendError } from "../errors.js";
 
@@ -27,6 +29,19 @@ export function internalRoutes(deps: {
   /** Null on a deployment with no extraction service: documents are filed, and say they are unread. */
   extractor: Extractor | null;
   bucket: string;
+  /**
+   * The mailbox adapters and how much one pass may read.
+   *
+   * Absent on a deployment with no provider credentials, in which case a sync request is skipped
+   * with that said out loud — rather than failing, which would look like a broken mailbox.
+   */
+  mailbox?:
+    | {
+        providers: Partial<Record<"gmail" | "microsoft", MailboxProvider>>;
+        limits: SyncLimits;
+        encryptionKey: string;
+      }
+    | undefined;
 }) {
   const app = new Hono();
 
@@ -102,6 +117,78 @@ export function internalRoutes(deps: {
             ? `${outcome.pages} pages read, ${outcome.fields} values proposed for review.`
             : outcome.reason,
       });
+    }
+
+    /*
+     * Reading a mailbox. The pass is bounded, idempotent on the provider's own identities, and
+     * writes its own run row — so "Syncing" is a fact, a failure says what it managed to save,
+     * and a re-delivered event cannot read the same mail twice.
+     */
+    if (event.event_type === "mailbox.sync_requested" && event.entity_type === "mailbox" && event.entity_id) {
+      if (!deps.mailbox) {
+        results.push({
+          consumer: "mailbox_sync",
+          result: "skipped",
+          detail: "This deployment has no mailbox provider configured, so nothing reads a mailbox.",
+        });
+      } else {
+        const box = await db
+          .from("mailboxes")
+          .select("provider")
+          .eq("id", event.entity_id)
+          .maybeSingle();
+        const providerId = (box.data as { provider: "gmail" | "microsoft" } | null)?.provider;
+        const adapter = providerId ? deps.mailbox.providers[providerId] : undefined;
+        if (!adapter) {
+          results.push({
+            consumer: "mailbox_sync",
+            result: "skipped",
+            detail: "No adapter is configured for that mailbox's provider.",
+          });
+        } else {
+          const trigger =
+            event.payload?.["trigger"] === "person"
+              ? "person"
+              : event.payload?.["trigger"] === "schedule"
+                ? "schedule"
+                : "first_connection";
+          try {
+            const outcome = await syncMailbox(
+              {
+                db,
+                logger: deps.logger,
+                provider: adapter,
+                encryptionKey: deps.mailbox.encryptionKey,
+                bucket: deps.bucket,
+                limits: deps.mailbox.limits,
+              },
+              { mailboxId: event.entity_id, trigger },
+            );
+            results.push({
+              consumer: "mailbox_sync",
+              result: outcome.state === "succeeded" ? "success" : "failure",
+              detail:
+                outcome.state === "succeeded"
+                  ? `${outcome.messagesSaved} messages and ${outcome.attachmentsSaved} attachments saved${outcome.moreWaiting ? "; more is waiting" : ""}${outcome.checkpointExpired ? "; the provider's checkpoint had expired, so the recent window was re-read" : ""}.`
+                  : (outcome.error ?? "The mailbox could not be read."),
+            });
+          } catch (e) {
+            /*
+             * A pass already going is the right answer, not a failure: the thing the event asked
+             * for is happening. Marking it failed would have the dispatcher retry into the same
+             * refusal until it gave up.
+             */
+            results.push({
+              consumer: "mailbox_sync",
+              result: e instanceof AlreadySyncing ? "skipped" : "failure",
+              detail:
+                e instanceof AlreadySyncing
+                  ? "A pass is already going for this mailbox."
+                  : ((e as { message?: string } | null)?.message ?? "The mailbox could not be read."),
+            });
+          }
+        }
+      }
     }
 
     /*

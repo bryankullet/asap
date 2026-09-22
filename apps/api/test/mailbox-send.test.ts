@@ -22,9 +22,12 @@ const ctx = { req: { header: () => undefined } } as never;
 function provider(outcome: SendOutcome): MailboxProvider {
   return {
     id: "gmail",
-    list: async () => ({ messages: [], cursor: null }),
+    list: async () => ({ messages: [], cursor: null, checkpointExpired: false, reachedLimit: false }),
+    fetchAttachment: async () => null,
     send: async () => outcome,
     refresh: async () => "needs_reauthorisation",
+    exchangeCode: async () => ({ outcome: "failed", reason: "not in this test" }),
+    revoke: async () => {},
   };
 }
 

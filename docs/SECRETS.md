@@ -67,10 +67,17 @@ Keep separate keys per environment so a staging leak does not touch production s
 
 | Secret | Sensitivity | Allowed in | Notes |
 |---|---|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | Low | `apps/api` | Not a secret, but set with the others or nothing connects. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | High | `apps/api` | App-level, not per-brokerage. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Low | `apps/api` | `<API_BASE_URL>/mailboxes/oauth/gmail/callback`, byte for byte as registered in Google Cloud Console. |
 | `MICROSOFT_OAUTH_CLIENT_SECRET` | High | `apps/api` | Microsoft expires these — calendar the expiry. |
 | `RESEND_API_KEY` | Medium | `apps/api` | Platform mail only: invitations, resets, system notices. Optional; absent disables email. |
 | `API_INTERNAL_KEY` | High | `apps/api` | Lets the API write through the engine functions. Registered by hash on boot (0025); the value is never logged or written anywhere. |
+
+**Scopes.** Gmail is connected with `gmail.readonly` and `userinfo.email` only. Permission to
+send is deliberately not requested: sending from ASAP is not built, and asking a brokerage to grant
+standing authority to send mail as itself before anything can send is asking for more than the
+product needs. It is a separate consent when the send path lands.
 
 **Per-brokerage OAuth refresh tokens are the sharpest edge in the system.** Each one is standing access to a brokerage's entire mailbox. They live in the database, encrypted with `ENCRYPTION_KEY`, never in environment variables, never in logs, never in an audit payload, never in an error message. A crash trace containing a refresh token is a reportable incident.
 

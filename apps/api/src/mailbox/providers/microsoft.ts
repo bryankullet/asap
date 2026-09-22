@@ -26,20 +26,34 @@ export function microsoftProvider(config: { timeoutMs: number }): MailboxProvide
   return {
     id: "microsoft",
 
-    async list({ credentials, cursor }) {
+    async list({ credentials, cursor, limits }) {
       // Graph's deltaLink is an absolute url, so a stored cursor is followed as given.
       const res = cursor
         ? await fetch(cursor, {
             headers: { authorization: `Bearer ${credentials.accessToken}` },
             signal: AbortSignal.timeout(config.timeoutMs),
           })
-        : await call("/messages/delta?$top=50", credentials);
+        : await call(`/messages/delta?$top=${limits.maxThreads}`, credentials);
       if (!res.ok) throw new Error(`microsoft list failed: ${res.status}`);
       const body = (await res.json()) as { value?: GraphMessage[]; "@odata.deltaLink"?: string };
+      const all = (body.value ?? []).map(toFetched);
+      const messages = all.slice(0, limits.maxThreads);
       return {
-        messages: (body.value ?? []).map(toFetched),
+        messages,
         cursor: body["@odata.deltaLink"] ?? cursor,
+        /*
+         * Graph answers an expired delta token with a 410 and a fresh link rather than a state we
+         * can read here. Until this adapter is exercised against a real tenant it does not claim
+         * to detect one, which is why this is false rather than a guess.
+         */
+        checkpointExpired: false,
+        reachedLimit: all.length > messages.length,
       };
+    },
+
+    /** Not built. Microsoft 365 ingestion lands with its own increment, not as a silent stub. */
+    async fetchAttachment() {
+      return null;
     },
 
     async send({ credentials, message }): Promise<SendOutcome> {
@@ -93,6 +107,17 @@ export function microsoftProvider(config: { timeoutMs: number }): MailboxProvide
         return { outcome: "failed", reason: `Microsoft 365 refused to send it (${sent.status}).` };
       }
       return { outcome: "outcome_unknown", reason: `Microsoft 365 returned ${sent.status} while sending.` };
+    },
+
+    async exchangeCode() {
+      return {
+        outcome: "failed" as const,
+        reason: "Connecting Microsoft 365 is not built yet.",
+      };
+    },
+
+    async revoke() {
+      /* Nothing to revoke: no Microsoft connection is ever established by this deployment. */
     },
 
     async refresh(credentials) {

@@ -14,9 +14,13 @@ import {
 } from "@asap/schema";
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { MailboxProvider } from "../mailbox/types.js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
+import { emitEvent } from "../events/emit.js";
+import { decryptToken, newOAuthState } from "../mailbox/crypto.js";
+import { GMAIL_READ_SCOPES } from "../mailbox/providers/gmail.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
@@ -61,6 +65,27 @@ function missingFor(provider: MailboxProviderIdValue, config: MailboxOAuthConfig
     : "This deployment has no Microsoft credentials yet. Whoever administers it can add them.";
 }
 
+/**
+ * How long an authorisation may be in flight.
+ *
+ * Long enough for a person to read a consent screen and pick an account; short enough that a
+ * state left in a browser history is useless by the time anyone finds it.
+ */
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+type SyncRunRow = {
+  id: string;
+  mailbox_id: string;
+  state: "running" | "succeeded" | "failed";
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+  messages_saved: number;
+  attachments_saved: number;
+  cursor_after: string | null;
+  checkpoint_expired: boolean;
+};
+
 type MailboxRow = {
   id: string;
   provider: MailboxProviderIdValue;
@@ -68,11 +93,28 @@ type MailboxRow = {
   display_name: string | null;
   status: "connected" | "needs_reauthorisation" | "disconnected";
   status_reason: string | null;
+  sync_cursor: string | null;
   last_synced_at: string | null;
   created_at: string;
 };
 
-export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig }) {
+export function mailboxRoutes(deps: {
+  logger: Logger;
+  oauth: MailboxOAuthConfig;
+  /** The adapters, so a disconnect can tell the provider. Absent in a deployment with none. */
+  providers?: Partial<Record<MailboxProviderIdValue, MailboxProvider>> | undefined;
+  /** Server-side only, and used only to read a token back in order to revoke it. */
+  encryptionKey?: string | undefined;
+  /**
+   * The service connection, for the one table no tenant path may reach.
+   *
+   * `mailbox_oauth_states` has row level security on and no policy at all: the callback that
+   * consumes a state has no session, so the row cannot be tenant-readable without also being
+   * listable by a signed-in person. It is therefore written here the same way it is read there.
+   * The organization and the person on the row still come from the session, never from the body.
+   */
+  service?: (() => SupabaseClient) | undefined;
+}) {
   const app = new Hono();
 
   /** What is connected, and what this deployment could connect. */
@@ -452,41 +494,122 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
   /**
    * The reading state of one mailbox, from rows only.
    *
-   * There is no reader yet: nothing in this deployment fetches messages, and nothing writes
-   * `last_synced_at`. So the honest answer for a connected mailbox is `never` — connected, and
-   * reading has not started — and `canStart` is false with the reason said plainly. When the sync
-   * worker lands, this function reads the run instead and `syncing` becomes a fact rather than a
-   * word; the client never infers it, which is what stops the word appearing before the mechanism.
+   * Every one of these words is something the server can prove. "Syncing" means a run row says
+   * `running`; "Connected — last synced" means a run finished cleanly and wrote the time;
+   * "Sync stopped" means a run failed and its reason is on the row. Nothing here is inferred from
+   * how long ago something happened, because elapsed time cannot tell a quiet mailbox from a
+   * broken one.
    */
-  function syncStateOf(m: MailboxRow) {
+  function syncStateOf(
+    m: MailboxRow,
+    run: SyncRunRow | null,
+  ): {
+    state: "never" | "syncing" | "idle" | "failed";
+    runId: string | null;
+    lastSyncedAt: string | null;
+    error: string | null;
+    canStart: boolean;
+    cannotStartReason: string | null;
+    messagesSaved: number;
+    attachmentsSaved: number;
+    hasCheckpoint: boolean;
+    checkpointExpired: boolean;
+  } {
+    /* What the last pass managed, whatever it then did. A failure keeps what it saved. */
+    const saved = {
+      messagesSaved: run?.messages_saved ?? 0,
+      attachmentsSaved: run?.attachments_saved ?? 0,
+      hasCheckpoint: m.sync_cursor !== null,
+      checkpointExpired: run?.checkpoint_expired ?? false,
+    };
     if (m.status === "disconnected") {
       return {
-        state: "never" as const,
+        state: "never",
         runId: null,
         lastSyncedAt: null,
         error: null,
         canStart: false,
+        ...saved,
         cannotStartReason: "This mailbox is disconnected.",
+      };
+    }
+    if (m.status === "needs_reauthorisation") {
+      return {
+        state: "failed",
+        runId: run?.id ?? null,
+        lastSyncedAt: m.last_synced_at,
+        error:
+          m.status_reason ??
+          "This mailbox needs authorising again before anything can be read.",
+        canStart: false,
+        ...saved,
+        cannotStartReason: "Connect the mailbox again first.",
+      };
+    }
+    if (run?.state === "running") {
+      return {
+        state: "syncing",
+        runId: run.id,
+        lastSyncedAt: m.last_synced_at,
+        error: null,
+        canStart: false,
+        ...saved,
+        cannotStartReason: "A pass is going now.",
+      };
+    }
+    if (run?.state === "failed") {
+      return {
+        state: "failed",
+        runId: run.id,
+        // What was saved before it stopped is still saved, and the last good point stands.
+        lastSyncedAt: m.last_synced_at,
+        error: run.error,
+        canStart: true,
+        ...saved,
+        cannotStartReason: null,
       };
     }
     if (m.last_synced_at !== null) {
       return {
-        state: "idle" as const,
-        runId: null,
+        state: "idle",
+        runId: run?.id ?? null,
         lastSyncedAt: m.last_synced_at,
         error: null,
-        canStart: false,
-        cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+        canStart: true,
+        ...saved,
+        cannotStartReason: null,
       };
     }
     return {
-      state: "never" as const,
-      runId: null,
+      state: "never",
+      runId: run?.id ?? null,
       lastSyncedAt: null,
       error: null,
-      canStart: false,
-      cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+      canStart: true,
+      ...saved,
+      cannotStartReason: null,
     };
+  }
+
+  /** The most recent pass for each mailbox, which is what every state above is read from. */
+  async function latestRuns(
+    db: Db,
+    organizationId: string,
+    mailboxIds: string[],
+  ): Promise<Map<string, SyncRunRow>> {
+    const out = new Map<string, SyncRunRow>();
+    if (mailboxIds.length === 0) return out;
+    const { data } = await db
+      .from("mailbox_sync_runs")
+      .select("id, mailbox_id, state, error, started_at, finished_at, messages_saved, attachments_saved, cursor_after, checkpoint_expired")
+      .eq("organization_id", organizationId)
+      .in("mailbox_id", mailboxIds)
+      .order("started_at", { ascending: false })
+      .limit(200);
+    for (const r of (data ?? []) as SyncRunRow[]) {
+      if (!out.has(r.mailbox_id)) out.set(r.mailbox_id, r);
+    }
+    return out;
   }
 
   app.get("/mailboxes", async (c) => {
@@ -501,8 +624,11 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
       .order("created_at", { ascending: true });
     if (error) return sendError(c, mapDatabaseError(error));
 
+    const rows = (data ?? []) as MailboxRow[];
+    const runs = await latestRuns(db, org.id, rows.map((m) => m.id));
+
     const body: MailboxesResponse = mailboxesResponseSchema.parse({
-      mailboxes: ((data ?? []) as MailboxRow[]).map((m) => ({
+      mailboxes: rows.map((m) => ({
         id: m.id,
         provider: m.provider,
         emailAddress: m.email_address,
@@ -511,7 +637,7 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
         statusReason: m.status_reason,
         lastSyncedAt: m.last_synced_at,
         connectedAt: m.created_at,
-        sync: syncStateOf(m),
+        sync: syncStateOf(m, runs.get(m.id) ?? null),
       })),
       providers: (["gmail", "microsoft"] as const).map((id) => {
         const missing = missingFor(id, deps.oauth);
@@ -545,11 +671,19 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
     }
 
     /*
-     * The state parameter carries who asked and which brokerage, signed by being random and
-     * short-lived rather than guessable: the callback looks it up rather than trusting anything
-     * the browser sends back. Storing it is the callback's half of this work.
+     * The state parameter carries who asked and which brokerage, by being looked up rather than
+     * trusted: 32 random bytes, stored as a digest, single-use and short-lived. The callback has
+     * no session at all, so this row is the whole of its authentication.
      */
-    const state = crypto.randomUUID();
+    const state = newOAuthState();
+    const stored = await (deps.service?.() ?? db).from("mailbox_oauth_states").insert({
+      organization_id: org.id,
+      provider: input.provider,
+      state_hash: state.hash,
+      requested_by: user.id,
+      expires_at: new Date(Date.now() + OAUTH_STATE_TTL_MS).toISOString(),
+    });
+    if (stored.error) return sendError(c, mapDatabaseError(stored.error));
     const url =
       input.provider === "gmail"
         ? new URL("https://accounts.google.com/o/oauth2/v2/auth")
@@ -562,15 +696,24 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
       input.provider === "gmail"
         ? deps.oauth.gmail.redirectUri!
         : deps.oauth.microsoft.redirectUri!;
+    /*
+     * Reading only.
+     *
+     * Permission to send is not asked for, because sending from ASAP is not built. Asking a
+     * brokerage to grant standing authority to send mail as itself, before anything can send, is
+     * asking for more than the product needs — and a consent screen listing a permission that
+     * nothing uses teaches people not to read consent screens. When the send path lands it is a
+     * separate authorisation, and the brokerage will see exactly what changed.
+     */
     const scope =
       input.provider === "gmail"
-        ? "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send"
-        : "offline_access Mail.Read Mail.Send";
+        ? GMAIL_READ_SCOPES.join(" ")
+        : "offline_access Mail.Read";
     url.searchParams.set("client_id", clientId);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", scope);
-    url.searchParams.set("state", state);
+    url.searchParams.set("state", state.value);
     if (input.provider === "gmail") {
       // Without these Google returns no refresh token on a repeat authorisation, and the
       // connection dies silently an hour later.
@@ -593,6 +736,77 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
   });
 
   /**
+   * Read it again, now.
+   *
+   * This asks: it emits the event and returns. The reading itself is worker work, because it is
+   * slow and because doing it inside a request would give a person a spinner whose only honest
+   * caption is "this may take a while". A second press while a pass is going is refused by the
+   * run row, not by a disabled button — the button is disabled too, but the row is what decides.
+   */
+  app.post("/mailboxes/:id/sync", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    const box = await db
+      .from("mailboxes")
+      .select("id, status, status_reason")
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .maybeSingle();
+    if (box.error) return sendError(c, mapDatabaseError(box.error));
+    if (!box.data) throw new HttpError(404, "not_found", "No mailbox with that id");
+    const row = box.data as { status: string; status_reason: string | null };
+
+    if (row.status === "disconnected") {
+      throw new HttpError(409, "not_connected", "This mailbox is disconnected. Connect it again first.");
+    }
+    if (row.status === "needs_reauthorisation") {
+      throw new HttpError(
+        409,
+        "needs_reauthorisation",
+        row.status_reason ?? "This mailbox needs authorising again before anything can be read.",
+      );
+    }
+
+    const running = await db
+      .from("mailbox_sync_runs")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("mailbox_id", id)
+      .eq("state", "running")
+      .maybeSingle();
+    if (running.error) return sendError(c, mapDatabaseError(running.error));
+    if (running.data) {
+      // Not an error: the thing they asked for is already happening, and this says which pass.
+      return c.json({ requested: false, runId: (running.data as { id: string }).id });
+    }
+
+    await emitEvent(db, deps.logger, {
+      organizationId: org.id,
+      eventType: "mailbox.sync_requested",
+      entityType: "mailbox",
+      entityId: id,
+      actor: "user",
+      actorUserId: user.id,
+      payload: { trigger: "person" },
+    });
+
+    await recordAudit(db, deps.logger, c, {
+      organizationId: org.id,
+      actorUserId: user.id,
+      action: "mailbox.sync_requested",
+      objectType: "mailbox",
+      objectId: id,
+      result: "success",
+      newState: { trigger: "person" },
+    });
+
+    return c.json({ requested: true, runId: null });
+  });
+
+  /**
    * Disconnect. The row stays — a mailbox that once fed this brokerage is part of its history —
    * and its tokens are cleared, so nothing can read or send with it again.
    */
@@ -602,6 +816,46 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
     const org = requireActiveOrganization(ctx);
     const id = c.req.param("id");
 
+    /*
+     * Tell the provider first, while we still hold the token, then clear our own copy.
+     *
+     * The order matters and the failure mode is chosen: if revocation fails we still disconnect,
+     * because a mailbox that cannot be told is still one ASAP will never read again — and a
+     * person can revoke it in their own Google account, which is the authority that counts.
+     * Doing it the other way round would leave a live grant nobody holds a handle to.
+     *
+     * Retrying a disconnect is safe: the second one finds no token, revokes nothing, and writes
+     * the same row.
+     */
+    const before = await db
+      .from("mailboxes")
+      .select("id, provider, access_token_encrypted, refresh_token_encrypted, token_expires_at")
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .maybeSingle();
+    if (before.error) return sendError(c, mapDatabaseError(before.error));
+    const held = before.data as {
+      provider: MailboxProviderIdValue;
+      access_token_encrypted: string | null;
+      refresh_token_encrypted: string | null;
+      token_expires_at: string | null;
+    } | null;
+
+    if (held && deps.encryptionKey && (held.access_token_encrypted || held.refresh_token_encrypted)) {
+      const adapter = deps.providers?.[held.provider];
+      if (adapter) {
+        await adapter.revoke({
+          accessToken: held.access_token_encrypted
+            ? (decryptToken(held.access_token_encrypted, deps.encryptionKey) ?? "")
+            : "",
+          refreshToken: held.refresh_token_encrypted
+            ? decryptToken(held.refresh_token_encrypted, deps.encryptionKey)
+            : null,
+          expiresAt: held.token_expires_at,
+        });
+      }
+    }
+
     const { data, error } = await db
       .from("mailboxes")
       .update({
@@ -610,6 +864,7 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
         access_token_encrypted: null,
         refresh_token_encrypted: null,
         token_expires_at: null,
+        sync_cursor: null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

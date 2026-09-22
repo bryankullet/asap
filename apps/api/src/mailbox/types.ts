@@ -56,19 +56,71 @@ export type FetchedMessage = {
   attachments: { providerAttachmentId: string | null; filename: string; mimeType: string; byteSize: number }[];
 };
 
+/**
+ * How much of a mailbox one pass may read.
+ *
+ * Every one of these is a real limit, not a hint. A brokerage's mailbox can hold a decade of
+ * correspondence, and a first connection that tried to read all of it would spend hours, fill a
+ * bucket with attachments nobody asked for, and be rate-limited half way through with no way to
+ * say where it got to. A pass is small, bounded and repeatable instead.
+ */
+export type SyncLimits = {
+  /** How far back a first pass reaches. Later passes use the checkpoint instead. */
+  windowDays: number;
+  maxThreads: number;
+  maxAttachments: number;
+  maxAttachmentBytes: number;
+  /** Types worth filing. Anything else is recorded as an attachment and never downloaded. */
+  attachmentMimeTypes: string[];
+};
+
+/** What one bounded pass returned, and why it stopped. */
+export type ListPage = {
+  messages: FetchedMessage[];
+  /** The checkpoint to store, or null when the provider gave none and the old one still stands. */
+  cursor: string | null;
+  /**
+   * True when the provider said its own checkpoint was too old to use.
+   *
+   * Gmail expires a `historyId` after about a week. The honest response is a bounded re-read of
+   * the recent window, said out loud, rather than silently returning nothing — which would look
+   * exactly like a quiet mailbox.
+   */
+  checkpointExpired: boolean;
+  /** True when the pass stopped at a limit rather than at the end of what there was. */
+  reachedLimit: boolean;
+};
+
 export type MailboxProvider = {
   readonly id: MailboxProviderId;
   /**
-   * Messages since the cursor, and the cursor to store for next time. Incremental by design: a
-   * full re-read of a mailbox on every sync is both slow and a way to re-file the same message.
+   * One bounded pass. Messages since the cursor, and the cursor to store for next time.
+   *
+   * Incremental by design: a full re-read of a mailbox on every sync is both slow and a way to
+   * re-file the same message. `limits` is what stops a first pass — which has no cursor — from
+   * becoming that full re-read.
    */
   list(input: {
     credentials: MailboxCredentials;
     cursor: string | null;
-  }): Promise<{ messages: FetchedMessage[]; cursor: string | null }>;
+    limits: SyncLimits;
+  }): Promise<ListPage>;
+  /** The bytes of one attachment. Called only for a type and size worth filing. */
+  fetchAttachment(input: {
+    credentials: MailboxCredentials;
+    providerMessageId: string;
+    providerAttachmentId: string;
+  }): Promise<Uint8Array | null>;
   send(input: { credentials: MailboxCredentials; message: OutgoingMessage }): Promise<SendOutcome>;
   /** Exchanges a refresh token for a fresh access token, or says the connection needs a person. */
   refresh(credentials: MailboxCredentials): Promise<MailboxCredentials | "needs_reauthorisation">;
+  /** Exchanges the authorisation code for tokens. Server-side only; the code never returns here. */
+  exchangeCode(input: { code: string; redirectUri: string }): Promise<
+    | { outcome: "connected"; credentials: MailboxCredentials; emailAddress: string; displayName: string | null }
+    | { outcome: "failed"; reason: string }
+  >;
+  /** Best-effort revocation on disconnect. A provider that cannot be told is still disconnected here. */
+  revoke(credentials: MailboxCredentials): Promise<void>;
 };
 
 /** Raised when a mailbox is asked for and none is connected. A state, not an error to swallow. */

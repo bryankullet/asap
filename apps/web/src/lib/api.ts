@@ -305,6 +305,13 @@ export const api = {
   /** Begin connecting one, or be told plainly that this deployment cannot. */
   connectMailbox: (provider: "gmail" | "microsoft") =>
     request("POST", "/mailboxes/connect", connectMailboxResponseSchema, { provider }),
+  /** Ask for a pass over the mailbox now. The reading itself is the worker's; this only asks. */
+  syncMailbox: (id: string) =>
+    request(
+      "POST",
+      `/mailboxes/${id}/sync`,
+      z.object({ requested: z.boolean(), runId: z.string().nullable() }),
+    ),
   /** Disconnect: the row stays as history, the tokens do not. */
   disconnectMailbox: (id: string) => request("DELETE", `/mailboxes/${id}`, null),
 

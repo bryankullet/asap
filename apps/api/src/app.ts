@@ -13,6 +13,8 @@ import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
+import { mailboxOAuthRoutes } from "./routes/mailbox-oauth.js";
+import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
 import { importRoutes } from "./routes/imports.js";
 import { internalRoutes } from "./routes/internal.js";
 import { documentRoutes } from "./routes/documents.js";
@@ -62,6 +64,18 @@ export type AppDeps = {
    * connection that cannot work (D-068).
    */
   mailboxOAuth?: MailboxOAuthConfig;
+  /**
+   * The mailbox adapters, the encryption key that reads their stored tokens, and how much one
+   * pass may read. Absent in a test that never touches a mailbox, and in a deployment with no
+   * provider credentials — where the honest answer is that nothing reads a mailbox.
+   */
+  mailbox?:
+    | {
+        providers: Partial<Record<"gmail" | "microsoft", MailboxProvider>>;
+        limits: SyncLimits;
+        encryptionKey: string;
+      }
+    | undefined;
   streamPollMs?: number;
 };
 
@@ -113,6 +127,31 @@ export function createApp(deps: AppDeps) {
         internalKey: deps.apiInternalKey,
         extractor: deps.extractor ?? null,
         bucket: deps.storage?.bucket ?? "insurance-documents",
+        mailbox: deps.mailbox,
+      }),
+    );
+  }
+  /*
+   * The OAuth callback. Public because it has to be: the person arrives by a redirect from the
+   * provider with no session, and the single-use state row is the authentication.
+   */
+  if (deps.mailbox) {
+    app.route(
+      "/",
+      mailboxOAuthRoutes({
+        logger,
+        service: () => supabase.service(),
+        providers: deps.mailbox.providers,
+        redirectUris: {
+          ...(deps.mailboxOAuth?.gmail.redirectUri
+            ? { gmail: deps.mailboxOAuth.gmail.redirectUri }
+            : {}),
+          ...(deps.mailboxOAuth?.microsoft.redirectUri
+            ? { microsoft: deps.mailboxOAuth.microsoft.redirectUri }
+            : {}),
+        },
+        encryptionKey: deps.mailbox.encryptionKey,
+        webBaseUrl: deps.webBaseUrl,
       }),
     );
   }
@@ -181,6 +220,9 @@ export function createApp(deps: AppDeps) {
     mailboxRoutes({
       logger,
       oauth: deps.mailboxOAuth ?? { gmail: {}, microsoft: {} },
+      providers: deps.mailbox?.providers,
+      encryptionKey: deps.mailbox?.encryptionKey,
+      service: () => supabase.service(),
     }),
   );
   app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));

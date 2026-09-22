@@ -68,6 +68,23 @@ export const serverEnvSchema = z
     MICROSOFT_OAUTH_CLIENT_SECRET: optionalNonEmpty,
     MICROSOFT_OAUTH_TENANT_ID: optionalNonEmpty,
     MICROSOFT_OAUTH_REDIRECT_URI: optionalNonEmpty,
+    /**
+     * How much of a mailbox one pass may read.
+     *
+     * Defaults chosen to be small: connecting a ten-year-old mailbox should be a series of quick
+     * passes, not one that runs for an hour and is rate-limited half way through. Every value is
+     * configuration rather than a constant, because what is reasonable differs between a two-person
+     * brokerage and one with a shared inbox that takes three hundred messages a day.
+     */
+    MAILBOX_SYNC_WINDOW_DAYS: z.coerce.number().int().positive().max(365).default(30),
+    MAILBOX_SYNC_MAX_THREADS: z.coerce.number().int().positive().max(500).default(50),
+    MAILBOX_SYNC_MAX_ATTACHMENTS: z.coerce.number().int().nonnegative().max(500).default(20),
+    /** Bigger than this and the attachment is recorded but never downloaded. */
+    MAILBOX_SYNC_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(10_485_760),
+    /** Comma-separated media types worth filing. Anything else is recorded, never fetched. */
+    MAILBOX_SYNC_ATTACHMENT_TYPES: z
+      .string()
+      .default("application/pdf,image/jpeg,image/png,image/tiff"),
     EXTRACTOR_URL: optionalNonEmpty,
     EXTRACTOR_SHARED_SECRET: optionalNonEmpty,
     /**

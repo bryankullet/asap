@@ -1438,3 +1438,46 @@ because two clients called Otieno are two clients.
 One renderer change came with it: an `open` action whose target is an absolute URL now renders as
 a link out rather than a router `Link`. A provider's copy of a message and a signed file URL are
 not application routes, and routing to one landed nowhere.
+
+## D-081 — A mailbox is read in bounded passes, and every word about it is a row
+
+Gmail is connected and read for real. The design is decided by four ways this goes wrong:
+
+1. **A first sync that reads everything.** One pass reads a bounded window and a bounded number of
+   messages, saves a checkpoint, and stops. The limits are configuration
+   (`MAILBOX_SYNC_WINDOW_DAYS`, `MAILBOX_SYNC_MAX_THREADS`, `MAILBOX_SYNC_MAX_ATTACHMENTS`,
+   `MAILBOX_SYNC_MAX_ATTACHMENT_BYTES`, `MAILBOX_SYNC_ATTACHMENT_TYPES`) rather than constants,
+   because what is reasonable differs between a two-person brokerage and a shared inbox taking
+   three hundred messages a day.
+2. **The same message arriving twice.** Every write is keyed on the provider's own identity:
+   `(mailbox, provider_thread_id)`, `(thread, provider_message_id)`,
+   `(message, provider_attachment_id)`, and an attachment's document on its content digest. This
+   holds for a re-delivered event, a double-clicked button and a restarted worker alike.
+3. **A later page failing and taking the earlier ones with it.** Nothing is rolled back. The run
+   row records what it saved, and `cursor_after` stays null on a failure — so a retry resumes from
+   the last good point rather than skipping mail, and the screen can say how much is already here.
+4. **A stale pass moving the checkpoint backwards.** The cursor write is conditional on
+   `sync_cursor_updated_at` not having changed since the pass read it.
+
+**The callback does not read the mailbox.** It validates a single-use, short-lived state, exchanges
+the code server-side, stores the tokens encrypted, emits `mailbox.sync_requested` and redirects. A
+callback that read a mailbox would hold a browser open for as long as that mailbox is large.
+
+**The state parameter is the callback's whole authentication**, because the callback has no session
+— the person arrives by a redirect. It is 32 random bytes, stored as a SHA-256 digest so a database
+reader cannot mint one, consumed conditionally so two deliveries cannot both proceed, and expiring
+in ten minutes. `mailbox_oauth_states` has RLS on and **no policy at all**: nothing tenant-facing may
+read or list it, which is why the API writes and reads it through the service connection.
+
+**Tokens are AES-256-GCM at rest**, under a key derived from `ENCRYPTION_KEY` by scrypt, with a
+fresh IV per value and a version prefix so a re-encryption migration is possible. A value that will
+not decrypt returns null rather than throwing: a token under a rotated key means the mailbox needs
+reconnecting, which is a state the product has, not a 500.
+
+**"Syncing" is now true.** Every connection state comes from a row — a running run, a failed run
+with its reason, a clean finish with its time — and the browser infers none of it. The conditional
+truth tests from the earlier correction now have a mechanism behind them to be true about.
+
+**An attachment enters the ordinary document pipeline**: stored in the tenant's own bucket, given a
+document row, and emitted as `document.received`. It is read, reviewed and applied by a person like
+any other file, and is never treated as read because it arrived.
