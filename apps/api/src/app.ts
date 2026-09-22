@@ -14,6 +14,7 @@ import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { mailboxOAuthRoutes } from "./routes/mailbox-oauth.js";
+import { onboardingRoutes } from "./routes/onboarding.js";
 import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
 import { importRoutes } from "./routes/imports.js";
 import { internalRoutes } from "./routes/internal.js";
@@ -165,6 +166,8 @@ export function createApp(deps: AppDeps) {
     "/me/*",
     "/organizations",
     "/organizations/*",
+    "/onboarding",
+    "/onboarding/*",
     "/invitations/:token/accept",
     "/ask",
     "/attention",
@@ -240,6 +243,14 @@ export function createApp(deps: AppDeps) {
     }),
   );
   app.route("/", organizationRoutes(logger));
+  app.route(
+    "/",
+    onboardingRoutes({
+      logger,
+      /* Honest by construction: step three offers a connection only where one could work. */
+      gmailConfigured: Boolean(deps.mailbox?.providers.gmail),
+    }),
+  );
   app.route(
     "/",
     invitationRoutes({

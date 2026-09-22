@@ -1481,3 +1481,36 @@ truth tests from the earlier correction now have a mechanism behind them to be t
 **An attachment enters the ordinary document pipeline**: stored in the tenant's own bucket, given a
 document row, and emitted as `document.received`. It is read, reviewed and applied by a person like
 any other file, and is never treated as read because it arrived.
+
+## D-082 — A person's first day is four steps, and its progress is a row
+
+First-use onboarding is Welcome and company details, add records, connect Gmail, finish — through
+the one Space renderer, over the real APIs. It is deliberately not a settings wizard: nobody
+arriving at a new job wants to be asked about retention periods before they can see anything, so
+the company step asks for a name and where the brokerage is, and everything else has a sensible
+answer already.
+
+What being a row (`user_onboarding`, migration 0046) buys:
+
+- **A refresh does not undo a step.** Where somebody got to is server-side, per person *per
+  brokerage* — joining a second brokerage is a first day there too.
+- **A skip is an answer.** "Not connecting a mailbox yet" and "has not got that far" are different
+  facts, and a product that cannot tell them apart nags people who already decided. Each choice is
+  recorded and audited; paging between steps is not audited, because a trail full of navigation
+  hides the decisions.
+- **Nobody is walked through it twice.** Completion is a timestamp. Coming back shows what is set
+  up, with a deliberate way back in, and arriving writes nothing.
+
+The row holds no copy of the brokerage's own details. Those are `organizations`, which exists by
+the time the row does. Whoever created the brokerage gets a form; whoever joined one gets a
+read-only summary and no control that could overwrite it — `canEdit` is resolved from the session's
+permissions, never sent by the browser.
+
+Every step uses the pipeline that already exists: the brokerage through `create_organization` with
+the browser's request key, so two clicks are one brokerage (0029); a file through the same upload
+as the Documents Space, now one shared `useDocumentUpload` hook rather than two copies of a
+security-sensitive order of operations; a spreadsheet through the real import; Gmail through the
+OAuth flow of D-081. A deployment without Google credentials says Gmail connection is not
+configured, disables Connect with that reason beside it, and leaves Skip as the honest path.
+`/onboarding/create` now redirects: two ways to create a brokerage is one more than a brokerage
+needs.

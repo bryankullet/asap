@@ -117,3 +117,68 @@ export type UpdateMemberRequest = z.infer<typeof updateMemberRequestSchema>;
 /** GET /organizations/current/roles */
 export const rolesResponseSchema = z.object({ roles: z.array(roleSummarySchema) });
 export type RolesResponse = z.infer<typeof rolesResponseSchema>;
+
+/* ---- First-use onboarding (D-082) ----------------------------------------------------------- */
+
+/**
+ * `GET /onboarding`, `PUT /onboarding`, `POST /onboarding/complete`.
+ *
+ * Four short steps, and the state of them is a server row rather than component state — so a
+ * refresh does not undo a step somebody finished, and nobody is walked through it twice.
+ */
+export const OnboardingRecordsChoice = z.enum(["upload", "import", "skip"]);
+export type OnboardingRecordsChoice = z.infer<typeof OnboardingRecordsChoice>;
+
+export const OnboardingMailboxChoice = z.enum(["connect", "skip"]);
+export type OnboardingMailboxChoice = z.infer<typeof OnboardingMailboxChoice>;
+
+export const onboardingSchema = z.object({
+  /** Which step they are on. Bounded, so nothing can park a person on a step with no screen. */
+  step: z.number().int().min(1).max(4),
+  recordsChoice: OnboardingRecordsChoice.nullable().default(null),
+  mailboxChoice: OnboardingMailboxChoice.nullable().default(null),
+  /** Set once. An existing person opening onboarding is shown what is set up, not asked again. */
+  completedAt: z.string().nullable().default(null),
+  /**
+   * The brokerage as it stands, so step one can show it rather than ask for it again.
+   *
+   * `canEditCompany` is resolved from the session's own permissions — somebody who joined an
+   * existing brokerage sees its details and cannot overwrite them from here.
+   */
+  company: z
+    .object({
+      id: uuidSchema,
+      name: z.string(),
+      country: z.string(),
+      currency: z.string(),
+      timezone: z.string(),
+      canEdit: z.boolean(),
+      /** True when this person created it, which is the only case step one is a form. */
+      createdByYou: z.boolean(),
+    })
+    .nullable()
+    .default(null),
+  /** What has actually landed: counts from the brokerage's own rows, never a claim. */
+  progress: z.object({
+    documents: z.number().int().min(0),
+    imports: z.number().int().min(0),
+    clients: z.number().int().min(0),
+    mailboxConnected: z.boolean(),
+  }),
+  /** True when this deployment holds Google credentials. False means Skip is the only honest path. */
+  gmailConfigured: z.boolean(),
+  /** Why not, in words, when it is not configured. Never a variable name. */
+  gmailUnavailableReason: z.string().max(300).nullable().default(null),
+});
+export type Onboarding = z.infer<typeof onboardingSchema>;
+
+export const onboardingResponseSchema = z.object({ onboarding: onboardingSchema });
+export type OnboardingResponse = z.infer<typeof onboardingResponseSchema>;
+
+/** Moving between steps, and recording a choice. Every field optional: this is a patch. */
+export const saveOnboardingRequestSchema = z.object({
+  step: z.number().int().min(1).max(4).optional(),
+  recordsChoice: OnboardingRecordsChoice.optional(),
+  mailboxChoice: OnboardingMailboxChoice.optional(),
+});
+export type SaveOnboardingRequest = z.infer<typeof saveOnboardingRequestSchema>;

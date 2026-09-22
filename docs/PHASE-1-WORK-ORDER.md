@@ -222,10 +222,12 @@ as blocked with the reason.
 
 | Check | State | Why |
 |---|---|---|
-| Import and Document visual comparison at 1360×900 / 1440×900 / 390×844 | **BLOCKED** | Needs the deterministic authenticated harness; these Spaces have no unauthenticated route. |
-| Communication and Gmail visual comparison (the eleven states) | **BLOCKED** | Same. |
-| `pnpm test:rls` (pgTAP) | **BLOCKED** | No local Postgres in the build container; `DATABASE_URL` is unset. Suites `0318` and `0319` are written and committed, unrun. |
-| Migrations 0044 and 0045 applied to hosted Supabase | **NOT DONE, deliberately** | Additive and reviewed, but a hosted application needs its own production-safety review. |
+| Onboarding visual capture at 1360×900 / 1440×900 / 390×844 | **PASSED** | 27 captures via `scripts/visual/capture-onboarding.mjs` against the parity harness. No empty screens, no horizontal overflow, no console errors. |
+| Import and Document visual comparison at 1360×900 / 1440×900 / 390×844 | **BLOCKED** | Needs harness states for the ingestion Spaces; the onboarding capture shows the pattern to follow. |
+| Communication and Gmail visual comparison (the eleven states) | **BLOCKED** | Same. A live Gmail screenshot is not possible here and must not be claimed. |
+| `pnpm test:rls` (pgTAP) | **BLOCKED** | No local Postgres in the build container; `DATABASE_URL` is unset. Suites `0318`, `0319` and `0320` are written and committed, unrun. Run with `DATABASE_URL=postgres://… pnpm test:rls`. |
+| Worker database suite (10 tests) | **BLOCKED** | `apps/workers/test/dispatcher.test.ts` (8) and `withOrganization.test.ts` (2) are gated on `WORKER_DATABASE_URL`. Nothing was deleted or disabled. Run with `WORKER_DATABASE_URL=postgres://asap_worker:…@localhost:54322/postgres pnpm --filter @asap/workers test`. |
+| Migrations 0044, 0045 and 0046 applied to hosted Supabase | **NOT DONE, deliberately** | Additive and reviewed, but a hosted application needs its own production-safety review. |
 
 Before 4A is called finished: run the captures through the authenticated harness, run the RLS and
 pgTAP suites wherever a Postgres exists, and report anything still unavailable as blocked rather

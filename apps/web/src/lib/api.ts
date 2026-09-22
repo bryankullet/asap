@@ -1,4 +1,6 @@
 import {
+  onboardingResponseSchema,
+  type SaveOnboardingRequest,
   acceptInvitationResponseSchema,
   apiErrorSchema,
   actResponseSchema,
@@ -342,6 +344,15 @@ export const api = {
     request("POST", "/me/active-organization", null, { organization_id }),
   createOrganization: (input: CreateOrganizationRequest) =>
     request("POST", "/organizations", createOrganizationResponseSchema, input),
+
+  /* ---- First-use onboarding ----------------------------------------------------------------- */
+  /** Where a person got to, and what is actually set up. Never a claim: counts from real rows. */
+  onboarding: () => request("GET", "/onboarding", onboardingResponseSchema),
+  /** Move a step, or record a choice. A skip is a choice. */
+  saveOnboarding: (input: SaveOnboardingRequest) =>
+    request("PUT", "/onboarding", onboardingResponseSchema, input),
+  /** Finish. Pressing it twice finishes once. */
+  completeOnboarding: () => request("POST", "/onboarding/complete", onboardingResponseSchema),
   roles: () => request("GET", "/organizations/current/roles", rolesResponseSchema),
   members: () => request("GET", "/organizations/current/members", membersResponseSchema),
   updateMember: (membershipId: string, input: UpdateMemberRequest) =>

@@ -304,6 +304,47 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
     });
   }
   if (u.includes("/pins")) return json({ pins: [] });
+  /*
+   * First-use onboarding. The step, and whether this deployment has Google credentials, come from
+   * the harness URL — so every one of the four steps and the two Gmail answers can be photographed
+   * without a live Google client and without pretending one connected.
+   */
+  if (u.includes("/onboarding")) {
+    const q = new URLSearchParams(location.search);
+    const step = Number(q.get("step") ?? "1");
+    const gmail = q.get("gmail") !== "off";
+    const joined = q.get("joined") === "1";
+    const done = q.get("done") === "1";
+    return json({
+      onboarding: {
+        step: Number.isInteger(step) && step >= 1 && step <= 4 ? step : 1,
+        recordsChoice: q.get("records"),
+        mailboxChoice: q.get("mailbox"),
+        completedAt: done ? "2026-09-20T10:00:00.000Z" : null,
+        company: q.get("company") === "none"
+          ? null
+          : {
+              id: ORG,
+              name: ORGANIZATION.name,
+              country: ORGANIZATION.country,
+              currency: ORGANIZATION.currency,
+              timezone: ORGANIZATION.timezone,
+              canEdit: !joined,
+              createdByYou: !joined,
+            },
+        progress: {
+          documents: Number(q.get("documents") ?? "0"),
+          imports: Number(q.get("imports") ?? "0"),
+          clients: Number(q.get("clients") ?? "0"),
+          mailboxConnected: q.get("connected") === "1",
+        },
+        gmailConfigured: gmail,
+        gmailUnavailableReason: gmail
+          ? null
+          : "Gmail connection is not configured. Whoever administers this deployment can add the Google credentials.",
+      },
+    });
+  }
   return json({});
 }) as typeof fetch;
 
@@ -315,7 +356,18 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
  * nothing: every request is answered by the stub above.
  */
 function installSession(): void {
-  const ref = new URL(import.meta.env["VITE_PUBLIC_SUPABASE_URL"] as string).hostname.split(".")[0];
+  /*
+   * The storage key supabase-js reads is derived from the project ref. Without a configured URL
+   * there is no ref to derive — which is a measuring machine's situation, not a fault — so the
+   * harness falls back to a placeholder rather than throwing and rendering nothing at all.
+   */
+  let ref = "parity-harness";
+  try {
+    const configured = import.meta.env["VITE_PUBLIC_SUPABASE_URL"] as string | undefined;
+    if (configured) ref = new URL(configured).hostname.split(".")[0] ?? ref;
+  } catch {
+    /* Not a URL. The placeholder above stands, and every request is answered by the stub anyway. */
+  }
   const session = {
     access_token: "parity-harness-token",
     refresh_token: "parity-harness-refresh",

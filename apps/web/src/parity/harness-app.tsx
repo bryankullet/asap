@@ -3,6 +3,7 @@ import {
   RouterProvider,
   createMemoryHistory,
   createRootRoute,
+  Outlet,
   createRoute,
   createRouter,
 } from "@tanstack/react-router";
@@ -16,6 +17,7 @@ import { Today } from "../pages/Today.js";
 import { Work } from "../pages/Work.js";
 import { Shell } from "../shell/Shell.js";
 import "../styles/index.css";
+import { Onboarding } from "../pages/Onboarding.js";
 
 /**
  * The harness's application: the shipping shell and the shipping boards, over the stubbed
@@ -25,7 +27,13 @@ import "../styles/index.css";
  */
 if (import.meta.env.PROD) throw new Error("the parity harness is a development tool");
 
-const root = createRootRoute({ component: () => <Shell /> });
+/*
+ * Onboarding is the one screen that is not inside the shell: in the application it sits under the
+ * session guard but before a brokerage exists, so there is no sidebar to draw. The harness has to
+ * mirror that, or the captures would show a shell the real screen never has.
+ */
+const outsideShell = (new URLSearchParams(location.search).get("at") ?? "").startsWith("/onboarding");
+const root = createRootRoute({ component: () => (outsideShell ? <Outlet /> : <Shell />) });
 const boards = [
   createRoute({ getParentRoute: () => root, path: "/today", component: Today }),
   createRoute({
@@ -54,6 +62,7 @@ const extra = [
   /* `/new` is how the sheet is opened, in the harness exactly as in the application. */
   createRoute({ getParentRoute: () => root, path: "/new", component: OpenNewSheet }),
 ];
+const onboarding = createRoute({ getParentRoute: () => root, path: "/onboarding", component: Onboarding });
 const routes = ["/automations", "/ask", "/import", "/email", "/clients", "/documents", "/files"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
 );
@@ -64,7 +73,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([...boards, search, ...extra, ...routes, record]),
+  routeTree: root.addChildren([onboarding, ...boards, search, ...extra, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

@@ -27,7 +27,6 @@ import { Agreements } from "./pages/Agreements.js";
 import { AutomationDetail, Automations } from "./pages/Automations.js";
 import { ClientFile } from "./pages/ClientFile.js";
 import { Files } from "./pages/Files.js";
-import { CreateOrganization } from "./pages/CreateOrganization.js";
 import { Members } from "./pages/Members.js";
 import { Onboarding } from "./pages/Onboarding.js";
 import { Record } from "./pages/Record.js";
@@ -96,10 +95,18 @@ const onboarding = createRoute({
   path: "/onboarding",
   component: Onboarding,
 });
+/*
+ * The old create-a-brokerage form. Creating one is now the first step of onboarding, in the same
+ * Space renderer as everything else, so this address redirects rather than offering a second
+ * creation screen — two ways to create a brokerage is one more than a brokerage needs.
+ */
 const onboardingCreate = createRoute({
   getParentRoute: () => authed,
   path: "/onboarding/create",
-  component: CreateOrganization,
+  beforeLoad: () => {
+    throw redirect({ to: "/onboarding", replace: true });
+  },
+  component: Onboarding,
 });
 
 const member = createRoute({
