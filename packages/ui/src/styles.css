@@ -120,6 +120,12 @@
   /* A form label. Between muted and secondary, and it is neither of them. */
   --color-ink-label: #69746b;
 
+  /* The sheet: its scrim, and the two states of a choice inside it. */
+  --color-scrim: rgba(13, 20, 15, 0.42);
+  --color-choice-hover-line: #9bb0a1;
+  --color-choice-hover: #f8faf8;
+  --color-choice-icon: #eaf0eb;
+
   --color-navy: #18231c;
   --color-navy-hover: #24312a;
 

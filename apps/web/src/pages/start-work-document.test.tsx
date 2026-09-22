@@ -1,7 +1,8 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { StartWork } from "./StartWork.js";
+import { NewSheet, NEW_OPTIONS } from "../shell/NewSheet.js";
+import { CREATE_KINDS } from "../live/create-space.js";
 import { renderInRouter } from "../test-utils.js";
 
 vi.mock("../lib/supabase.js", () => ({
@@ -21,47 +22,83 @@ vi.mock("../lib/supabase.js", () => ({
  * unreachable — you had to type the URL. A route that renders is not a feature a person can use,
  * and Documents is deliberately not a sidebar destination (§45 rule 16), so `+ New` is where it
  * belongs.
+ *
+ * `+ New` is a sheet now rather than a page of six forms, so these assert the same things against
+ * the sheet: the option exists, it leads to the place that owns filing, and choosing it neither
+ * asks for a client nor creates anything.
  */
 describe("+ New offers filing a document", () => {
   it("lists it as a kind of thing you can start", async () => {
-    await renderInRouter(<StartWork />, "/new");
-    expect(screen.getByRole("button", { name: "A document" })).toBeInTheDocument();
+    await renderInRouter(<NewSheet onClose={() => {}} />, "/today");
+    expect(screen.getByRole("link", { name: /Upload a document/ })).toBeInTheDocument();
   });
 
   it("leads to the page that owns filing, and says why it asks for no client", async () => {
-    await renderInRouter(<StartWork />, "/new");
-    await userEvent.click(screen.getByRole("button", { name: "A document" }));
-
-    const go = screen.getByRole("link", { name: "Choose a file to file" });
-    expect(go).toHaveAttribute("href", "/documents");
-    expect(screen.getByText(/does not need a client first/)).toBeInTheDocument();
+    await renderInRouter(<NewSheet onClose={() => {}} />, "/today");
+    const option = screen.getByRole("link", { name: /Upload a document/ });
+    expect(option).toHaveAttribute("href", "/documents");
+    // The note says what happens next, and does not promise the document has been read.
+    expect(within(option).getByText(/proposes what it says/)).toBeInTheDocument();
+    expect(option.textContent).not.toMatch(/\bread it\b|has been read/i);
   });
 
-  /*
-   * Every other kind opens a work item and needs a client to open it against. A document does not,
-   * because `documents.client_id` is nullable: a schedule often arrives before anyone has decided
-   * which record it is about. So this kind must not render the client form — asking for a client
-   * would be asking for something the upload does not use.
-   */
   it("does not ask for a client, and offers no submit that could open a work item", async () => {
-    await renderInRouter(<StartWork />, "/new");
-    await userEvent.click(screen.getByRole("button", { name: "A document" }));
+    const { container } = await renderInRouter(<NewSheet onClose={() => {}} />, "/today");
+    /*
+     * A sheet of choices has no form and no fields: there is nothing here that can create
+     * anything, which is what makes it safe to browse.
+     */
+    expect(screen.queryByLabelText(/WHICH CLIENT/)).toBeNull();
+    expect(container.querySelectorAll("form")).toHaveLength(0);
+    expect(container.querySelectorAll('button[type="submit"]')).toHaveLength(0);
+    expect(container.querySelectorAll("input, textarea, select")).toHaveLength(0);
+  });
 
-    expect(screen.queryByLabelText(/WHICH CLIENT\?/)).toBeNull();
-    expect(screen.queryByLabelText(/WHAT IS THE CLIENT CALLED\?/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /Open the work|Add the client|Record the cover/ })).toBeNull();
+  it("closes the sheet when a choice is taken, so the Space behind it is not lost", async () => {
+    let closed = false;
+    await renderInRouter(<NewSheet onClose={() => (closed = true)} />, "/today");
+    await userEvent.click(screen.getByRole("link", { name: /Upload a document/ }));
+    expect(closed).toBe(true);
   });
 
   it("still offers the five kinds that open work", async () => {
-    await renderInRouter(<StartWork />, "/new");
-    for (const label of [
-      "A client",
-      "Cover you already place",
-      "A renewal",
-      "A claim",
-      "A change to a policy",
+    await renderInRouter(<NewSheet onClose={() => {}} />, "/today");
+    for (const name of [
+      /Add a client/,
+      /Record existing cover/,
+      /Start a renewal/,
+      /Register a claim/,
+      /Start a policy change/,
     ]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name })).toBeInTheDocument();
     }
+    // And each of those five has a creation Space behind it.
+    expect([...CREATE_KINDS].sort()).toEqual(["claim", "client", "endorsement", "policy", "renewal"]);
+  });
+
+  /*
+   * The tenth option has no endpoint yet. It is shown disabled with the reason rather than
+   * removed: a missing option teaches a person the product cannot do it at all.
+   */
+  it("shows quotation work disabled, with the reason, rather than hiding it", async () => {
+    await renderInRouter(<NewSheet onClose={() => {}} />, "/today");
+    const quote = screen.getByRole("button", { name: /Start quotation work/ });
+    expect(quote).toBeDisabled();
+    expect(quote.textContent).toMatch(/not stored as its own record yet/);
+  });
+
+  it("offers all ten paths from the prototype's sheet", () => {
+    expect(NEW_OPTIONS.map((o) => o.id)).toEqual([
+      "ask",
+      "import",
+      "document",
+      "client",
+      "policy",
+      "renewal",
+      "quote",
+      "claim",
+      "endorsement",
+      "automation",
+    ]);
   });
 });

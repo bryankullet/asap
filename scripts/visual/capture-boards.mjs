@@ -45,6 +45,9 @@ const STATES = [
   { name: "activity", url: `${HARNESS}?at=/jobs` },
   { name: "activity-nothing", url: `${HARNESS}?at=/jobs&rows=0` },
   { name: "run-detail", url: `${HARNESS}?at=/jobs/50000000-0000-4000-8000-000000000001` },
+  { name: "new-sheet", url: `${HARNESS}?at=/new` },
+  { name: "create-claim", url: `${HARNESS}?at=/new/claim` },
+  { name: "create-policy", url: `${HARNESS}?at=/new/policy` },
 ];
 
 /**
@@ -53,6 +56,8 @@ const STATES = [
  */
 const ROLES = {
   app: {
+    sheet: ".sp-sheet",
+    sheetOption: ".sp-sheet-option",
     pane: ".shell-pane",
     head: ".sp-head",
     space: ".sp-space",
@@ -74,6 +79,8 @@ const ROLES = {
     empty: ".sp-empty",
   },
   prototype: {
+    sheet: ".asap-sheet",
+    sheetOption: null,
     pane: ".asap-pane",
     head: ".asap-pane > div:first-child",
     /* The prototype's Space content has no wrapper of its own: the pane *is* the frame. */

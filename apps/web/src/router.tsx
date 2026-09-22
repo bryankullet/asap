@@ -14,7 +14,7 @@ import { Today } from "./pages/Today.js";
 import { DocumentViewer, Documents } from "./pages/Documents.js";
 import { Email, EmailThread } from "./pages/Email.js";
 import { JobDetail, Jobs } from "./pages/Jobs.js";
-import { StartWork } from "./pages/StartWork.js";
+import { OpenNewSheet, StartWork } from "./pages/StartWork.js";
 import { ImportBook } from "./pages/ImportBook.js";
 import { Work } from "./pages/Work.js";
 import { z } from "zod";
@@ -269,9 +269,18 @@ const jobDetail = createRoute({
 const newThing = createRoute({
   getParentRoute: () => shell,
   path: "/new",
-  // `+ New` starts real work on a real brokerage (D-067) — never a menu of apologies.
+  /*
+   * `+ New` is a **sheet**, not a page: the shell opens it over whatever is on screen, so the
+   * Space a person was reading stays mounted and stays in its tab. This route exists so the sheet
+   * can be linked to and reopened; it renders Today underneath and asks the shell to open it.
+   */
+  component: OpenNewSheet,
+});
+/** One creation flow, as its own Space. `/new/client`, `/new/renewal`, and so on. */
+const startWork = createRoute({
+  getParentRoute: () => shell,
+  path: "/new/$kind",
   component: StartWork,
-  validateSearch: z.object({ kind: z.string().max(40).optional().catch(undefined) }),
 });
 const importBook = createRoute({
   getParentRoute: () => shell,
@@ -324,7 +333,8 @@ const routeTree = rootRoute.addChildren([
         ask,
         jobs,
         jobDetail,
-            newThing,
+        newThing,
+        startWork,
         importBook,
     email,
         emailThread,

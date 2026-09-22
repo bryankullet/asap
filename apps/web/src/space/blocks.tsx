@@ -428,6 +428,130 @@ function ApprovalGateBlock({ block, onAct }: Props<"approval_gate">) {
   );
 }
 
+/**
+ * A typed form: the one block that collects rather than shows.
+ *
+ * It holds what has been typed and nothing else. Submitting hands the values to the page through
+ * `onAct`, which calls the validated creation API — this block has no idea what a client is, and
+ * that is deliberate: a presentation component that knew would be a presentation component that
+ * could create one.
+ *
+ * Required fields are marked before the request goes out, which is a courtesy. The API validates
+ * every value again on arrival, which is the check that counts.
+ */
+function FormBlock({ block, onAct }: Props<"form">) {
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(block.fields.map((f) => [f.name, f.value])),
+  );
+  const [touched, setTouched] = useState(false);
+
+  const missing = block.fields.filter((f) => f.required && (values[f.name] ?? "").trim() === "");
+  const submit = block.actions[0] ?? null;
+  const blocked = submit === null ? null : (submit.notPermittedReason ?? submit.disabledReason);
+
+  const set = (name: string, v: string) => setValues((s) => ({ ...s, [name]: v }));
+
+  return (
+    <form
+      className="sp-form sp-form-stack"
+      onSubmit={(e) => {
+        e.preventDefault();
+        setTouched(true);
+        if (missing.length > 0 || submit === null || blocked !== null || block.busy) return;
+        onAct?.({ ...submit, values } as typeof submit & { values: Record<string, string> });
+      }}
+    >
+      {block.fields.map((field) => {
+        const id = `${block.id}-${field.name}`;
+        const showMissing = touched && field.required && (values[field.name] ?? "").trim() === "";
+        const error = field.error ?? (showMissing ? "This is needed before anything is created." : null);
+        return (
+          <div key={field.name}>
+            <label className="sp-label" htmlFor={id}>
+              {field.label}
+              {field.required && <span aria-hidden> *</span>}
+            </label>
+
+            {field.kind === "textarea" ? (
+              <textarea
+                id={id}
+                className="sp-input sp-textarea"
+                value={values[field.name] ?? ""}
+                placeholder={field.placeholder}
+                aria-required={field.required}
+                aria-invalid={error !== null}
+                onChange={(e) => set(field.name, e.target.value)}
+              />
+            ) : field.kind === "select" ? (
+              <select
+                id={id}
+                className="sp-input"
+                value={values[field.name] ?? ""}
+                aria-required={field.required}
+                aria-invalid={error !== null}
+                onChange={(e) => set(field.name, e.target.value)}
+              >
+                <option value="">Choose…</option>
+                {field.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : field.kind === "choice" ? (
+              <div className="sp-choices" role="radiogroup" aria-label={field.label}>
+                {field.options.map((o) => (
+                  <label key={o.value} className="sp-choice">
+                    <input
+                      type="radio"
+                      name={id}
+                      value={o.value}
+                      checked={(values[field.name] ?? "") === o.value}
+                      onChange={() => set(field.name, o.value)}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <input
+                id={id}
+                type={field.kind === "date" ? "date" : "text"}
+                className="sp-input"
+                value={values[field.name] ?? ""}
+                placeholder={field.placeholder}
+                aria-required={field.required}
+                aria-invalid={error !== null}
+                onChange={(e) => set(field.name, e.target.value)}
+              />
+            )}
+
+            {field.hint !== "" && error === null && <small className="sp-field-hint">{field.hint}</small>}
+            {error !== null && (
+              <small className="sp-field-error" role="alert">
+                {error}
+              </small>
+            )}
+          </div>
+        );
+      })}
+
+      <div className="sp-form-actions">
+        <button
+          type="submit"
+          className="sp-btn-solid"
+          /* Disabled while in flight, so one click is one write however fast the second one is. */
+          disabled={block.busy || blocked !== null}
+          title={blocked ?? undefined}
+        >
+          {block.busy ? "Working…" : block.submitLabel}
+        </button>
+        {blocked !== null && <small className="sp-blocked">{blocked}</small>}
+      </div>
+    </form>
+  );
+}
+
 function TimelineBlock({ block }: Props<"timeline">) {
   return (
     <div className="sp-timeline">
@@ -483,6 +607,7 @@ const REGISTRY: {
   automation_builder: AutomationBuilderBlock,
   approval_gate: ApprovalGateBlock,
   timeline: TimelineBlock,
+  form: FormBlock,
 };
 
 /**
@@ -499,6 +624,7 @@ const OWNS_ITS_ACTIONS: ReadonlySet<SpaceFrameBlock["type"]> = new Set([
   "assignment",
   "automation_builder",
   "approval_gate",
+  "form",
 ]);
 
 /** True when the renderer has a component for this type. */

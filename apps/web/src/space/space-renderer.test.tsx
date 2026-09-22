@@ -173,6 +173,50 @@ const SAMPLES: { [T in SpaceFrameBlock["type"]]: Extract<SpaceFrameBlock, { type
     detail: "The insurer's confirmation and the client's instruction are both on file.",
     blockedNote: null,
   },
+  form: {
+    ...envelope,
+    id: "form",
+    type: "form",
+    submitLabel: "Add the client",
+    busy: false,
+    fields: [
+      {
+        name: "name",
+        label: "WHAT IS THE CLIENT CALLED?",
+        kind: "text",
+        value: "",
+        placeholder: "As it appears on their documents",
+        required: true,
+        options: [],
+        hint: "",
+        error: null,
+      },
+      {
+        name: "kind",
+        label: "COMPANY OR PERSON",
+        kind: "choice",
+        value: "corporate",
+        placeholder: "",
+        required: true,
+        options: [
+          { value: "corporate", label: "A company" },
+          { value: "individual", label: "A person" },
+        ],
+        hint: "",
+        error: null,
+      },
+    ],
+    actions: [
+      {
+        verb: "prepare" as const,
+        label: "Add the client",
+        to: null,
+        stepId: "create",
+        disabledReason: null,
+        notPermittedReason: null,
+      },
+    ],
+  },
   timeline: {
     ...envelope,
     id: "tl",
@@ -353,6 +397,54 @@ describe("every registered block renders what it was given", () => {
     expect(screen.getByText("12 AUG")).toBeInTheDocument();
     expect(screen.getByText("Cover requested from CIC")).toBeInTheDocument();
     expect(screen.getByText("Request email")).toBeInTheDocument();
+  });
+});
+
+describe("the form block", () => {
+  it("marks a required field before anything is sent, and sends nothing", async () => {
+    const sent: unknown[] = [];
+    await renderInRouter(<SpaceBlockView block={SAMPLES.form} onAct={(a) => sent.push(a)} />);
+    await userEvent.click(screen.getByRole("button", { name: "Add the client" }));
+    expect(sent).toEqual([]);
+    expect(screen.getByRole("alert")).toHaveTextContent(/needed before anything is created/);
+  });
+
+  it("hands the typed values to the page rather than creating anything itself", async () => {
+    const sent: { values?: Record<string, string> }[] = [];
+    await renderInRouter(
+      <SpaceBlockView block={SAMPLES.form} onAct={(a) => sent.push(a as { values?: Record<string, string> })} />,
+    );
+    await userEvent.type(screen.getByLabelText(/WHAT IS THE CLIENT CALLED/), "Tamarind Exporters");
+    await userEvent.click(screen.getByRole("button", { name: "Add the client" }));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.values).toMatchObject({ name: "Tamarind Exporters", kind: "corporate" });
+  });
+
+  /* One click is one write, however fast the second click is. */
+  it("cannot be submitted twice while a write is in flight", async () => {
+    const sent: unknown[] = [];
+    await renderInRouter(
+      <SpaceBlockView block={{ ...SAMPLES.form, busy: true }} onAct={(a) => sent.push(a)} />,
+    );
+    const button = screen.getByRole("button", { name: "Working…" });
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(sent).toEqual([]);
+  });
+
+  it("shows the server's own message against the field it belongs to", async () => {
+    const withError = {
+      ...SAMPLES.form,
+      fields: [{ ...SAMPLES.form.fields[0]!, error: "A client with this name is already on file." }],
+    };
+    await renderInRouter(<SpaceBlockView block={withError} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("A client with this name is already on file.");
+  });
+
+  it("offers a choice as a real radio group", async () => {
+    await renderInRouter(<SpaceBlockView block={SAMPLES.form} />);
+    const group = screen.getByRole("radiogroup", { name: /COMPANY OR PERSON/ });
+    expect(within(group).getAllByRole("radio")).toHaveLength(2);
   });
 });
 

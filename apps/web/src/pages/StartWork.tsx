@@ -1,101 +1,76 @@
+import { useMutation } from "@tanstack/react-query";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import type {
   CreateClientResponse,
-  CreatePolicyInput,
   CreatePolicyResponse,
-  CreateWorkItemInput,
   CreateWorkItemResponse,
+  SpaceFrameAction,
 } from "@asap/schema";
-import { useMutation } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { CREATE_KINDS, createSpace, createSpaceTitle, type CreateKind } from "../live/create-space.js";
 import { api, describeApiError } from "../lib/api.js";
+import { useWorkspaceTabs } from "../shell/workspace-tabs.js";
+import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * Starting real work (D-067).
+ * One creation flow, as its own Space.
  *
- * Three kinds, because three kinds are what the engine can actually start: a renewal, a claim, an
- * endorsement. Each opens a record whose steps, evidence and guards come from its recipe, and the
- * work then runs on the record — this screen's whole job is to get a person there.
+ * This replaces the page that carried six forms behind a tab row. Every field, every `required`
+ * and every piece of copy came with it; what changed is that each flow is now its own Space with
+ * its own address and its own tab, so starting a claim and starting a renewal are two pieces of
+ * work rather than two states of one screen.
  *
- * What it will not do:
- *
- *  - **It never creates a client.** Ask and this screen both refuse to (D-050): a client is a
- *    record with a file, duplicates and a compliance state, and conjuring one to satisfy a form is
- *    how two Acmes end up in a brokerage's book. If the name matches nothing, it says so and sends
- *    the person to the client path, where duplicates are reviewed.
- *  - **It never guesses which client.** Several matches is a question, not a coin toss.
- *  - **It never opens a second item for work that is already open.** The server returns the
- *    existing one and says it did.
+ * **Nothing is created by arriving here.** The sheet that opened it wrote nothing, and this writes
+ * only when a person fills the form in and submits it. The submit button disables itself while the
+ * request is in flight, so one click is one write.
  */
-const KINDS = [
-  {
-    id: "client" as const,
-    label: "A client",
-    hint: "Someone the brokerage acts for. ASAP never creates one on its own, and checks for a name you already have before it creates another.",
-  },
-  {
-    id: "policy" as const,
-    label: "Cover you already place",
-    hint: "A policy that exists: who it is for, who carries it, and the period. Not a premium and not a schedule — those arrive with their evidence.",
-  },
-  {
-    id: "renewal" as const,
-    label: "A renewal",
-    hint: "A period of cover coming to its end. ASAP checks the file, prepares the pack and asks the insurers.",
-  },
-  {
-    id: "claim" as const,
-    label: "A claim",
-    hint: "An incident to notify and track. It stays a draft until a person registers it.",
-  },
-  {
-    id: "endorsement" as const,
-    label: "A change to a policy",
-    hint: "A vehicle, an address, a sum insured. The insurer's answer writes a new policy version.",
-  },
-  {
-    id: "document" as const,
-    label: "A document",
-    hint: "A schedule, a debit note, a claim form. ASAP reads it and proposes what it says; a person accepts or corrects every value before anything treats it as known.",
-  },
-];
-
 export function StartWork() {
+  const { kind: raw } = useParams({ strict: false }) as { kind?: string };
   const navigate = useNavigate();
-  const [kind, setKind] = useState<(typeof KINDS)[number]["id"]>("renewal");
-  const [clientKind, setClientKind] = useState<"corporate" | "individual">("corporate");
-  const [insurerName, setInsurerName] = useState("");
-  const [classOfBusiness, setClassOfBusiness] = useState("");
-  const [policyNumber, setPolicyNumber] = useState("");
-  const [periodStart, setPeriodStart] = useState("");
-  const [periodEnd, setPeriodEnd] = useState("");
-  const [clientOutcome, setClientOutcome] = useState<CreateClientResponse | null>(null);
-  const [policyOutcome, setPolicyOutcome] = useState<CreatePolicyResponse | null>(null);
-  const [clientName, setClientName] = useState("");
-  const [insurers, setInsurers] = useState("");
-  const [incidentOn, setIncidentOn] = useState("");
-  const [incidentSummary, setIncidentSummary] = useState("");
-  const [requestText, setRequestText] = useState("");
-  const [effectiveOn, setEffectiveOn] = useState("");
-  const [outcome, setOutcome] = useState<CreateWorkItemResponse | null>(null);
+  const kind: CreateKind = CREATE_KINDS.includes(raw as CreateKind)
+    ? (raw as CreateKind)
+    : "client";
+  const tabs = useWorkspaceTabs(`/new/${kind}`);
 
-  /** A client. The duplicate review is the server's; this only carries the person's answer back. */
+  const [outcome, setOutcome] = useState<
+    CreateClientResponse | CreatePolicyResponse | CreateWorkItemResponse | null
+  >(null);
+  const [error, setError] = useState<string | null>(null);
+  /** What was typed last, so answering "which client?" does not retype the whole form. */
+  const [last, setLast] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    tabs.open({
+      spaceType: "route",
+      recordType: "creation",
+      recordId: kind,
+      kind: "NEW",
+      title: createSpaceTitle(kind),
+      path: `/new/${kind}`,
+    });
+  }, [kind]);
+
+  const fail = (e: unknown) => setError(describeApiError(e));
+
   const createClient = useMutation({
     mutationFn: (input: { name: string; kind: "corporate" | "individual"; confirmNew: boolean }) =>
       api.createClient(input),
+    onMutate: () => setError(null),
+    onError: fail,
     onSuccess: (res) => {
-      setClientOutcome(res);
+      setOutcome(res);
       if (res.outcome === "created") {
         void navigate({ to: "/files/$clientId", params: { clientId: res.file.client.id } });
       }
     },
   });
 
-  /** Cover the brokerage already places. */
   const createPolicy = useMutation({
-    mutationFn: (input: CreatePolicyInput) => api.createPolicy(input),
+    mutationFn: api.createPolicy,
+    onMutate: () => setError(null),
+    onError: fail,
     onSuccess: (res) => {
-      setPolicyOutcome(res);
+      setOutcome(res);
       if (res.outcome === "recorded") {
         void navigate({
           to: "/r/$recordId",
@@ -106,8 +81,10 @@ export function StartWork() {
     },
   });
 
-  const create = useMutation({
-    mutationFn: (input: CreateWorkItemInput) => api.createWorkItem(input),
+  const createWork = useMutation({
+    mutationFn: api.createWorkItem,
+    onMutate: () => setError(null),
+    onError: fail,
     onSuccess: (res) => {
       setOutcome(res);
       // Opened — including reopened — is the only outcome that leads anywhere on its own.
@@ -117,34 +94,38 @@ export function StartWork() {
     },
   });
 
-  function submit(clientId?: string, confirmNew = false) {
-    /*
-     * Filing a document opens no work item, so it has no form and never reaches here. The guard
-     * is explicit rather than a cast: if someone later gives this kind a form, the compiler stops
-     * them here instead of sending `kind: "document"` to an endpoint that has no such kind.
-     */
-    if (kind === "document") return;
-    const base = clientId ? { clientId } : { clientName: clientName.trim() };
+  const busy = createClient.isPending || createPolicy.isPending || createWork.isPending;
+
+  /** Submit, with either the typed client name or the id a person just chose. */
+  function submit(values: Record<string, string>, clientId?: string, confirmNew = false) {
+    setLast(values);
+    const named = (k: string) => (values[k] ?? "").trim();
+    const base = clientId ? { clientId } : { clientName: named("clientName") };
+
     if (kind === "client") {
-      createClient.mutate({ name: clientName.trim(), kind: clientKind, confirmNew });
+      createClient.mutate({
+        name: named("clientName"),
+        kind: named("clientKind") === "individual" ? "individual" : "corporate",
+        confirmNew,
+      });
       return;
     }
     if (kind === "policy") {
       createPolicy.mutate({
         ...base,
-        insurerName: insurerName.trim(),
-        classOfBusiness: classOfBusiness.trim(),
-        ...(policyNumber.trim() ? { policyNumber: policyNumber.trim() } : {}),
-        periodStart,
-        periodEnd,
+        insurerName: named("insurerName"),
+        classOfBusiness: named("classOfBusiness"),
+        ...(named("policyNumber") ? { policyNumber: named("policyNumber") } : {}),
+        periodStart: named("periodStart"),
+        periodEnd: named("periodEnd"),
       });
       return;
     }
     if (kind === "renewal") {
-      create.mutate({
+      createWork.mutate({
         kind,
         ...base,
-        insurers: insurers
+        insurers: named("insurers")
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
@@ -152,445 +133,56 @@ export function StartWork() {
       return;
     }
     if (kind === "claim") {
-      create.mutate({
+      createWork.mutate({
         kind,
         ...base,
-        incidentOn,
-        incidentSummary: incidentSummary.trim(),
+        incidentOn: named("incidentOn"),
+        incidentSummary: named("incidentSummary"),
         source: "manual",
       });
       return;
     }
-    create.mutate({
+    createWork.mutate({
       kind,
       ...base,
-      requestText: requestText.trim(),
+      requestText: named("requestText"),
       requestedBy: "policyholder",
-      ...(effectiveOn ? { effectiveOn } : {}),
+      ...(named("effectiveOn") ? { effectiveOn: named("effectiveOn") } : {}),
     });
   }
 
-  const chosen = KINDS.find((k) => k.id === kind)!;
+  const space = createSpace(kind, { busy, error, outcome });
 
   return (
-    <section className="page-scroll spaces-page">
-      <div className="welcome-row">
-        <div>
-          <div className="eyebrow">START SOMETHING</div>
-          <h2>What are we working on?</h2>
-        </div>
-        <Link to="/ask" className="ask-floating">
-          ✦ Ask ASAP
-        </Link>
-      </div>
-
-      <article className="space-card">
-        <div className="space-head">
-          <div className="space-type">
-            <span>NEW WORK</span>
-          </div>
-          <h2>{chosen.label}</h2>
-          <p>{chosen.hint}</p>
-        </div>
-        <div className="space-body">
-          <nav className="tab-row" aria-label="What kind of work">
-            {KINDS.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                className={`tab ${k.id === kind ? "selected" : ""}`}
-                aria-current={k.id === kind ? "true" : undefined}
-                onClick={() => {
-                  setKind(k.id);
-                  setOutcome(null);
-                }}
-              >
-                {k.label}
-              </button>
-            ))}
-          </nav>
-
-          {kind === "document" ? (
-            <div className="flex flex-col gap-3">
-              <p className="text-sm text-ink-secondary">
-                Filing a document does not need a client first. A schedule often arrives before
-                anyone has decided which record it belongs to, so ASAP files it, reads it, and asks
-                you which record it is about afterwards.
-              </p>
-              <Link to="/documents" className="primary self-start">
-                Choose a file to file
-              </Link>
-            </div>
-          ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setOutcome(null);
-              submit();
-            }}
-          >
-            <div className="form-row">
-              <label htmlFor="sw-client">
-                {kind === "client" ? "WHAT IS THE CLIENT CALLED?" : "WHICH CLIENT?"}
-              </label>
-              <input
-                id="sw-client"
-                required
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-                placeholder="The client's name as you would say it"
-              />
-            </div>
-
-            {kind === "client" && (
-              <div className="form-row">
-                <label htmlFor="sw-client-kind">A COMPANY OR A PERSON?</label>
-                <select
-                  id="sw-client-kind"
-                  value={clientKind}
-                  onChange={(e) => setClientKind(e.target.value as "corporate" | "individual")}
-                >
-                  <option value="corporate">A company</option>
-                  <option value="individual">A person</option>
-                </select>
-              </div>
-            )}
-
-            {kind === "policy" && (
-              <>
-                <div className="form-row">
-                  <label htmlFor="sw-insurer">WHICH INSURER CARRIES IT?</label>
-                  <input
-                    id="sw-insurer"
-                    required
-                    value={insurerName}
-                    onChange={(e) => setInsurerName(e.target.value)}
-                    placeholder="Jubilee"
-                  />
-                  <small>New to your book? Naming it here is how it is added.</small>
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-class">WHAT CLASS OF BUSINESS?</label>
-                  <input
-                    id="sw-class"
-                    required
-                    value={classOfBusiness}
-                    onChange={(e) => setClassOfBusiness(e.target.value)}
-                    placeholder="Motor commercial"
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-number">POLICY NUMBER (OPTIONAL)</label>
-                  <input
-                    id="sw-number"
-                    value={policyNumber}
-                    onChange={(e) => setPolicyNumber(e.target.value)}
-                    placeholder="Leave it empty until the insurer issues one"
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-from">THE PERIOD OF COVER: FROM</label>
-                  <input
-                    id="sw-from"
-                    type="date"
-                    required
-                    value={periodStart}
-                    onChange={(e) => setPeriodStart(e.target.value)}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-to">TO</label>
-                  <input
-                    id="sw-to"
-                    type="date"
-                    required
-                    value={periodEnd}
-                    onChange={(e) => setPeriodEnd(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
-
-            {kind === "renewal" && (
-              <div className="form-row">
-                <label htmlFor="sw-insurers">WHICH INSURERS SHOULD WE ASK? (OPTIONAL)</label>
-                <input
-                  id="sw-insurers"
-                  value={insurers}
-                  onChange={(e) => setInsurers(e.target.value)}
-                  placeholder="Jubilee, APA"
-                />
-                <small>
-                  Leave it empty and ASAP asks you at the step, rather than choosing for you.
-                </small>
-              </div>
-            )}
-
-            {kind === "claim" && (
-              <>
-                <div className="form-row">
-                  <label htmlFor="sw-date">WHEN DID IT HAPPEN?</label>
-                  <input
-                    id="sw-date"
-                    type="date"
-                    required
-                    value={incidentOn}
-                    onChange={(e) => setIncidentOn(e.target.value)}
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-summary">WHAT DID THE CLIENT SAY?</label>
-                  <textarea
-                    id="sw-summary"
-                    required
-                    rows={3}
-                    value={incidentSummary}
-                    onChange={(e) => setIncidentSummary(e.target.value)}
-                    placeholder="In their words, not a classification"
-                  />
-                </div>
-              </>
-            )}
-
-            {kind === "endorsement" && (
-              <>
-                <div className="form-row">
-                  <label htmlFor="sw-request">WHAT ARE THEY ASKING FOR?</label>
-                  <textarea
-                    id="sw-request"
-                    required
-                    rows={3}
-                    value={requestText}
-                    onChange={(e) => setRequestText(e.target.value)}
-                    placeholder="Add KDN 482Q to the fleet from 1 October"
-                  />
-                </div>
-                <div className="form-row">
-                  <label htmlFor="sw-effective">FROM WHEN? (OPTIONAL)</label>
-                  <input
-                    id="sw-effective"
-                    type="date"
-                    value={effectiveOn}
-                    onChange={(e) => setEffectiveOn(e.target.value)}
-                  />
-                </div>
-              </>
-            )}
-
-            <div className="actions">
-              <button
-                type="submit"
-                className="primary"
-                disabled={create.isPending || createClient.isPending || createPolicy.isPending}
-              >
-                {kind === "client"
-                  ? createClient.isPending
-                    ? "Adding…"
-                    : "Add the client"
-                  : kind === "policy"
-                    ? createPolicy.isPending
-                      ? "Recording…"
-                      : "Record the cover"
-                    : create.isPending
-                      ? "Opening…"
-                      : "Open the work"}
-              </button>
-            </div>
-          </form>
-          )}
-
-          {(create.isError || createClient.isError || createPolicy.isError) && (
-            <div className="warning">
-              <strong>That did not go in:</strong>{" "}
-              {describeApiError(create.error ?? createClient.error ?? createPolicy.error)}
-            </div>
-          )}
-
-          {outcome && <Outcome outcome={outcome} onChoose={(id) => submit(id)} />}
-          {clientOutcome?.outcome === "possible_duplicates" && (
-            <DuplicateClients
-              outcome={clientOutcome}
-              onCreateAnyway={() => submit(undefined, true)}
-            />
-          )}
-          {policyOutcome && policyOutcome.outcome !== "recorded" && (
-            <PolicyClientAnswer
-              outcome={policyOutcome}
-              onChoose={(id) => submit(id)}
-              onAddClient={() => {
-                setKind("client");
-                setPolicyOutcome(null);
-              }}
-            />
-          )}
-        </div>
-      </article>
-    </section>
+    <SpaceFrameView
+      space={space}
+      onAct={(action) => {
+        if (action.verb === "open" && action.to) {
+          void navigate({ to: action.to.path });
+          return;
+        }
+        /* The form hands its values through; every other action reuses the last ones. */
+        const values = (action as SpaceFrameAction & { values?: Record<string, string> }).values ?? last;
+        const step = action.stepId ?? "";
+        if (step === "create") submit(values);
+        else if (step === "confirm-new") submit(values, undefined, true);
+        else if (step.startsWith("choose:")) submit(values, step.slice("choose:".length));
+      }}
+    />
   );
 }
 
 /**
- * A name the brokerage may already have.
+ * `/new`, the linkable address of the sheet.
  *
- * The server checks before it creates, and this is the person's answer to what it found: the same
- * client, or genuinely a different one with a similar name. Two Acmes in a book is a mess that
- * takes months to unpick, so the question is asked once, here, rather than never.
+ * The sheet itself belongs to the shell, so that what is behind it stays mounted. This component
+ * is what a link to `/new` lands on: it sends the person to Today, and the shell opens the sheet
+ * over it. The address is the point — a sheet nobody can link to is a sheet nobody can share.
  */
-function DuplicateClients({
-  outcome,
-  onCreateAnyway,
-}: {
-  outcome: Extract<CreateClientResponse, { outcome: "possible_duplicates" }>;
-  onCreateAnyway: () => void;
-}) {
-  return (
-    <>
-      <div className="section-label">You may already have this client</div>
-      {outcome.candidates.map((c) => (
-        <div className="issue" key={c.id}>
-          <span className="sev" aria-hidden />
-          <div>
-            <h4>{c.kind === "corporate" ? "Company" : "Person"}</h4>
-            <p>{c.name}</p>
-          </div>
-          <Link to="/files/$clientId" params={{ clientId: c.id }} className="secondary">
-            Open this one
-          </Link>
-        </div>
-      ))}
-      <div className="actions">
-        <button type="button" className="secondary" onClick={onCreateAnyway}>
-          None of these — add “{outcome.name}” as a new client
-        </button>
-      </div>
-    </>
-  );
-}
-
-/** Which client the cover belongs to, when the name did not settle it. */
-function PolicyClientAnswer({
-  outcome,
-  onChoose,
-  onAddClient,
-}: {
-  outcome: Exclude<CreatePolicyResponse, { outcome: "recorded" }>;
-  onChoose: (clientId: string) => void;
-  onAddClient: () => void;
-}) {
-  if (outcome.outcome === "ambiguous") {
-    return (
-      <>
-        <div className="section-label">Which {outcome.name}?</div>
-        {outcome.candidates.map((c) => (
-          <div className="issue" key={c.id}>
-            <span className="sev" aria-hidden />
-            <div>
-              <h4>{c.kind === "corporate" ? "Company" : "Person"}</h4>
-              <p>{c.name}</p>
-            </div>
-            <button type="button" className="secondary" onClick={() => onChoose(c.id)}>
-              This one
-            </button>
-          </div>
-        ))}
-      </>
-    );
-  }
-  return (
-    <div className="warning">
-      <strong>No client on file called “{outcome.name}”.</strong> A policy belongs to somebody, and
-      nothing has been recorded. Add the client first — it takes one line.
-      <div className="actions">
-        <button type="button" className="secondary" onClick={onAddClient}>
-          Add the client
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * What the server said, when it did not simply open something.
- *
- * Each of these is a real answer rather than a failure: a name that matches two clients is a
- * question, and a name that matches none is a different piece of work.
- */
-function Outcome({
-  outcome,
-  onChoose,
-}: {
-  outcome: CreateWorkItemResponse;
-  onChoose: (clientId: string) => void;
-}) {
-  if (outcome.outcome === "opened") {
-    return (
-      <div className="warning">
-        {outcome.reopened
-          ? "This work was already open, so ASAP opened it rather than starting a second one."
-          : "Opened."}
-      </div>
-    );
-  }
-
-  if (outcome.outcome === "ambiguous") {
-    return (
-      <>
-        <div className="section-label">Which {outcome.name}?</div>
-        {outcome.candidates.map((c) => (
-          <div className="issue" key={c.id}>
-            <span className="sev" aria-hidden />
-            <div>
-              <h4>{c.kind === "corporate" ? "Company" : "Person"}</h4>
-              <p>{c.name}</p>
-            </div>
-            <button type="button" className="secondary" onClick={() => onChoose(c.id)}>
-              This one
-            </button>
-          </div>
-        ))}
-      </>
-    );
-  }
-
-  if (outcome.outcome === "no_client") {
-    return (
-      <div className="warning">
-        <strong>No client on file called “{outcome.name}”.</strong> ASAP does not create clients
-        from a form — a client carries a file, duplicates and a compliance state. Create it where
-        those are reviewed, then start this work again.
-        <div className="actions">
-          <Link to="/files" search={{ view: "blocking" }} className="secondary">
-            Open client files
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (outcome.outcome === "ambiguous_policy") {
-    return (
-      <>
-        <div className="section-label">Which policy is this change to?</div>
-        {outcome.candidates.map((c) => (
-          <div className="issue" key={c.id}>
-            <span className="sev" aria-hidden />
-            <div>
-              <h4>Policy</h4>
-              <p>{c.label}</p>
-            </div>
-          </div>
-        ))}
-        <small className="disclaimer">
-          Open the policy and start the change there, so it is recorded against the right one.
-        </small>
-      </>
-    );
-  }
-
-  return (
-    <div className="warning">
-      <strong>No policy on file for that client.</strong> A change is a change to something:
-      record the policy first, and nothing has been created here.
-    </div>
-  );
+export function OpenNewSheet() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    void navigate({ to: "/today", replace: true });
+  }, [navigate]);
+  return null;
 }

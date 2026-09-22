@@ -138,6 +138,20 @@ export const SpaceBlockType = z.enum([
   "automation_builder",
   "approval_gate",
   "timeline",
+  /*
+   * Added deliberately in Increment 4A, for the creation flows behind "+ New".
+   *
+   * Seven of them — a client, cover already placed, a renewal, quotation work, a claim, a policy
+   * change, an automation — need typed fields with required marking and per-field errors, and no
+   * existing block carries any of that: `automation_builder` is text inputs with no types, no
+   * validation and no submit contract. Expressing a date of loss as free text would have been the
+   * alternative, and that is how a date nobody can validate gets into a claim.
+   *
+   * It is still not a hole in the registry: the field types are a closed set, there is no slot for
+   * markup, and the block cannot perform its own submit — it hands values to the page, which calls
+   * the validated creation API.
+   */
+  "form",
 ]);
 export type SpaceBlockType = z.infer<typeof SpaceBlockType>;
 
@@ -338,6 +352,43 @@ export const spaceFrameBlockSchema = z.discriminatedUnion("type", [
     heading: z.string().min(1).max(200),
     detail: z.string().max(800).default(""),
     blockedNote: z.string().max(600).nullable().default(null),
+  }),
+  /**
+   * A typed form. The one block that collects rather than shows.
+   *
+   * Validation is declared here and enforced twice: the browser marks a required field before a
+   * request goes out, and the API validates every value again on arrival. The first is a courtesy;
+   * the second is the one that counts, and this block never assumes the first replaces it.
+   */
+  z.object({
+    ...blockEnvelope,
+    type: z.literal("form"),
+    fields: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(60),
+          label: z.string().min(1).max(120),
+          /** A closed set. There is no "html" and no "custom". */
+          kind: z.enum(["text", "textarea", "date", "select", "choice"]),
+          value: z.string().max(4000).default(""),
+          placeholder: z.string().max(200).default(""),
+          required: z.boolean().default(false),
+          /** For `select` and `choice`. Empty for every other kind. */
+          options: z
+            .array(z.object({ value: z.string().max(120), label: z.string().min(1).max(160) }))
+            .max(40)
+            .default([]),
+          /** One line under the field, saying what it is for. Never a validation message. */
+          hint: z.string().max(300).default(""),
+          /** What is wrong with what was typed, from the server or from the required check. */
+          error: z.string().max(300).nullable().default(null),
+        }),
+      )
+      .max(20),
+    /** The words on the button that submits it. */
+    submitLabel: z.string().min(1).max(80),
+    /** True while the request is in flight: the button disables itself, so one click is one write. */
+    busy: z.boolean().default(false),
   }),
   z.object({
     ...blockEnvelope,

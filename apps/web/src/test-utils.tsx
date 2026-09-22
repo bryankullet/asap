@@ -48,6 +48,8 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     "/onboarding/create",
     "/onboarding",
   ].map((path) => createRoute({ getParentRoute: () => root, path, component: page }));
+  /* The creation Spaces behind "+ New": `/new/client`, `/new/claim`, and the rest. */
+  const creation = createRoute({ getParentRoute: () => root, path: "/new/$kind", component: page });
   const record = createRoute({ getParentRoute: () => root, path: "/r/$recordId", component: page });
   const file = createRoute({
     getParentRoute: () => root,
@@ -65,7 +67,7 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     component: page,
   });
   const router = createRouter({
-    routeTree: root.addChildren([...routes, record, file, agreement, document]),
+    routeTree: root.addChildren([...routes, creation, record, file, agreement, document]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   // Test-only router; the app's typed router registration does not apply here.

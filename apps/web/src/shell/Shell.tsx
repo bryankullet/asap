@@ -6,6 +6,7 @@ import { useInvalidateMe, useMe } from "../lib/me.js";
 import { useRuns, useWorkList } from "../lib/queries.js";
 import { supabase } from "../lib/supabase.js";
 import { NAV } from "./nav.js";
+import { NewSheet } from "./NewSheet.js";
 import { AskPanel } from "./AskPanel.js";
 import { useAskPanel } from "./ask-width.js";
 import { ProfileMenu } from "./ProfileMenu.js";
@@ -69,6 +70,16 @@ export function Shell() {
 
   const tabs = useWorkspaceTabs(path);
   const ask = useAskPanel();
+  /*
+   * "+ New" is a sheet over whatever is on screen, not a destination. The Space behind it stays
+   * mounted and stays in its tab, which is the whole reason it is a sheet: a person choosing to
+   * start a claim has not left the renewal they were reading.
+   */
+  const [newOpen, setNewOpen] = useState(false);
+  // `/new` exists so the sheet can be linked to and reopened. Landing there opens it.
+  useEffect(() => {
+    if (path === "/new") setNewOpen(true);
+  }, [path]);
   const runs = useRuns(org?.id);
 
   // The prototype is a fixed-height application: the body never scrolls, the panes do.
@@ -130,12 +141,19 @@ export function Shell() {
 
           <div className="shell-side-bottom">
             {/* The prototype's order below the destinations: New, then Search, then Profile. */}
-            <Link to="/new" className="shell-nav-item shell-new" title="New">
+            <button
+              type="button"
+              className="shell-nav-item shell-new"
+              title="New"
+              aria-haspopup="dialog"
+              aria-expanded={newOpen}
+              onClick={() => setNewOpen(true)}
+            >
               <span aria-hidden className="shell-nav-ico">
                 ＋
               </span>
               <span className="shell-navlabel">New</span>
-            </Link>
+            </button>
             <Link
               to="/search"
               search={{ q: "" }}
@@ -199,7 +217,9 @@ export function Shell() {
            * its own accessible name: two navigations both called "Main" is one ambiguous landmark to a
            * screen reader, which is a real defect and not only a test problem.
            */}
-          <nav className="shell-mobilenav" aria-label="Main, bottom bar">
+          {newOpen && <NewSheet onClose={() => setNewOpen(false)} />}
+
+      <nav className="shell-mobilenav" aria-label="Main, bottom bar">
             {NAV.map((item) => (
               <Link
                 key={item.to}

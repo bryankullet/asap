@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { Connections } from "../pages/Connections.js";
 import { JobDetail, Jobs } from "../pages/Jobs.js";
 import { Search } from "../pages/Search.js";
+import { OpenNewSheet, StartWork } from "../pages/StartWork.js";
 import { Today } from "../pages/Today.js";
 import { Work } from "../pages/Work.js";
 import { Shell } from "../shell/Shell.js";
@@ -49,8 +50,11 @@ const extra = [
     validateSearch: (s: Record<string, unknown>) => ({ filter: (s["filter"] as string | undefined) ?? "all" }),
   }),
   createRoute({ getParentRoute: () => root, path: "/jobs/$jobId", component: JobDetail }),
+  createRoute({ getParentRoute: () => root, path: "/new/$kind", component: StartWork }),
+  /* `/new` is how the sheet is opened, in the harness exactly as in the application. */
+  createRoute({ getParentRoute: () => root, path: "/new", component: OpenNewSheet }),
 ];
-const routes = ["/automations", "/new", "/ask", "/import", "/email", "/clients"].map(
+const routes = ["/automations", "/ask", "/import", "/email", "/clients", "/documents", "/files"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
 );
 const record = createRoute({
