@@ -150,6 +150,46 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
     );
   });
 
+  /**
+   * The reading state of one mailbox, from rows only.
+   *
+   * There is no reader yet: nothing in this deployment fetches messages, and nothing writes
+   * `last_synced_at`. So the honest answer for a connected mailbox is `never` — connected, and
+   * reading has not started — and `canStart` is false with the reason said plainly. When the sync
+   * worker lands, this function reads the run instead and `syncing` becomes a fact rather than a
+   * word; the client never infers it, which is what stops the word appearing before the mechanism.
+   */
+  function syncStateOf(m: MailboxRow) {
+    if (m.status === "disconnected") {
+      return {
+        state: "never" as const,
+        runId: null,
+        lastSyncedAt: null,
+        error: null,
+        canStart: false,
+        cannotStartReason: "This mailbox is disconnected.",
+      };
+    }
+    if (m.last_synced_at !== null) {
+      return {
+        state: "idle" as const,
+        runId: null,
+        lastSyncedAt: m.last_synced_at,
+        error: null,
+        canStart: false,
+        cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+      };
+    }
+    return {
+      state: "never" as const,
+      runId: null,
+      lastSyncedAt: null,
+      error: null,
+      canStart: false,
+      cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+    };
+  }
+
   app.get("/mailboxes", async (c) => {
     const { db, user } = c.get("auth");
     const ctx = await resolveContext(db, user.id);
@@ -172,6 +212,7 @@ export function mailboxRoutes(deps: { logger: Logger; oauth: MailboxOAuthConfig 
         statusReason: m.status_reason,
         lastSyncedAt: m.last_synced_at,
         connectedAt: m.created_at,
+        sync: syncStateOf(m),
       })),
       providers: (["gmail", "microsoft"] as const).map((id) => {
         const missing = missingFor(id, deps.oauth);

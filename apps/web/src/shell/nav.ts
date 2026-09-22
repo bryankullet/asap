@@ -97,11 +97,17 @@ export type WorkFilterId = (typeof WORK_FILTERS)[number]["id"];
  * from Activity, and its vocabulary stays deliberately different from Work's: this is what ASAP is
  * processing, not what a person owns.
  */
+/**
+ * Activity's filters: everything, then the three words a run has.
+ *
+ * A run waiting on an outside party is still open, so it is Working. Naming the party is the
+ * *human-work* layer's job — a Work item says "With Jubilee since 12 Aug" — and a run says at
+ * most, in supporting text, that Jubilee must respond before it continues.
+ */
 export const JOB_FILTERS = [
   { id: "all", label: "All" },
-  { id: "running", label: "Working" },
-  { id: "waiting", label: "Waiting on someone else" },
-  { id: "work", label: "Stopped for a person" },
-  { id: "completed", label: "Finished" },
+  { id: "working", label: "Working" },
+  { id: "stopped", label: "Stopped" },
+  { id: "finished", label: "Finished" },
 ] as const;
 export type JobFilterId = (typeof JOB_FILTERS)[number]["id"];

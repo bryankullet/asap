@@ -292,7 +292,14 @@ export type SetPinResponse = z.infer<typeof setPinResponseSchema>;
  * The filters are the board's own: `all` is everything still live, `work` is everything that has
  * stopped and needs a person — a decision to take or a failure to look at.
  */
-export const RunListFilter = z.enum(["all", "running", "waiting", "work", "completed"]);
+/**
+ * Activity's filters: everything, and then the three words a run has.
+ *
+ * `waiting` is gone. A run that cannot continue until an outside party answers is still open, so
+ * it is Working — the party belongs to the human-work layer, not to the run's status. Keeping a
+ * fourth filter for it would have made "waiting" a status by the back door.
+ */
+export const RunListFilter = z.enum(["all", "working", "stopped", "finished"]);
 export type RunListFilter = z.infer<typeof RunListFilter>;
 
 /**
@@ -306,26 +313,39 @@ export type RunListFilter = z.infer<typeof RunListFilter>;
  */
 export const RUN_LIST_FILTER_LABELS: Readonly<Record<RunListFilter, string>> = {
   all: "All",
-  running: "Working",
-  waiting: "Waiting on someone else",
-  work: "Stopped for a person",
-  completed: "Finished",
+  working: "Working",
+  stopped: "Stopped",
+  finished: "Finished",
+};
+
+/**
+ * Older links keep working. `?filter=running` was Working, `waiting` folded into Working when it
+ * stopped being a status, `work` was what is now Stopped, and `completed` was Finished.
+ */
+export const LEGACY_RUN_FILTERS: Readonly<Record<string, RunListFilter>> = {
+  running: "working",
+  waiting: "working",
+  work: "stopped",
+  completed: "finished",
 };
 
 /** Which group a run sits in, in the words the board prints above it. */
-export const RunGroup = z.enum(["running", "waiting_externally", "work", "completed"]);
+export const RunGroup = z.enum(["working", "stopped", "finished"]);
 export type RunGroup = z.infer<typeof RunGroup>;
 
-/** The same vocabulary as the filters, because a group and a filter name the same set. */
+/** The same three words as the filters, because a group and a filter name the same set. */
 export const RUN_GROUP_LABELS: Readonly<Record<RunGroup, string>> = {
-  running: "Working",
-  waiting_externally: "Waiting on someone else",
-  work: "Stopped for a person",
-  completed: "Finished",
+  working: "Working",
+  stopped: "Stopped",
+  finished: "Finished",
 };
 
 export const runListQuerySchema = z.object({
-  filter: RunListFilter.catch("all"),
+  /* A legacy id resolves to the filter it became; anything unknown falls back to everything open. */
+  filter: z.preprocess(
+    (v) => (typeof v === "string" && v in LEGACY_RUN_FILTERS ? LEGACY_RUN_FILTERS[v] : v),
+    RunListFilter.catch("all"),
+  ),
   limit: z.coerce.number().int().min(1).max(100).catch(50),
 });
 export type RunListQuery = z.infer<typeof runListQuerySchema>;

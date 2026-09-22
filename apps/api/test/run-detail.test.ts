@@ -118,30 +118,35 @@ describe("GET /runs — the Jobs board", () => {
     // Two could-not-finish runs need a person; the finished one is not in All.
     expect(body.groups.map((g: { key: string; title: string }) => [g.key, g.title])).toEqual([
       /*
-       * The run vocabulary, not Work's. This title used to be "Work", which said nothing about
-       * what had happened; "Running", "Waiting" and "Completed" were the others, and a bare
-       * "Waiting" and a cross-layer "Completed" are both banned.
+       * A run has exactly three words: Working, Finished, Stopped. There is no "waiting" group,
+       * because a run held up by an outside party is still open and therefore Working — the party
+       * belongs to the human-work layer.
        */
-      ["work", "Stopped for a person"],
+      ["stopped", "Stopped"],
     ]);
     expect(body.groups[0].items).toHaveLength(2);
-    expect(body.counts).toMatchObject({ all: 2, running: 0, waiting: 0, work: 2, completed: 1 });
+    expect(body.counts).toMatchObject({ all: 2, working: 0, stopped: 2, finished: 1 });
   });
 
-  it("keeps Completed out of All, and finds it under its own filter", async () => {
+  it("keeps a finished run out of All, and finds it under its own filter", async () => {
     const all = await get("/runs?filter=all");
     const ids = all.groups.flatMap((g: { items: { run: { id: string } }[] }) =>
       g.items.map((i) => i.run.id),
     );
     expect(ids).not.toContain(RUN_DONE);
 
-    const done = await get("/runs?filter=completed");
-    expect(done.groups[0].key).toBe("completed");
+    const done = await get("/runs?filter=finished");
+    expect(done.groups[0].key).toBe("finished");
     expect(done.groups[0].items[0].run.id).toBe(RUN_DONE);
+
+    /* An older link still lands where the person meant. */
+    const legacy = await get("/runs?filter=completed");
+    expect(legacy.filter).toBe("finished");
+    expect(legacy.groups[0].items[0].run.id).toBe(RUN_DONE);
   });
 
   it("derives progress from the work's steps, and says nothing when there are none", async () => {
-    const body = await get("/runs?filter=work");
+    const body = await get("/runs?filter=stopped");
     const withWork = body.groups[0].items.find(
       (i: { run: { id: string } }) => i.run.id === RUN_FAILED,
     );
@@ -156,7 +161,7 @@ describe("GET /runs — the Jobs board", () => {
   });
 
   it("leads to the work a person owns, and says what it last did", async () => {
-    const body = await get("/runs?filter=work");
+    const body = await get("/runs?filter=stopped");
     const row = body.groups[0].items.find((i: { run: { id: string } }) => i.run.id === RUN_FAILED);
     expect(row.work).toMatchObject({ id: ITEM, title: "Acme Motors — renewal terms from Jubilee" });
     expect(row.lastEvent).toBe("The schedule had no premium line");
@@ -165,7 +170,7 @@ describe("GET /runs — the Jobs board", () => {
   });
 
   it("never claims a business outcome", async () => {
-    const body = await get("/runs?filter=completed");
+    const body = await get("/runs?filter=finished");
     expect(JSON.stringify(body)).not.toMatch(/renewed|accepted|paid|policy is active/i);
   });
 

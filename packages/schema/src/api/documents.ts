@@ -200,6 +200,34 @@ export const MAILBOX_PROVIDER_LABELS: Readonly<Record<MailboxProviderIdValue, st
 
 export const MailboxStatus = z.enum(["connected", "needs_reauthorisation", "disconnected"]);
 
+/**
+ * What a mailbox's reading is doing, as the **server** sees it.
+ *
+ * Not a decoration and not a guess: each of these corresponds to something the backend can point
+ * at. `syncing` means a sync run is genuinely active right now; `failed` means the last one ended
+ * with an error a person can read and retry; `never` means the mailbox is connected and no sync
+ * has ever run — which is the honest state for a deployment where the reader is not built yet, and
+ * is the difference between a gap and a lie.
+ */
+export const MailboxSyncState = z.enum(["never", "syncing", "idle", "failed"]);
+export type MailboxSyncState = z.infer<typeof MailboxSyncState>;
+
+/** The reading half of a mailbox: only ever what the server can confirm. */
+export const mailboxSyncSchema = z.object({
+  state: MailboxSyncState,
+  /** The run doing the reading, when one is active. Null in every other state. */
+  runId: uuidSchema.nullable().default(null),
+  /** When the last sync finished cleanly. Null until one has. */
+  lastSyncedAt: z.string().nullable().default(null),
+  /** The last failure, in the provider's or the worker's own words. Null when there was none. */
+  error: z.string().max(500).nullable().default(null),
+  /** True when a person may start one. False when no reader exists, or one is already running. */
+  canStart: z.boolean().default(false),
+  /** Why they may not, when they may not. Shown beside the control, never instead of it (§34). */
+  cannotStartReason: z.string().max(300).nullable().default(null),
+});
+export type MailboxSync = z.infer<typeof mailboxSyncSchema>;
+
 export const mailboxSchema = z.object({
   id: uuidSchema,
   provider: MailboxProviderId,
@@ -210,6 +238,18 @@ export const mailboxSchema = z.object({
   statusReason: z.string().nullable(),
   lastSyncedAt: z.string().nullable(),
   connectedAt: z.string(),
+  /**
+   * The reading state, from the server. A client may never infer "Syncing" from anything else —
+   * the whole point is that the word appears when, and only when, a run is really going.
+   */
+  sync: mailboxSyncSchema.default({
+    state: "never",
+    runId: null,
+    lastSyncedAt: null,
+    error: null,
+    canStart: false,
+    cannotStartReason: null,
+  }),
 });
 export type Mailbox = z.infer<typeof mailboxSchema>;
 

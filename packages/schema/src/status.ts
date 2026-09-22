@@ -71,11 +71,26 @@ export const TASK_LABELS: Readonly<Record<TaskStatus, string>> = {
   done: "Done",
 };
 
+/**
+ * A run has exactly three words: **Working · Finished · Stopped**.
+ *
+ * Five stored statuses map onto them, and the two collapses are the point:
+ *
+ *  - `paused` is a run that cannot continue until an outside party answers. It is still open, so
+ *    it is **Working**. Who is being waited on belongs to the *human-work* layer — a Work item
+ *    says "With Jubilee since 12 Aug" — and a run says at most, in supporting text, "Jubilee must
+ *    respond before this continues." Waiting is not a run status.
+ *  - `could_not_finish` is **Stopped**. "Couldn't finish" described the run's feelings about it;
+ *    what a person needs to know is that it is not going to continue by itself.
+ *
+ * The stored statuses stay as they are — they carry information the engine needs — but nothing a
+ * person reads draws on more than these three words.
+ */
 export const RUN_LABELS: Readonly<Record<RunStatus, string>> = {
   working: "Working",
-  paused: "Paused",
+  paused: "Working",
   finished: "Finished",
-  could_not_finish: "Couldn't finish",
+  could_not_finish: "Stopped",
   stopped: "Stopped",
 };
 

@@ -161,7 +161,7 @@ export function useRunList(orgId: string | undefined, filter: RunListFilter, lim
     enabled: Boolean(orgId),
     queryFn: () => api.runList(filter, limit),
     refetchInterval: (query) =>
-      (query.state.data?.counts.running ?? 0) > 0 ? 10_000 : false,
+      (query.state.data?.counts.working ?? 0) > 0 ? 10_000 : false,
   });
 }
 

@@ -1261,22 +1261,24 @@ export function workRoutes(deps: WorkDeps) {
     if (runsR.error) return sendError(c, mapDatabaseError(runsR.error));
     const runs = RunRow.array().parse(runsR.data ?? []);
 
+    /*
+     * Five stored statuses, three words. `paused` is a run still open and waiting on an outside
+     * party, which is Working: the party belongs to the human-work layer, and a Work item says
+     * "With Jubilee since 12 Aug". `could_not_finish` and `stopped` both mean it is not going to
+     * continue by itself.
+     */
     const groupOf = (run: RunRow): RunGroup =>
-      run.status === "working"
-        ? "running"
-        : run.status === "paused"
-          ? "waiting_externally"
-          : run.status === "finished"
-            ? "completed"
-            : "work";
+      run.status === "working" || run.status === "paused"
+        ? "working"
+        : run.status === "finished"
+          ? "finished"
+          : "stopped";
 
     const inFilter = (run: RunRow, filter: RunListFilter): boolean => {
       const group = groupOf(run);
-      if (filter === "all") return group !== "completed";
-      if (filter === "running") return group === "running";
-      if (filter === "waiting") return group === "waiting_externally";
-      if (filter === "work") return group === "work";
-      return group === "completed";
+      // "All" is everything still open: a finished run is history, not activity.
+      if (filter === "all") return group !== "finished";
+      return group === filter;
     };
 
     // Every tab's count in one pass, so the board needs one request rather than five.

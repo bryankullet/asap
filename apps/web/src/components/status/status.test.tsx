@@ -59,7 +59,8 @@ describe("status components refuse the wrong slot", () => {
         <RunStatus status="could_not_finish" />
       </ActivityPanelSlot>,
     );
-    expect(screen.getByText("Couldn't finish")).toBeInTheDocument();
+    // A run has three words. `could_not_finish` is one that is not going to continue: Stopped.
+    expect(screen.getByText("Stopped")).toBeInTheDocument();
     expect(() =>
       render(
         <CardHeadline>

@@ -287,6 +287,14 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
           statusReason: null,
           lastSyncedAt: null,
           connectedAt: "2026-08-01T00:00:00.000Z",
+          sync: {
+            state: "never",
+            runId: null,
+            lastSyncedAt: null,
+            error: null,
+            canStart: false,
+            cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+          },
         },
       ],
       providers: [

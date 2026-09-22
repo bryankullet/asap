@@ -187,7 +187,7 @@ const runRow = (over: Partial<RunListItem> = {}): RunListItem => ({
     created_at: "2026-09-11T08:00:00.000Z",
     updated_at: "2026-09-11T08:00:00.000Z",
   },
-  group: "running",
+  group: "working",
   progress: 68,
   lastEvent: "Reading Endorsed Schedule v4",
   waitingFor: null,

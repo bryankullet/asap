@@ -25,23 +25,58 @@ import {
   WITH_PARTY_ERROR,
 } from "./status.js";
 
-const allLabels = [
-  ...Object.values(TASK_LABELS),
-  ...Object.values(RUN_LABELS),
-  ...Object.values(COVER_LABELS),
-  ...Object.values(MONEY_LABELS),
-  ...Object.values(FILE_LABELS),
-  ...Object.values(STOCK_LABELS),
+/**
+ * The words each layer uses, deduplicated **within** the layer.
+ *
+ * A layer may deliberately give two stored statuses the same word — the run layer has exactly
+ * three (Working · Finished · Stopped) over five statuses, because `paused` is a run still open
+ * and `could_not_finish` is one that stopped. What must never happen is a word appearing in *two*
+ * layers, which is what makes a status readable without asking "of what?".
+ */
+const LAYERS: [string, readonly string[]][] = [
+  ["task", [...new Set(Object.values(TASK_LABELS))]],
+  ["run", [...new Set(Object.values(RUN_LABELS))]],
+  ["cover", [...new Set(Object.values(COVER_LABELS))]],
+  ["money", [...new Set(Object.values(MONEY_LABELS))]],
+  ["file", [...new Set(Object.values(FILE_LABELS))]],
+  ["stock", [...new Set(Object.values(STOCK_LABELS))]],
 ];
 
 describe("status layers", () => {
   it("no label appears in two layers", () => {
-    expect(new Set(allLabels).size).toBe(allLabels.length);
+    const seen = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const [layer, labels] of LAYERS) {
+      for (const label of labels) {
+        const other = seen.get(label);
+        if (other !== undefined) collisions.push(`"${label}" in ${other} and ${layer}`);
+        else seen.set(label, layer);
+      }
+    }
+    expect(collisions).toEqual([]);
   });
 
   it("no label appears in two layers, case-insensitively", () => {
-    const lower = allLabels.map((l) => l.toLowerCase());
-    expect(new Set(lower).size).toBe(lower.length);
+    const seen = new Map<string, string>();
+    const collisions: string[] = [];
+    for (const [layer, labels] of LAYERS) {
+      for (const label of labels) {
+        const key = label.toLowerCase();
+        const other = seen.get(key);
+        if (other !== undefined) collisions.push(`"${label}" in ${other} and ${layer}`);
+        else seen.set(key, layer);
+      }
+    }
+    expect(collisions).toEqual([]);
+  });
+
+  /* The run layer's own rule: exactly three words, whatever the stored statuses. */
+  it("gives a run exactly three words", () => {
+    expect([...new Set(Object.values(RUN_LABELS))].sort()).toEqual([
+      "Finished",
+      "Stopped",
+      "Working",
+    ]);
   });
 
   it("every enum value has exactly one label and no label is empty", () => {
@@ -114,13 +149,15 @@ describe("taskLabel (prototype checks.mjs lines 16, 17, 22)", () => {
   });
 
   it("the prototype's rendered task group shares no word with the other layers", () => {
-    const groups = [
+    // Deduplicated per layer, as above: a layer may map two statuses onto one word, and the run
+    // layer deliberately does. Two *layers* sharing one word is the failure.
+    const groups: string[][] = [
       ["Your work", "With Jubilee", "In progress", "Done"],
-      Object.values(RUN_LABELS),
-      Object.values(COVER_LABELS),
-      Object.values(MONEY_LABELS),
-      Object.values(FILE_LABELS),
-      Object.values(STOCK_LABELS),
+      [...new Set(Object.values(RUN_LABELS))],
+      [...new Set(Object.values(COVER_LABELS))],
+      [...new Set(Object.values(MONEY_LABELS))],
+      [...new Set(Object.values(FILE_LABELS))],
+      [...new Set(Object.values(STOCK_LABELS))],
     ];
     expect(new Set(groups.flat()).size).toBe(groups.flat().length);
   });

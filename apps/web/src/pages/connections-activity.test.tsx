@@ -41,21 +41,39 @@ const mailboxes = (over: Partial<MailboxesResponse> = {}): MailboxesResponse =>
     ...over,
   });
 
-const connected = () =>
-  mailboxes({
-    mailboxes: [
-      {
-        id: MAILBOX,
-        provider: "gmail",
-        emailAddress: "broking@example.invalid",
-        displayName: null,
-        status: "connected",
-        statusReason: null,
-        lastSyncedAt: null,
-        connectedAt: "2026-08-01T00:00:00.000Z",
-      },
-    ],
-  });
+/** A mailbox in whatever state the server reports. The sync half is always the server's word. */
+const box = (
+  over: Partial<MailboxesResponse["mailboxes"][number]> = {},
+  sync: Partial<MailboxesResponse["mailboxes"][number]["sync"]> = {},
+): MailboxesResponse["mailboxes"][number] => ({
+  id: MAILBOX,
+  provider: "gmail",
+  emailAddress: "broking@example.invalid",
+  displayName: null,
+  status: "connected",
+  statusReason: null,
+  lastSyncedAt: null,
+  connectedAt: "2026-08-01T00:00:00.000Z",
+  sync: {
+    state: "never",
+    runId: null,
+    lastSyncedAt: null,
+    error: null,
+    canStart: false,
+    cannotStartReason: "Nothing reads a mailbox in this deployment yet.",
+    ...sync,
+  },
+  ...over,
+});
+
+const connected = () => mailboxes({ mailboxes: [box()] });
+
+/** The one row the Space draws for Gmail, whatever state it is in. */
+function gmailRow(response: MailboxesResponse) {
+  const rows = connectionsSpace(response, READY, null).blocks.find((b) => b.id === "sources");
+  if (rows?.type !== "rows") throw new Error("expected rows");
+  return rows.rows.find((r) => r.id === "gmail")!;
+}
 
 const runList = (over: Partial<RunListResponse> = {}): RunListResponse =>
   runListResponseSchema.parse({
@@ -65,7 +83,7 @@ const runList = (over: Partial<RunListResponse> = {}): RunListResponse =>
     generatedAt: "2026-08-20T09:00:00.000Z",
     groups: [
       {
-        key: "work",
+        key: "stopped",
         title: "ignored",
         items: [
           {
@@ -83,7 +101,7 @@ const runList = (over: Partial<RunListResponse> = {}): RunListResponse =>
               created_at: "2026-08-20T08:00:00.000Z",
               updated_at: "2026-08-20T08:04:00.000Z",
             },
-            group: "work",
+            group: "stopped",
             progress: 40,
             lastEvent: "Could not read page 2",
             waitingFor: null,
@@ -95,7 +113,7 @@ const runList = (over: Partial<RunListResponse> = {}): RunListResponse =>
         ],
       },
     ],
-    counts: { all: 1, running: 0, waiting: 0, work: 1, completed: 0 },
+    counts: { all: 1, working: 0, stopped: 1, finished: 0 },
     visible: 1,
     returned: 1,
     cap: 50,
@@ -115,14 +133,11 @@ describe("the Connections Space", () => {
   });
 
   it("says connected, and says plainly that nothing has been read", () => {
-    const space = connectionsSpace(connected(), READY, null);
-    expect(space.status.label).toBe("1 connected");
-    const rows = space.blocks.find((b) => b.id === "sources");
-    if (rows?.type !== "rows") throw new Error("expected rows");
-    const gmail = rows.rows.find((r) => r.id === "gmail")!;
+    expect(connectionsSpace(connected(), READY, null).status.label).toBe("1 connected");
+    const gmail = gmailRow(connected());
     expect(gmail.badge).toBe("Connected");
-    expect(gmail.note).toMatch(/No messages read yet/);
-    expect(gmail.actions[0]?.label).toBe("Disconnect");
+    expect(gmail.note).toMatch(/Reading has not started/);
+    expect(gmail.actions.some((a) => a.label === "Disconnect")).toBe(true);
   });
 
   /* §34: shown disabled with the reason, never hidden. A missing button teaches the wrong lesson. */
@@ -135,42 +150,124 @@ describe("the Connections Space", () => {
   });
 
   it("offers reauthorising, by name, when the connection has lapsed", () => {
-    const lapsed = mailboxes({
-      mailboxes: [
-        {
-          id: MAILBOX,
-          provider: "gmail",
-          emailAddress: "broking@example.invalid",
-          displayName: null,
-          status: "needs_reauthorisation",
-          statusReason: "The provider withdrew the permission.",
-          lastSyncedAt: null,
-          connectedAt: "2026-08-01T00:00:00.000Z",
-        },
-      ],
-    });
-    const rows = connectionsSpace(lapsed, READY, null).blocks.find((b) => b.id === "sources");
-    if (rows?.type !== "rows") throw new Error("expected rows");
-    const gmail = rows.rows.find((r) => r.id === "gmail")!;
+    const gmail = gmailRow(
+      mailboxes({
+        mailboxes: [
+          box({ status: "needs_reauthorisation", statusReason: "The provider withdrew the permission." }),
+        ],
+      }),
+    );
     expect(gmail.badge).toBe("Needs authorising again");
     expect(gmail.note).toMatch(/withdrew the permission/);
-    expect(gmail.actions[0]?.label).toBe("Authorise again");
+    expect(gmail.actions.some((a) => a.label === "Authorise again")).toBe(true);
   });
 
   /*
-   * The gap, named. Nothing reads a mailbox yet — no endpoint, no worker, nothing writes
-   * `last_synced_at` — so a "Syncing" badge or a "Sync now" button would be a control with no
-   * mechanism behind it.
+   * "Syncing" is not banned — it is *earned*. These six cases are the whole rule: the word appears
+   * when the server says a run is active, and never because a client inferred it. Each state is
+   * asserted against what the backend reported, so the day the reader lands nothing here has to be
+   * rewritten: the fixtures simply start reporting a different state.
    */
-  it("says what is not available yet rather than offering a sync that does not exist", () => {
-    const space = connectionsSpace(connected(), READY, null);
-    const missing = space.blocks.find((b) => b.id === "sync-unavailable");
-    expect(missing?.type).toBe("missing");
-    const text = missing?.type === "missing" ? missing.items.map((i) => i.text).join(" ") : "";
-    expect(text).toMatch(/Reading messages from a connected mailbox/);
-    const everything = JSON.stringify(space);
-    expect(everything).not.toMatch(/"Syncing"/);
-    expect(everything).not.toMatch(/Sync now/);
+  describe("reading state, and only what the server confirms", () => {
+    it("says reading has not started, for a connected mailbox with no reader", () => {
+      const gmail = gmailRow(connected());
+      expect(gmail.badge).toBe("Connected");
+      expect(gmail.note).toMatch(/Reading has not started/);
+      // And the control is offered, disabled, with the server's reason — never hidden (§34).
+      const start = gmail.actions.find((a) => a.stepId === `sync:${MAILBOX}`)!;
+      expect(start.disabledReason).toBe("Nothing reads a mailbox in this deployment yet.");
+    });
+
+    it("never says Syncing unless the server reports a run", () => {
+      expect(JSON.stringify(connectionsSpace(connected(), READY, null))).not.toContain("Syncing");
+    });
+
+    it("says Syncing while the server reports a run genuinely active", () => {
+      const gmail = gmailRow(
+        mailboxes({
+          mailboxes: [
+            box({}, { state: "syncing", runId: "50000000-0000-4000-8000-000000000009", canStart: false, cannotStartReason: "A read is already running." }),
+          ],
+        }),
+      );
+      expect(gmail.badge).toBe("Syncing");
+      expect(gmail.badgeTone).toBe("active");
+      expect(gmail.note).toMatch(/Reading messages now/);
+    });
+
+    it("shows the real error and a retry when a sync failed", () => {
+      const gmail = gmailRow(
+        mailboxes({
+          mailboxes: [
+            box({}, {
+              state: "failed",
+              error: "Google refused the request: insufficient scope.",
+              canStart: true,
+              cannotStartReason: null,
+            }),
+          ],
+        }),
+      );
+      expect(gmail.badge).toBe("Sync stopped");
+      expect(gmail.note).toContain("Google refused the request: insufficient scope.");
+      const retry = gmail.actions.find((a) => a.stepId === `sync:${MAILBOX}`)!;
+      expect(retry.label).toBe("Try reading again");
+      expect(retry.disabledReason).toBeNull();
+    });
+
+    it("says when it last synced, once one has genuinely finished", () => {
+      const gmail = gmailRow(
+        mailboxes({
+          mailboxes: [
+            box({ lastSyncedAt: "2026-08-20T09:00:00.000Z" }, {
+              state: "idle",
+              lastSyncedAt: "2026-08-20T09:00:00.000Z",
+              canStart: true,
+              cannotStartReason: null,
+            }),
+          ],
+        }),
+      );
+      expect(gmail.badge).toBe("Connected");
+      expect(gmail.note).toMatch(/Last synced/);
+    });
+
+    it("never lets a disconnected mailbox look connected, or look like it is reading", () => {
+      const gmail = gmailRow(
+        mailboxes({
+          mailboxes: [box({ status: "disconnected" }, { state: "syncing", runId: "50000000-0000-4000-8000-000000000009" })],
+        }),
+      );
+      /*
+       * Disconnected outranks everything, including a sync row that still says "syncing": the
+       * mailbox is not a live connection, so the provider reads as not connected, nothing offers
+       * to read it, and the word "Syncing" does not appear anywhere.
+       */
+      expect(gmail.badge).toBe("Not connected");
+      expect(gmail.actions.some((a) => a.stepId === `sync:${MAILBOX}`)).toBe(false);
+      const space = connectionsSpace(
+        mailboxes({
+          mailboxes: [box({ status: "disconnected" }, { state: "syncing", runId: "50000000-0000-4000-8000-000000000009" })],
+        }),
+        READY,
+        null,
+      );
+      expect(JSON.stringify(space)).not.toContain("Syncing");
+      expect(space.status.label).toBe("0 connected");
+    });
+
+    /* The honest gap, while it is real — and it disappears on its own when a reader exists. */
+    it("names the missing reader only while the server says nothing can read", () => {
+      const withoutReader = connectionsSpace(connected(), READY, null);
+      expect(withoutReader.blocks.some((b) => b.id === "sync-unavailable")).toBe(true);
+
+      const withReader = connectionsSpace(
+        mailboxes({ mailboxes: [box({}, { state: "idle", canStart: true, cannotStartReason: null })] }),
+        READY,
+        null,
+      );
+      expect(withReader.blocks.some((b) => b.id === "sync-unavailable")).toBe(false);
+    });
   });
 
   it("passes on what a failed connect attempt said, in the server's words", () => {
@@ -201,16 +298,16 @@ describe("the Activity Space", () => {
     expect(text).not.toMatch(/Needs you/);
     expect(text).not.toMatch(/"Waiting"/);
     expect(text).not.toMatch(/"Completed"/);
-    const rows = space.blocks.find((b) => b.id === "group-work");
+    const rows = space.blocks.find((b) => b.id === "group-stopped");
     if (rows?.type !== "rows") throw new Error("expected rows");
-    expect(rows.label).toBe("Stopped for a person");
+    expect(rows.label).toBe("Stopped");
     expect(rows.rows[0]?.badge).toBe("Stopped");
   });
 
   /* The promise, enforced: a stopped run leads to the work a person owns, first. */
   it("sends a stopped run to the work a person owns", () => {
     const space = activitySpace(runList(), READY, JOB_FILTERS, "all");
-    const rows = space.blocks.find((b) => b.id === "group-work");
+    const rows = space.blocks.find((b) => b.id === "group-stopped");
     if (rows?.type !== "rows") throw new Error("expected rows");
     const actions = rows.rows[0]!.actions;
     expect(actions[0]?.label).toBe("Open the work →");
@@ -218,23 +315,61 @@ describe("the Activity Space", () => {
     expect(actions[0]?.to?.spaceKind).toBe("work_item");
   });
 
+  /*
+   * The whole rule, in one test: a run has exactly three words, and "waiting" is not one of them.
+   * A run that cannot continue until an outside party answers is still open, so it reads Working,
+   * and who must respond is supporting text — never the status.
+   */
+  it("gives a run waiting on an outside party the Working status, and names who must respond", () => {
+    const waiting = runList({
+      groups: [
+        {
+          key: "working",
+          title: "ignored",
+          items: [
+            {
+              ...runList().groups[0]!.items[0]!,
+              run: { ...runList().groups[0]!.items[0]!.run, status: "paused", ended_at: null },
+              group: "working",
+              needsPerson: false,
+              waitingFor: "Jubilee must respond before this continues.",
+            },
+          ],
+        },
+      ],
+      counts: { all: 1, working: 1, stopped: 0, finished: 0 },
+    });
+    const space = activitySpace(waiting, READY, JOB_FILTERS, "all");
+    const rows = space.blocks.find((b) => b.id === "group-working");
+    if (rows?.type !== "rows") throw new Error("expected rows");
+    expect(rows.label).toBe("Working");
+    expect(rows.rows[0]?.badge).toBe("Working");
+    expect(rows.rows[0]?.note).toContain("Jubilee must respond before this continues.");
+  });
+
+  it("uses exactly three words for a run, and never a party as a status", () => {
+    const every = JSON.stringify([
+      activitySpace(runList(), READY, JOB_FILTERS, "all"),
+      activitySpace(runList({ groups: [] }), READY, JOB_FILTERS, "all"),
+    ]);
+    for (const banned of ["Waiting on someone else", "Stopped for a person", "Paused", "Couldn't finish", "Running"]) {
+      expect(every, banned).not.toContain(banned);
+    }
+    expect(JOB_FILTERS.map((f) => f.label)).toEqual(["All", "Working", "Stopped", "Finished"]);
+  });
+
   it("states a run's derived progress in words rather than drawing a bar", () => {
     const space = activitySpace(runList(), READY, JOB_FILTERS, "all");
-    const rows = space.blocks.find((b) => b.id === "group-work");
+    const rows = space.blocks.find((b) => b.id === "group-stopped");
     if (rows?.type !== "rows") throw new Error("expected rows");
     expect(rows.rows[0]?.note).toMatch(/40% of its steps/);
   });
 
   it("offers the five job filters, with counts from the same read", () => {
-    const space = activitySpace(runList(), READY, JOB_FILTERS, "work");
-    expect(space.filters.map((f) => f.label)).toEqual([
-      "All",
-      "Working",
-      "Waiting on someone else",
-      "Stopped for a person",
-      "Finished",
-    ]);
-    expect(space.filters.find((f) => f.id === "work")?.active).toBe(true);
+    const space = activitySpace(runList(), READY, JOB_FILTERS, "stopped");
+    // Exactly three words, plus "everything still open".
+    expect(space.filters.map((f) => f.label)).toEqual(["All", "Working", "Stopped", "Finished"]);
+    expect(space.filters.find((f) => f.id === "stopped")?.active).toBe(true);
     expect(space.filters.find((f) => f.id === "all")?.count).toBe(1);
   });
 

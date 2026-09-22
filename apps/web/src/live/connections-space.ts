@@ -24,18 +24,32 @@ import { formatSince } from "../components/status/slots.js";
 /* ---- Connections ------------------------------------------------------------------------- */
 
 /**
- * What a mailbox's state is called, and what the words are allowed to claim.
+ * What a mailbox is called, from what the **server** confirms — never inferred here.
  *
- * There is no "Syncing". Nothing in this product reads a mailbox yet — no endpoint, no worker, and
- * nothing writes `last_synced_at` — so a syncing state would be a word with no mechanism behind
- * it. `connectionsSpace` says so on the Space instead, which is the difference between a gap and
- * a lie.
+ * Six states, and which one applies is decided by two server-owned facts: the connection status,
+ * and `sync.state`. "Syncing" appears when, and only when, the server says a sync run is active.
+ * That is the whole rule: the word is not banned, it is *earned*. Until a reader exists the server
+ * answers `never`, and a connected mailbox says plainly that reading has not started.
  */
-const MAILBOX_WORDS: Readonly<Record<string, { label: string; tone: SpaceTone }>> = {
-  connected: { label: "Connected", tone: "active" },
-  needs_reauthorisation: { label: "Needs authorising again", tone: "attention" },
-  disconnected: { label: "Disconnected", tone: "neutral" },
-};
+function mailboxWords(mailbox: {
+  status: string;
+  sync: { state: string; lastSyncedAt: string | null; error: string | null };
+}): { label: string; tone: SpaceTone } {
+  /*
+   * A disconnected mailbox never reaches here — it is not a live connection, so its provider row
+   * reads "Not connected" like any other. What matters is that no disconnected mailbox can be
+   * described as connected or as reading, whatever its sync row happens to say.
+   */
+  if (mailbox.status === "needs_reauthorisation") {
+    return { label: "Needs authorising again", tone: "attention" };
+  }
+  if (mailbox.sync.state === "syncing") return { label: "Syncing", tone: "active" };
+  if (mailbox.sync.state === "failed") return { label: "Sync stopped", tone: "attention" };
+  if (mailbox.sync.state === "idle" && mailbox.sync.lastSyncedAt !== null) {
+    return { label: "Connected", tone: "active" };
+  }
+  return { label: "Connected", tone: "active" };
+}
 
 export function connectionsSpace(
   response: MailboxesResponse | undefined,
@@ -94,17 +108,27 @@ export function connectionsSpace(
   const rows: SpaceRow[] = response.providers.map((provider) => {
     const mine = live.filter((m) => m.provider === provider.id);
     const mailbox = mine[0];
-    const words = mailbox ? MAILBOX_WORDS[mailbox.status] : undefined;
+    const words = mailbox ? mailboxWords(mailbox) : undefined;
 
     const notes: string[] = [];
     if (mailbox) {
       notes.push(mailbox.emailAddress);
       if (mailbox.statusReason !== null) notes.push(mailbox.statusReason);
-      notes.push(
-        mailbox.lastSyncedAt === null
-          ? "No messages read yet"
-          : `Last read ${formatSince(mailbox.lastSyncedAt)}`,
-      );
+      /*
+       * What reading is doing, in the server's own terms. A failure carries the error itself,
+       * because "something went wrong" is not something a person can act on.
+       */
+      if (mailbox.status === "disconnected") {
+        notes.push("Nothing is being read.");
+      } else if (mailbox.sync.state === "syncing") {
+        notes.push("Reading messages now");
+      } else if (mailbox.sync.state === "failed") {
+        notes.push(mailbox.sync.error ?? "The last read did not finish.");
+      } else if (mailbox.sync.lastSyncedAt !== null) {
+        notes.push(`Last synced ${formatSince(mailbox.sync.lastSyncedAt)}`);
+      } else {
+        notes.push("Connected. Reading has not started.");
+      }
     } else if (!provider.available) {
       /*
        * The reason itself belongs beside the disabled control, not here: §34 puts a guard's words
@@ -117,6 +141,23 @@ export function connectionsSpace(
 
     const actions: SpaceFrameAction[] = [];
     if (mailbox) {
+      /*
+       * Starting or retrying a read. Offered whenever the server says it can be, disabled with the
+       * server's own reason when it cannot — including the honest one, that nothing reads a
+       * mailbox in this deployment yet.
+       */
+      if (mailbox.status !== "disconnected") {
+        actions.push({
+          verb: "prepare",
+          label: mailbox.sync.state === "failed" ? "Try reading again" : "Read the mailbox",
+          to: null,
+          stepId: `sync:${mailbox.id}`,
+          disabledReason: mailbox.sync.canStart
+            ? null
+            : (mailbox.sync.cannotStartReason ?? "This cannot be started right now."),
+          notPermittedReason: null,
+        });
+      }
       actions.push({
         verb: "exception",
         label: mailbox.status === "connected" ? "Disconnect" : "Authorise again",
@@ -183,27 +224,34 @@ export function connectionsSpace(
   }
 
   /*
-   * The gap, named. Authorising a mailbox records the connection; nothing reads it afterwards,
-   * because no sync exists — no endpoint, no worker job, and nothing writes `last_synced_at`. A
-   * "Syncing" badge or a "Sync now" button here would be a control with no mechanism behind it.
+   * The gap, named — but only while it is real.
+   *
+   * This block appears when the server says no mailbox can start a read. The moment the sync
+   * worker lands, `canStart` becomes true for a connected mailbox and this disappears on its own:
+   * the message is a consequence of the backend's state, not a fixed sentence someone has to
+   * remember to delete.
    */
-  blocks.push({
-    id: "sync-unavailable",
-    type: "missing",
-    label: "NOT AVAILABLE YET",
-    items: [
-      {
-        text: "Reading messages from a connected mailbox. Authorising records the connection and nothing reads it yet, so there is no sync to start, pause or show progress for.",
-      },
-      {
-        text: "An initial import of past messages. It needs the same reader, so it cannot be offered before it exists.",
-      },
-    ],
-    evidence: [],
-    actions: [],
-    state: "ready",
-    stateNote: null,
-  });
+  const readerMissing =
+    live.length > 0 && live.every((m) => !m.sync.canStart && m.sync.state === "never");
+  if (readerMissing) {
+    blocks.push({
+      id: "sync-unavailable",
+      type: "missing",
+      label: "NOT AVAILABLE YET",
+      items: [
+        {
+          text: "Reading messages from a connected mailbox. Authorising records the connection, and nothing reads it yet — so there is no sync to start or show progress for.",
+        },
+        {
+          text: "An initial import of past messages. It needs the same reader, so it cannot be offered before that exists.",
+        },
+      ],
+      evidence: [],
+      actions: [],
+      state: "ready",
+      stateNote: null,
+    });
+  }
 
   blocks.push({
     id: "what-is-connected",
@@ -398,12 +446,18 @@ function runRow(item: RunListResponse["groups"][number]["items"][number]): Space
     });
   }
 
+  /*
+   * Three words, and the group already decided which. A run waiting on an outside party is still
+   * open, so it is Working — `waitingFor` carries the supporting sentence ("Jubilee must respond
+   * before this continues"), and naming the party as a *state* is the human-work layer's job.
+   */
   return {
     id: item.run.id,
     title: item.run.title,
     note: notes.join(" · "),
-    badge: item.needsPerson ? "Stopped" : item.run.ended_at === null ? "Working" : "Finished",
-    badgeTone: item.needsPerson ? "attention" : item.run.ended_at === null ? "active" : "done",
+    badge: RUN_GROUP_LABELS[item.group],
+    badgeTone:
+      item.group === "stopped" ? "attention" : item.group === "working" ? "active" : "done",
     why: item.run.next_step,
     related: null,
     actions,
@@ -474,8 +528,12 @@ export function runSpace(
     };
   }
 
-  const ended = detail.run.ended_at !== null;
-  const stopped = detail.run.status === "paused" || detail.run.status === "could_not_finish" || detail.run.status === "stopped";
+  /*
+   * `paused` is **not** stopped: it is a run still open, waiting on an outside party. It reads as
+   * Working, and `waitingFor` says who must respond.
+   */
+  const stopped = detail.run.status === "could_not_finish" || detail.run.status === "stopped";
+  const ended = detail.run.status === "finished";
 
   /* The work this run belongs to, so a person always reaches something they own. */
   const related: SpaceRef[] = detail.relatedWork
