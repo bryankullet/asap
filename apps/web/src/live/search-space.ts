@@ -85,6 +85,7 @@ export function searchSpace(
       "Clients, policies, work, claims, documents, email, insurers and runs — everything your role can see, and nothing it cannot.",
     filters: [] as SpaceFilter[],
     related: [] as SpaceRef[],
+    region: null,
     actions: [],
     evidence: [],
     permission: { canAssign: false, canApprove: false, note: null },
@@ -195,6 +196,7 @@ function rowFor(hit: SearchResponse["results"][number]): SpaceRow {
     badgeTone: "neutral",
     why: null,
     related: ref,
+    region: null,
     actions: [
       {
         verb: "open",

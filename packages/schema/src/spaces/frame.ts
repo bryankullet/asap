@@ -152,6 +152,14 @@ export const SpaceBlockType = z.enum([
    * the validated creation API.
    */
   "form",
+  /*
+   * Added in Increment 4A-2, for evidence that has coordinates.
+   *
+   * A citation you cannot open is not a citation, and "page 2" is not an answer to *where on the
+   * page*. The `document` block shows a page's text with the read lines highlighted; this shows
+   * the rectangle itself, drawn at the page's own scale. Neither expresses the other.
+   */
+  "evidence_region",
 ]);
 export type SpaceBlockType = z.infer<typeof SpaceBlockType>;
 
@@ -205,6 +213,28 @@ export const spaceRowSchema = z.object({
   why: z.string().max(600).nullable().default(null),
   /** The Space this row is about, so Related and the tab strip agree on one identity. */
   related: spaceRefSchema.nullable().default(null),
+  /**
+   * Where on a page this row's value was read from, when the extractor placed it.
+   *
+   * Revealed by the row itself, like `why`, rather than by an action: showing a rectangle is an
+   * interface reveal and not a business verb, and the verb list stays finite because of it.
+   */
+  region: z
+    .object({
+      what: z.string().min(1).max(200),
+      pageNumber: z.number().int().min(1),
+      pageWidth: z.number().positive().nullable(),
+      pageHeight: z.number().positive().nullable(),
+      rect: z.object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number().positive(),
+        height: z.number().positive(),
+      }),
+      fileUrl: z.string().max(2000).nullable(),
+    })
+    .nullable()
+    .default(null),
   actions: z.array(spaceFrameActionSchema).max(4).default([]),
   evidence: z.array(spaceEvidenceSchema).max(4).default([]),
 });
@@ -304,6 +334,17 @@ export const spaceFrameBlockSchema = z.discriminatedUnion("type", [
     type: z.literal("upload"),
     prompt: z.string().min(1).max(300),
     multiple: z.boolean().default(true),
+    /**
+     * What this deployment accepts, from the server's own limits — never a guess.
+     *
+     * `accept` narrows the picker; `maxBytes` lets the screen refuse a file before a person waits
+     * for an upload that the API would reject at the end. Both are stated, so a file the extractor
+     * cannot read is still filed and simply never described as read.
+     */
+    accept: z.string().max(400).default(""),
+    maxBytes: z.number().int().positive().nullable().default(null),
+    /** True while bytes are moving: the picker is replaced by progress and a way to stop. */
+    busy: z.boolean().default(false),
     progress: z
       .array(
         z.object({
@@ -389,6 +430,32 @@ export const spaceFrameBlockSchema = z.discriminatedUnion("type", [
     submitLabel: z.string().min(1).max(80),
     /** True while the request is in flight: the button disables itself, so one click is one write. */
     busy: z.boolean().default(false),
+  }),
+  /**
+   * Where on the page a value was read from.
+   *
+   * Drawn at the page's own scale when the extractor recorded the page's size, and against a
+   * standard page with that assumption stated when it did not. The rectangle is always exactly
+   * what was recorded: a region is never widened to look tidy, and never invented for a value
+   * that has no placement.
+   */
+  z.object({
+    ...blockEnvelope,
+    type: z.literal("evidence_region"),
+    /** What was read there, in the words on the row it belongs to. */
+    what: z.string().min(1).max(200),
+    pageNumber: z.number().int().min(1),
+    /** The page's own size, when the extractor recorded it. Null means the drawing is an estimate. */
+    pageWidth: z.number().positive().nullable(),
+    pageHeight: z.number().positive().nullable(),
+    region: z.object({
+      x: z.number(),
+      y: z.number(),
+      width: z.number().positive(),
+      height: z.number().positive(),
+    }),
+    /** A link that opens the file at that page. Null when no signed link is available. */
+    fileUrl: z.string().max(2000).nullable().default(null),
   }),
   z.object({
     ...blockEnvelope,

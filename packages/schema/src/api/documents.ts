@@ -124,7 +124,24 @@ export const documentFiledResponseSchema = z.object({
 });
 export type DocumentFiledResponse = z.infer<typeof documentFiledResponseSchema>;
 
-export const documentsResponseSchema = z.object({ documents: z.array(documentSummarySchema) });
+/**
+ * What this deployment will accept, so the browser can say so before a person waits for an upload.
+ *
+ * The server enforces both and always has; what it did not do was *tell* anyone, so the screen
+ * could only find out by uploading a 60MB scan and being refused at the end. These are the
+ * server's own values — the browser states them and never invents one.
+ */
+export const uploadLimitsSchema = z.object({
+  maxBytes: z.number().int().positive(),
+  /** Media types the extractor can read. A file outside this is accepted but never read. */
+  readableMimeTypes: z.array(z.string()).default([]),
+});
+export type UploadLimits = z.infer<typeof uploadLimitsSchema>;
+
+export const documentsResponseSchema = z.object({
+  documents: z.array(documentSummarySchema),
+  limits: uploadLimitsSchema,
+});
 export type DocumentsResponse = z.infer<typeof documentsResponseSchema>;
 
 /**

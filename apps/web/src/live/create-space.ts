@@ -384,6 +384,7 @@ function candidates(
         badgeTone: "neutral",
         why: null,
         related: null,
+        region: null,
         actions:
           r.action === undefined
             ? []

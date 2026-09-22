@@ -165,6 +165,7 @@ export function todaySpace(
     context: null,
     filters: [] as SpaceFilter[],
     related: [] as SpaceRef[],
+    region: null,
     actions: [] as SpaceFrameAction[],
     evidence: [],
     permission: { canAssign: false, canApprove: false, note: null },
@@ -337,6 +338,7 @@ function quickRow(id: string, title: string, note: string, path: string, label: 
     badgeTone: "neutral",
     why: null,
     related: null,
+    region: null,
     actions: [quickAction(label, path)],
     evidence: [],
   };
@@ -357,6 +359,7 @@ function attentionRow(row: AttentionResponse["items"][number]): SpaceRow {
      */
     why: `${row.reason} ${row.signals.map((s) => s.because).join(" ")}`.trim(),
     related: refForWorkItem(row.item, row.links),
+    region: null,
     actions: [openAction(row.item, row.links)],
     evidence: evidenceFor(row.facts),
   };
@@ -428,6 +431,7 @@ export function workSpace(
     context: null,
     filters,
     related: [] as SpaceRef[],
+    region: null,
     actions: [] as SpaceFrameAction[],
     evidence: [],
     permission: {
@@ -537,6 +541,7 @@ function workRow(
     badgeTone: toneForWork(row),
     why: `${row.reason} ${row.signals.map((s) => s.because).join(" ")}`.trim(),
     related: refForWorkItem(row.item, row.links),
+    region: null,
     actions,
     evidence: evidenceFor(row.facts),
   };

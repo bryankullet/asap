@@ -27,9 +27,15 @@ vi.mock("../lib/supabase.js", () => ({
  */
 
 const ME = {
-  user: { id: "u1", email: "a@b.test", display_name: "Amina", full_name: null },
+  user: { id: "90000000-0000-4000-8000-000000000001", email: "a@b.test", display_name: "Amina", full_name: null },
   memberships: [],
-  active_organization: { id: "o1", name: "Acme", country: "KE", currency: "KES", timezone: "UTC" },
+  active_organization: {
+    id: "10000000-0000-4000-8000-00000000000a",
+    name: "Acme",
+    country: "KE",
+    currency: "KES",
+    timezone: "UTC",
+  },
   permissions: [],
 };
 
@@ -94,7 +100,7 @@ function stubApi(uploadOutcome: "ready" | "already_on_file" = "ready") {
       new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
     if (method === "POST") posted.push({ url: u, body: JSON.parse(String((init as RequestInit).body ?? "{}")) });
     if (u.endsWith("/me")) return json(ME);
-    if (u.endsWith("/documents") && method === "GET") return json({ documents: [] });
+    if (u.endsWith("/documents") && method === "GET") return json({ documents: [], limits: { maxBytes: 26214400, readableMimeTypes: ["application/pdf"] } });
     if (u.endsWith("/documents") && method === "POST") {
       return json(
         uploadOutcome === "already_on_file"
@@ -159,7 +165,7 @@ describe("uploading a document", () => {
     await waitFor(() =>
       expect(screen.getByText(/The file store could not be reached/)).toBeInTheDocument(),
     );
-    expect(screen.getByText(/Nothing was filed/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Nothing was filed/).length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(puts).toHaveLength(2));

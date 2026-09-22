@@ -133,6 +133,20 @@ const DOCUMENT_SUMMARY_COLUMNS =
   "id, organization_id, client_id, work_item_id, kind, filename, mime_type, byte_size, storage_path, page_count, extraction_state, extraction_error, created_at";
 
 /**
+ * What our extractor can actually open (`apps/extractor/src/asap_extractor/extract.py`).
+ *
+ * A file outside this list is still accepted and still stored — a brokerage may file anything —
+ * but nothing will read it, and the screen says so instead of leaving it queued for ever.
+ */
+const READABLE_MIME_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/tiff",
+  "image/bmp",
+] as const;
+
+/**
  * Fields whose values are amounts, and so compare as numbers rather than as text.
  *
  * A schedule prints `214,500.00`; the column holds `214500.00`. Comparing those as strings made
@@ -286,7 +300,10 @@ export function documentRoutes(deps: {
     const { data, error } = await q.order("created_at", { ascending: false }).limit(100);
     if (error) return sendError(c, mapDatabaseError(error));
     return c.json(
-      documentsResponseSchema.parse({ documents: ((data ?? []) as DocumentRow[]).map(summarise) }),
+      documentsResponseSchema.parse({
+        documents: ((data ?? []) as DocumentRow[]).map(summarise),
+        limits: { maxBytes: deps.maxUploadBytes, readableMimeTypes: READABLE_MIME_TYPES },
+      }),
     );
   });
 

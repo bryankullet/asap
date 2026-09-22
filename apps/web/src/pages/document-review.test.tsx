@@ -34,9 +34,15 @@ vi.mock("../lib/supabase.js", () => ({
 const DOC = "90000000-0000-4000-8000-00000000000a";
 
 const ME = {
-  user: { id: "u1", email: "a@b.test", display_name: "Amina", full_name: null },
+  user: { id: "90000000-0000-4000-8000-000000000001", email: "a@b.test", display_name: "Amina", full_name: null },
   memberships: [],
-  active_organization: { id: "o1", name: "Acme", country: "KE", currency: "KES", timezone: "UTC" },
+  active_organization: {
+    id: "10000000-0000-4000-8000-00000000000a",
+    name: "Acme",
+    country: "KE",
+    currency: "KES",
+    timezone: "UTC",
+  },
   permissions: [],
 };
 
@@ -106,16 +112,19 @@ describe("what a person is told about a document", () => {
   it("never calls an unread upload read", async () => {
     stubApi(detail({ document: { extractionState: "not_started" }, fields: [] }));
     await open();
-    await waitFor(() => expect(screen.getByText("Uploaded")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Uploaded").length).toBeGreaterThan(0));
     expect(screen.queryByText("Ready for review")).toBeNull();
+    // Said plainly, not implied by the absence of anything else.
+    expect(screen.getByText("On file. Nothing has read it yet")).toBeInTheDocument();
     // And nothing offers to re-read something that has not been read once.
-    expect(screen.queryByRole("button", { name: /Try reading it again/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Read it again/ })).toBeNull();
   });
 
   it("says Queued and Reading while the machine has it", async () => {
     stubApi(detail({ document: { extractionState: "queued" }, fields: [] }));
     await open();
-    await waitFor(() => expect(screen.getByText("Queued")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Queued").length).toBeGreaterThan(0));
+    expect(screen.getByText(/Nothing has been read from it yet/)).toBeInTheDocument();
   });
 
   it("says Conflict found ahead of anything else, and keeps both readings", async () => {
@@ -128,15 +137,19 @@ describe("what a person is told about a document", () => {
       }),
     );
     await open();
-    await waitFor(() => expect(screen.getByText("Conflict found")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Conflict found").length).toBeGreaterThan(0));
     expect(screen.queryByText("Missing information")).toBeNull();
+    // Both readings are kept: neither is chosen for the person.
+    expect(screen.getByText(/two readings disagree/i)).toBeInTheDocument();
   });
 
   it("counts what is waiting for a person", async () => {
     stubApi(detail({ fields: [field(), field({ id: "91000000-0000-4000-8000-00000000000b" })] }));
     await open();
-    await waitFor(() => expect(screen.getByText("Ready for review")).toBeInTheDocument());
-    expect(screen.getByText("2 values waiting for you")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("Ready for review").length).toBeGreaterThan(0));
+    // The count is on the facts and in the sentence, both from the same derived number.
+    expect(screen.getByText("AWAITING A DECISION")).toBeInTheDocument();
+    expect(screen.getByText(/2 values were read/)).toBeInTheDocument();
   });
 });
 
@@ -148,11 +161,12 @@ describe("a failed read can be tried again", () => {
     });
     stubApi(body);
     await open();
-    await waitFor(() => expect(screen.getByText("Failed")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Failed").length).toBeGreaterThan(0));
     expect(screen.getByText(/The extractor could not be reached/)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing is uploaded again/)).toBeInTheDocument();
+    // The file is not sent again: the same stored object is read a second time.
+    expect(screen.getByText(/re-reads the same file/)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: /Try reading it again/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Read it again/ }));
     await waitFor(() =>
       expect(posted.some((u) => u.includes(`/documents/${DOC}/extraction/retry`))).toBe(true),
     );
@@ -161,8 +175,8 @@ describe("a failed read can be tried again", () => {
   it("offers no retry once it has been read", async () => {
     stubApi(detail());
     await open();
-    await waitFor(() => expect(screen.getByText("Ready for review")).toBeInTheDocument());
-    expect(screen.queryByRole("button", { name: /Try reading it again/ })).toBeNull();
+    await waitFor(() => expect(screen.getAllByText("Ready for review").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: /Read it again/ })).toBeNull();
   });
 });
 
@@ -170,7 +184,7 @@ describe("a citation you cannot open is not a citation", () => {
   it("draws the region a value was read from, at that page's own scale", async () => {
     stubApi(detail());
     await open();
-    const show = await screen.findByRole("button", { name: /Show where it was read · page 1/ });
+    const show = await screen.findByRole("button", { name: "Show where" });
     await userEvent.click(show);
 
     const drawing = await screen.findByRole("img", {
@@ -194,9 +208,10 @@ describe("a citation you cannot open is not a citation", () => {
     stubApi(detail({ fields: [field({ page: null, region: null, fieldKey: "sum_insured" })] }));
     await open();
     await waitFor(() =>
-      expect(screen.getByText("ASAP could not place this on a page.")).toBeInTheDocument(),
+      expect(screen.getByText(/ASAP could not place this on a page/)).toBeInTheDocument(),
     );
-    expect(screen.queryByRole("button", { name: /Show where it was read/ })).toBeNull();
+    // No reveal at all, rather than one that opens an invented page.
+    expect(screen.queryByRole("button", { name: "Show where" })).toBeNull();
   });
 });
 
@@ -428,7 +443,7 @@ describe("applying a document to a record", () => {
   it("offers nothing to apply while every value is still only proposed", async () => {
     stubApplyApi(detail());
     await open();
-    await waitFor(() => expect(screen.getByText("Ready for review")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText("Ready for review").length).toBeGreaterThan(0));
     expect(screen.queryByRole("button", { name: "Apply to this" })).toBeNull();
   });
 });

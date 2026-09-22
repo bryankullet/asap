@@ -59,6 +59,7 @@ const SAMPLES: { [T in SpaceFrameBlock["type"]]: Extract<SpaceFrameBlock, { type
           title: "Confirm cover with CIC",
           label: "PLACEMENT",
         },
+        region: null,
         actions: [],
         evidence: [],
       },
@@ -148,6 +149,9 @@ const SAMPLES: { [T in SpaceFrameBlock["type"]]: Extract<SpaceFrameBlock, { type
     type: "upload",
     prompt: "Add the insurer's schedule",
     multiple: true,
+    accept: "application/pdf,image/png",
+    maxBytes: 52_428_800,
+    busy: false,
     progress: [{ name: "schedule.pdf", state: "reading", percent: 40, tone: "active" }],
   },
   assignment: {
@@ -216,6 +220,17 @@ const SAMPLES: { [T in SpaceFrameBlock["type"]]: Extract<SpaceFrameBlock, { type
         notPermittedReason: null,
       },
     ],
+  },
+  evidence_region: {
+    ...envelope,
+    id: "region",
+    type: "evidence_region",
+    what: "Sum insured",
+    pageNumber: 2,
+    pageWidth: 595,
+    pageHeight: 842,
+    region: { x: 100, y: 200, width: 180, height: 24 },
+    fileUrl: "https://storage.example.invalid/signed",
   },
   timeline: {
     ...envelope,
@@ -370,6 +385,55 @@ describe("every registered block renders what it was given", () => {
     const { container } = await renderInRouter(<SpaceBlockView block={SAMPLES.upload} />);
     expect(screen.getByText(/Nothing is saved until you confirm/)).toBeInTheDocument();
     expect((container.querySelector(".sp-progress-fill") as HTMLElement).style.width).toBe("40%");
+    // The server's own limit, stated before a person waits for a transfer that would be refused.
+    expect(screen.getByText(/Up to 50 MB/)).toBeInTheDocument();
+  });
+
+  it("upload: refuses a file over the server's limit without uploading it", async () => {
+    const picked: unknown[] = [];
+    const withPicker = {
+      ...SAMPLES.upload,
+      maxBytes: 10,
+      actions: [
+        {
+          verb: "prepare" as const,
+          label: "Choose files",
+          to: null,
+          stepId: "pick",
+          disabledReason: null,
+          notPermittedReason: null,
+        },
+      ],
+    };
+    await renderInRouter(<SpaceBlockView block={withPicker} onAct={(a) => picked.push(a)} />);
+    const input = screen.getByLabelText("Add the insurer's schedule") as HTMLInputElement;
+    await userEvent.upload(input, new File(["far too many bytes"], "big.pdf", { type: "application/pdf" }));
+    expect(picked).toEqual([]);
+    expect(screen.getByRole("alert")).toHaveTextContent(/larger than this deployment accepts/);
+  });
+
+  it("upload: hands a chosen file to the page rather than uploading it itself", async () => {
+    const picked: { files?: File[] }[] = [];
+    const withPicker = {
+      ...SAMPLES.upload,
+      actions: [
+        {
+          verb: "prepare" as const,
+          label: "Choose files",
+          to: null,
+          stepId: "pick",
+          disabledReason: null,
+          notPermittedReason: null,
+        },
+      ],
+    };
+    await renderInRouter(
+      <SpaceBlockView block={withPicker} onAct={(a) => picked.push(a as { files?: File[] })} />,
+    );
+    const input = screen.getByLabelText("Add the insurer's schedule") as HTMLInputElement;
+    await userEvent.upload(input, new File(["x"], "schedule.pdf", { type: "application/pdf" }));
+    expect(picked).toHaveLength(1);
+    expect(picked[0]?.files?.[0]?.name).toBe("schedule.pdf");
   });
 
   it("assignment: offers owner and due date, and says what assignment does not do", async () => {
@@ -397,6 +461,38 @@ describe("every registered block renders what it was given", () => {
     expect(screen.getByText("12 AUG")).toBeInTheDocument();
     expect(screen.getByText("Cover requested from CIC")).toBeInTheDocument();
     expect(screen.getByText("Request email")).toBeInTheDocument();
+  });
+});
+
+describe("the evidence region block", () => {
+  it("draws the region at the page's own scale", async () => {
+    const { container } = await renderInRouter(<SpaceBlockView block={SAMPLES.evidence_region} />);
+    const svg = container.querySelector("svg")!;
+    // The page's own coordinates, so the rectangle lands where the extractor said it did.
+    expect(svg.getAttribute("viewBox")).toBe("0 0 595 842");
+    const mark = svg.querySelectorAll("rect")[1]!;
+    expect(mark.getAttribute("x")).toBe("100");
+    expect(mark.getAttribute("width")).toBe("180");
+  });
+
+  it("opens the file at that page", async () => {
+    await renderInRouter(<SpaceBlockView block={SAMPLES.evidence_region} />);
+    expect(screen.getByRole("link", { name: /Open the file at this page/ })).toHaveAttribute(
+      "href",
+      "https://storage.example.invalid/signed#page=2",
+    );
+  });
+
+  /* A region drawn to the wrong scale is a confident lie about where to look. */
+  it("says so when the page's size was never recorded, and keeps the region exact", async () => {
+    const { container } = await renderInRouter(
+      <SpaceBlockView
+        block={{ ...SAMPLES.evidence_region, pageWidth: null, pageHeight: null }}
+      />,
+    );
+    expect(screen.getByText(/drawn against a standard page/)).toBeInTheDocument();
+    expect(container.querySelector("svg")!.getAttribute("viewBox")).toBe("0 0 595 842");
+    expect(container.querySelectorAll("rect")[1]!.getAttribute("x")).toBe("100");
   });
 });
 

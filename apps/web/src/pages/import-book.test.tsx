@@ -114,10 +114,22 @@ const PREVIEW = {
   mappedByModel: [],
 };
 
+/*
+ * A valid `/me`. `api.ts` validates every response, so an organization id that is not a uuid
+ * fails the schema, `me.data` stays undefined and every query keyed on the organization is
+ * silently disabled — a screen that renders its loading state for ever and a test that proves
+ * nothing.
+ */
+const ORG = "10000000-0000-4000-8000-00000000000a";
 const ME = {
-  user: { id: "u1", email: "a@b.test", display_name: "Amina", full_name: null },
+  user: {
+    id: "90000000-0000-4000-8000-000000000001",
+    email: "a@b.test",
+    display_name: "Amina",
+    full_name: null,
+  },
   memberships: [],
-  active_organization: { id: "o1", name: "Acme", country: "KE", currency: "KES", timezone: "UTC" },
+  active_organization: { id: ORG, name: "Acme", country: "KE", currency: "KES", timezone: "UTC" },
   permissions: [],
 };
 
@@ -135,6 +147,9 @@ function stubApi(preview: unknown = PREVIEW) {
       new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
     if (u.endsWith("/me")) return json(ME);
     if (u.endsWith("/imports") && method === "GET") return json({ batches: [] });
+    if (u.endsWith("/documents")) {
+      return json({ documents: [], limits: { maxBytes: 52_428_800, readableMimeTypes: [] } });
+    }
     if (u.endsWith("/imports") && method === "POST") return json(preview);
     if (u.includes("/commit")) return json({ batch: PREVIEW.batch, failures: [] });
     return json({});
@@ -166,144 +181,222 @@ describe("choosing a file", () => {
   it("reads nothing until a person asks it to", async () => {
     stubApi();
     await renderScreen();
-    const user = userEvent.setup();
-    await user.upload(
-      screen.getByLabelText(/choose a file/i),
-      csvFile("book.csv", "Client\nAcme"),
-    );
-    await screen.findByText(/is ready to read/i);
-    // Choosing a file is not sending it. Nothing has been posted.
-    expect(posted).toEqual([]);
+    // Arriving sends nothing. The only POST that exists is the one a chosen file causes.
+    expect(posted.filter((p) => p.url.endsWith("/imports"))).toEqual([]);
+    // The promise is on the screen twice — as the block's heading and on the picker itself.
+    expect(screen.getAllByText(/Nothing is saved until you confirm/).length).toBeGreaterThan(0);
   });
 
   it("asks what the premium column means, and offers no default", async () => {
     stubApi();
     await renderScreen();
-    const select = screen.getByLabelText(/what is in it/i) as HTMLSelectElement;
+    const select = (await screen.findByLabelText(/WHAT IS IN IT/i)) as HTMLSelectElement;
+    // No default: guessing between gross and total payable misstates every premium in the book.
     expect(select.value).toBe("");
+    expect(within(select).getByRole("option", { name: /Gross premium/ })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: /total payable/ })).toBeInTheDocument();
+  });
+
+  it("refuses a file larger than the server accepts, before sending anything", async () => {
+    stubApi();
+    await renderScreen();
+    const user = userEvent.setup();
+    // The limit comes from the server, so wait until the screen has it before testing against it.
+    await screen.findByText(/Up to 50 MB/);
+    const huge = csvFile("huge.xlsx", "x");
+    Object.defineProperty(huge, "size", { value: 90_000_000 });
+    await user.upload(screen.getByLabelText(/Choose a file/i), huge);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/larger than this deployment accepts/);
+    expect(posted.filter((p) => p.url.endsWith("/imports"))).toEqual([]);
+  });
+
+  it("offers spreadsheets and CSV, not only CSV", async () => {
+    stubApi();
+    await renderScreen();
+    const picker = screen.getByLabelText(/Choose a file/i) as HTMLInputElement;
+    expect(picker.accept).toMatch(/csv/);
+    expect(picker.accept).toMatch(/spreadsheetml/);
   });
 });
 
-describe("the preview", () => {
-  async function openPreview(preview: unknown = PREVIEW) {
-    stubApi(preview);
+describe("what the preview says", () => {
+  const preview = async () => {
+    stubApi();
     await renderScreen();
     const user = userEvent.setup();
     await user.upload(
-      screen.getByLabelText(/choose a file/i),
-      csvFile("book.csv", "Client\nAcme"),
+      screen.getByLabelText(/Choose a file/i),
+      csvFile("book.csv", "Client,Branch Code\nTamarind,1"),
     );
-    await user.click(screen.getByRole("button", { name: /read the file/i }));
-    await screen.findByText(/what this would do/i);
-    return user;
-  }
+    await screen.findByText(/3 rows staged/);
+  };
 
   it("says what would happen without doing it", async () => {
-    await openPreview();
-    expect(screen.getByText(/nothing below has been written yet/i)).toBeTruthy();
+    await preview();
+    // Read, and nothing else: the only POST so far is the preview.
     expect(posted.filter((p) => p.url.includes("/commit"))).toEqual([]);
+    expect(screen.getByText("CLIENTS TO CREATE")).toBeInTheDocument();
   });
 
   it("shows every row, including the ones it could not read", async () => {
-    await openPreview();
-    // Scoped to the row table: the summary above it uses the same words as headings.
-    const table = screen.getByRole("table");
-    expect(within(table).getByText("New client")).toBeTruthy();
-    expect(within(table).getByText("Needs a decision")).toBeTruthy();
-    expect(within(table).getByText("Cannot be read")).toBeTruthy();
-    // The reason, in the person's own words, against the line of their own file.
-    expect(screen.getByText(/unquoted comma/i)).toBeTruthy();
+    await preview();
+    expect(screen.getByText("Tamarind Exporters Ltd")).toBeInTheDocument();
+    expect(screen.getByText("Mara")).toBeInTheDocument();
+    // The unreadable row is on the screen with its reason, not dropped — in the row list and
+    // again in the list of what cannot be written.
+    expect(screen.getAllByText(/Line 4/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/unquoted comma/).length).toBeGreaterThan(0);
   });
 
   it("names the candidates when a client is ambiguous rather than choosing one", async () => {
-    await openPreview();
-    expect(screen.getByText(/Mara Foods Limited, Mara Holdings Ltd/)).toBeTruthy();
+    await preview();
+    expect(screen.getByText(/Could be: Mara Foods Limited, Mara Holdings Ltd/)).toBeInTheDocument();
+    // And offers no way to pick one here: the preview is the server's reading of the file.
+    expect(screen.queryByRole("button", { name: /It is Mara/ })).toBeNull();
   });
 
   it("says which columns it did not use, rather than dropping them silently", async () => {
-    await openPreview();
-    expect(screen.getByText(/does not have a place for this column/i)).toBeTruthy();
-  });
-
-  it("offers to write only the rows that can be written", async () => {
-    await openPreview();
-    // One row of the three is writable; the button counts what it would actually do.
-    expect(screen.getByRole("button", { name: /import 1 rows/i })).toBeTruthy();
-  });
-
-  it("leaves a row out when a person unticks it, and says so in the count", async () => {
-    const user = await openPreview();
-    await user.click(screen.getByLabelText(/leave line 2 out/i));
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /import 0 rows/i })).toBeTruthy();
-    });
-  });
-
-  it("sends the lines a person left out when committing", async () => {
-    const user = await openPreview();
-    await user.click(screen.getByLabelText(/leave line 2 out/i));
-    // Nothing is writable now, so re-tick and commit to see what is sent.
-    await user.click(screen.getByLabelText(/leave line 2 out/i));
-    await user.click(screen.getByRole("button", { name: /import 1 rows/i }));
-    await waitFor(() => {
-      const commit = posted.find((p) => p.url.includes("/commit"));
-      expect(commit).toBeTruthy();
-      expect((commit!.body as { skipLineNumbers: number[] }).skipLineNumbers).toEqual([]);
-    });
-  });
-
-  it("will not let a blocked file be committed", async () => {
-    await openPreview({
-      ...PREVIEW,
-      blocking: ["This file has a premium column. Say whether those figures are gross."],
-    });
-    expect(screen.getByText(/say whether those figures are gross/i)).toBeTruthy();
-    const button = screen.getByRole("button", { name: /import 1 rows/i }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-  });
-});
-
-describe("any kind of file", () => {
-  it("offers spreadsheets and PDFs, not only CSV", async () => {
-    stubApi();
-    await renderScreen();
-    const input = screen.getByLabelText(/choose a file/i) as HTMLInputElement;
-    expect(input.accept).toMatch(/\.xlsx/);
-    expect(input.accept).toMatch(/\.pdf/);
-    expect(input.accept).toMatch(/\.csv/);
+    await preview();
+    expect(screen.getByText("Branch Code")).toBeInTheDocument();
+    expect(screen.getByText("Not used")).toBeInTheDocument();
   });
 
   it("says which reader understood the file, rather than implying every file is a CSV", async () => {
+    await preview();
+    expect(screen.getByText("Spreadsheet")).toBeInTheDocument();
+  });
+
+  it("offers to write only the rows that can be written", async () => {
+    await preview();
+    // One row of three: the ambiguous and the unreadable are not offered.
+    expect(screen.getByRole("button", { name: /Confirm the import of 1 row/ })).toBeEnabled();
+  });
+
+  it("says why each blocked row cannot continue", async () => {
+    await preview();
+    const blocked = screen.getByText(/WHAT CANNOT BE WRITTEN, AND WHY/).parentElement!;
+    expect(within(blocked).getByText(/Line 3.*Mara/)).toBeInTheDocument();
+    expect(within(blocked).getByText(/Line 4.*unquoted comma/)).toBeInTheDocument();
+  });
+});
+
+describe("leaving rows out, and committing", () => {
+  const preview = async () => {
     stubApi();
     await renderScreen();
     const user = userEvent.setup();
-    await user.upload(screen.getByLabelText(/choose a file/i), csvFile("book.csv", "Client\nAcme"));
-    await user.click(screen.getByRole("button", { name: /read the file/i }));
-    await screen.findByText(/what this would do/i);
-    expect(screen.getByText(/first sheet of your spreadsheet/i)).toBeTruthy();
+    await user.upload(
+      screen.getByLabelText(/Choose a file/i),
+      csvFile("book.csv", "Client,Branch Code\nTamarind,1"),
+    );
+    await screen.findByText(/3 rows staged/);
+    return user;
+  };
+
+  it("leaves a row out when a person says so, and says so in the count", async () => {
+    const user = await preview();
+    const row = screen.getByText("Tamarind Exporters Ltd").closest(".sp-row") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Leave it out" }));
+    expect(await screen.findByRole("button", { name: /Confirm the import of 0 rows/ })).toBeDisabled();
+    expect(screen.getByText("Left out")).toBeInTheDocument();
+  });
+
+  it("puts a row back when a person changes their mind", async () => {
+    const user = await preview();
+    const row = () => screen.getByText("Tamarind Exporters Ltd").closest(".sp-row") as HTMLElement;
+    await user.click(within(row()).getByRole("button", { name: "Leave it out" }));
+    await user.click(within(row()).getByRole("button", { name: "Put it back" }));
+    expect(await screen.findByRole("button", { name: /Confirm the import of 1 row/ })).toBeEnabled();
+  });
+
+  it("sends the lines a person left out when committing", async () => {
+    const user = await preview();
+    const row = screen.getByText("Tamarind Exporters Ltd").closest(".sp-row") as HTMLElement;
+    await user.click(within(row).getByRole("button", { name: "Leave it out" }));
+    // Nothing is writable now, so put it back and commit with the ambiguous line left out.
+    await user.click(within(row).getByRole("button", { name: "Put it back" }));
+    const ambiguous = screen.getByText("Mara").closest(".sp-row") as HTMLElement;
+    await user.click(within(ambiguous).getByRole("button", { name: "Leave it out" }));
+    await user.click(screen.getByRole("button", { name: /Confirm the import of 1 row/ }));
+    await waitFor(() => expect(posted.some((p) => p.url.includes("/commit"))).toBe(true));
+    const commit = posted.find((p) => p.url.includes("/commit"))!;
+    expect((commit.body as { skipLineNumbers: number[] }).skipLineNumbers).toEqual([3]);
+  });
+
+  /* The write happens once however many times the button is pressed. */
+  it("writes once when Confirm is pressed twice", async () => {
+    const user = await preview();
+    const button = screen.getByRole("button", { name: /Confirm the import of 1 row/ });
+    await user.click(button);
+    await user.click(button);
+    await waitFor(() => expect(posted.some((p) => p.url.includes("/commit"))).toBe(true));
+    expect(posted.filter((p) => p.url.includes("/commit"))).toHaveLength(1);
+  });
+
+  it("will not let a blocked file be committed", async () => {
+    stubApi({ ...PREVIEW, blocking: ["No column in this file says who the client is."] });
+    await renderScreen();
+    const user = userEvent.setup();
+    await user.upload(
+      screen.getByLabelText(/Choose a file/i),
+      csvFile("book.csv", "Branch Code\n1"),
+    );
+    const confirm = await screen.findByRole("button", { name: /Confirm the import/ });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByText(/No column in this file says who the client is/)).toBeInTheDocument();
   });
 
   it("flags the headings the model worked out, so a person checks them", async () => {
-    stubApi({ ...PREVIEW, mappedByModel: ["U/W", "Sum Ins."] });
+    stubApi({
+      ...PREVIEW,
+      columns: [
+        { header: "Client", meaning: "client_name" },
+        { header: "Cover From", meaning: "period_start" },
+      ],
+      mappedByModel: ["Cover From"],
+    });
     await renderScreen();
     const user = userEvent.setup();
-    await user.upload(screen.getByLabelText(/choose a file/i), csvFile("book.csv", "Client\nAcme"));
-    await user.click(screen.getByRole("button", { name: /read the file/i }));
-    await screen.findByText(/what this would do/i);
-    const note = screen.getByText(/worked out/i);
-    expect(note.textContent).toMatch(/U\/W, Sum Ins\./);
-    // The boundary, said on the screen: headings, never values.
-    expect(note.textContent).toMatch(/read the headings, never the values/i);
+    await user.upload(
+      screen.getByLabelText(/Choose a file/i),
+      csvFile("book.csv", "Client,Branch Code\nTamarind,1"),
+    );
+    expect(await screen.findByText(/matched by ASAP/)).toBeInTheDocument();
   });
+});
 
-  it("refuses a file larger than it can read, before sending anything", async () => {
+describe("the receipt", () => {
+  it("keeps a partial import partial, and names the rows that failed", async () => {
     stubApi();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      const u = String(url);
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      if (method === "POST") posted.push({ url: u, body: JSON.parse(String((init as RequestInit).body)) });
+      const json = (v: unknown) =>
+        new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
+      if (u.endsWith("/me")) return json(ME);
+      if (u.endsWith("/documents")) return json({ documents: [], limits: { maxBytes: 52428800, readableMimeTypes: [] } });
+      if (u.endsWith("/imports") && method === "POST") return json(PREVIEW);
+      if (u.includes("/commit")) {
+        return json({
+          batch: { ...PREVIEW.batch, status: "committed", clientsCreated: 1, rowsSkipped: 1 },
+          failures: [{ lineNumber: 4, problem: "The insurer named on this line is not on file." }],
+        });
+      }
+      return json({});
+    });
     await renderScreen();
     const user = userEvent.setup();
-    const huge = csvFile("huge.xlsx", "x");
-    Object.defineProperty(huge, "size", { value: 20_000_000 });
-    await user.upload(screen.getByLabelText(/choose a file/i), huge);
-    expect(await screen.findByText(/20MB/)).toBeTruthy();
-    expect(posted).toEqual([]);
+    await user.upload(
+      screen.getByLabelText(/Choose a file/i),
+      csvFile("book.csv", "Client\nTamarind"),
+    );
+    await user.click(await screen.findByRole("button", { name: /Confirm the import/ }));
+
+    expect(await screen.findByText("Partly written")).toBeInTheDocument();
+    expect(screen.getByText(/Line 4 — The insurer named on this line is not on file/)).toBeInTheDocument();
+    expect(screen.getByText(/This import is partly written/)).toBeInTheDocument();
+    // And where the records now are.
+    expect(screen.getByRole("link", { name: "Open client files" })).toHaveAttribute("href", "/files");
   });
 });

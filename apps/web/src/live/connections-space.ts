@@ -72,6 +72,7 @@ export function connectionsSpace(
     context: "What ASAP is allowed to read on this brokerage's behalf.",
     filters: [] as SpaceFilter[],
     related: [] as SpaceRef[],
+    region: null,
     actions: [] as SpaceFrameAction[],
     evidence: [],
     permission: { canAssign: false, canApprove: false, note: null },
@@ -192,6 +193,7 @@ export function connectionsSpace(
       badgeTone: words?.tone ?? (provider.available ? "neutral" : "waiting"),
       why: null,
       related: null,
+      region: null,
       actions,
       evidence: [],
     };
@@ -316,6 +318,7 @@ export function activitySpace(
       to: `/jobs?filter=${f.id}`,
     })),
     related: [] as SpaceRef[],
+    region: null,
     actions: [] as SpaceFrameAction[],
     evidence: [],
     permission: { canAssign: false, canApprove: false, note: null },
@@ -460,6 +463,7 @@ function runRow(item: RunListResponse["groups"][number]["items"][number]): Space
       item.group === "stopped" ? "attention" : item.group === "working" ? "active" : "done",
     why: item.run.next_step,
     related: null,
+    region: null,
     actions,
     evidence: [],
   };
@@ -569,6 +573,7 @@ export function runSpace(
                 : ("active" as SpaceTone),
         link: null,
         related: null,
+        region: null,
       })),
       evidence: [],
       actions: [],
@@ -599,6 +604,7 @@ export function runSpace(
           badgeTone: "neutral",
           why: null,
           related: related[0] ?? null,
+          region: null,
           actions: [
             {
               verb: "open",

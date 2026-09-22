@@ -1089,3 +1089,48 @@
   padding: 9px 11px;
   font-size: 13.5px;
 }
+
+/* ---- Evidence region --------------------------------------------------------------------- */
+
+/* Where on the page a value was read from, drawn at that page's own scale. */
+.sp-region {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  padding: 12px;
+}
+.sp-region-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sp-region-what {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+.sp-space .sp-region-open {
+  font-size: 12px;
+  color: var(--color-ink-secondary);
+  text-decoration: underline;
+}
+.sp-region-page {
+  max-height: 22rem;
+  width: 100%;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 11px;
+  background: var(--color-wash);
+}
+.sp-region-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+}

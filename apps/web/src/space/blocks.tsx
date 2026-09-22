@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SpaceFrameBlock } from "@asap/schema";
 import type { ActHandler } from "./parts.js";
 import { BlockShell, RelatedSpaces, SpaceActions, SpaceEvidenceList, toneClass } from "./parts.js";
@@ -73,6 +73,11 @@ function RowsBlock({ block, onAct }: Props<"rows">) {
               {row.why !== null && open[row.id] === true && (
                 <small className="sp-row-why">{row.why}</small>
               )}
+              {row.region !== null && open[`${row.id}:region`] === true && (
+                <div style={{ marginTop: 9 }}>
+                  <RegionDrawing {...row.region} />
+                </div>
+              )}
               <SpaceEvidenceList evidence={row.evidence} />
             </div>
             <div className="sp-row-actions">
@@ -87,6 +92,22 @@ function RowsBlock({ block, onAct }: Props<"rows">) {
                   onClick={() => setOpen((s) => ({ ...s, [row.id]: s[row.id] !== true }))}
                 >
                   Why is this here?
+                </button>
+              )}
+              {/*
+               * Where it was read from. A reveal, not an action: drawing a rectangle changes
+               * nothing, and making it a verb would have put it in a list of things that do.
+               */}
+              {row.region !== null && (
+                <button
+                  type="button"
+                  className="sp-btn"
+                  aria-expanded={open[`${row.id}:region`] === true}
+                  onClick={() =>
+                    setOpen((s) => ({ ...s, [`${row.id}:region`]: s[`${row.id}:region`] !== true }))
+                  }
+                >
+                  {open[`${row.id}:region`] === true ? "Hide where" : "Show where"}
                 </button>
               )}
               <SpaceActions actions={row.actions} onAct={onAct} primaryFirst />
@@ -255,16 +276,65 @@ function EmailBlock({ block, onAct }: Props<"email">) {
   );
 }
 
-/** Files are read from the device. Nothing is saved until a person confirms. */
+/**
+ * Files are read from the device. Nothing is saved until a person confirms.
+ *
+ * The picker hands the chosen files to the page, which owns the upload: the hashing, the direct
+ * PUT to storage, the byte progress and the abort all live there, because they are one transaction
+ * and a presentation component has no business holding half of it.
+ *
+ * `accept` and `maxBytes` come from the server's own limits. A file over the limit is refused here
+ * rather than after a person has waited for a 60MB transfer the API would reject at the end.
+ */
 function UploadBlock({ block, onAct }: Props<"upload">) {
+  const [refused, setRefused] = useState<string | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const pick = block.actions.find((a) => a.stepId === "pick") ?? null;
+
   return (
     <div className="sp-upload">
       <strong className="sp-upload-prompt">{block.prompt}</strong>
       <small className="sp-upload-note">
         Real files are read from your device. Nothing is saved until you confirm.
+        {block.maxBytes !== null && ` Up to ${Math.floor(block.maxBytes / 1_048_576)} MB.`}
       </small>
+
+      {pick !== null && (
+        <input
+          ref={picker}
+          type="file"
+          multiple={block.multiple}
+          accept={block.accept === "" ? undefined : block.accept}
+          disabled={block.busy}
+          aria-label={block.prompt}
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])];
+            const tooBig =
+              block.maxBytes === null ? [] : files.filter((f) => f.size > block.maxBytes!);
+            if (tooBig.length > 0) {
+              setRefused(
+                `${tooBig[0]!.name} is larger than this deployment accepts. Nothing was uploaded.`,
+              );
+              // The picker is cleared, so choosing the same file again still fires a change.
+              if (picker.current) picker.current.value = "";
+              return;
+            }
+            setRefused(null);
+            if (files.length > 0) {
+              onAct?.({ ...pick, files } as typeof pick & { files: File[] });
+            }
+            if (picker.current) picker.current.value = "";
+          }}
+        />
+      )}
+      {refused !== null && (
+        <small className="sp-field-error" role="alert">
+          {refused}
+        </small>
+      )}
+
       <div className="sp-email-actions">
-        <SpaceActions actions={block.actions} onAct={onAct} />
+        <SpaceActions actions={block.actions.filter((a) => a.stepId !== "pick")} onAct={onAct} />
       </div>
       {block.progress.length > 0 && (
         <div className="sp-progress">
@@ -552,6 +622,84 @@ function FormBlock({ block, onAct }: Props<"form">) {
   );
 }
 
+/**
+ * Where on the page a value was read from.
+ *
+ * An SVG at the page's own coordinates, so the rectangle lands where the extractor said it did on
+ * any rendering of that page. When the page's size was never recorded the drawing is against a
+ * standard A4 at 72dpi — the extractor's own default — and the block says so, because a region
+ * drawn to the wrong scale is a confident lie about where to look.
+ */
+function EvidenceRegionBlock({ block }: Props<"evidence_region">) {
+  return (
+    <RegionDrawing
+      what={block.what}
+      pageNumber={block.pageNumber}
+      pageWidth={block.pageWidth}
+      pageHeight={block.pageHeight}
+      rect={block.region}
+      fileUrl={block.fileUrl}
+    />
+  );
+}
+
+/** The drawing itself, shared by the block and by a row that reveals one. */
+function RegionDrawing(block: {
+  what: string;
+  pageNumber: number;
+  pageWidth: number | null;
+  pageHeight: number | null;
+  rect: { x: number; y: number; width: number; height: number };
+  fileUrl: string | null;
+}) {
+  const estimated = block.pageWidth === null || block.pageHeight === null;
+  const width = block.pageWidth ?? 595;
+  const height = block.pageHeight ?? 842;
+  return (
+    <div className="sp-region">
+      <div className="sp-region-head">
+        <span className="sp-region-what">
+          {block.what} · page {block.pageNumber}
+        </span>
+        {block.fileUrl !== null && (
+          <a
+            href={`${block.fileUrl}#page=${block.pageNumber}`}
+            target="_blank"
+            rel="noreferrer"
+            className="sp-region-open"
+          >
+            Open the file at this page
+          </a>
+        )}
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={`Page ${block.pageNumber}, with the region ${block.what} was read from marked`}
+        className="sp-region-page"
+        preserveAspectRatio="xMidYMin meet"
+      >
+        <rect x={0} y={0} width={width} height={height} fill="var(--color-paper)" />
+        <rect
+          x={block.rect.x}
+          y={block.rect.y}
+          width={block.rect.width}
+          height={block.rect.height}
+          fill="var(--color-accent-gold-soft)"
+          stroke="var(--color-accent-gold)"
+          strokeWidth={2}
+        />
+      </svg>
+      {estimated && (
+        <p className="sp-region-note">
+          The page&rsquo;s own size was not recorded, so this is drawn against a standard page. The
+          region is exactly what was recorded.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TimelineBlock({ block }: Props<"timeline">) {
   return (
     <div className="sp-timeline">
@@ -608,6 +756,7 @@ const REGISTRY: {
   approval_gate: ApprovalGateBlock,
   timeline: TimelineBlock,
   form: FormBlock,
+  evidence_region: EvidenceRegionBlock,
 };
 
 /**
