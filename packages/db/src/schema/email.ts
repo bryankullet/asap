@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createdAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
 import { clients } from "./compliance.js";
+import { policies } from "./servicing.js";
 import { documents } from "./documents.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
@@ -47,6 +48,8 @@ export const mailboxes = pgTable(
     refreshTokenEncrypted: text("refresh_token_encrypted"),
     tokenExpiresAt: timestamptz("token_expires_at"),
     syncCursor: text("sync_cursor"),
+    /** Migration 0045. Guards the checkpoint: a stale pass cannot overwrite a newer cursor. */
+    syncCursorUpdatedAt: timestamptz("sync_cursor_updated_at"),
     lastSyncedAt: timestamptz("last_synced_at"),
     status: text("status").notNull().default("connected"),
     statusReason: text("status_reason"),
@@ -79,6 +82,8 @@ export const emailThreads = pgTable(
     providerThreadId: text("provider_thread_id").notNull(),
     subject: text("subject").notNull().default(""),
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    /** Migration 0044. Set by a person, never inferred from a name in a subject line. */
+    policyId: uuid("policy_id").references(() => policies.id, { onDelete: "set null" }),
     workItemId: uuid("work_item_id").references(() => workItems.id, { onDelete: "set null" }),
     lastMessageAt: timestamptz("last_message_at"),
     createdAt: createdAt(),
@@ -90,6 +95,7 @@ export const emailThreads = pgTable(
       t.lastMessageAt.desc(),
     ),
     index("email_threads_client_id_idx").on(t.clientId),
+    index("email_threads_policy_id_idx").on(t.policyId),
     index("email_threads_work_item_id_idx").on(t.workItemId),
   ],
 );
@@ -221,7 +227,136 @@ export const emailSendAttempts = pgTable(
   ],
 );
 
+/**
+ * Migration 0044. A reply being written.
+ *
+ * One per conversation, so two open conversations keep two. `approvedBodySha256` is the digest of
+ * the exact text an approval covers: the API recomputes it on every save and clears the approval
+ * when it no longer matches, and the check constraint makes a half-approval impossible.
+ */
+export const emailDrafts = pgTable(
+  "email_drafts",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => emailThreads.id, { onDelete: "cascade" }),
+    toAddresses: text("to_addresses").array().notNull().default(sql`'{}'`),
+    ccAddresses: text("cc_addresses").array().notNull().default(sql`'{}'`),
+    subject: text("subject").notNull().default(""),
+    bodyText: text("body_text").notNull().default(""),
+    approvedBodySha256: text("approved_body_sha256"),
+    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedAt: timestamptz("approved_at"),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("email_drafts_thread_id_key").on(t.threadId),
+    check(
+      "email_drafts_approval_is_whole",
+      sql`(${t.approvedBy} is null and ${t.approvedAt} is null and ${t.approvedBodySha256} is null)
+          or (${t.approvedBy} is not null and ${t.approvedAt} is not null and ${t.approvedBodySha256} is not null)`,
+    ),
+    index("email_drafts_organization_id_idx").on(t.organizationId),
+    index("email_drafts_thread_id_idx").on(t.threadId),
+    index("email_drafts_created_by_idx").on(t.createdBy),
+    index("email_drafts_approved_by_idx").on(t.approvedBy),
+  ],
+);
+
+/**
+ * Migration 0045. A single-use authorisation state.
+ *
+ * Row level security is on and there is no policy: the callback that consumes one has no session,
+ * so this is written and read by the API's service connection alone (0047 revokes the worker's
+ * default grant). Nothing in a worker path touches it; it is modelled here so drift checking can
+ * see the whole schema.
+ */
+export const mailboxOauthStates = pgTable(
+  "mailbox_oauth_states",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    /** The digest of the state parameter, never the value. */
+    stateHash: text("state_hash").notNull(),
+    requestedBy: uuid("requested_by")
+      .notNull()
+      .references(() => users.id),
+    consumedAt: timestamptz("consumed_at"),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("mailbox_oauth_states_state_hash_key").on(t.stateHash),
+    check("mailbox_oauth_states_provider_check", sql`${t.provider} in ('gmail','microsoft')`),
+    index("mailbox_oauth_states_organization_id_idx").on(t.organizationId),
+    index("mailbox_oauth_states_requested_by_idx").on(t.requestedBy),
+    index("mailbox_oauth_states_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+/** Migration 0045. One pass of reading a mailbox. This is what makes "Syncing" a fact. */
+export const mailboxSyncRuns = pgTable(
+  "mailbox_sync_runs",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    mailboxId: uuid("mailbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    state: text("state").notNull().default("running"),
+    trigger: text("trigger").notNull(),
+    startedAt: timestamptz("started_at").notNull().default(sql`now()`),
+    finishedAt: timestamptz("finished_at"),
+    threadsSeen: integer("threads_seen").notNull().default(0),
+    messagesSaved: integer("messages_saved").notNull().default(0),
+    attachmentsSaved: integer("attachments_saved").notNull().default(0),
+    cursorBefore: text("cursor_before"),
+    cursorAfter: text("cursor_after"),
+    error: text("error"),
+    checkpointExpired: boolean("checkpoint_expired").notNull().default(false),
+  },
+  (t) => [
+    check("mailbox_sync_runs_state_check", sql`${t.state} in ('running','succeeded','failed')`),
+    check(
+      "mailbox_sync_runs_trigger_check",
+      sql`${t.trigger} in ('first_connection','person','schedule')`,
+    ),
+    check("mailbox_sync_runs_threads_seen_check", sql`${t.threadsSeen} >= 0`),
+    check("mailbox_sync_runs_messages_saved_check", sql`${t.messagesSaved} >= 0`),
+    check("mailbox_sync_runs_attachments_saved_check", sql`${t.attachmentsSaved} >= 0`),
+    check(
+      "mailbox_sync_runs_failure_has_a_reason",
+      sql`${t.state} <> 'failed' or ${t.error} is not null`,
+    ),
+    check(
+      "mailbox_sync_runs_finished_states_have_a_time",
+      sql`${t.state} = 'running' or ${t.finishedAt} is not null`,
+    ),
+    index("mailbox_sync_runs_organization_id_started_at_idx").on(
+      t.organizationId,
+      t.startedAt.desc(),
+    ),
+    index("mailbox_sync_runs_mailbox_id_started_at_idx").on(t.mailboxId, t.startedAt.desc()),
+  ],
+);
+
 export type Mailbox = typeof mailboxes.$inferSelect;
+export type EmailDraft = typeof emailDrafts.$inferSelect;
+export type MailboxOauthState = typeof mailboxOauthStates.$inferSelect;
+export type MailboxSyncRun = typeof mailboxSyncRuns.$inferSelect;
 export type EmailThread = typeof emailThreads.$inferSelect;
 export type EmailMessage = typeof emailMessages.$inferSelect;
 export type EmailAttachment = typeof emailAttachments.$inferSelect;

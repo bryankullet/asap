@@ -75,12 +75,12 @@ describe("Drizzle schema conventions", () => {
   });
 
   /*
-   * Every public table through migration 0043. The list is written out rather than counted so
+   * Every public table through migration 0047. The list is written out rather than counted so
    * that adding a table to the database without representing it here — or representing one that
    * no migration creates — fails this test rather than the drift check against a live database,
    * which not every contributor can run.
    */
-  it("lists exactly the tables the migrations create, through 0043", () => {
+  it("lists exactly the tables the migrations create, through 0047", () => {
     const names = Object.values(schema)
       .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:Name") in v)
       .map((t) => getTableConfig(t as never).name)
@@ -107,6 +107,7 @@ describe("Drizzle schema conventions", () => {
       "documents",
       "drafts",
       "email_attachments",
+      "email_drafts",
       "email_messages",
       "email_send_attempts",
       "email_threads",
@@ -117,6 +118,8 @@ describe("Drizzle schema conventions", () => {
       "import_rows",
       "insurers",
       "invitations",
+      "mailbox_oauth_states",
+      "mailbox_sync_runs",
       "mailboxes",
       "organization_memberships",
       "organizations",
@@ -129,6 +132,7 @@ describe("Drizzle schema conventions", () => {
       "run_events",
       "runs",
       "teams",
+      "user_onboarding",
       "user_team_memberships",
       "users",
       "work_item_pins",

@@ -26,12 +26,28 @@ begin
 end $$;
 grant execute on function pg_temp.rows_in(text, uuid) to anon, authenticated, asap_worker;
 
+/*
+ * Tables no tenant role may reach at all.
+ *
+ * `mailbox_oauth_states` (0045) is the one, and it is deliberate. An OAuth `state` is consumed by
+ * a callback that has no session — the person arrives by a redirect from Google — so the row is
+ * written and read by the API's service connection alone. Making it tenant-readable would also
+ * make it listable by any signed-in person, which is the thing it exists to prevent. It therefore
+ * has row level security on, no policy, and no grant: unreachable rather than scoped.
+ *
+ * It is named here rather than quietly skipped, and the guard below asserts the protection that
+ * replaces a policy — that no tenant role holds a single privilege on it.
+ */
+create temp table policyless_by_design (tbl text);
+insert into policyless_by_design (tbl) values ('mailbox_oauth_states');
+
 create temp table tenant_tables as
   select c.relname::text as tbl
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   join information_schema.columns col on col.table_name = c.relname and col.table_schema = 'public'
-  where n.nspname = 'public' and c.relkind = 'r' and col.column_name = 'organization_id';
+  where n.nspname = 'public' and c.relkind = 'r' and col.column_name = 'organization_id'
+    and c.relname::text not in (select tbl from policyless_by_design);
 grant select on tenant_tables to anon, authenticated, asap_worker;
 
 -- 1. Coverage guard ------------------------------------------------------------
@@ -39,13 +55,32 @@ select is_empty($$
   select c.relname
   from pg_class c join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'public' and c.relkind = 'r'
+    and c.relname::text not in (select tbl from policyless_by_design)
     and (not c.relrowsecurity
          or not exists (select 1 from pg_policies p where p.tablename = c.relname and p.schemaname = 'public'))
 $$, 'every public table has RLS enabled and at least one policy');
 
+-- The exception earns its place only if it is genuinely out of reach. Both halves are asserted:
+-- row level security is on, and no tenant role holds any privilege on it.
+select is_empty($$
+  select tbl from policyless_by_design d
+  where not (select c.relrowsecurity from pg_class c
+             join pg_namespace n on n.oid = c.relnamespace
+             where n.nspname = 'public' and c.relname = d.tbl)
+$$, 'a table with no policy still has row level security enabled');
+
+select is_empty($$
+  select d.tbl || ' -> ' || g.grantee || ':' || g.privilege_type
+  from policyless_by_design d
+  join information_schema.role_table_grants g
+    on g.table_schema = 'public' and g.table_name = d.tbl
+  where g.grantee in ('anon', 'authenticated', 'asap_worker', 'PUBLIC')
+$$, 'and no tenant role holds any privilege on it, so nothing can reach it');
+
 select is_empty($$
   select t.tbl from tenant_tables t
-  where not exists (
+  where t.tbl not in (select tbl from policyless_by_design)
+    and not exists (
     select 1 from pg_policies p
     where p.schemaname = 'public' and p.tablename = t.tbl
       and (coalesce(p.qual, '') like '%organization_id%' or coalesce(p.with_check, '') like '%organization_id%'))

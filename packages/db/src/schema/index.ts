@@ -14,6 +14,7 @@ export * from "./conversations.js";
 export * from "./pins.js";
 export * from "./documents.js";
 export * from "./email.js";
+export * from "./onboarding.js";
 export * from "./automations.js";
 export * from "./contacts.js";
 export * from "./imports.js";

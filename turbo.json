@@ -16,7 +16,8 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["DATABASE_URL", "WORKER_DATABASE_URL", "OWNER_DATABASE_URL"]
     },
     "dev": {
       "cache": false,
