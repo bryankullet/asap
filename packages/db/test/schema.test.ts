@@ -80,7 +80,7 @@ describe("Drizzle schema conventions", () => {
    * no migration creates — fails this test rather than the drift check against a live database,
    * which not every contributor can run.
    */
-  it("lists exactly the tables the migrations create, through 0047", () => {
+  it("lists exactly the tables the migrations create, through 0048", () => {
     const names = Object.values(schema)
       .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:Name") in v)
       .map((t) => getTableConfig(t as never).name)
@@ -116,17 +116,24 @@ describe("Drizzle schema conventions", () => {
       "events",
       "import_batches",
       "import_rows",
+      "insurer_responses",
       "insurers",
       "invitations",
       "mailbox_oauth_states",
       "mailbox_sync_runs",
       "mailboxes",
+      "opportunities",
+      "opportunity_insurers",
+      "opportunity_requirements",
       "organization_memberships",
       "organizations",
       "permissions",
       "policies",
       "policy_periods",
       "policy_versions",
+      "quote_requests",
+      "quote_terms",
+      "requirement_templates",
       "role_permissions",
       "roles",
       "run_events",

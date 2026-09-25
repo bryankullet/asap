@@ -14,7 +14,9 @@ import { UiIntent } from "../intent.js";
  * business fact. Every value a person sees is read from a record by id at render time; the
  * messages are a transcript of asking, not a store of answers.
  */
-export const AskScopeKind = z.enum(["brokerage", "client", "record"]);
+/* `opportunity` is quotation work: it has its own title and its own records, and scoping to
+ * the work item behind it would name the task rather than the thing being quoted. */
+export const AskScopeKind = z.enum(["brokerage", "client", "record", "opportunity"]);
 export type AskScopeKind = z.infer<typeof AskScopeKind>;
 
 export const askScopeSchema = z.object({

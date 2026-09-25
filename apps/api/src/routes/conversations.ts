@@ -44,6 +44,17 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     id: string | null,
   ): Promise<AskScope | null> {
     if (kind === "brokerage" || !id) return { kind: "brokerage", id: null, label: orgName };
+    if (kind === "opportunity") {
+      const { data, error } = await db
+        .from("opportunities")
+        .select("id, title")
+        .eq("organization_id", orgId)
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw mapDatabaseError(error);
+      const row = data as { id: string; title: string } | null;
+      return row ? { kind: "opportunity", id: row.id, label: row.title } : null;
+    }
     if (kind === "client") {
       const { data, error } = await db
         .from("clients")
@@ -183,7 +194,7 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     const scopeHint =
       scope.kind === "brokerage"
         ? `The broker is asking about ${org.name} as a whole.`
-        : `The broker is looking at ${scope.kind === "client" ? "the client" : "the record"} "${scope.label}" (id ${scope.id}).`;
+        : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : "the record"} "${scope.label}" (id ${scope.id}).`;
 
     let outcome;
     try {

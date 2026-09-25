@@ -1549,3 +1549,45 @@ neither and will not invent them, so those actions open the real creation form.
 Ask now scopes to the client when a client route is matched, so "their policy" and "their latest
 claim" attach to the client on screen rather than to the brokerage at large. The server already
 resolved a client scope from the row; only the composer needed to send it.
+
+## D-084 — Quotation work is facts, not a status
+
+A client needs cover, and the market answers. Migration 0048 models that with seven tables and no
+status column anywhere: `requirement_templates`, `opportunities`, `opportunity_requirements`,
+`opportunity_insurers`, `quote_requests`, `insurer_responses`, `quote_terms`.
+
+**What an opportunity has reached is derived from its own rows** — whether requirements are
+supplied, whether a request is approved, whether an insurer answered (D-027). Nothing stores
+"Prepared" or "Replies received", so the words on screen cannot drift from the facts behind them.
+
+**Nothing is claimed without its evidence**, and each of these is a check constraint rather than a
+convention:
+
+- a request cannot say it was sent without the provider's own message id, and cannot be sent at
+  all without an approval;
+- a quoted response must name where it came from — a document, an email, or a person's own note.
+  A blank row is not a received quote;
+- a decline must say why, and silence carries no premium and no time;
+- a requirement cannot be ticked without naming what proves it.
+
+**A correction never destroys what was read.** `quote_terms.extracted_value` is written once;
+correcting it writes `corrected_value` beside it with who and when. Both are shown, because the
+difference between them is the audit. An insurer wording that cannot be compared is recorded as
+`unclear` rather than guessed into a number.
+
+**What a Kenyan brokerage requires is data.** `requirement_templates` are per organization and per
+class of business, each with a source and a verified-at date, and are copied into an opportunity
+when it is created so a later template edit cannot rewrite the history of a request that already
+went out.
+
+**Nothing is deleted.** There is no delete grant on any of the seven tables. An opportunity that
+came to nothing is closed with an outcome and a reason; an insurer no longer approached is marked
+removed with a reason. Both are part of how a placement was arrived at.
+
+**The status layers stay apart.** An insurer has *not been asked*, been *asked*, or *quoted*,
+*declined* or *not answered*. A request is *prepared*, *approved* or *sent*. The work a person owns
+keeps its own words and names the party holding it (D-075). None of those vocabularies borrows
+from another, and none of them is a cover state or a run state.
+
+Ask gained an `opportunity` scope, resolved from the row's own title, so "add Jubilee to this" and
+"which insurer has responded" stay attached to the quotation work on screen.

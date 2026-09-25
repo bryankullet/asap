@@ -35,6 +35,7 @@ import { SignUp } from "./pages/SignUp.js";
 import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
 import { ClientSpace } from "./pages/ClientSpace.js";
+import { OpportunitySpace, QuoteSpace } from "./pages/OpportunitySpace.js";
 
 /** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
 const rootRoute = createRootRoute({ component: Outlet });
@@ -215,6 +216,17 @@ const clientSpace = createRoute({
   path: "/clients/$clientId",
   component: ClientSpace,
 });
+/* Quotation work, and one insurer's terms inside it. Each is its own tab, keyed by its own id. */
+const opportunity = createRoute({
+  getParentRoute: () => shell,
+  path: "/opportunities/$opportunityId",
+  component: OpportunitySpace,
+});
+const quote = createRoute({
+  getParentRoute: () => shell,
+  path: "/opportunities/$opportunityId/insurers/$opportunityInsurerId",
+  component: QuoteSpace,
+});
 const files = createRoute({
   getParentRoute: () => shell,
   path: "/files",
@@ -362,6 +374,8 @@ const routeTree = rootRoute.addChildren([
         automationDetail,
         record,
         clientSpace,
+        opportunity,
+        quote,
         files,
         clientFile,
         agreements,

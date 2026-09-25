@@ -521,6 +521,21 @@ function actionsBlock(data: ClientSpaceResponse, clientId: string, busy: boolean
   });
 
   rows.push({
+    id: "quotation",
+    title: "Start quotation work",
+    note: "Records what the client needs insured, what is still missing, and which insurers are approached.",
+    badge: null,
+    badgeTone: "neutral",
+    why: null,
+    related: null,
+    region: null,
+    actions: [
+      act("Start a quotation", "start:quotation", busy, p.canStartWork ? null : "You may not start work in this brokerage."),
+    ],
+    evidence: [],
+  });
+
+  rows.push({
     id: "claim",
     title: "Register a claim",
     note: "Opens the claim form. ASAP needs the incident and the date from you, and will not invent either.",

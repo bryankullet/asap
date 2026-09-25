@@ -277,7 +277,8 @@ describe("what does not exist yet", () => {
   it("is named, with the increment that builds it", async () => {
     const body = await space(ACME);
     const ids = body.gaps.map((g: { id: string }) => g.id);
-    expect(ids).toContain("quotation");
+    // Quotations were a gap until 4B-2 built them; money records still are.
+    expect(ids).not.toContain("quotation");
     expect(ids).toContain("money");
     for (const gap of body.gaps) {
       expect(gap.reason.length).toBeGreaterThan(10);

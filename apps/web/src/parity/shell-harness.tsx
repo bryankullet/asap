@@ -305,6 +305,111 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
   }
   if (u.includes("/pins")) return json({ pins: [] });
   /*
+   * Quotation work. The shape comes from the harness URL so every state a real one passes through
+   * can be photographed: nothing asked yet, prepared, approved-but-unsent, quoted, declined.
+   */
+  if (u.includes("/opportunities/")) {
+    const q = new URLSearchParams(location.search);
+    const stage = q.get("stage") ?? "full";
+    const bare = stage === "new";
+    const A = "31000000-0000-4000-8000-00000000000a";
+    const request = {
+      id: "35000000-0000-4000-8000-00000000000a",
+      subject: "Quotation request — Placeholder Company",
+      body: "We invite terms.",
+      preparedAt: "2026-09-02T00:00:00.000Z",
+      preparedByName: "Parity Harness",
+      approvedAt: stage === "prepared" ? null : "2026-09-03T00:00:00.000Z",
+      approvedByName: stage === "prepared" ? null : "Parity Harness",
+      sentAt: null,
+      sentEmailMessageId: null,
+    };
+    return json({
+      opportunity: {
+        id: "30000000-0000-4000-8000-00000000000a",
+        title: "Placeholder Company motor fleet quotation — 2027",
+        classOfBusiness: "Commercial motor",
+        riskSummary: bare ? null : "Five commercial vehicles",
+        coverStart: bare ? null : "2027-01-01",
+        coverEnd: bare ? null : "2027-12-31",
+        ownerName: "Parity Harness",
+        createdAt: "2026-09-01T00:00:00.000Z",
+        closedAt: null,
+        closedOutcome: null,
+        closedReason: null,
+        source: null,
+      },
+      client: { id: CLIENT, name: "Placeholder Company" },
+      workItem: {
+        id: "26000000-0000-4000-8000-00000000000a",
+        taskStatus: bare ? "needs_you" : "with_party",
+        taskParty: bare ? null : "Placeholder Insurer",
+        taskSince: bare ? null : "2026-08-12T00:00:00.000Z",
+      },
+      requirements: bare
+        ? [{ id: "33000000-0000-4000-8000-00000000000a", label: "Vehicle schedule with declared values", required: true, suppliedAt: null, suppliedByName: null, evidence: null }]
+        : [
+            { id: "33000000-0000-4000-8000-00000000000a", label: "Vehicle schedule with declared values", required: true, suppliedAt: null, suppliedByName: null, evidence: null },
+            { id: "33000000-0000-4000-8000-00000000000b", label: "Previous year claims history", required: true, suppliedAt: "2026-09-02T00:00:00.000Z", suppliedByName: "Parity Harness", evidence: { kind: "note", id: null, label: "Handed over at the meeting.", path: null } },
+          ],
+      insurers: bare
+        ? []
+        : [
+            {
+              id: A,
+              insurerId: "21000000-0000-4000-8000-00000000000a",
+              insurerName: "Placeholder Insurer",
+              addedAt: "2026-09-01T00:00:00.000Z",
+              removedAt: null,
+              removedReason: null,
+              request: stage === "asked" ? null : request,
+              response:
+                stage === "quoted" || stage === "full"
+                  ? {
+                      id: "34000000-0000-4000-8000-00000000000a",
+                      outcome: "quoted",
+                      receivedAt: "2026-09-05T00:00:00.000Z",
+                      premiumAmount: "5310000.00",
+                      premiumCurrency: "KES",
+                      validUntil: "2026-10-05",
+                      declineReason: null,
+                      recordedByName: "Parity Harness",
+                      source: { kind: "note", id: null, label: "Terms read out by the underwriter.", path: null },
+                      terms: [
+                        { id: "36000000-0000-4000-8000-00000000000a", termType: "excess", label: "Own damage excess", extractedValue: "2.5% min 30,000", correctedValue: "2.5% min 35,000", correctedByName: "Parity Harness", correctedAt: "2026-09-06T00:00:00.000Z", amount: null, currency: null, unclear: false, evidence: null },
+                        { id: "36000000-0000-4000-8000-00000000000b", termType: "excess", label: "Theft excess", extractedValue: null, correctedValue: null, correctedByName: null, correctedAt: null, amount: null, currency: null, unclear: true, evidence: null },
+                      ],
+                    }
+                  : null,
+            },
+            {
+              id: "31000000-0000-4000-8000-00000000000b",
+              insurerId: "21000000-0000-4000-8000-00000000000b",
+              insurerName: "Second Placeholder Insurer",
+              addedAt: "2026-09-01T00:00:00.000Z",
+              removedAt: null,
+              removedReason: null,
+              request: null,
+              response:
+                stage === "full"
+                  ? { id: "34000000-0000-4000-8000-00000000000b", outcome: "declined", receivedAt: "2026-09-04T00:00:00.000Z", premiumAmount: null, premiumCurrency: null, validUntil: null, declineReason: "Outside their appetite.", recordedByName: "Parity Harness", source: { kind: "note", id: null, label: "By telephone.", path: null }, terms: [] }
+                  : null,
+            },
+          ],
+      availableInsurers: [
+        { id: "21000000-0000-4000-8000-00000000000a", name: "Placeholder Insurer" },
+        { id: "21000000-0000-4000-8000-00000000000b", name: "Second Placeholder Insurer" },
+        { id: "21000000-0000-4000-8000-00000000000c", name: "Third Placeholder Insurer" },
+      ],
+      documents: [],
+      permissions: { canEdit: q.get("perms") !== "none", canApprove: q.get("perms") !== "none", canRecordResponse: q.get("perms") !== "none" },
+      sending: {
+        available: false,
+        reason: "Sending from ASAP is not connected yet. An approved request can be copied into the mailbox it should go from.",
+      },
+    });
+  }
+  /*
    * One client, assembled. The shape of the client comes from the harness URL so the measuring
    * run can photograph a company with several policies, a person with one, and a client with
    * nothing — without a database and without inventing a brokerage.

@@ -279,12 +279,6 @@ export function clientRoutes() {
        */
       gaps: [
         {
-          id: "quotation",
-          label: "Start quotation work",
-          reason: "Quotations are not built yet, so there is nothing to open.",
-          gap: "4B-2",
-        },
-        {
           id: "money",
           label: "Premium and balance",
           reason:

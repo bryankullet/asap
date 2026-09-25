@@ -44,6 +44,25 @@ export function ClientSpace() {
    * Starting work goes through the same contract the rest of the product uses, with the client's
    * own id — never a name typed into a box, which is how two clients called Otieno become one.
    */
+  /*
+   * One request key for the life of this Space, so a double-clicked "Start a quotation" is one
+   * opportunity however slow the first response is.
+   */
+  const [quotationKey] = useState(() => crypto.randomUUID());
+  const startQuotation = useMutation({
+    mutationFn: () =>
+      api.createOpportunity({
+        clientId,
+        title: `${live.data?.client.name ?? "Client"} — quotation`,
+        /* The class is the client's to say; the form on the opportunity asks for the rest. */
+        classOfBusiness: "General",
+        requestKey: quotationKey,
+      }),
+    onSuccess: (res) =>
+      void navigate({ to: "/opportunities/$opportunityId", params: { opportunityId: res.opportunityId } }),
+    onError: (e) => setFailure(describeApiError(e)),
+  });
+
   const start = useMutation({
     mutationFn: () => api.createWorkItem({ kind: "renewal", clientId, insurers: [] }),
     onSuccess: (res) => {
@@ -78,7 +97,7 @@ export function ClientSpace() {
       loading: live.isPending,
       error: notFound ? null : (failure ?? (live.isError ? describeApiError(live.error) : null)),
       missing: notFound,
-      busy: start.isPending,
+      busy: start.isPending || startQuotation.isPending,
     },
     clientId,
   );
@@ -100,6 +119,7 @@ export function ClientSpace() {
          * endorsement needs the request in the client's own words — neither of which this Space
          * knows, and neither of which it will invent — so those open the real creation form.
          */
+        if (step === "start:quotation") startQuotation.mutate();
         if (step === "start:renewal") start.mutate();
         if (step === "start:claim") void navigate({ to: "/new/$kind", params: { kind: "claim" } });
         if (step === "start:endorsement") void navigate({ to: "/new/$kind", params: { kind: "endorsement" } });

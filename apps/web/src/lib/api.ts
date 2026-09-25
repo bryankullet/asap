@@ -1,5 +1,11 @@
 import {
   clientSpaceResponseSchema,
+  opportunityActionResponseSchema,
+  opportunityListResponseSchema,
+  opportunityResponseSchema,
+  uuidSchema,
+  type CreateOpportunityRequest,
+  type OpportunityAction,
   onboardingResponseSchema,
   type SaveOnboardingRequest,
   acceptInvitationResponseSchema,
@@ -348,6 +354,18 @@ export const api = {
 
   /** Everything this brokerage holds about one client, in one read. */
   clientSpace: (id: string) => request("GET", `/clients/${id}/space`, clientSpaceResponseSchema),
+
+  /* ---- Quotation work ------------------------------------------------------------------------ */
+  /** Every opportunity of this brokerage. */
+  opportunities: () => request("GET", "/opportunities", opportunityListResponseSchema),
+  /** One opportunity, with its requirements, insurers, requests, responses and terms. */
+  opportunity: (id: string) => request("GET", `/opportunities/${id}`, opportunityResponseSchema),
+  /** Start quotation work. Idempotent on the request key: a double submit is one opportunity. */
+  createOpportunity: (input: CreateOpportunityRequest) =>
+    request("POST", "/opportunities", z.object({ opportunityId: uuidSchema, workItemId: uuidSchema }), input),
+  /** Everything a person does to it, through one contract. */
+  opportunityAction: (id: string, input: OpportunityAction) =>
+    request("POST", `/opportunities/${id}/actions`, opportunityActionResponseSchema, input),
 
   /* ---- First-use onboarding ----------------------------------------------------------------- */
   /** Where a person got to, and what is actually set up. Never a claim: counts from real rows. */

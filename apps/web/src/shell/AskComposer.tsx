@@ -90,8 +90,14 @@ export function AskComposer() {
     // change to the path shape cannot leave this silently scoping every question to the brokerage.
     select: (state) => {
       for (const match of state.matches) {
-        const params = match.params as { recordId?: string; clientId?: string };
+        const params = match.params as { recordId?: string; clientId?: string; opportunityId?: string };
         if (params.recordId) return { kind: "record" as const, id: params.recordId };
+        /*
+         * Quotation work scopes to its own work item, so "add Jubilee to this" and "which insurer
+         * has responded" stay attached to the opportunity a person is looking at. The id sent is
+         * the record's, and the server resolves the label from the row.
+         */
+        if (params.opportunityId) return { kind: "opportunity" as const, id: params.opportunityId };
         /*
          * A client Space scopes to the client, so "their policy" and "their latest claim" attach
          * to the client a person is actually looking at rather than to the brokerage at large.
