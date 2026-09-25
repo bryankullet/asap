@@ -1514,3 +1514,38 @@ OAuth flow of D-081. A deployment without Google credentials says Gmail connecti
 configured, disables Connect with that reason beside it, and leaves Skip as the honest path.
 `/onboarding/create` now redirects: two ways to create a brokerage is one more than a brokerage
 needs.
+
+## D-083 — A client is a Space named after the client, not a list of its records
+
+The Client Space is one read of one relationship: `GET /clients/:id/space` assembles contacts,
+policies and periods, work, claims, endorsements, documents, email and the compliance file's
+outstanding items in a single request, under the caller's own RLS and filtered by
+`organization_id` as well as by client.
+
+The title is the client's own name. There is no screen called "Client Space", no list page for
+clients behind it, and `vocabulary`-style checks in the capture script fail if that phrase ever
+reaches a title.
+
+**A section with nothing in it is not shown.** A client with no claims gets a shorter Space, not
+an empty Claims heading. The exception is an absence that changes the work — nobody recorded to
+write to, a main contact with no email address, a file still waiting for documents, a premium
+recorded but never checked against a document — which is stated in a `missing` block, because a
+silence there reads as "fine".
+
+**A premium is reported as recorded**, with where it came from and whether a document backs it
+(0039's `premium_source` and `premium_verified_at`). An imported figure is the old system's claim
+until a schedule proves it, and the row says so.
+
+**There is no balance.** Invoices and payments have no tables, so rather than rendering a
+confident zero the Space carries a named gap with the increment that will build it. Quotations are
+the same. Both are returned by the server as `gaps` and drawn as disabled actions with their
+reason — never as a button whose only effect is to look like it worked.
+
+**A renewal starts here; a claim and an endorsement do not.** A renewal needs only the client, so
+it goes straight through `POST /work-items` with the client's id. A claim needs the incident and
+its date, and an endorsement needs the request in the client's own words: this Space knows
+neither and will not invent them, so those actions open the real creation form.
+
+Ask now scopes to the client when a client route is matched, so "their policy" and "their latest
+claim" attach to the client on screen rather than to the brokerage at large. The server already
+resolved a client scope from the row; only the composer needed to send it.

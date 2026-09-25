@@ -232,3 +232,45 @@ as blocked with the reason.
 Before 4A is called finished: run the captures through the authenticated harness, run the RLS and
 pgTAP suites wherever a Postgres exists, and report anything still unavailable as blocked rather
 than passed.
+
+
+## Gmail: deferred to final deployment (decided 2026-09-25)
+
+**Do not configure Google Cloud, do not add Google credentials to Render, and do not run a live
+Gmail OAuth flow during feature work.** A real Gmail account is connected and tested only after the
+complete product is built. A later session picking up this work order must not read "Gmail is not
+configured" as a gap to close early — it is the intended state.
+
+What stays true while it is deferred:
+
+- The Gmail implementation built in 4A-3 (D-081) stays. It is not removed, weakened or replaced.
+- Every surface shows Gmail honestly as **not configured** wherever credentials are absent, and
+  never as a connection that worked.
+- **Skip** keeps working throughout onboarding, and stays a recorded decision rather than navigation.
+- The scripted Gmail tests stay green. They exercise the real code against a scripted provider and
+  are the reason this can be deferred without the implementation rotting.
+
+The sequence at final deployment, in this order:
+
+1. Create and verify a manual `pg_dump` — this project is on the free plan and has **no backups**.
+2. Apply the reviewed migrations 0044, 0045, 0046, 0047 in their exact repository order.
+3. Merge and deploy the completed product.
+4. Configure Google Cloud and Render (see the 4A-3 report for the exact redirect URI, scopes and
+   variable names).
+5. Connect a real Gmail account.
+6. Test controlled sync, attachments, record linking, reconnect and disconnect.
+7. Run the full lifecycle acceptance test.
+
+Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
+
+## Increment 4B — the placement lifecycle
+
+| Stage | State |
+|---|---|
+| 4B-1 Client Space | Tested |
+| 4B-2 Opportunity and Quote Space | In progress |
+| 4B-3 Quote Comparison Space | Not started |
+| 4B-4 Placement and approval flow | Not started |
+| 4B-5 Policy issuance handoff | Not started |
+
+Updated after every commit.

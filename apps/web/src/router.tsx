@@ -34,6 +34,7 @@ import { SignIn } from "./pages/SignIn.js";
 import { SignUp } from "./pages/SignUp.js";
 import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
+import { ClientSpace } from "./pages/ClientSpace.js";
 
 /** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
 const rootRoute = createRootRoute({ component: Outlet });
@@ -208,6 +209,12 @@ const search = createRoute({
   component: Search,
   validateSearch: z.object({ q: z.string().max(200).optional().catch(undefined) }),
 });
+/* One client, by id. The tab is named after the client; there is no list page behind it. */
+const clientSpace = createRoute({
+  getParentRoute: () => shell,
+  path: "/clients/$clientId",
+  component: ClientSpace,
+});
 const files = createRoute({
   getParentRoute: () => shell,
   path: "/files",
@@ -354,6 +361,7 @@ const routeTree = rootRoute.addChildren([
         automations,
         automationDetail,
         record,
+        clientSpace,
         files,
         clientFile,
         agreements,

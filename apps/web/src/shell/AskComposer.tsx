@@ -85,15 +85,20 @@ export function AskComposer() {
   const [turns, setTurns] = useState<{ question: string; response: AskResponseV2 | null }[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   // The scope travels with the question: the record a person is looking at is what "this" means.
-  const recordId = useRouterState({
+  const scope = useRouterState({
     // Read from the matched route's own params rather than parsed from the URL by hand, so a
     // change to the path shape cannot leave this silently scoping every question to the brokerage.
     select: (state) => {
       for (const match of state.matches) {
-        const params = match.params as { recordId?: string };
-        if (params.recordId) return params.recordId;
+        const params = match.params as { recordId?: string; clientId?: string };
+        if (params.recordId) return { kind: "record" as const, id: params.recordId };
+        /*
+         * A client Space scopes to the client, so "their policy" and "their latest claim" attach
+         * to the client a person is actually looking at rather than to the brokerage at large.
+         */
+        if (params.clientId) return { kind: "client" as const, id: params.clientId };
       }
-      return null;
+      return { kind: "brokerage" as const, id: null };
     },
   });
   const question = useMutation({
@@ -101,7 +106,7 @@ export function AskComposer() {
       api.askQuestion({
         question: text,
         conversationId,
-        scope: recordId ? { kind: "record", id: recordId } : { kind: "brokerage", id: null },
+        scope,
       }),
     onSuccess: (res) => {
       setConversationId(res.conversationId);

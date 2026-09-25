@@ -1,4 +1,5 @@
 import {
+  clientSpaceResponseSchema,
   onboardingResponseSchema,
   type SaveOnboardingRequest,
   acceptInvitationResponseSchema,
@@ -344,6 +345,9 @@ export const api = {
     request("POST", "/me/active-organization", null, { organization_id }),
   createOrganization: (input: CreateOrganizationRequest) =>
     request("POST", "/organizations", createOrganizationResponseSchema, input),
+
+  /** Everything this brokerage holds about one client, in one read. */
+  clientSpace: (id: string) => request("GET", `/clients/${id}/space`, clientSpaceResponseSchema),
 
   /* ---- First-use onboarding ----------------------------------------------------------------- */
   /** Where a person got to, and what is actually set up. Never a claim: counts from real rows. */

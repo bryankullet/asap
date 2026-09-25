@@ -305,6 +305,69 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
   }
   if (u.includes("/pins")) return json({ pins: [] });
   /*
+   * One client, assembled. The shape of the client comes from the harness URL so the measuring
+   * run can photograph a company with several policies, a person with one, and a client with
+   * nothing — without a database and without inventing a brokerage.
+   */
+  if (u.includes("/space") && u.includes("/clients/")) {
+    const q = new URLSearchParams(location.search);
+    const shape = q.get("client") ?? "full";
+    const bare = shape === "bare";
+    const single = shape === "single";
+    return json({
+      client: {
+        id: CLIENT,
+        name: bare ? "Placeholder Individual" : single ? "Placeholder Person" : "Placeholder Company",
+        kind: bare || single ? "individual" : "corporate",
+        fileStatus: bare ? "not_started" : "in_review",
+        createdAt: "2026-01-04T00:00:00.000Z",
+      },
+      contacts: bare
+        ? []
+        : [
+            { id: "c1000000-0000-4000-8000-000000000001", fullName: "Placeholder Contact", roleLabel: "Finance", email: "placeholder@example.invalid", phone: null, isPrimary: true },
+            ...(single ? [] : [{ id: "c1000000-0000-4000-8000-000000000002", fullName: "Second Contact", roleLabel: "Operations", email: null, phone: null, isPrimary: false }]),
+          ],
+      policies: bare
+        ? []
+        : [
+            {
+              id: "c2000000-0000-4000-8000-000000000001",
+              policyNumber: "PLACEHOLDER-1",
+              classOfBusiness: "Motor",
+              insurerName: "Placeholder Insurer",
+              periods: [
+                { id: "c3000000-0000-4000-8000-000000000001", periodStart: "2026-01-01", periodEnd: "2026-12-31", premiumAmount: "214500.00", premiumCurrency: "KES", premiumBasis: "gross", commissionAmount: "32175.00", premiumSource: "document", premiumVerifiedAt: "2026-02-01T00:00:00.000Z", premiumEvidenceDocumentId: "c6000000-0000-4000-8000-000000000001", current: true },
+                ...(single ? [] : [{ id: "c3000000-0000-4000-8000-000000000002", periodStart: "2025-01-01", periodEnd: "2025-12-31", premiumAmount: "198000.00", premiumCurrency: "KES", premiumBasis: "gross", commissionAmount: null, premiumSource: "import", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: false }]),
+              ],
+            },
+            ...(single
+              ? []
+              : [{ id: "c2000000-0000-4000-8000-000000000002", policyNumber: "PLACEHOLDER-2", classOfBusiness: "Fire", insurerName: "Placeholder Insurer", periods: [{ id: "c3000000-0000-4000-8000-000000000003", periodStart: "2026-01-01", periodEnd: "2026-12-31", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] }]),
+          ],
+      work: bare
+        ? []
+        : [{ id: "c4000000-0000-4000-8000-000000000001", kind: "renewal", title: "Placeholder renewal", taskStatus: "with_party", taskParty: "Placeholder Insurer", taskSince: "2026-08-12T00:00:00.000Z", ownerName: "Parity Harness", completedAt: null }],
+      claims: bare || single
+        ? []
+        : [{ id: "c5000000-0000-4000-8000-000000000001", workItemId: "c4000000-0000-4000-8000-000000000002", status: "registered", incidentOn: "2026-08-01", incidentSummary: "Placeholder incident", insurerReference: "REF-99", policyId: "c2000000-0000-4000-8000-000000000001" }],
+      endorsements: [],
+      documents: bare ? [] : [{ id: "c6000000-0000-4000-8000-000000000001", filename: "placeholder.pdf", kind: "policy_schedule", extractionState: "extracted", createdAt: "2026-02-01T00:00:00.000Z" }],
+      threads: bare ? [] : [{ id: "c7000000-0000-4000-8000-000000000001", subject: "Placeholder thread", lastMessageAt: "2026-08-12T00:00:00.000Z", messageCount: 3 }],
+      fileMissing: bare ? [] : ["KRA PIN certificate"],
+      mailboxConnected: !bare,
+      permissions: {
+        canEditContacts: q.get("perms") !== "none",
+        canUploadDocuments: q.get("perms") !== "none",
+        canStartWork: q.get("perms") !== "none",
+      },
+      gaps: [
+        { id: "quotation", label: "Start quotation work", reason: "Quotations are not built yet, so there is nothing to open.", gap: "4B-2" },
+        { id: "money", label: "Premium and balance", reason: "Premiums are recorded against each period, but invoices and payments have no records yet, so ASAP cannot say what is outstanding.", gap: "4D" },
+      ],
+    });
+  }
+  /*
    * First-use onboarding. The step, and whether this deployment has Google credentials, come from
    * the harness URL — so every one of the four steps and the two Gmail answers can be photographed
    * without a live Google client and without pretending one connected.

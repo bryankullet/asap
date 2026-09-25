@@ -18,6 +18,7 @@ import { Work } from "../pages/Work.js";
 import { Shell } from "../shell/Shell.js";
 import "../styles/index.css";
 import { Onboarding } from "../pages/Onboarding.js";
+import { ClientSpace } from "../pages/ClientSpace.js";
 
 /**
  * The harness's application: the shipping shell and the shipping boards, over the stubbed
@@ -62,6 +63,7 @@ const extra = [
   /* `/new` is how the sheet is opened, in the harness exactly as in the application. */
   createRoute({ getParentRoute: () => root, path: "/new", component: OpenNewSheet }),
 ];
+const clientSpace = createRoute({ getParentRoute: () => root, path: "/clients/$clientId", component: ClientSpace });
 const onboarding = createRoute({ getParentRoute: () => root, path: "/onboarding", component: Onboarding });
 const routes = ["/automations", "/ask", "/import", "/email", "/clients", "/documents", "/files"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
@@ -73,7 +75,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([onboarding, ...boards, search, ...extra, ...routes, record]),
+  routeTree: root.addChildren([onboarding, clientSpace, ...boards, search, ...extra, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

@@ -5,6 +5,7 @@ export * from "./ask.js";
 export * from "./work.js";
 export * from "./attention.js";
 export * from "./documents.js";
+export * from "./clients.js";
 export * from "./compliance.js";
 export * from "./servicing.js";
 export * from "./contacts.js";
