@@ -274,3 +274,44 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
+
+
+## Test baseline (verified at 381e439, 2026-09-25)
+
+Counted by running each package's own test command separately and reading the line it printed.
+An earlier report stated 976, which was an arithmetic error on my part: the per-package figures it
+listed sum to 989, not 976.
+
+| Package | Passed | Skipped | File total |
+|---|---|---|---|
+| `@asap/api` | 447 | 0 | 447 |
+| `@asap/web` | 410 | 0 | 410 |
+| `@asap/schema` | 106 | 0 | 106 |
+| `@asap/workers` | 23 | 10 | 33 |
+| `@asap/db` | 3 | 0 | 3 |
+| **Total** | **989** | **10** | **999** |
+
+`@asap/ui` has no test task.
+
+**The 10 are additional to the 23, not part of them.** `apps/workers/test/dispatcher.test.ts` (8)
+and `withOrganization.test.ts` (2) are wrapped in `const describeDb = url ? describe : describe.skip`
+and need a real Postgres. Without one the worker package reports `23 passed | 10 skipped (33)`;
+with one it reports `33 passed (33)`. So the honest headline is:
+
+- **without a database: 989 passing, 10 skipped, 999 declared**
+- **with a disposable database: 999 passing, 0 skipped**
+
+Both were observed at `381e439`. Nothing has been deleted, disabled, renamed out of discovery or
+omitted: `git diff 234538f..HEAD -- apps/workers/` is empty, and the two `describe.skip` bindings
+above are the only conditional skips in the repository.
+
+To run the database-backed ten:
+
+```
+WORKER_DATABASE_URL=postgres://asap_worker:<password>@127.0.0.1:5433/<db> \
+OWNER_DATABASE_URL=postgres://postgres@127.0.0.1:5433/<db> \
+pnpm --filter @asap/workers test
+```
+
+Both variables are required — the dispatcher writes its fixtures on an owner connection, because
+events are written by the API and the worker only ever reads that one exists.
