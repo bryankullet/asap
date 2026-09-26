@@ -1,10 +1,13 @@
 import {
   clientSpaceResponseSchema,
+  comparisonActionResponseSchema,
+  comparisonResponseSchema,
   opportunityActionResponseSchema,
   opportunityListResponseSchema,
   opportunityResponseSchema,
   uuidSchema,
   type CreateOpportunityRequest,
+  type ComparisonAction,
   type OpportunityAction,
   onboardingResponseSchema,
   type SaveOnboardingRequest,
@@ -366,6 +369,11 @@ export const api = {
   /** Everything a person does to it, through one contract. */
   opportunityAction: (id: string, input: OpportunityAction) =>
     request("POST", `/opportunities/${id}/actions`, opportunityActionResponseSchema, input),
+  /** The quotes beside each other, and whether the comparison still describes them. */
+  comparison: (id: string) =>
+    request("GET", `/opportunities/${id}/comparison`, comparisonResponseSchema),
+  comparisonAction: (id: string, input: ComparisonAction) =>
+    request("POST", `/opportunities/${id}/comparison/actions`, comparisonActionResponseSchema, input),
 
   /* ---- First-use onboarding ----------------------------------------------------------------- */
   /** Where a person got to, and what is actually set up. Never a claim: counts from real rows. */

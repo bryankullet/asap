@@ -269,11 +269,36 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 |---|---|
 | 4B-1 Client Space | Tested |
 | 4B-2 Opportunity and Quote Space | Tested — data foundation awaiting review |
-| 4B-3 Quote Comparison Space | In progress |
+| 4B-3 Quote Comparison Space | Tested — awaiting review |
 | 4B-4 Placement and approval flow | Not started |
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
+
+### Gaps named by 4B-3
+
+**Quotation terms are not extracted from documents.** The extractor
+(`apps/extractor/src/asap_extractor/extract.py`) knows eight labelled fields, all of them from a
+policy schedule: policy number, insured name, insurer name, class of business, period start,
+period end, sum insured, premium. It has no notion of an excess, a limit as a distinct term, an
+exclusion, a condition, a subjectivity, or a validity date, and nothing joins an extracted field
+to an `insurer_response`. Every term compared in 4B-3 is therefore one a person recorded.
+
+Measured rather than assumed. Running the real extractor over a quotation-style PDF carrying an
+own-damage excess, a theft excess, a third-party limit, an exclusion, a condition and a validity
+sentence returned: `class_of_business`, `premium`, `sum_insured` and a confused `insured_name` —
+**no term of any kind**. Two further defects surfaced in that run, both pre-existing and outside
+4B-3's scope:
+
+- `sum_insured` matches the label "limit" / "limit of liability", so a third-party limit on a
+  quotation would be read as the sum insured;
+- "Policyholders compensation fund" matches the `insured_name` label "policyholders", producing a
+  spurious conflicting reading of the insured's name; and "Period from: … Period to: …" on one
+  line puts both dates into `period_start`.
+
+Closing this needs a quotation-shaped label set, terms returned as a list rather than one value
+per key, and a route from a reviewed extraction to `quote_terms`. It is not started, and nothing
+in the product claims otherwise.
 
 
 ## Test baseline (verified at 381e439, 2026-09-25)

@@ -263,3 +263,151 @@ export const opportunityActionResponseSchema = z.object({
   opportunity: opportunityResponseSchema.nullable().default(null),
 });
 export type OpportunityActionResponse = z.infer<typeof opportunityActionResponseSchema>;
+
+/* ---- Comparing what came back ---------------------------------------------------------------
+ *
+ * A comparison is a photograph of the market at one moment, so everything here is about whether
+ * the photograph still describes anything: what it was taken from, what has moved since, and what
+ * was never there to photograph.
+ */
+
+/** Why a comparison is not worth making yet. Each is a sentence a broker can act on. */
+export const comparisonReadinessSchema = z.object({
+  ready: z.boolean(),
+  /** Empty when ready. Never a bare "Waiting" — each names who or what is outstanding. */
+  blockers: z.array(z.string().max(300)),
+  approached: z.number().int().min(0),
+  quoted: z.number().int().min(0),
+  declined: z.number().int().min(0),
+  awaiting: z.array(z.object({ insurerName: z.string(), since: z.string().nullable() })),
+  /** Required information the client has not supplied. A quote compared without it is a guess. */
+  missingInformation: z.array(z.string().max(200)),
+});
+export type ComparisonReadiness = z.infer<typeof comparisonReadinessSchema>;
+
+/** One thing that has moved since the comparison was made, named by insurer and by term. */
+export const comparisonChangeSchema = z.object({
+  insurerId: uuidSchema,
+  insurerName: z.string(),
+  termType: QuoteTermType.nullable(),
+  label: z.string().nullable(),
+  change: z.string().max(300),
+});
+export type ComparisonChange = z.infer<typeof comparisonChangeSchema>;
+
+/**
+ * One insurer's cell on one row.
+ *
+ * The three absences are different things and are never collapsed into a blank: `missing` is
+ * "this insurer did not state it", `unclear` is "they said something that cannot be compared",
+ * and a value with `corrected` true is a person's reading standing over the extractor's.
+ */
+export const comparisonCellSchema = z.object({
+  insurerId: uuidSchema,
+  value: z.string().nullable(),
+  amount: z.string().nullable(),
+  currency: z.string().nullable(),
+  missing: z.boolean(),
+  unclear: z.boolean(),
+  corrected: z.boolean(),
+  evidence: evidenceRefSchema.nullable(),
+});
+export type ComparisonCell = z.infer<typeof comparisonCellSchema>;
+
+export const comparisonRowSchema = z.object({
+  termType: QuoteTermType,
+  label: z.string(),
+  cells: z.array(comparisonCellSchema),
+  /** True when at least one insurer did not state this at all. The row is not like-for-like. */
+  incomplete: z.boolean(),
+});
+export type ComparisonRow = z.infer<typeof comparisonRowSchema>;
+
+export const comparisonColumnSchema = z.object({
+  insurerId: uuidSchema,
+  insurerName: z.string(),
+  responseId: uuidSchema,
+  receivedAt: z.string().nullable(),
+  premiumAmount: z.string().nullable(),
+  premiumCurrency: z.string().nullable(),
+  validUntil: z.string().nullable(),
+  /** True when the terms expire within a fortnight, or already have. Stated, never colour alone. */
+  validityNote: z.string().max(200).nullable(),
+  source: evidenceRefSchema.nullable(),
+});
+export type ComparisonColumn = z.infer<typeof comparisonColumnSchema>;
+
+/**
+ * What the comparison suggests, and why.
+ *
+ * `insurerId` is null whenever the quotes are not like-for-like or the cheapest is not plainly
+ * the best — abstention is a state, not a blank (§36). Cheapest never wins by being cheapest:
+ * the reasoning says what was weighed, and the caveats say what it could not weigh.
+ */
+export const comparisonRecommendationSchema = z.object({
+  insurerId: uuidSchema.nullable(),
+  insurerName: z.string().nullable(),
+  headline: z.string().max(300),
+  reasoning: z.array(z.string().max(300)),
+  caveats: z.array(z.string().max(300)),
+});
+export type ComparisonRecommendation = z.infer<typeof comparisonRecommendationSchema>;
+
+export const comparisonSchema = z.object({
+  id: uuidSchema,
+  generatedAt: z.string(),
+  generatedByName: z.string().nullable(),
+  presentedAt: z.string().nullable(),
+  presentedByName: z.string().nullable(),
+  /** True when a quote it included has changed since. The comparison is kept, never rewritten. */
+  stale: z.boolean(),
+  staleReason: z.string().nullable(),
+  changes: z.array(comparisonChangeSchema),
+  columns: z.array(comparisonColumnSchema),
+  rows: z.array(comparisonRowSchema),
+  recommendation: comparisonRecommendationSchema,
+});
+export type Comparison = z.infer<typeof comparisonSchema>;
+
+export const comparisonResponseSchema = z.object({
+  opportunity: z.object({
+    id: uuidSchema,
+    title: z.string(),
+    classOfBusiness: z.string(),
+    coverStart: z.string().nullable(),
+    coverEnd: z.string().nullable(),
+    closedAt: z.string().nullable(),
+  }),
+  client: z.object({ id: uuidSchema, name: z.string() }),
+  readiness: comparisonReadinessSchema,
+  /** Null until one has been generated. A Space with no comparison says so and offers to make one. */
+  comparison: comparisonSchema.nullable(),
+  /** Earlier comparisons, kept for audit. Newest first, the live one excluded. */
+  history: z.array(
+    z.object({
+      id: uuidSchema,
+      generatedAt: z.string(),
+      generatedByName: z.string().nullable(),
+      presentedAt: z.string().nullable(),
+      supersededAt: z.string().nullable(),
+      supersededReason: z.string().nullable(),
+    }),
+  ),
+  permissions: z.object({ canGenerate: z.boolean(), canPresent: z.boolean() }),
+});
+export type ComparisonResponse = z.infer<typeof comparisonResponseSchema>;
+
+export const comparisonActionSchema = z.discriminatedUnion("action", [
+  /** Takes the photograph. Supersedes the live one; the old is kept, not replaced. */
+  z.object({ action: z.literal("generate_comparison") }),
+  /** Records that this exact comparison went to the client. Refused while it is stale. */
+  z.object({ action: z.literal("present_comparison"), comparisonId: uuidSchema }),
+]);
+export type ComparisonAction = z.infer<typeof comparisonActionSchema>;
+
+export const comparisonActionResponseSchema = z.object({
+  outcome: z.enum(["done", "already", "blocked"]),
+  reason: z.string().max(300).nullable().default(null),
+  comparison: comparisonResponseSchema.nullable().default(null),
+});
+export type ComparisonActionResponse = z.infer<typeof comparisonActionResponseSchema>;

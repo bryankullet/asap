@@ -1591,3 +1591,39 @@ from another, and none of them is a cover state or a run state.
 
 Ask gained an `opportunity` scope, resolved from the row's own title, so "add Jubilee to this" and
 "which insurer has responded" stay attached to the quotation work on screen.
+
+
+## D-085 — An approval covers one exact request, and a comparison knows what it compared
+
+Two integrity rules, closed together because they are the same rule at two depths: a record of
+consent is worthless unless it says what was consented to.
+
+**An approval is of one exact text.** `app.quote_request_digest` is the canonical digest and both
+the database and the API compute it; a check constraint recomputes it from the row, so an approval
+that does not describe its request cannot be stored. A BEFORE trigger fills the digest on approval
+rather than trusting a caller, and supersedes the standing approval whenever the subject or body
+changes — testing the *old* digest, so a route that clears the columns itself while rewriting the
+body is still recorded. Approvals are an append-only log holding the digest, the approver and the
+time, and never the request text: a quotation request quotes the client.
+
+**A comparison records exactly what it compared.** `quote_comparisons` stores the digest of every
+response and every term it used. Any change to those rows supersedes it, naming the insurer and
+the term; `app.quote_comparison_changes` answers live, so it stays right after several changes.
+The superseded comparison is kept — a comparison a person has read is a thing that was said — and
+a stale one cannot be presented to a client until it is generated again.
+
+Rejected: recomputing a stale comparison silently, which would erase what was shown; staleness on
+`updated_at`, which would fire on writes that moved nothing until nobody read the marker; and
+storing the compared values, which is a second copy of the client's terms in an audit table.
+
+## D-086 — The cheapest quote is a candidate, not a recommendation
+
+The comparison recommends an insurer only where the quotes can honestly be set against one
+another: same currency, every term one insurer stated stated by both, nothing unclear, nothing
+expired, and more than a 5% gap in premium. Otherwise it abstains and says which of those it
+tripped on. Abstention is a state, not a blank (§36).
+
+The reasoning and the caveats are computed on the server from the rows and shown with equal
+weight; nothing on this screen is composed by a model. A cell an insurer left silent reads "Not
+stated" in words — never an empty cell, and never a colour alone, because an insurer silent on
+theft excess has not offered a nil excess.

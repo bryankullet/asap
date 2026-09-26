@@ -16,6 +16,7 @@ import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { mailboxOAuthRoutes } from "./routes/mailbox-oauth.js";
 import { onboardingRoutes } from "./routes/onboarding.js";
 import { clientRoutes } from "./routes/clients.js";
+import { comparisonRoutes } from "./routes/comparisons.js";
 import { opportunityRoutes } from "./routes/opportunities.js";
 import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
 import { importRoutes } from "./routes/imports.js";
@@ -239,6 +240,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", complianceRoutes({ logger }));
   app.route("/", clientRoutes());
   app.route("/", opportunityRoutes({ logger }));
+  app.route("/", comparisonRoutes({ logger }));
   app.route(
     "/",
     workRoutes({

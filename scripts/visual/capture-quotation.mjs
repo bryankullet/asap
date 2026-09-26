@@ -1,10 +1,11 @@
 /**
- * The Client Space, photographed and measured.
+ * Quotation work, one insurer's terms, and the comparison — photographed and measured.
  *
- * Every shape a real book contains: a company with several policies, a person with one, a client
- * with nothing on file, and somebody whose role carries no permissions. The harness serves each
- * from its URL, so a measuring run needs no database and invents no brokerage — every name in the
- * captures is an obvious placeholder.
+ * Every state each passes through: nothing asked yet, a request prepared, an insurer quoted and
+ * another declined; and for the comparison, too little to compare, a live one, one that has gone
+ * out of date, and one already shown to the client. The harness serves each from its URL, so a
+ * measuring run needs no database and invents no brokerage — every name is an obvious
+ * placeholder.
  *
  *   node scripts/visual/capture-quotation.mjs
  */
@@ -26,6 +27,7 @@ function browserPath() {
 const HARNESS = process.env.HARNESS ?? "http://127.0.0.1:5199/parity/shell-harness/";
 const OPP = "/opportunities/30000000-0000-4000-8000-00000000000a";
 const TERMS = `${OPP}/insurers/31000000-0000-4000-8000-00000000000a`;
+const COMPARISON = `${OPP}/comparison`;
 
 const STATES = [
   { name: "opportunity-new", url: `${HARNESS}?at=${OPP}&stage=new` },
@@ -35,6 +37,10 @@ const STATES = [
   { name: "opportunity-no-permissions", url: `${HARNESS}?at=${OPP}&stage=full&perms=none` },
   { name: "terms-quoted", url: `${HARNESS}?at=${TERMS}&stage=full` },
   { name: "terms-not-asked", url: `${HARNESS}?at=${TERMS}&stage=asked` },
+  { name: "comparison-too-little", url: `${HARNESS}?at=${COMPARISON}&stage=empty` },
+  { name: "comparison-live", url: `${HARNESS}?at=${COMPARISON}&stage=live` },
+  { name: "comparison-out-of-date", url: `${HARNESS}?at=${COMPARISON}&stage=stale` },
+  { name: "comparison-presented", url: `${HARNESS}?at=${COMPARISON}&stage=presented` },
 ];
 
 const outDir = resolve(".local-visual/shots/quotation");

@@ -35,6 +35,7 @@ import { SignUp } from "./pages/SignUp.js";
 import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
 import { ClientSpace } from "./pages/ClientSpace.js";
+import { ComparisonSpace } from "./pages/ComparisonSpace.js";
 import { OpportunitySpace, QuoteSpace } from "./pages/OpportunitySpace.js";
 
 /** Routes from UI Build Spec v1 Part 1.3. Every panel is a URL; nothing traps state in memory. */
@@ -222,6 +223,12 @@ const opportunity = createRoute({
   path: "/opportunities/$opportunityId",
   component: OpportunitySpace,
 });
+/* The quotes beside each other. Its own address, so a comparison can be linked and reopened. */
+const comparison = createRoute({
+  getParentRoute: () => shell,
+  path: "/opportunities/$opportunityId/comparison",
+  component: ComparisonSpace,
+});
 const quote = createRoute({
   getParentRoute: () => shell,
   path: "/opportunities/$opportunityId/insurers/$opportunityInsurerId",
@@ -375,6 +382,7 @@ const routeTree = rootRoute.addChildren([
         record,
         clientSpace,
         opportunity,
+        comparison,
         quote,
         files,
         clientFile,

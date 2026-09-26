@@ -253,6 +253,151 @@ const getRuns: DeclaredTool = {
   },
 };
 
+
+/**
+ * What each insurer said, for one piece of quotation work.
+ *
+ * Read-only and rows-only, like everything here. It deliberately returns the outcome as the
+ * database stores it — `quoted`, `declined`, `no_response` — rather than a phrase, so the model
+ * cannot turn silence into a quote by choosing kinder words. A response with no premium comes
+ * back with no premium.
+ */
+const getQuotes: DeclaredTool = {
+  declaration: {
+    name: "get_quotes",
+    description:
+      "For one piece of quotation work, what each insurer approached has actually said: quoted, declined, or no answer yet, with the premium where one was stated and the terms recorded against it. Use this before answering anything about who has responded or what a quote costs. An insurer with no row here has not answered.",
+    inputSchema: {
+      type: "object",
+      properties: { opportunityId: { type: "string", description: "The opportunity's id." } },
+      required: ["opportunityId"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const { opportunityId } = z.object({ opportunityId: uuid }).parse(args);
+
+    const approaches = await ctx.db
+      .from("opportunity_insurers")
+      .select("id, insurer_id, added_at, removed_at")
+      .eq("organization_id", ctx.organizationId)
+      .eq("opportunity_id", opportunityId)
+      .is("removed_at", null)
+      .limit(LIMIT);
+    if (approaches.error) throw mapDatabaseError(approaches.error);
+    const rows = (approaches.data ?? []) as { id: string; insurer_id: string; added_at: string }[];
+    if (rows.length === 0) return [];
+
+    const [insurersR, responsesR] = await Promise.all([
+      ctx.db.from("insurers").select("id, name").eq("organization_id", ctx.organizationId)
+        .in("id", rows.map((r) => r.insurer_id)),
+      ctx.db
+        .from("insurer_responses")
+        .select("id, opportunity_insurer_id, outcome, received_at, premium_amount, premium_currency, valid_until, decline_reason")
+        .eq("organization_id", ctx.organizationId)
+        .in("opportunity_insurer_id", rows.map((r) => r.id)),
+    ]);
+    if (insurersR.error) throw mapDatabaseError(insurersR.error);
+    if (responsesR.error) throw mapDatabaseError(responsesR.error);
+
+    const names = new Map((insurersR.data ?? []).map((i) => [(i as { id: string }).id, (i as { name: string }).name]));
+    const responses = (responsesR.data ?? []) as Record<string, string | null>[];
+
+    const terms = responses.length === 0
+      ? []
+      : ((await ctx.db
+          .from("quote_terms")
+          .select("insurer_response_id, term_type, label, extracted_value, corrected_value, amount, currency, unclear")
+          .eq("organization_id", ctx.organizationId)
+          .in("insurer_response_id", responses.map((r) => r["id"] as string))).data ?? []) as Record<string, unknown>[];
+
+    return rows.map((approach) => {
+      const response = responses.find((r) => r["opportunity_insurer_id"] === approach.id) ?? null;
+      return {
+        insurerId: approach.insurer_id,
+        insurerName: names.get(approach.insurer_id) ?? null,
+        approachedAt: approach.added_at,
+        /* No row means nobody has recorded an answer. Not a decline, and not a quote. */
+        outcome: response === null ? "not_recorded" : response["outcome"],
+        receivedAt: response?.["received_at"] ?? null,
+        premiumAmount: response?.["premium_amount"] ?? null,
+        premiumCurrency: response?.["premium_currency"] ?? null,
+        validUntil: response?.["valid_until"] ?? null,
+        declineReason: response?.["decline_reason"] ?? null,
+        terms: response === null
+          ? []
+          : terms
+              .filter((t) => t["insurer_response_id"] === response["id"])
+              .map((t) => ({
+                termType: t["term_type"],
+                label: t["label"],
+                value: t["corrected_value"] ?? t["extracted_value"],
+                corrected: t["corrected_value"] !== null,
+                amount: t["amount"],
+                currency: t["currency"],
+                unclear: t["unclear"],
+              })),
+      };
+    });
+  },
+};
+
+/**
+ * The comparison of those quotes, and whether it still describes them.
+ *
+ * `stale` is the point of this tool. A model asked "what does the comparison say" must be able to
+ * find out that it no longer says anything reliable, and why — so the answer is "that comparison
+ * is out of date because Jubilee revised its premium", not last week's figures.
+ */
+const getQuoteComparison: DeclaredTool = {
+  declaration: {
+    name: "get_quote_comparison",
+    description:
+      "The current comparison of the quotes for one piece of quotation work, if one has been made: when it was made, whether it was shown to the client, and whether any quote has changed since it was made. If `stale` is true the figures in it no longer describe the quotes, and `staleReason` says what moved. Never present a stale comparison's figures as current.",
+    inputSchema: {
+      type: "object",
+      properties: { opportunityId: { type: "string", description: "The opportunity's id." } },
+      required: ["opportunityId"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const { opportunityId } = z.object({ opportunityId: uuid }).parse(args);
+    const { data, error } = await ctx.db
+      .from("quote_comparisons")
+      .select("id, generated_at, presented_at, superseded_at, superseded_reason")
+      .eq("organization_id", ctx.organizationId)
+      .eq("opportunity_id", opportunityId)
+      .order("generated_at", { ascending: false })
+      .limit(LIMIT);
+    if (error) throw mapDatabaseError(error);
+
+    const rows = (data ?? []) as Record<string, string | null>[];
+    const current = rows.find((r) => r["superseded_at"] === null) ?? null;
+    if (current === null) {
+      return {
+        comparison: null,
+        /* Said plainly, so "there isn't one" cannot be read as "there is one and it is empty". */
+        note: rows.length === 0
+          ? "No comparison has been made for this quotation work."
+          : "Every comparison made for this quotation work is out of date. Make it again before quoting figures.",
+        earlier: rows.length,
+      };
+    }
+    return {
+      comparison: {
+        id: current["id"],
+        generatedAt: current["generated_at"],
+        presentedToClientAt: current["presented_at"],
+        stale: false,
+        staleReason: null,
+      },
+      note: null,
+      earlier: rows.length - 1,
+    };
+  },
+};
+
 /** Every tool the model may be told about. Nothing outside this list is reachable. */
 export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   findClients,
@@ -260,6 +405,8 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getPolicyPeriods,
   getRecordEvidence,
   getRuns,
+  getQuotes,
+  getQuoteComparison,
 ];
 
 export const TOOL_DECLARATIONS: AiToolDeclaration[] = DECLARED_TOOLS.map((t) => t.declaration);

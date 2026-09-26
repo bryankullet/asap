@@ -235,7 +235,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
     const { db, user } = c.get("auth");
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
-    return c.json(opportunityResponseSchema.parse(await load(db, ctx, org.id, c.req.param("id"))));
+    return c.json(opportunityResponseSchema.parse(await loadOpportunity(db, ctx, org.id, c.req.param("id"))));
   });
 
   app.patch("/opportunities/:id", async (c) => {
@@ -277,7 +277,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       newState: patch,
     });
 
-    return c.json(opportunityResponseSchema.parse(await load(db, ctx, org.id, id)));
+    return c.json(opportunityResponseSchema.parse(await loadOpportunity(db, ctx, org.id, id)));
   });
 
   /**
@@ -308,7 +308,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
         opportunityActionResponseSchema.parse({
           outcome: "blocked",
           reason,
-          opportunity: await load(db, ctx, org.id, id),
+          opportunity: await loadOpportunity(db, ctx, org.id, id),
         }),
       );
     const done = async (outcome: "done" | "already" = "done") =>
@@ -316,7 +316,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
         opportunityActionResponseSchema.parse({
           outcome,
           reason: null,
-          opportunity: await load(db, ctx, org.id, id),
+          opportunity: await loadOpportunity(db, ctx, org.id, id),
         }),
       );
 
@@ -774,7 +774,7 @@ async function namesFor(
   return out;
 }
 
-async function load(
+export async function loadOpportunity(
   db: SupabaseClient,
   ctx: Ctx,
   organizationId: string,

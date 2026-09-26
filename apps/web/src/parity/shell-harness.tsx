@@ -308,6 +308,86 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
    * Quotation work. The shape comes from the harness URL so every state a real one passes through
    * can be photographed: nothing asked yet, prepared, approved-but-unsent, quoted, declined.
    */
+  /*
+   * The comparison. Its own stub, ahead of the opportunity's, because its address is a longer
+   * form of the same one. `stage` photographs each state it passes through: nothing to compare,
+   * a live comparison, one that has gone out of date, and one already shown to the client.
+   */
+  if (u.includes("/comparison")) {
+    const q = new URLSearchParams(location.search);
+    const stage = q.get("stage") ?? "live";
+    const INS_A = "21000000-0000-4000-8000-00000000000a";
+    const INS_B = "21000000-0000-4000-8000-00000000000b";
+    const CMP = "36000000-0000-4000-8000-00000000000f";
+    const cell = (insurerId: string, value: string | null, over: Record<string, unknown> = {}) => ({
+      insurerId, value, amount: null, currency: null,
+      missing: value === null, unclear: false, corrected: false, evidence: null, ...over,
+    });
+    const stale = stage === "stale";
+    return json({
+      opportunity: {
+        id: "30000000-0000-4000-8000-00000000000a",
+        title: "Placeholder Company motor fleet quotation — 2027",
+        classOfBusiness: "Commercial motor",
+        coverStart: "2027-01-01",
+        coverEnd: "2027-12-31",
+        closedAt: null,
+      },
+      client: { id: CLIENT, name: "Placeholder Company" },
+      readiness:
+        stage === "empty"
+          ? {
+              ready: false,
+              blockers: [
+                "Only Placeholder Insurer has quoted. One quote is a quote, not a comparison.",
+                "With Second Placeholder Insurer since 2026-09-01 — no answer yet.",
+              ],
+              approached: 2, quoted: 1, declined: 0,
+              awaiting: [{ insurerName: "Second Placeholder Insurer", since: "2026-09-01" }],
+              missingInformation: [],
+            }
+          : { ready: true, blockers: [], approached: 2, quoted: 2, declined: 0, awaiting: [], missingInformation: [] },
+      comparison:
+        stage === "empty" || stale
+          ? null
+          : {
+              id: CMP,
+              generatedAt: "2026-09-06T09:00:00.000Z",
+              generatedByName: "Parity Harness",
+              presentedAt: stage === "presented" ? "2026-09-07T09:00:00.000Z" : null,
+              presentedByName: stage === "presented" ? "Parity Harness" : null,
+              stale: false,
+              staleReason: null,
+              changes: [],
+              columns: [
+                { insurerId: INS_B, insurerName: "Second Placeholder Insurer", responseId: "34000000-0000-4000-8000-00000000000b", receivedAt: "2026-09-05T00:00:00.000Z", premiumAmount: "5620000.00", premiumCurrency: "KES", validUntil: "2027-06-30", validityNote: null, source: { kind: "note", id: null, label: "Quotation letter.", path: null } },
+                { insurerId: INS_A, insurerName: "Placeholder Insurer", responseId: "34000000-0000-4000-8000-00000000000a", receivedAt: "2026-09-05T00:00:00.000Z", premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30", validityNote: null, source: { kind: "note", id: null, label: "Terms read out by the underwriter.", path: null } },
+              ],
+              rows: [
+                { termType: "limit", label: "Third party property damage", cells: [cell(INS_B, "KES 20,000,000"), cell(INS_A, "KES 20,000,000")], incomplete: false },
+                { termType: "excess", label: "Own damage", cells: [cell(INS_B, "5% of claim, minimum KES 25,000"), cell(INS_A, "5% of claim, minimum KES 30,000", { corrected: true })], incomplete: false },
+                { termType: "excess", label: "Theft", cells: [cell(INS_B, null), cell(INS_A, "As per policy wording", { unclear: true })], incomplete: true },
+                { termType: "exclusion", label: "Political violence", cells: [cell(INS_B, "Excluded"), cell(INS_A, "Excluded unless separately arranged")], incomplete: false },
+              ],
+              recommendation: {
+                insurerId: null, insurerName: null,
+                headline: "These quotes are not yet like for like.",
+                reasoning: [
+                  "Placeholder Insurer quotes KES 5,310,000, against KES 5,620,000 from Second Placeholder Insurer.",
+                  "Before recommending one, get the missing terms stated so the same cover is being priced.",
+                ],
+                caveats: [
+                  "Second Placeholder Insurer did not state Theft.",
+                  "Placeholder Insurer: Theft was stated in terms that cannot be compared.",
+                ],
+              },
+            },
+      history: stale
+        ? [{ id: CMP, generatedAt: "2026-09-06T09:00:00.000Z", generatedByName: "Parity Harness", presentedAt: null, supersededAt: "2026-09-08T09:00:00.000Z", supersededReason: 'Placeholder Insurer changed the term "Own damage" after this comparison was made.' }]
+        : [],
+      permissions: { canGenerate: true, canPresent: true },
+    });
+  }
   if (u.includes("/opportunities/")) {
     const q = new URLSearchParams(location.search);
     const stage = q.get("stage") ?? "full";
