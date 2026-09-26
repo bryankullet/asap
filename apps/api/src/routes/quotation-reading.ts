@@ -7,6 +7,7 @@ import {
   type TermProposal,
 } from "@asap/schema";
 import { Hono } from "hono";
+import { pgMoney } from "../numeric.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
@@ -243,7 +244,7 @@ export function quotationReadingRoutes(deps: { logger: Logger }) {
           corrected_value: input.action === "correct_proposal" ? input.correctedValue : null,
           corrected_by: input.action === "correct_proposal" ? user.id : null,
           corrected_at: input.action === "correct_proposal" ? now : null,
-          amount: proposal.amount,
+          amount: pgMoney(proposal.amount),
           currency: proposal.currency,
           unclear: proposal.condition === "unclear",
           evidence_document_id: documentId,
@@ -459,7 +460,7 @@ async function load(
         termType: r.term_type,
         label: r.label,
         proposedValue: r.proposed_value,
-        amount: r.amount,
+        amount: pgMoney(r.amount),
         currency: r.currency,
         page: r.page_number,
         region:

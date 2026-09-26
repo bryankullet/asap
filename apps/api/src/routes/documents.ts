@@ -22,6 +22,7 @@ import {
   type DocumentSummary,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pgMoney } from "../numeric.js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
@@ -243,7 +244,7 @@ async function currentValues(
       values: {
         period_start: row.period_start,
         period_end: row.period_end,
-        premium: row.premium_amount === null ? null : String(row.premium_amount),
+        premium: pgMoney(row.premium_amount),
       },
     };
   }

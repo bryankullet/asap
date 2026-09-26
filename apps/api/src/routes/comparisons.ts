@@ -19,6 +19,7 @@ import {
   type QuoteTerm,
 } from "@asap/schema";
 import { createHash } from "node:crypto";
+import { pgMoney } from "../numeric.js";
 import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
@@ -471,7 +472,7 @@ async function assemble(
       insurerName: insurerNames.get(input.insurer_id) ?? "An insurer no longer approached",
       responseId: input.insurer_response_id,
       receivedAt: (revision["received_at"] as string | null) ?? null,
-      premiumAmount: (revision["premium_amount"] as string | null) ?? null,
+      premiumAmount: pgMoney(revision["premium_amount"]),
       premiumCurrency: (revision["premium_currency"] as string | null) ?? null,
       validUntil: (revision["valid_until"] as string | null) ?? null,
       validity: validityOf((revision["valid_until"] as string | null) ?? null, validity),
@@ -812,7 +813,7 @@ function buildRows(
         return {
           insurerId: column.insurerId,
           value: valueOf(r),
-          amount: (r["amount"] as string | null) ?? null,
+          amount: pgMoney(r["amount"]),
           currency: (r["currency"] as string | null) ?? null,
           missing: false,
           unclear: Boolean(r["unclear"]),

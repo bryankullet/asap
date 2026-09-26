@@ -10,6 +10,7 @@ import {
   type OpportunityResponse,
   type QuoteTermType,
 } from "@asap/schema";
+import { pgMoney } from "../numeric.js";
 import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
@@ -640,7 +641,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           newState: {
             opportunityInsurerId: input.opportunityInsurerId,
             outcome: input.outcome,
-            premiumAmount: row.premium_amount,
+            premiumAmount: pgMoney(row.premium_amount),
             premiumCurrency: row.premium_currency,
           },
         });
@@ -960,7 +961,7 @@ export async function loadOpportunity(
                 id: res["id"] as string,
                 outcome: res["outcome"] as "quoted" | "declined" | "no_response",
                 receivedAt: res["received_at"] ?? null,
-                premiumAmount: res["premium_amount"] ?? null,
+                premiumAmount: pgMoney(res["premium_amount"]),
                 premiumCurrency: res["premium_currency"] ?? null,
                 validUntil: res["valid_until"] ?? null,
                 declineReason: res["decline_reason"] ?? null,
@@ -980,7 +981,7 @@ export async function loadOpportunity(
                     correctedValue: (t["corrected_value"] as string | null) ?? null,
                     correctedByName: t["corrected_by"] ? (who.get(t["corrected_by"] as string) ?? null) : null,
                     correctedAt: (t["corrected_at"] as string | null) ?? null,
-                    amount: (t["amount"] as string | null) ?? null,
+                    amount: pgMoney(t["amount"]),
                     currency: (t["currency"] as string | null) ?? null,
                     unclear: Boolean(t["unclear"]),
                     evidence: evidence((t["evidence_document_id"] as string | null) ?? null, null, null),

@@ -1,5 +1,6 @@
 import { clientSpaceResponseSchema, type ClientSpaceResponse } from "@asap/schema";
 import { Hono } from "hono";
+import { pgMoney } from "../numeric.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 
@@ -211,10 +212,10 @@ export function clientRoutes() {
             id: r["id"] as string,
             periodStart: r["period_start"] as string,
             periodEnd: r["period_end"] as string,
-            premiumAmount: (r["premium_amount"] as string | null) ?? null,
+            premiumAmount: pgMoney(r["premium_amount"]),
             premiumCurrency: (r["premium_currency"] as string | null) ?? null,
             premiumBasis: (r["premium_basis"] as "gross" | "total_payable" | null) ?? null,
-            commissionAmount: (r["commission_amount"] as string | null) ?? null,
+            commissionAmount: pgMoney(r["commission_amount"]),
             premiumSource: (r["premium_source"] as "manual" | "import" | "document" | "seed") ?? "manual",
             premiumVerifiedAt: (r["premium_verified_at"] as string | null) ?? null,
             premiumEvidenceDocumentId: (r["premium_evidence_document_id"] as string | null) ?? null,

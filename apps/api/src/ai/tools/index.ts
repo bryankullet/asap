@@ -11,6 +11,7 @@ import {
   type PrepareActionResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pgMoney } from "../../numeric.js";
 import { z } from "zod";
 import { mapDatabaseError } from "../../errors.js";
 import { coverOf as coverOfForTool } from "../../routes/placement.js";
@@ -335,7 +336,7 @@ const getQuotes: DeclaredTool = {
         /* No row means nobody has recorded an answer. Not a decline, and not a quote. */
         outcome: response === null ? "not_recorded" : response["outcome"],
         receivedAt: response?.["received_at"] ?? null,
-        premiumAmount: response?.["premium_amount"] ?? null,
+        premiumAmount: pgMoney(response?.["premium_amount"]),
         premiumCurrency: response?.["premium_currency"] ?? null,
         validUntil: response?.["valid_until"] ?? null,
         declineReason: response?.["decline_reason"] ?? null,
@@ -348,7 +349,7 @@ const getQuotes: DeclaredTool = {
                 label: t["label"],
                 value: t["corrected_value"] ?? t["extracted_value"],
                 corrected: t["corrected_value"] !== null,
-                amount: t["amount"],
+                amount: pgMoney(t["amount"]),
                 currency: t["currency"],
                 unclear: t["unclear"],
               })),
@@ -486,7 +487,7 @@ const getQuotationReading: DeclaredTool = {
         label: r["label"],
         proposedValue: r["proposed_value"],
         correctedValue: r["corrected_value"],
-        amount: r["amount"],
+        amount: pgMoney(r["amount"]),
         currency: r["currency"],
         page: r["page_number"],
         region:
@@ -622,7 +623,7 @@ const getPlacement: DeclaredTool = {
       },
       instruction: instructionQ.data,
       acceptedTerms: {
-        premiumAmount: p["basis_premium_amount"],
+        premiumAmount: pgMoney(p["basis_premium_amount"]),
         premiumCurrency: p["basis_premium_currency"],
         validUntil: p["basis_valid_until"],
       },
