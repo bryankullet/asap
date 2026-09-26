@@ -271,7 +271,8 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-2 Opportunity and Quote Space | Tested — data foundation awaiting review |
 | 4B-3 Quote Comparison Space | Accepted |
 | 4B-3A Reproducibility, recommendation rules, extraction | Accepted |
-| 4B-4 Placement and approval flow | Tested — awaiting review |
+| 4B-4 Placement and approval flow | Accepted as foundation |
+| 4B-4A Ask actions, Work clarity, cover match, client acceptance | Tested — awaiting review |
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
@@ -306,26 +307,38 @@ sentence returned: `class_of_business`, `premium`, `sum_insured` and a confused 
 Closing this needed a quotation-shaped label set, terms returned as a list rather than one value
 per key, and a route from a reviewed extraction to `quote_terms`. All three are now in place.
 
-### What 4B-5 inherits from 4B-4
+### What 4B-5 inherits from 4B-4 and 4B-4A
 
-- **The handoff is Work, not a policy.** `prepare_issuance` opens one Work item titled
-  "… placement — 2027 — policy issuance", once, and only after cover is confirmed as requested.
-  No `policies` row is written anywhere in 4B-4; pgTAP asserts it.
-- **Confirmed on changed terms has no acceptance action yet.** The placement blocks issuance and
-  says the client must accept the changes. Today the honest route is to put the changes to the
-  client and record a fresh confirmation *as requested* once they agree. A dedicated "client
-  accepted the insurer's changes" step, with its own evidence, belongs with issuance.
-- **`placement.verify_cover_match` is still a gap.** A confirmation is recorded with its terms in
-  words; nothing yet compares the insurer's confirmed terms field by field against the frozen
-  basis. "Confirmed on changed terms" is a person's judgement, recorded with the changes named.
-- **The premium condition is not checked.** The economic model says placed cover needs the
-  premium condition met (`money.check_payment_condition`). "Active cover" here follows the
-  insurer's effective date only, as the 4B-4 brief defines it. Money is 4D.
-- **Confirmation overdue has no timer.** Work shows "With Jubilee since 8 Sep" from the moment of
-  submission, which is what a person needs to see; nothing yet raises it after N days. That is the
-  scheduled-jobs stage, like the validity sweep.
-- **Quote expiry after instruction** is caught at submission (a revised quote blocks it) and on
-  the comparison (an expired quote is unpresentable). It does not yet raise Work by itself.
+- **The handoff is Work, not a policy.** When cover is confirmed and the cover check finds no
+  unaccepted material difference, the placement's lifecycle Work becomes *issue policy from
+  confirmed cover* — once, keyed on the placement. `prepare_issuance` finds that same item. No
+  `policies` row is written anywhere in 4B-4 or 4B-4A.
+- **Readiness is a structured gate** (`readiness.state` + `reasons[]`): submitted, confirmed,
+  confirmation evidence, effective date, a current cover check, no unaccepted material difference,
+  a current instruction, not cancelled, permission. 4B-5 must re-evaluate it, never trust it.
+- **The premium condition is recorded, not checked.** `readiness.deferredChecks` says so in words.
+  Whether premium must be paid before issuance is a per-brokerage company rule that arrives with
+  Money (4D, `money.check_payment_condition`). Nothing hard-codes it.
+- **Closed in 4B-4A:** `placement.verify_cover_match` (field by field, stored with both input
+  ids, stale when either moves) and the client's acceptance of changed terms (accept all creates a
+  new instruction revision and basis version; reject and partial never change what was agreed).
+
+### Scheduled gaps left open by 4B-4A
+
+Opening a placement derives its state and brings its Work into line immediately, and every blocked
+attempt creates or updates Work in the same request. What does **not** yet happen without a person
+opening something:
+
+- **Confirmation overdue has no timer.** Work shows "With Jubilee since 8 Sep — cover confirmation
+  requested" from the moment of submission; nothing raises it after N days. `task_next_check` is
+  carried through the engine function but nothing sets it yet.
+- **Quote expiry after instruction** raises Work only when the placement is next opened or acted
+  on (it becomes *review what changed in the quotation*). No sweep notices it in between.
+- **`quote.track_validity` has no scheduled sweep** (unchanged from 4B-3A).
+- **Prepared actions expire lazily.** A prepared action past its 24-hour window is refused and
+  marked expired when someone tries to confirm it; nothing sweeps unconfirmed ones.
+
+All four belong with the scheduled-jobs stage.
 
 ### Still unsupported after 4B-3A
 
@@ -339,7 +352,9 @@ per key, and a route from a reviewed extraction to `quote_terms`. All three are 
   comparison unpresentable immediately. Nothing runs on a timer to notice an expiry between
   readings; that belongs with the scheduled-jobs stage.
 - **Ask prepares, it does not confirm.** The model can read a quotation's proposals and explain
-  why no recommendation was made. Accepting, correcting or rejecting a reading is a person's
+  why no recommendation was made. For placements (4B-4A) it can now *prepare* the eight placement
+  actions; each waits on the placement for a person to confirm, and runs through the same
+  validated action the screen uses. Accepting, correcting or rejecting a reading is a person's
   action through the validated route.
 
 

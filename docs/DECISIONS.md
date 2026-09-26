@@ -1734,3 +1734,45 @@ sending integration does, and requires the provider's own message id.
 A person refused an approval is told which roles in their own brokerage hold `placement:approve`,
 read from `roles` and `role_permissions`. The Work item records that approval is required.
 Nothing about the placement changes.
+
+## D-096 — Work is identified by its source and reason, never its title
+
+A Work item opened for a business record carries `source_type`, `source_id` and `reason_code`, and
+a partial unique index allows one open item per (organization, source type, source id, reason).
+`work_item_ensure` refreshes that item instead of duplicating it; `work_item_resolve` completes
+exactly that item. Two placements with the same title are two sources, so two items. A placement
+has one lifecycle reason open at a time, derived from its facts on every action, on every blocked
+attempt, and on opening when Work disagrees. Title-keyed `work_item_create` stays for kinds that
+have no source yet.
+
+## D-097 — The cover check compares immutable records, and says when it is stale
+
+`placement.verify_cover_match` compares the current accepted basis *version* with the live insurer
+response, field by field and term by term, and stores the result naming both input ids. It is
+current only while both ids are still the current ones — derived by comparison, so nothing has to
+remember to mark it stale. Whitespace, case and thousands separators are presentation. A term the
+confirmation is silent on is *missing*, never a match. The client's own conditions are shown as
+*a person must check* but are not material: treating them as a difference would ask the client to
+accept their own conditions before a policy could ever issue.
+
+## D-098 — Insurance reality and client agreement are separate facts
+
+An insurer can put cover in force on changed terms before the client agrees. The cover line then
+says "Active cover … on the insurer's changed terms", truthfully, and the placement says beside it
+that the client has not agreed, opens *review changed insurer terms* in Work, and blocks issuance.
+The client's decision is its own record with its own evidence. Accepting all creates a new
+instruction revision (the original is kept, superseded) and a new basis version from the insurer's
+confirmation, and the cover is checked again. Rejecting or partly accepting changes nothing that
+was agreed — the database refuses a partial acceptance that points at a new basis — and prepares a
+draft to the insurer that is never said to have been sent.
+
+## D-099 — Ask prepares placement actions; a person confirms them on the placement
+
+Ask's `prepare_placement_action` tool is the one exception to the tools being read-only: it stores
+a *prepared action* — a typed, validated payload, the versions of every fact it rests on and their
+digest, what will change, what blocks it, whether the person may do it, an idempotency key and a
+24-hour expiry — and nothing else. Names are resolved exactly against the brokerage's own records
+or answered with one question; nothing is defaulted. Confirmation re-reads the placement, refuses
+the action as stale if the digest moved, re-checks permission, then runs the same service function
+the screen's action route runs. Prepared actions live in the database, not the browser, so a
+refresh does not lose one; they are shown on the placement with a confirm panel and a receipt.
