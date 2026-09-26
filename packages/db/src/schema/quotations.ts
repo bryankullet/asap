@@ -320,6 +320,43 @@ export const quoteTerms = pgTable(
   ],
 );
 
+/**
+ * Every approval that has ever been given for a quotation request, and what became of it.
+ * Append-only: superseding is the database trigger's write, and nothing deletes a row.
+ */
+export const quoteRequestApprovals = pgTable(
+  "quote_request_approvals",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    quoteRequestId: uuid("quote_request_id")
+      .notNull()
+      .references(() => quoteRequests.id, { onDelete: "cascade" }),
+    /* The digest of exactly what was approved. Never the text: a request quotes the client. */
+    bodySha256: text("body_sha256").notNull(),
+    approvedBy: uuid("approved_by")
+      .notNull()
+      .references(() => users.id),
+    approvedAt: timestamptz("approved_at").notNull().defaultNow(),
+    supersededAt: timestamptz("superseded_at"),
+    supersededReason: text("superseded_reason"),
+  },
+  (t) => [
+    check("quote_request_approvals_body_sha256_check", sql`length(${t.bodySha256}) = 64`),
+    check(
+      "quote_request_approvals_superseded_is_whole",
+      sql`(${t.supersededAt} is null and ${t.supersededReason} is null)
+          or (${t.supersededAt} is not null
+              and ${t.supersededReason} is not null and length(btrim(${t.supersededReason})) > 0)`,
+    ),
+    index("quote_request_approvals_organization_id_idx").on(t.organizationId),
+    index("quote_request_approvals_quote_request_id_idx").on(t.quoteRequestId),
+    index("quote_request_approvals_approved_by_idx").on(t.approvedBy),
+  ],
+);
+
 export type RequirementTemplate = typeof requirementTemplates.$inferSelect;
 export type Opportunity = typeof opportunities.$inferSelect;
 export type OpportunityRequirement = typeof opportunityRequirements.$inferSelect;
@@ -327,3 +364,4 @@ export type OpportunityInsurer = typeof opportunityInsurers.$inferSelect;
 export type QuoteRequest = typeof quoteRequests.$inferSelect;
 export type InsurerResponse = typeof insurerResponses.$inferSelect;
 export type QuoteTerm = typeof quoteTerms.$inferSelect;
+export type QuoteRequestApproval = typeof quoteRequestApprovals.$inferSelect;

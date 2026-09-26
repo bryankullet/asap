@@ -13,7 +13,7 @@
 --   * nothing here can be deleted, by anybody;
 --   * and one brokerage sees none of another's.
 begin;
-select plan(36);
+select plan(37);
 
 create or replace function pg_temp.login(p_user uuid) returns void language plpgsql as $$
 begin
@@ -162,10 +162,24 @@ select throws_ok(
     where id = 'f6000000-0000-4000-8000-00000000000a'$$,
   '23514', null, 'it cannot be sent without the provider''s own message id');
 
-select throws_ok(
-  $$update quote_requests set approved_by = 'a0000000-0000-4000-8000-000000000001', approved_at = now()
-    where id = 'f6000000-0000-4000-8000-00000000000a'$$,
-  '23514', null, 'and cannot be approved without the digest of what was approved');
+/*
+ * Approving no longer needs the caller to supply a digest and is no longer trusted to: 0049 puts
+ * a trigger in front of this write that computes it from the row itself. What 0048 could only ask
+ * of a careful caller is now simply true.
+ */
+update quote_requests set approved_by = 'a0000000-0000-4000-8000-000000000001', approved_at = now()
+ where id = 'f6000000-0000-4000-8000-00000000000a';
+select is(
+  (select approved_body_sha256 = app.quote_request_digest(subject, body_text)
+     from quote_requests where id = 'f6000000-0000-4000-8000-00000000000a'),
+  true, 'approving records the digest of exactly the text being approved');
+
+/* Editing it withdraws the approval, which is 0049's rule and is proved in full in 0322. */
+update quote_requests set subject = 'Quotation request (revised)'
+ where id = 'f6000000-0000-4000-8000-00000000000a';
+select is(
+  (select approved_at from quote_requests where id = 'f6000000-0000-4000-8000-00000000000a'),
+  null, 'and editing the request afterwards leaves it unapproved again');
 
 select throws_ok(
   $$insert into quote_requests (organization_id, opportunity_id, opportunity_insurer_id,

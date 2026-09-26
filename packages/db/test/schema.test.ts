@@ -131,6 +131,7 @@ describe("Drizzle schema conventions", () => {
       "policies",
       "policy_periods",
       "policy_versions",
+      "quote_request_approvals",
       "quote_requests",
       "quote_terms",
       "requirement_templates",

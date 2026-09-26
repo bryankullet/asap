@@ -269,7 +269,7 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 |---|---|
 | 4B-1 Client Space | Tested |
 | 4B-2 Opportunity and Quote Space | Tested — data foundation awaiting review |
-| 4B-3 Quote Comparison Space | Blocked — waiting on the 4B-2 data foundation review |
+| 4B-3 Quote Comparison Space | In progress |
 | 4B-4 Placement and approval flow | Not started |
 | 4B-5 Policy issuance handoff | Not started |
 

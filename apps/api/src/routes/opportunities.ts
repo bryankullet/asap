@@ -30,6 +30,19 @@ import { parseBody } from "./_parse.js";
  * index refuses the second of anything, and this code reads what won rather than racing it.
  */
 
+/**
+ * The canonical digest an approval covers. This must stay identical to `app.quote_request_digest`
+ * in migration 0049 — a check constraint recomputes it in the database, so a divergence here is a
+ * failed write rather than a quiet disagreement. The separator is a record separator character,
+ * which cannot occur in a subject line; without one, a subject ending "x" with body "y" and a
+ * subject "x" with body starting "y" would hash alike.
+ */
+export function quoteRequestDigest(subject: string, body: string): string {
+  return createHash("sha256")
+    .update(`${subject}\u001e${body}`, "utf8")
+    .digest("hex");
+}
+
 /** No response shape carries a status. What has happened is read from the rows. */
 export function opportunityRoutes(deps: { logger: Logger }) {
   const app = new Hono();
@@ -523,9 +536,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
             approved_by: user.id,
             approved_at: now,
             /* The approval covers this exact text; editing it afterwards clears it. */
-            approved_body_sha256: createHash("sha256")
-              .update(JSON.stringify([row.subject, row.body_text]))
-              .digest("hex"),
+            approved_body_sha256: quoteRequestDigest(row.subject, row.body_text),
             updated_at: now,
           })
           .eq("organization_id", org.id)
@@ -533,6 +544,18 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           .select("id")
           .maybeSingle();
         if (updated.error) return sendError(c, mapDatabaseError(updated.error));
+
+        /*
+         * The standing approval, kept where superseding it leaves a trace. The digest only: a
+         * quotation request quotes the client's own information, and this is an audit table.
+         */
+        await db.from("quote_request_approvals").insert({
+          organization_id: org.id,
+          quote_request_id: row.id,
+          body_sha256: quoteRequestDigest(row.subject, row.body_text),
+          approved_by: user.id,
+          approved_at: now,
+        });
 
         await recordAudit(db, deps.logger, c, {
           organizationId: org.id,

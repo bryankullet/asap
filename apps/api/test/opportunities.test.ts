@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import type { Mailer } from "../src/mail/index.js";
 import { fakeFactory, type FakeDb } from "./_fake-supabase.js";
+import { quoteRequestDigest } from "../src/routes/opportunities.js";
 
 const ORG = "10000000-0000-4000-8000-00000000000a";
 const OTHER_ORG = "10000000-0000-4000-8000-00000000000b";
@@ -288,6 +289,26 @@ describe("preparing and approving a request", () => {
     expect((await readJson(await act({ action: "approve_request", quoteRequestId: id }))).outcome).toBe("done");
     expect((await readJson(await act({ action: "approve_request", quoteRequestId: id }))).outcome).toBe("already");
     expect(db.tables["audit_log"]!.filter((r) => r["action"] === "opportunity.request_approved")).toHaveLength(1);
+  });
+
+  it("records the approval against the exact text, and keeps no copy of it", async () => {
+    await prepare();
+    const req = db.tables["quote_requests"]![0]!;
+    await act({ action: "approve_request", quoteRequestId: req["id"] as string });
+
+    const approvals = db.tables["quote_request_approvals"] ?? [];
+    expect(approvals).toHaveLength(1);
+    const approval = approvals[0]!;
+    expect(approval["body_sha256"]).toBe(req["approved_body_sha256"]);
+    expect(approval["approved_by"]).toBe(req["approved_by"]);
+    /* A quotation request quotes the client. The record of consent is a digest, nothing more. */
+    expect(Object.keys(approval)).not.toContain("body_text");
+    expect(Object.keys(approval)).not.toContain("subject");
+    expect(JSON.stringify(approval)).not.toContain("commercial motor");
+  });
+
+  it("digests the subject and the body apart, so the two cannot be shuffled", async () => {
+    expect(quoteRequestDigest("ab", "c")).not.toBe(quoteRequestDigest("a", "bc"));
   });
 
   it("refuses to approve for somebody without that permission", async () => {
