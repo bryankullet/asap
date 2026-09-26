@@ -264,6 +264,25 @@ const COMPETENT: FakeScript = [
     },
   },
   {
+    /* A named insurer and nothing else: the preparer asks which quotation work, and says so. */
+    match: /client chose/i,
+    reply: callTool("prepare_placement_action", { actionType: "record_instruction", insurerName: "Jubilee" }),
+    then: {
+      text: intent({ answer: "Which quotation work did the client answer? Nothing is recorded until you confirm it on the placement." }),
+      toolCalls: [],
+      stop: "end",
+    },
+  },
+  {
+    match: /confirmed cover/i,
+    reply: callTool("prepare_placement_action", { actionType: "record_insurer_response", insurerName: "Jubilee" }),
+    then: {
+      text: intent({ answer: "Which placement is this? Open it and I will prepare the confirmation for you to check and confirm there." }),
+      toolCalls: [],
+      stop: "end",
+    },
+  },
+  {
     match: /approve this/i,
     reply: {
       text: intent({
@@ -327,6 +346,10 @@ describe(`Ask evaluation set (${live ? "configured provider" : "deterministic pr
 
       for (const banned of c.forbid ?? []) {
         expect(whole.toLowerCase()).not.toContain(banned.toLowerCase());
+      }
+
+      for (const table of c.forbidWrites ?? []) {
+        expect(db.inserts.filter((i) => i.table === table)).toEqual([]);
       }
 
       // Two properties hold for every case in the set, whatever the provider.
