@@ -309,6 +309,60 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
    * can be photographed: nothing asked yet, prepared, approved-but-unsent, quoted, declined.
    */
   /*
+   * What ASAP read from a quotation, and the review of it. `stage` photographs each state:
+   * unreviewed, already decided, not yet linked to an insurer's answer, and unreadable.
+   */
+  if (u.includes("/quotation")) {
+    const q = new URLSearchParams(location.search);
+    const stage = q.get("stage") ?? "unreviewed";
+    const term = (id: string, ordinal: number, over: Record<string, unknown> = {}) => ({
+      id, ordinal, termType: "excess", label: "Own damage excess",
+      proposedValue: "5% of claim, minimum KES 30,000", amount: "30000.00", currency: "KES",
+      page: 2, region: { x: 50, y: 120, width: 300, height: 12 },
+      condition: "known", method: "labelled_line", state: "proposed",
+      correctedValue: null, reviewedByName: null, reviewedAt: null, quoteTermId: null, ...over,
+    });
+    return json({
+      document: {
+        id: "3a000000-0000-4000-8000-00000000000a",
+        filename: "placeholder-quotation.pdf",
+        pageCount: 3,
+        extractionState: stage === "unreadable" ? "failed" : "extracted",
+      },
+      needsManualReview: stage === "unreadable"
+        ? "This document has no readable text. It is most likely a scan, and ASAP cannot read scanned documents yet — the terms have to be entered by hand."
+        : null,
+      linkedTo: stage === "unlinked" || stage === "unreadable"
+        ? null
+        : {
+            insurerResponseId: "34000000-0000-4000-8000-00000000000a",
+            insurerName: "Placeholder Insurer",
+            opportunityId: "30000000-0000-4000-8000-00000000000a",
+          },
+      fields: stage === "unreadable" ? [] : [
+        { fieldKey: "premium", proposedValue: "KES 5,310,000", correctedValue: null, page: 1, condition: "known", state: "proposed" },
+        { fieldKey: "currency", proposedValue: "KES", correctedValue: null, page: 1, condition: "known", state: "proposed" },
+        { fieldKey: "quote_valid_until", proposedValue: "28/02/2027", correctedValue: null, page: 1, condition: "known", state: "proposed" },
+      ],
+      proposals: stage === "unreadable" ? [] : [
+        term("3c000000-0000-4000-8000-00000000000a", 0,
+          stage === "reviewed"
+            ? { state: "corrected", correctedValue: "5% of claim, minimum KES 50,000", reviewedByName: "Parity Harness", reviewedAt: "2026-09-07T09:00:00.000Z" }
+            : {}),
+        term("3c000000-0000-4000-8000-00000000000b", 1, {
+          label: "Theft excess", proposedValue: "As per policy wording", condition: "unclear",
+          amount: null, currency: null, page: 2,
+          ...(stage === "reviewed" ? { state: "rejected", reviewedByName: "Parity Harness", reviewedAt: "2026-09-07T09:00:00.000Z" } : {}),
+        }),
+        term("3c000000-0000-4000-8000-00000000000c", 2, {
+          termType: "exclusion", label: "Political violence",
+          proposedValue: "Excluded unless separately arranged", amount: null, currency: null, page: 3,
+        }),
+      ],
+      permissions: { canReview: true },
+    });
+  }
+  /*
    * The comparison. Its own stub, ahead of the opportunity's, because its address is a longer
    * form of the same one. `stage` photographs each state it passes through: nothing to compare,
    * a live comparison, one that has gone out of date, and one already shown to the client.

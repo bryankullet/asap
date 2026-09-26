@@ -130,12 +130,19 @@ function makeDb(): FakeDb {
       quote_comparisons: [],
       quote_comparison_inputs: [],
       quote_comparison_terms: [],
+      /* Minted by a database trigger in production (0051); written here because the stand-in
+       * has no triggers, and a comparison cannot be generated without one. */
+      insurer_response_revisions: [],
+      quote_term_revisions: [],
+      company_rules: [],
       documents: [],
       email_messages: [],
       audit_log: [],
     },
     defaults: {
-      quote_comparisons: { generated_at: iso, presented_at: null, presented_by: null, superseded_at: null, superseded_reason: null },
+      /* `version` is the database's, numbered by trigger (0051); the stand-in has none, so the
+       * tests that care about a second version set it themselves. */
+      quote_comparisons: { generated_at: iso, presented_at: null, presented_by: null, superseded_at: null, superseded_reason: null, version: 1 },
       quote_comparison_inputs: { created_at: iso },
       quote_comparison_terms: { quote_term_id: null },
       opportunity_insurers: { added_at: iso, removed_at: null, removed_by: null, removed_reason: null },
@@ -174,6 +181,14 @@ const asUser = (token = "tok-amina") => ({ authorization: `Bearer ${token}` });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const readJson = (res: Response): Promise<any> => res.json();
 
+async function readVersion(version: number, token = "tok-amina") {
+  const res = await build().request(`/opportunities/${OPP}/comparison?version=${version}`, {
+    headers: asUser(token),
+  });
+  expect(res.status).toBe(200);
+  return await readJson(res);
+}
+
 async function read(token = "tok-amina") {
   const res = await build().request(`/opportunities/${OPP}/comparison`, { headers: asUser(token) });
   expect(res.status).toBe(200);
@@ -194,6 +209,74 @@ function twoQuotes(premiumA: string | null = "5310000.00", premiumB: string | nu
   db.tables["quote_terms"] = [
     term("35000000-0000-4000-8000-00000000000a", RESP_A, "Own damage", "5% min KES 30,000"),
     term("35000000-0000-4000-8000-00000000000b", RESP_B, "Own damage", "5% min KES 25,000"),
+  ];
+  mintRevisions();
+}
+
+/**
+ * What the database does by trigger: one immutable revision per answer and per term, which is
+ * what a comparison actually points at.
+ */
+function mintRevisions() {
+  db.tables["insurer_response_revisions"] = (db.tables["insurer_responses"] ?? []).map((r, i) => ({
+    id: `37000000-0000-4000-8000-00000000000${i}`,
+    organization_id: ORG,
+    insurer_response_id: r["id"],
+    opportunity_id: OPP,
+    revision: 1,
+    outcome: r["outcome"],
+    received_at: r["received_at"],
+    premium_amount: r["premium_amount"],
+    premium_currency: r["premium_currency"],
+    valid_until: r["valid_until"],
+    decline_reason: r["decline_reason"],
+    source_document_id: r["source_document_id"],
+    source_email_message_id: r["source_email_message_id"],
+    source_note: r["source_note"],
+    sha256: "0".repeat(64),
+    created_at: iso,
+  }));
+  db.tables["quote_term_revisions"] = (db.tables["quote_terms"] ?? []).map((t, i) => ({
+    id: `38000000-0000-4000-8000-00000000000${i}`,
+    organization_id: ORG,
+    quote_term_id: t["id"],
+    insurer_response_id: t["insurer_response_id"],
+    revision: 1,
+    term_type: t["term_type"],
+    label: t["label"],
+    extracted_value: t["extracted_value"],
+    corrected_value: t["corrected_value"],
+    corrected_by: t["corrected_by"],
+    corrected_at: t["corrected_at"],
+    amount: t["amount"],
+    currency: t["currency"],
+    unclear: t["unclear"],
+    evidence_document_id: t["evidence_document_id"],
+    evidence_page: t["evidence_page"],
+    region_x: null,
+    region_y: null,
+    region_width: null,
+    region_height: null,
+    sha256: "0".repeat(64),
+    created_at: iso,
+  }));
+}
+
+/** A brokerage saying when ASAP may name a recommended quote. Their number, their reason. */
+function setRule(value: unknown, source = "Partners meeting, 4 September 2026.") {
+  db.tables["company_rules"] = [
+    {
+      id: "39000000-0000-4000-8000-00000000000a",
+      organization_id: ORG,
+      key: "quote.recommendation",
+      value,
+      source,
+      verified_at: "2026-09-04",
+      note: null,
+      set_by: AMINA.id,
+      created_at: iso,
+      updated_at: iso,
+    },
   ];
 }
 
@@ -284,31 +367,97 @@ describe("the comparison itself", () => {
 });
 
 describe("what it recommends, and when it declines to", () => {
-  it("does not call the cheapest quote best when they are close", async () => {
-    twoQuotes("5310000.00", "5400000.00");
+  /*
+   * The correction 4B-3A exists for. 4B-3 named a recommended insurer whenever the premiums were
+   * more than 5% apart — a number from nowhere, deciding something no constant is entitled to
+   * decide. Which insurer a client should be advised to take is the broker's judgement, and ASAP
+   * enters it only where the brokerage has written down when it may.
+   */
+
+  it("states the facts and names nobody when no rule is configured", async () => {
+    twoQuotes();
     await act({ action: "generate_comparison" });
 
     const r = (await read()).comparison.recommendation;
     expect(r.insurerId).toBeNull();
-    expect(r.headline).toMatch(/price should not decide it/);
-    expect(r.reasoning.join(" ")).toMatch(/Cover and excesses will matter more/);
+    expect(r.rule).toBeNull();
+    expect(r.headline).toBe("ASAP is not recommending one of these.");
+    expect(r.reasoning.join(" ")).toMatch(/No rule has been set/);
+    expect(r.reasoning.join(" ")).toMatch(/judgement for the broker/);
+    /* But the difference itself is stated plainly, in shillings. */
+    expect(r.facts.join(" ")).toMatch(/Jubilee is KES 310,000 cheaper than CIC — 5\.5%/);
   });
 
-  it("abstains when the quotes are not like for like, and says which term is missing", async () => {
+  it("honours a brokerage that has asked it not to recommend", async () => {
+    twoQuotes();
+    setRule({ mode: "abstain" }, "Partners decided advice stays with the broker.");
+    await act({ action: "generate_comparison" });
+
+    const r = (await read()).comparison.recommendation;
+    expect(r.insurerId).toBeNull();
+    expect(r.headline).toMatch(/asked ASAP not to recommend/);
+    expect(r.rule?.source).toBe("Partners decided advice stays with the broker.");
+  });
+
+  it("recommends under the brokerage's own rule, and says it is theirs", async () => {
+    twoQuotes();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 5 });
+    await act({ action: "generate_comparison" });
+
+    const r = (await read()).comparison.recommendation;
+    expect(r.insurerId).toBe(INS_A);
+    expect(r.headline).toBe("Jubilee, under this brokerage's own rule.");
+    expect(r.reasoning.join(" ")).toMatch(/at or above the 5% this brokerage set/);
+    expect(r.reasoning.join(" ")).toMatch(/the broker's judgement/);
+    expect(r.rule?.verifiedAt).toBe("2026-09-04");
+  });
+
+  it("gives two brokerages different answers on the same quotes", async () => {
+    twoQuotes();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 5 });
+    await act({ action: "generate_comparison" });
+    const lenient = (await read()).comparison.recommendation;
+
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 12 }, "Their own policy.");
+    const strict = (await read()).comparison.recommendation;
+
+    expect(lenient.insurerId).toBe(INS_A);
+    expect(strict.insurerId).toBeNull();
+    expect(strict.reasoning.join(" ")).toMatch(/asks for at least 12%, and the gap is 5\.5%/);
+  });
+
+  it("recommending records no choice of insurer anywhere", async () => {
+    twoQuotes();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 5 });
+    await act({ action: "generate_comparison" });
+    expect((await read()).comparison.recommendation.insurerId).toBe(INS_A);
+
+    /* A recommendation is not a placement. Nothing in the book may record a selection for it. */
+    const written = JSON.stringify(db.tables["opportunities"]) + JSON.stringify(db.tables["opportunity_insurers"]);
+    expect(written).not.toMatch(/selected|chosen|placed_with/);
+    expect(db.tables["opportunities"]![0]!["closed_outcome"]).toBeNull();
+    expect(db.tables["audit_log"]!.every((r) => !String(r["action"]).includes("placed"))).toBe(true);
+  });
+
+  it("will not apply a rule to quotes that are not like for like", async () => {
     twoQuotes();
     db.tables["quote_terms"] = [term("35000000-0000-4000-8000-00000000000a", RESP_A, "Theft excess", "10% of claim")];
+    mintRevisions();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 5 });
     await act({ action: "generate_comparison" });
 
     const r = (await read()).comparison.recommendation;
     expect(r.insurerId).toBeNull();
     expect(r.headline).toMatch(/not yet like for like/);
-    expect(r.caveats.join(" ")).toMatch(/CIC did not state Theft excess/);
+    expect(r.facts.join(" ")).toMatch(/CIC did not state Theft excess/);
   });
 
-  it("abstains when an insurer said something that cannot be compared", async () => {
+  it("will not apply a rule to a term that cannot be compared", async () => {
     twoQuotes();
     db.tables["quote_terms"]![1]!["unclear"] = true;
     db.tables["quote_terms"]![1]!["extracted_value"] = "As per policy wording";
+    mintRevisions();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: 5 });
     await act({ action: "generate_comparison" });
 
     const r = (await read()).comparison.recommendation;
@@ -316,24 +465,23 @@ describe("what it recommends, and when it declines to", () => {
     expect(r.caveats.join(" ")).toMatch(/CIC: Own damage was stated in terms that cannot be compared/);
   });
 
-  it("recommends only when the same cover is priced twice, and says why", async () => {
-    twoQuotes();
-    await act({ action: "generate_comparison" });
-
-    const r = (await read()).comparison.recommendation;
-    expect(r.insurerId).toBe(INS_A);
-    expect(r.headline).toBe("Jubilee on these terms.");
-    expect(r.reasoning.join(" ")).toMatch(/same cover priced twice/);
-    expect(r.reasoning[0]).toMatch(/Jubilee quotes KES 5,310,000/);
-  });
-
-  it("says nothing when fewer than two quotes carry a premium", async () => {
+  it("says nothing about price when fewer than two quotes carry a premium", async () => {
     twoQuotes("5310000.00", null);
     await act({ action: "generate_comparison" });
 
     const r = (await read()).comparison.recommendation;
     expect(r.insurerId).toBeNull();
     expect(r.caveats[0]).toMatch(/Fewer than two of these quotes state a premium/);
+  });
+
+  it("ignores a rule that does not parse rather than inventing one", async () => {
+    twoQuotes();
+    setRule({ mode: "cheapest_when_like_for_like", minimumGapPercent: "quite a lot" });
+    await act({ action: "generate_comparison" });
+
+    const r = (await read()).comparison.recommendation;
+    expect(r.insurerId).toBeNull();
+    expect(r.rule).toBeNull();
   });
 });
 
@@ -373,6 +521,163 @@ describe("staleness and presentation", () => {
     expect((await readJson(await act({ action: "present_comparison", comparisonId: id }))).outcome).toBe("done");
     expect((await readJson(await act({ action: "present_comparison", comparisonId: id }))).outcome).toBe("already");
     expect(db.tables["audit_log"]!.filter((r) => r["action"] === "opportunity.comparison_presented")).toHaveLength(1);
+  });
+});
+
+
+describe("what the client was shown", () => {
+  /*
+   * The 4B-3A correction. A comparison joined to live rows shows today's excess under last
+   * month's name; these hold it to the revisions it actually compared.
+   */
+
+  it("shows the values it compared, not the values as they stand now", async () => {
+    twoQuotes();
+    await act({ action: "generate_comparison" });
+
+    /* The insurer revises, and a person corrects a misread excess. */
+    db.tables["insurer_responses"]![0]!["premium_amount"] = "5410000.00";
+    db.tables["insurer_responses"]![0]!["valid_until"] = "2028-03-31";
+    db.tables["quote_terms"]![0]!["corrected_value"] = "5% min KES 50,000";
+    db.tables["quote_comparisons"]![0]!["superseded_at"] = iso;
+    db.tables["quote_comparisons"]![0]!["superseded_reason"] = "Jubilee changed its quote after this comparison was made.";
+
+    const body = await read();
+    const old = body.history[0];
+    expect(old.version).toBe(1);
+
+    const shown = await readVersion(1);
+    /* Superseded, so reading it is reading history — which is exactly what it should say. */
+    expect(shown.viewingHistory).toBe(true);
+    const jubilee = shown.comparison.columns.find((c: { insurerName: string }) => c.insurerName === "Jubilee");
+    expect(jubilee.premiumAmount).toBe("5310000.00");
+    expect(jubilee.validUntil).toBe(VALID_UNTIL);
+
+    const row = shown.comparison.rows[0];
+    const cell = row.cells.find((c: { insurerId: string }) => c.insurerId === INS_A);
+    expect(cell.value).toBe("5% min KES 30,000");
+  });
+
+  it("says what moved, old value to new value", async () => {
+    twoQuotes();
+    await act({ action: "generate_comparison" });
+    db.tables["insurer_responses"]![0]!["premium_amount"] = "5410000.00";
+    db.tables["quote_terms"]![0]!["corrected_value"] = "5% min KES 50,000";
+
+    const changed = (await read()).comparison.changedValues;
+    const premium = changed.find((c: { label: string }) => c.label === "Premium");
+    expect(premium).toMatchObject({ insurerName: "Jubilee", was: "KES 5,310,000", now: "KES 5,410,000" });
+    const excess = changed.find((c: { label: string }) => c.label === "Own damage");
+    expect(excess).toMatchObject({ was: "5% min KES 30,000", now: "5% min KES 50,000" });
+  });
+
+  it("opens an earlier version as it was, beside the current one", async () => {
+    twoQuotes();
+    await act({ action: "generate_comparison" });
+    db.tables["quote_comparisons"]![0]!["superseded_at"] = iso;
+    db.tables["quote_comparisons"]![0]!["superseded_reason"] = "Jubilee changed its quote.";
+    db.tables["quote_comparisons"]![0]!["version"] = 1;
+
+    db.tables["quote_terms"]![0]!["corrected_value"] = "5% min KES 50,000";
+    mintRevisions();
+    db.tables["quote_term_revisions"]![0]!["id"] = "38000000-0000-4000-8000-0000000000ff";
+    db.tables["quote_term_revisions"]![0]!["revision"] = 2;
+    db.tables["quote_term_revisions"]!.push({
+      ...db.tables["quote_term_revisions"]![0]!,
+      id: "38000000-0000-4000-8000-000000000000",
+      revision: 1,
+      corrected_value: null,
+      extracted_value: "5% min KES 30,000",
+    });
+
+    await act({ action: "generate_comparison" });
+    db.tables["quote_comparisons"]![1]!["version"] = 2;
+
+    const now = await read();
+    expect(now.comparison.version).toBe(2);
+    expect(now.viewingHistory).toBe(false);
+    const nowCell = now.comparison.rows[0].cells.find((c: { insurerId: string }) => c.insurerId === INS_A);
+    expect(nowCell.value).toBe("5% min KES 50,000");
+
+    const then = await readVersion(1);
+    expect(then.viewingHistory).toBe(true);
+    expect(then.comparison.version).toBe(1);
+    const thenCell = then.comparison.rows[0].cells.find((c: { insurerId: string }) => c.insurerId === INS_A);
+    expect(thenCell.value).toBe("5% min KES 30,000");
+  });
+
+  it("carries the page a figure was read from into the old comparison's citation", async () => {
+    twoQuotes();
+    mintRevisions();
+    db.tables["quote_term_revisions"]![0]!["evidence_document_id"] = "3a000000-0000-4000-8000-00000000000a";
+    db.tables["quote_term_revisions"]![0]!["evidence_page"] = 3;
+    await act({ action: "generate_comparison" });
+
+    const cell = (await read()).comparison.rows[0].cells.find(
+      (c: { insurerId: string }) => c.insurerId === INS_A,
+    );
+    expect(cell.evidence.path).toBe("/documents/3a000000-0000-4000-8000-00000000000a");
+    expect(cell.evidence.label).toMatch(/page 3/);
+  });
+});
+
+describe("how long a quote holds", () => {
+  it("says a quote has expired, and refuses to let it go to a client", async () => {
+    twoQuotes();
+    db.tables["insurer_responses"]![0]!["valid_until"] = "2026-01-01";
+    mintRevisions();
+    await act({ action: "generate_comparison" });
+
+    const body = await read();
+    const jubilee = body.comparison.columns.find((c: { insurerName: string }) => c.insurerName === "Jubilee");
+    expect(jubilee.validity.state).toBe("expired");
+    expect(body.comparison.presentable.can).toBe(false);
+    expect(body.comparison.presentable.reason).toMatch(/expired quotation is not an offer/);
+
+    const refused = await readJson(
+      await act({ action: "present_comparison", comparisonId: body.comparison.id }),
+    );
+    expect(refused.outcome).toBe("blocked");
+    expect(refused.reason).toMatch(/expired/);
+  });
+
+  it("says when a quote states no validity at all", async () => {
+    twoQuotes();
+    db.tables["insurer_responses"]![0]!["valid_until"] = null;
+    mintRevisions();
+    await act({ action: "generate_comparison" });
+
+    const jubilee = (await read()).comparison.columns.find(
+      (c: { insurerName: string }) => c.insurerName === "Jubilee",
+    );
+    expect(jubilee.validity.state).toBe("not_stated");
+    expect(jubilee.validity.note).toMatch(/did not say how long/);
+  });
+
+  it("names the threshold's basis rather than hiding the number", async () => {
+    twoQuotes();
+    await act({ action: "generate_comparison" });
+    const column = (await read()).comparison.columns[0];
+    expect(column.validity.thresholdDays).toBe(14);
+    expect(column.validity.thresholdSource).toMatch(/ASAP's default of 14 days/);
+
+    db.tables["company_rules"] = [
+      {
+        id: "39000000-0000-4000-8000-00000000000b",
+        organization_id: ORG,
+        key: "quote.validity",
+        value: { expiringSoonDays: 30 },
+        source: "Their underwriting manual, clause 4.",
+        verified_at: "2026-08-01",
+        note: null,
+        set_by: AMINA.id,
+        created_at: iso,
+        updated_at: iso,
+      },
+    ];
+    const withRule = (await read()).comparison.columns[0];
+    expect(withRule.validity.thresholdDays).toBe(30);
+    expect(withRule.validity.thresholdSource).toMatch(/underwriting manual, clause 4/);
   });
 });
 

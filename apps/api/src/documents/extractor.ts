@@ -34,9 +34,38 @@ export const extractedFieldSchema = z.object({
   condition: z.enum(["known", "inferred", "conflicting", "missing", "stale", "waiting"]),
 });
 
+/**
+ * One term a quotation states, as read.
+ *
+ * Separate from a field because a quotation states several excesses and one value per key loses
+ * the ones that matter. Older extractor builds return no `terms` at all, so the array defaults
+ * to empty rather than failing the parse: a deployment mid-upgrade reads headers and says
+ * honestly that it found no terms.
+ */
+export const extractedTermSchema = z.object({
+  ordinal: z.number().int().min(0),
+  termType: z.enum([
+    "excess", "limit", "condition", "exclusion", "benefit", "levy", "tax", "subjectivity", "other",
+  ]),
+  label: z.string().min(1),
+  value: z.string().nullable(),
+  amount: z.string().nullable(),
+  currency: z.string().nullable(),
+  page: z.number().int().min(1).nullable(),
+  region: z
+    .object({ x: z.number(), y: z.number(), width: z.number().positive(), height: z.number().positive() })
+    .nullable(),
+  condition: z.enum(["known", "inferred", "conflicting", "unclear"]),
+  method: z.string().min(1),
+});
+export type ExtractedTerm = z.infer<typeof extractedTermSchema>;
+
 export const extractionResultSchema = z.object({
   pages: z.array(extractedPageSchema),
   fields: z.array(extractedFieldSchema),
+  terms: z.array(extractedTermSchema).default([]),
+  /** Why this document cannot be read at all — an image-only scan, with no OCR in this build. */
+  needsManualReview: z.string().nullable().default(null),
 });
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 

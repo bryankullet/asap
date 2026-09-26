@@ -126,12 +126,61 @@ export async function extractDocument(
     if (fields.error) return await fail(db, doc.id, "What was read could not be recorded.");
   }
 
+  /*
+   * The terms. Upserted on (document, ordinal) rather than inserted, so re-reading the same file
+   * updates its own proposals instead of duplicating them — and a proposal a person has already
+   * decided on is left alone, because a late extraction must never overwrite a human correction.
+   */
+  if (result.terms.length > 0) {
+    const decided = await db
+      .from("document_term_proposals")
+      .select("ordinal, state")
+      .eq("organization_id", doc.organization_id)
+      .eq("document_id", doc.id);
+    const settled = new Set(
+      ((decided.data ?? []) as { ordinal: number; state: string }[])
+        .filter((r) => r.state !== "proposed")
+        .map((r) => r.ordinal),
+    );
+
+    const fresh = result.terms.filter((t) => !settled.has(t.ordinal));
+    if (fresh.length > 0) {
+      const terms = await db.from("document_term_proposals").upsert(
+        fresh.map((t) => ({
+          organization_id: doc.organization_id,
+          document_id: doc.id,
+          ordinal: t.ordinal,
+          term_type: t.termType,
+          label: t.label,
+          proposed_value: t.value,
+          amount: t.amount,
+          currency: t.currency,
+          page_number: t.page,
+          region_x: t.region?.x ?? null,
+          region_y: t.region?.y ?? null,
+          region_width: t.region?.width ?? null,
+          region_height: t.region?.height ?? null,
+          condition: t.condition,
+          method: t.method,
+          state: "proposed",
+        })),
+        { onConflict: "document_id,ordinal" },
+      );
+      if (terms.error) return await fail(db, doc.id, "What was read could not be recorded.");
+    }
+  }
+
   const done = await db
     .from("documents")
     .update({
       extraction_state: "extracted",
       page_count: result.pages.length,
-      extraction_error: null,
+      /*
+       * An image-only file is not a document that says nothing. It is recorded as the reason it
+       * could not be read, so the review screen asks for a person rather than showing an empty
+       * quotation — there is no OCR in this deployment.
+       */
+      extraction_error: result.needsManualReview,
     })
     .eq("id", doc.id);
   if (done.error) return await fail(db, doc.id, "What was read could not be recorded.");

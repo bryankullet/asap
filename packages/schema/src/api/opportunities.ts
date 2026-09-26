@@ -24,6 +24,8 @@ export const QuoteTermType = z.enum([
   "limit",
   "condition",
   "exclusion",
+  /* A quotation may offer a benefit as well as limit, exclude and condition one (0053). */
+  "benefit",
   "levy",
   "tax",
   "subjectivity",
@@ -323,6 +325,27 @@ export const comparisonRowSchema = z.object({
 });
 export type ComparisonRow = z.infer<typeof comparisonRowSchema>;
 
+/**
+ * How long a quote still holds.
+ *
+ * Four states, never a silent blank: an insurer who did not say how long the terms stand has not
+ * offered indefinite terms. `thresholdDays` and `thresholdSource` travel with the state because
+ * "expiring soon" is a judgement, and a judgement with no stated basis is a number hidden in the
+ * interface.
+ */
+export const ComparisonValidityState = z.enum(["valid", "expiring_soon", "expired", "not_stated"]);
+export type ComparisonValidityState = z.infer<typeof ComparisonValidityState>;
+
+export const comparisonValiditySchema = z.object({
+  state: ComparisonValidityState,
+  validUntil: z.string().nullable(),
+  note: z.string().max(200),
+  thresholdDays: z.number().int().min(0),
+  /** Where the threshold came from: this brokerage's rule, or the product default, named. */
+  thresholdSource: z.string().max(200),
+});
+export type ComparisonValidity = z.infer<typeof comparisonValiditySchema>;
+
 export const comparisonColumnSchema = z.object({
   insurerId: uuidSchema,
   insurerName: z.string(),
@@ -331,8 +354,7 @@ export const comparisonColumnSchema = z.object({
   premiumAmount: z.string().nullable(),
   premiumCurrency: z.string().nullable(),
   validUntil: z.string().nullable(),
-  /** True when the terms expire within a fortnight, or already have. Stated, never colour alone. */
-  validityNote: z.string().max(200).nullable(),
+  validity: comparisonValiditySchema,
   source: evidenceRefSchema.nullable(),
 });
 export type ComparisonColumn = z.infer<typeof comparisonColumnSchema>;
@@ -348,13 +370,36 @@ export const comparisonRecommendationSchema = z.object({
   insurerId: uuidSchema.nullable(),
   insurerName: z.string().nullable(),
   headline: z.string().max(300),
+  /** Plain differences read off the rows. Stated whether or not a rule exists. */
+  facts: z.array(z.string().max(300)),
+  /** Why the rule reached this, when a rule applied, and why none did when none did. */
   reasoning: z.array(z.string().max(300)),
   caveats: z.array(z.string().max(300)),
+  /** The brokerage's configured rule, with its provenance. Null when none is configured. */
+  rule: z
+    .object({
+      summary: z.string().max(300),
+      source: z.string().max(300),
+      verifiedAt: z.string(),
+    })
+    .nullable(),
 });
 export type ComparisonRecommendation = z.infer<typeof comparisonRecommendationSchema>;
 
+/** One value that has moved since the comparison was made: what it said, and what it says now. */
+export const comparisonChangedValueSchema = z.object({
+  insurerId: uuidSchema,
+  insurerName: z.string(),
+  termType: QuoteTermType.nullable(),
+  label: z.string(),
+  was: z.string().nullable(),
+  now: z.string().nullable(),
+});
+export type ComparisonChangedValue = z.infer<typeof comparisonChangedValueSchema>;
+
 export const comparisonSchema = z.object({
   id: uuidSchema,
+  version: z.number().int().min(1),
   generatedAt: z.string(),
   generatedByName: z.string().nullable(),
   presentedAt: z.string().nullable(),
@@ -363,9 +408,16 @@ export const comparisonSchema = z.object({
   stale: z.boolean(),
   staleReason: z.string().nullable(),
   changes: z.array(comparisonChangeSchema),
+  /** Old value → new value, for everything this comparison showed that has since moved. */
+  changedValues: z.array(comparisonChangedValueSchema),
   columns: z.array(comparisonColumnSchema),
   rows: z.array(comparisonRowSchema),
   recommendation: comparisonRecommendationSchema,
+  /**
+   * Whether this exact comparison may be put in front of a client. False for a stale one, and
+   * false while any quote in it has expired — an expired quotation is not an offer.
+   */
+  presentable: z.object({ can: z.boolean(), reason: z.string().max(300).nullable() }),
 });
 export type Comparison = z.infer<typeof comparisonSchema>;
 
@@ -380,12 +432,18 @@ export const comparisonResponseSchema = z.object({
   }),
   client: z.object({ id: uuidSchema, name: z.string() }),
   readiness: comparisonReadinessSchema,
-  /** Null until one has been generated. A Space with no comparison says so and offers to make one. */
+  /**
+   * The comparison being read. The current one by default; an earlier version when one was asked
+   * for by `?version=`, in which case it is shown exactly as it was made.
+   */
   comparison: comparisonSchema.nullable(),
+  /** True when `comparison` is an earlier version being read rather than the current one. */
+  viewingHistory: z.boolean(),
   /** Earlier comparisons, kept for audit. Newest first, the live one excluded. */
   history: z.array(
     z.object({
       id: uuidSchema,
+      version: z.number().int().min(1),
       generatedAt: z.string(),
       generatedByName: z.string().nullable(),
       presentedAt: z.string().nullable(),
@@ -411,3 +469,157 @@ export const comparisonActionResponseSchema = z.object({
   comparison: comparisonResponseSchema.nullable().default(null),
 });
 export type ComparisonActionResponse = z.infer<typeof comparisonActionResponseSchema>;
+
+/* ---- The brokerage's own rules -----------------------------------------------------------------
+ *
+ * Kenyan legal and market values, and judgements like "when may ASAP name a recommended quote",
+ * are per-brokerage with a source and a date. Never a constant in this codebase.
+ */
+
+/**
+ * When ASAP may name a recommended quote.
+ *
+ * `abstain` is the default and what applies with no rule at all: state the differences, leave the
+ * judgement to the broker. `cheapest_when_like_for_like` lets a brokerage say "name the cheaper
+ * one, but only when the same cover is priced twice and the gap is at least this wide" — their
+ * number, recorded with their reason for it.
+ */
+export const RecommendationMode = z.enum(["abstain", "cheapest_when_like_for_like"]);
+export type RecommendationMode = z.infer<typeof RecommendationMode>;
+
+export const recommendationRuleSchema = z.object({
+  mode: RecommendationMode,
+  /** Required by `cheapest_when_like_for_like`. Below this the quotes are treated as level. */
+  minimumGapPercent: z.number().min(0).max(100).optional(),
+});
+export type RecommendationRule = z.infer<typeof recommendationRuleSchema>;
+
+export const validityThresholdRuleSchema = z.object({
+  expiringSoonDays: z.number().int().min(0).max(365),
+});
+export type ValidityThresholdRule = z.infer<typeof validityThresholdRuleSchema>;
+
+/** Every key this deployment understands, and what a value for it must look like. */
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity"] as const;
+export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
+export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
+
+export const companyRuleSchema = z.object({
+  key: CompanyRuleKey,
+  value: z.unknown(),
+  source: z.string(),
+  verifiedAt: z.string(),
+  note: z.string().nullable(),
+  setByName: z.string().nullable(),
+  updatedAt: z.string(),
+});
+export type CompanyRuleView = z.infer<typeof companyRuleSchema>;
+
+export const companyRulesResponseSchema = z.object({
+  rules: z.array(companyRuleSchema),
+  /** What applies where a brokerage has set nothing, said out loud rather than hidden. */
+  defaults: z.array(
+    z.object({ key: CompanyRuleKey, summary: z.string(), basis: z.string() }),
+  ),
+  permissions: z.object({ canEdit: z.boolean() }),
+});
+export type CompanyRulesResponse = z.infer<typeof companyRulesResponseSchema>;
+
+export const setCompanyRuleRequestSchema = z.object({
+  key: CompanyRuleKey,
+  value: z.unknown(),
+  source: z.string().trim().min(1).max(300),
+  verifiedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  note: z.string().trim().max(500).optional(),
+});
+export type SetCompanyRuleRequest = z.infer<typeof setCompanyRuleRequestSchema>;
+
+/* ---- Reading a quotation ---------------------------------------------------------------------- */
+
+export const ProposalState = z.enum(["proposed", "accepted", "corrected", "rejected"]);
+export type ProposalState = z.infer<typeof ProposalState>;
+
+export const ProposalCondition = z.enum(["known", "inferred", "conflicting", "unclear"]);
+export type ProposalCondition = z.infer<typeof ProposalCondition>;
+
+/** One thing the extractor thinks a quotation says. Never a confirmed term until a person says so. */
+export const termProposalSchema = z.object({
+  id: uuidSchema,
+  ordinal: z.number().int().min(0),
+  termType: QuoteTermType,
+  label: z.string(),
+  proposedValue: z.string().nullable(),
+  amount: z.string().nullable(),
+  currency: z.string().nullable(),
+  page: z.number().int().min(1).nullable(),
+  region: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .nullable(),
+  condition: ProposalCondition,
+  method: z.string(),
+  state: ProposalState,
+  correctedValue: z.string().nullable(),
+  reviewedByName: z.string().nullable(),
+  reviewedAt: z.string().nullable(),
+  quoteTermId: uuidSchema.nullable(),
+});
+export type TermProposal = z.infer<typeof termProposalSchema>;
+
+export const quotationReadingResponseSchema = z.object({
+  document: z.object({
+    id: uuidSchema,
+    filename: z.string(),
+    pageCount: z.number().int().min(0).nullable(),
+    extractionState: z.string(),
+  }),
+  /**
+   * Set when the document cannot be read at all. An image-only quotation says so rather than
+   * coming back as a quotation that states nothing — there is no OCR in this deployment.
+   */
+  needsManualReview: z.string().max(400).nullable(),
+  /** Which insurer's answer this reading belongs to. Chosen by a person, never by name likeness. */
+  linkedTo: z
+    .object({ insurerResponseId: uuidSchema, insurerName: z.string(), opportunityId: uuidSchema })
+    .nullable(),
+  /** Header values, one per key, from the existing document-field review path. */
+  fields: z.array(
+    z.object({
+      fieldKey: z.string(),
+      proposedValue: z.string().nullable(),
+      correctedValue: z.string().nullable(),
+      page: z.number().int().min(1).nullable(),
+      condition: z.string(),
+      state: z.string(),
+    }),
+  ),
+  /** Repeated terms, one row each. Never flattened. */
+  proposals: z.array(termProposalSchema),
+  permissions: z.object({ canReview: z.boolean() }),
+});
+export type QuotationReadingResponse = z.infer<typeof quotationReadingResponseSchema>;
+
+export const quotationReviewActionSchema = z.discriminatedUnion("action", [
+  /** Read the document again. Idempotent: a re-read updates its own proposals, never duplicates. */
+  z.object({ action: z.literal("read_document"), documentId: uuidSchema }),
+  /** A person choosing which answer this quotation belongs to. ASAP never guesses it. */
+  z.object({
+    action: z.literal("link_to_response"),
+    documentId: uuidSchema,
+    insurerResponseId: uuidSchema,
+  }),
+  z.object({ action: z.literal("accept_proposal"), proposalId: uuidSchema }),
+  z.object({
+    action: z.literal("correct_proposal"),
+    proposalId: uuidSchema,
+    correctedValue: z.string().trim().min(1).max(500),
+  }),
+  z.object({ action: z.literal("reject_proposal"), proposalId: uuidSchema }),
+]);
+export type QuotationReviewAction = z.infer<typeof quotationReviewActionSchema>;
+
+export const quotationReviewResponseSchema = z.object({
+  outcome: z.enum(["done", "already", "blocked"]),
+  reason: z.string().max(400).nullable().default(null),
+  reading: quotationReadingResponseSchema.nullable().default(null),
+});
+export type QuotationReviewResponse = z.infer<typeof quotationReviewResponseSchema>;

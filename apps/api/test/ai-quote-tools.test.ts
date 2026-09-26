@@ -23,6 +23,8 @@ function context(tables: FakeDb["tables"]) {
   return { db: fakeFactory(db).service(), organizationId: ORG };
 }
 
+const DOC = "3a000000-0000-4000-8000-00000000000a";
+
 const baseTables = () => ({
   insurers: [
     { id: INS_A, organization_id: ORG, name: "Jubilee" },
@@ -47,6 +49,31 @@ const baseTables = () => ({
     },
   ],
   quote_comparisons: [],
+  company_rules: [],
+  documents: [
+    {
+      id: DOC, organization_id: ORG, client_id: "20000000-0000-4000-8000-00000000000a",
+      filename: "jubilee-quotation.pdf", extraction_state: "extracted",
+      extraction_error: null as string | null,
+      deleted_at: null,
+    },
+  ],
+  document_term_proposals: [
+    {
+      id: "3c000000-0000-4000-8000-00000000000a", organization_id: ORG, document_id: DOC, ordinal: 0,
+      term_type: "excess", label: "Own damage excess", proposed_value: "5% min KES 30,000",
+      corrected_value: null, amount: "30000.00", currency: "KES", page_number: 2,
+      region_x: "50", region_y: "120", region_width: "300", region_height: "12",
+      condition: "known", state: "proposed",
+    },
+    {
+      id: "3c000000-0000-4000-8000-00000000000b", organization_id: ORG, document_id: DOC, ordinal: 1,
+      term_type: "excess", label: "Theft excess", proposed_value: "10% of claim",
+      corrected_value: "12% of claim", amount: null, currency: null, page_number: 2,
+      region_x: "50", region_y: "140", region_width: "300", region_height: "12",
+      condition: "known", state: "corrected",
+    },
+  ],
 });
 
 describe("get_quotes", () => {
@@ -122,5 +149,64 @@ describe("get_quote_comparison", () => {
     };
     expect(out.comparison.stale).toBe(false);
     expect(out.comparison.id).toBe("36000000-0000-4000-8000-00000000000a");
+  });
+});
+
+
+describe("get_quotation_reading", () => {
+  it("returns every reading with the page and rectangle it came from", async () => {
+    const out = (await toolByName("get_quotation_reading")!.run({ documentId: DOC }, context(baseTables()))) as {
+      terms: { label: string; page: number; region: { y: number }; reviewState: string }[];
+    };
+    expect(out.terms).toHaveLength(2);
+    expect(out.terms[0]).toMatchObject({ label: "Own damage excess", page: 2, reviewState: "proposed" });
+    expect(out.terms[0]!.region.y).toBe(120);
+  });
+
+  it("marks an unreviewed reading as a proposal, not as the insurer's terms", async () => {
+    const out = (await toolByName("get_quotation_reading")!.run({ documentId: DOC }, context(baseTables()))) as {
+      terms: { reviewState: string }[];
+    };
+    expect(out.terms.map((t) => t.reviewState)).toEqual(["proposed", "corrected"]);
+  });
+
+  it("says when a document could not be read at all", async () => {
+    const tables = baseTables();
+    tables.documents[0]!.extraction_error =
+      "This document has no readable text. It is most likely a scan.";
+    const out = (await toolByName("get_quotation_reading")!.run({ documentId: DOC }, context(tables))) as {
+      needsManualReview: string;
+    };
+    expect(out.needsManualReview).toMatch(/scan/);
+  });
+});
+
+describe("get_company_rules", () => {
+  it("says plainly that no rule permits a recommendation", async () => {
+    const out = (await toolByName("get_company_rules")!.run({}, context(baseTables()))) as {
+      rules: unknown[];
+      note: string;
+    };
+    expect(out.rules).toHaveLength(0);
+    expect(out.note).toMatch(/names none/);
+  });
+
+  it("returns the rule with its provenance when one exists", async () => {
+    const tables = baseTables();
+    tables.company_rules = [
+      {
+        key: "quote.recommendation",
+        value: { mode: "cheapest_when_like_for_like", minimumGapPercent: 8 },
+        source: "Partners meeting, 4 September 2026.",
+        verified_at: "2026-09-04",
+        organization_id: ORG,
+      },
+    ] as never;
+    const out = (await toolByName("get_company_rules")!.run({}, context(tables))) as {
+      rules: { source: string }[];
+      note: string | null;
+    };
+    expect(out.rules[0]!.source).toBe("Partners meeting, 4 September 2026.");
+    expect(out.note).toBeNull();
   });
 });

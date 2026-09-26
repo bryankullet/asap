@@ -26,6 +26,14 @@ import type {
  *     reasoning and its caveats, and it abstains far more often than it picks.
  */
 
+/** Each validity state named, so the state is in the text and not only in the colour. */
+const VALIDITY_WORDS: Record<Comparison["columns"][number]["validity"]["state"], string> = {
+  valid: "Holds",
+  expiring_soon: "Expiring soon",
+  expired: "Expired",
+  not_stated: "Not stated",
+};
+
 const TERM_WORDS: Record<ComparisonRow["termType"], string> = {
   excess: "Excess",
   limit: "Limit",
@@ -33,6 +41,7 @@ const TERM_WORDS: Record<ComparisonRow["termType"], string> = {
   exclusion: "Exclusion",
   levy: "Levy",
   tax: "Tax",
+  benefit: "Benefit",
   subjectivity: "Subject to",
   other: "Other",
 };
@@ -224,6 +233,20 @@ export function comparisonSpace(
             : "There is not enough here to compare yet. What is outstanding is listed above.",
     });
   } else {
+    if (data.viewingHistory) {
+      blocks.push({
+        id: "viewing-history",
+        type: "note",
+        label: null,
+        evidence: [],
+        actions: [],
+        state: "ready",
+        stateNote: null,
+        tone: "neutral",
+        title: `You are reading version ${c.version}, as it was made`,
+        text: `Every figure below is what was compared on ${day(c.generatedAt)}. It is not what the quotes say now.`,
+      });
+    }
     blocks.push(...comparisonBlocks(c));
   }
 
@@ -240,7 +263,7 @@ export function comparisonSpace(
       stateNote: null,
       rows: data.history.slice(0, 10).map((h) => ({
         id: h.id,
-        title: `Made ${day(h.generatedAt)}${h.generatedByName === null ? "" : ` by ${h.generatedByName}`}`,
+        title: `Version ${h.version} — made ${day(h.generatedAt)}${h.generatedByName === null ? "" : ` by ${h.generatedByName}`}`,
         note:
           h.presentedAt === null
             ? "Not shown to the client."
@@ -250,7 +273,24 @@ export function comparisonSpace(
         why: h.supersededReason,
         related: null,
         region: null,
-        actions: [],
+        actions: [
+          {
+            verb: "open" as const,
+            label: "See what this one showed",
+            stepId: null,
+            disabledReason: null,
+            notPermittedReason: null,
+            to: {
+              spaceKind: "placement" as const,
+              recordType: "opportunity" as const,
+              recordId: opportunityId,
+              workflowId: null,
+              path: `/opportunities/${opportunityId}/comparison?version=${h.version}`,
+              title: `Version ${h.version}`,
+              label: "COMPARISON",
+            },
+          },
+        ],
         evidence: [],
       })),
     });
@@ -274,7 +314,7 @@ export function comparisonSpace(
         notPermittedReason: null,
       });
     }
-    if (c !== null && !c.stale && c.presentedAt === null) {
+    if (c !== null && c.presentable.can && c.presentedAt === null) {
       actions.push({
         verb: "approve",
         label: "Record that this went to the client",
@@ -355,6 +395,22 @@ export function comparisonSpace(
 function comparisonBlocks(c: Comparison): SpaceFrameBlock[] {
   const blocks: SpaceFrameBlock[] = [];
 
+  if (!c.presentable.can && !c.stale) {
+    /* Current, but holding an expired quotation. Different from stale, and said differently. */
+    blocks.push({
+      id: "not-presentable",
+      type: "note",
+      label: null,
+      evidence: [],
+      actions: [],
+      state: "ready",
+      stateNote: null,
+      tone: "attention",
+      title: "This cannot go to the client yet",
+      text: c.presentable.reason ?? "One of these quotes is no longer an offer.",
+    });
+  }
+
   if (c.stale) {
     blocks.push({
       id: "stale",
@@ -368,6 +424,34 @@ function comparisonBlocks(c: Comparison): SpaceFrameBlock[] {
       title: "This comparison is out of date",
       text: `${c.staleReason ?? "A quote it included has changed."} It is kept exactly as it was made. Compare them again before putting anything to the client.`,
     });
+    if (c.changedValues.length > 0) {
+      blocks.push({
+        id: "changed-values",
+        type: "rows",
+        label: "WHAT IT SAID THEN, AND WHAT IT SAYS NOW",
+        evidence: [],
+        actions: [],
+        state: "ready",
+        stateNote: null,
+        rows: c.changedValues.slice(0, 20).map((change, index) => ({
+          id: `changed-${index}`,
+          title: `${change.insurerName} — ${change.label}`,
+          note:
+            change.was === null
+              ? `Stated since: ${change.now ?? "—"}`
+              : change.now === null
+                ? `Was ${change.was}; no longer recorded`
+                : `Was ${change.was} → now ${change.now}`,
+          badge: change.termType === null ? "Premium" : TERM_WORDS[change.termType],
+          badgeTone: "attention" as SpaceTone,
+          why: null,
+          related: null,
+          region: null,
+          actions: [],
+          evidence: [],
+        })),
+      });
+    }
     if (c.changes.length > 0) {
       blocks.push({
         id: "changes",
@@ -418,8 +502,9 @@ function comparisonBlocks(c: Comparison): SpaceFrameBlock[] {
         },
         { value: day(column.receivedAt) || "Not recorded", tone: "neutral" as SpaceTone },
         {
-          value: column.validityNote ?? day(column.validUntil),
-          tone: (column.validityNote === null ? "neutral" : "attention") as SpaceTone,
+          /* Four states, in words. A quote whose validity nobody stated is not an open offer. */
+          value: `${VALIDITY_WORDS[column.validity.state]} — ${column.validity.note}`,
+          tone: (column.validity.state === "valid" ? "neutral" : "attention") as SpaceTone,
         },
       ],
     })),
@@ -504,9 +589,26 @@ function comparisonBlocks(c: Comparison): SpaceFrameBlock[] {
   }
 
   /*
-   * The recommendation, exactly as the server reasoned it. Never composed here, and the caveats
-   * are shown with the same weight as the headline — they are the reason it is often no pick.
+   * What the comparison says, exactly as the server reasoned it.
+   *
+   * The differences come first and are always stated: they are true whether or not this
+   * brokerage has a rule. Naming a recommended quote is separate, and happens only under a rule
+   * the brokerage configured — so where there is none, this says so rather than leaving a gap
+   * that reads like an endorsement of the cheapest column.
    */
+  if (c.recommendation.facts.length > 0) {
+    blocks.push({
+      id: "differences",
+      type: "missing",
+      label: "THE DIFFERENCES",
+      evidence: [],
+      actions: [],
+      state: "ready",
+      stateNote: null,
+      items: c.recommendation.facts.slice(0, 12).map((text) => ({ text })),
+    });
+  }
+
   blocks.push({
     id: "recommendation",
     type: "note",
@@ -517,9 +619,18 @@ function comparisonBlocks(c: Comparison): SpaceFrameBlock[] {
     stateNote: null,
     tone: c.recommendation.insurerId === null ? "waiting" : "active",
     title: c.recommendation.headline,
-    text: [...c.recommendation.reasoning, ...c.recommendation.caveats.map((v) => `Bear in mind: ${v}`)]
-      .join("\n")
-      .slice(0, 1200) || "Nothing further to weigh.",
+    text:
+      [
+        ...c.recommendation.reasoning,
+        ...c.recommendation.caveats.map((v) => `Bear in mind: ${v}`),
+        ...(c.recommendation.rule === null
+          ? []
+          : [
+              `This brokerage's rule: ${c.recommendation.rule.summary} (${c.recommendation.rule.source}, checked ${day(c.recommendation.rule.verifiedAt)}.)`,
+            ]),
+      ]
+        .join("\n")
+        .slice(0, 1200) || "Nothing further to weigh.",
   });
 
   if (c.presentedAt !== null) {

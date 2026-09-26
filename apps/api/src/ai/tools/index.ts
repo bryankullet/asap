@@ -365,7 +365,7 @@ const getQuoteComparison: DeclaredTool = {
     const { opportunityId } = z.object({ opportunityId: uuid }).parse(args);
     const { data, error } = await ctx.db
       .from("quote_comparisons")
-      .select("id, generated_at, presented_at, superseded_at, superseded_reason")
+      .select("id, version, generated_at, presented_at, superseded_at, superseded_reason")
       .eq("organization_id", ctx.organizationId)
       .eq("opportunity_id", opportunityId)
       .order("generated_at", { ascending: false })
@@ -377,6 +377,13 @@ const getQuoteComparison: DeclaredTool = {
     if (current === null) {
       return {
         comparison: null,
+        versions: rows.map((r) => ({
+          version: r["version"],
+          generatedAt: r["generated_at"],
+          presentedToClientAt: r["presented_at"],
+          stale: r["superseded_at"] !== null,
+          staleReason: r["superseded_reason"],
+        })),
         /* Said plainly, so "there isn't one" cannot be read as "there is one and it is empty". */
         note: rows.length === 0
           ? "No comparison has been made for this quotation work."
@@ -387,13 +394,135 @@ const getQuoteComparison: DeclaredTool = {
     return {
       comparison: {
         id: current["id"],
+        version: current["version"],
         generatedAt: current["generated_at"],
         presentedToClientAt: current["presented_at"],
         stale: false,
         staleReason: null,
       },
+      /*
+       * Every version, so "show me the comparison the client saw yesterday" can be answered by
+       * pointing at one. Each is readable at its own address and shows what it compared.
+       */
+      versions: rows.map((r) => ({
+        version: r["version"],
+        generatedAt: r["generated_at"],
+        presentedToClientAt: r["presented_at"],
+        stale: r["superseded_at"] !== null,
+        staleReason: r["superseded_reason"],
+      })),
       note: null,
       earlier: rows.length - 1,
+    };
+  },
+};
+
+
+/**
+ * What a quotation document was read as, and what a person has decided about each reading.
+ *
+ * This is what lets Ask answer "show me where this premium came from" and "read this quotation"
+ * honestly: the page and the rectangle come back with each proposal, and a proposal still marked
+ * `proposed` is exactly that — something nobody has confirmed. A model that reported it as the
+ * insurer's terms would be stating an unreviewed reading as fact.
+ */
+const getQuotationReading: DeclaredTool = {
+  declaration: {
+    name: "get_quotation_reading",
+    description:
+      "What ASAP read from a quotation document, and what a person has decided about each reading. Returns one row per term found, with the page and rectangle it was read from and its review state. A row whose state is 'proposed' has NOT been confirmed by anybody: report it as a proposal, never as the insurer's terms. `needsManualReview` set means the document could not be read at all.",
+    inputSchema: {
+      type: "object",
+      properties: { documentId: { type: "string", description: "The document's id." } },
+      required: ["documentId"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const { documentId } = z.object({ documentId: uuid }).parse(args);
+
+    const document = await ctx.db
+      .from("documents")
+      .select("id, filename, extraction_state, extraction_error")
+      .eq("organization_id", ctx.organizationId)
+      .eq("id", documentId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (document.error) throw mapDatabaseError(document.error);
+    if (!document.data) return { document: null, note: "No document with that id in this brokerage." };
+    const doc = document.data as Record<string, string | null>;
+
+    const proposals = await ctx.db
+      .from("document_term_proposals")
+      .select("id, ordinal, term_type, label, proposed_value, corrected_value, amount, currency, page_number, region_x, region_y, region_width, region_height, condition, state")
+      .eq("organization_id", ctx.organizationId)
+      .eq("document_id", documentId)
+      .order("ordinal", { ascending: true })
+      .limit(LIMIT);
+    if (proposals.error) throw mapDatabaseError(proposals.error);
+
+    return {
+      document: { id: doc["id"], filename: doc["filename"], extractionState: doc["extraction_state"] },
+      needsManualReview: doc["extraction_error"],
+      terms: ((proposals.data ?? []) as Record<string, unknown>[]).map((r) => ({
+        proposalId: r["id"],
+        ordinal: r["ordinal"],
+        termType: r["term_type"],
+        label: r["label"],
+        proposedValue: r["proposed_value"],
+        correctedValue: r["corrected_value"],
+        amount: r["amount"],
+        currency: r["currency"],
+        page: r["page_number"],
+        region:
+          r["region_x"] === null
+            ? null
+            : {
+                x: Number(r["region_x"]),
+                y: Number(r["region_y"]),
+                width: Number(r["region_width"]),
+                height: Number(r["region_height"]),
+              },
+        condition: r["condition"],
+        /* proposed | accepted | corrected | rejected. Only the last three are anybody's view. */
+        reviewState: r["state"],
+      })),
+    };
+  },
+};
+
+/**
+ * The brokerage's own rules, so Ask can answer "why are you not recommending one?".
+ *
+ * The honest answer to that question is usually "because nobody has told me when I may", and it
+ * is only answerable if the model can see that no rule exists.
+ */
+const getCompanyRules: DeclaredTool = {
+  declaration: {
+    name: "get_company_rules",
+    description:
+      "The rules this brokerage has configured, each with the source it came from and the date it was last checked. Use this to explain why ASAP did or did not name a recommended quote: with no `quote.recommendation` rule, ASAP states the differences and names no recommended quote, and that is the correct answer to give.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  async run(_args, ctx) {
+    const { data, error } = await ctx.db
+      .from("company_rules")
+      .select("key, value, source, verified_at")
+      .eq("organization_id", ctx.organizationId)
+      .order("key", { ascending: true })
+      .limit(LIMIT);
+    if (error) throw mapDatabaseError(error);
+    const rows = (data ?? []) as Record<string, unknown>[];
+    return {
+      rules: rows.map((r) => ({
+        key: r["key"],
+        value: r["value"],
+        source: r["source"],
+        verifiedAt: r["verified_at"],
+      })),
+      note: rows.some((r) => r["key"] === "quote.recommendation")
+        ? null
+        : "No rule says when ASAP may name a recommended quote, so it names none.",
     };
   },
 };
@@ -407,6 +536,8 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getRuns,
   getQuotes,
   getQuoteComparison,
+  getQuotationReading,
+  getCompanyRules,
 ];
 
 export const TOOL_DECLARATIONS: AiToolDeclaration[] = DECLARED_TOOLS.map((t) => t.declaration);

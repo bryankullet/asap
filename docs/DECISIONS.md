@@ -1627,3 +1627,63 @@ The reasoning and the caveats are computed on the server from the rows and shown
 weight; nothing on this screen is composed by a model. A cell an insurer left silent reads "Not
 stated" in words — never an empty cell, and never a colour alone, because an insurer silent on
 theft excess has not offered a nil excess.
+
+
+## D-087 — A comparison names the revisions it compared
+
+D-085 stored digests and deliberately not values, reasoning that what was compared could be read
+from the rows it pointed at. That was wrong, and a probe against a real database showed how: after
+a premium revision and a corrected excess, the old comparison rendered *today's* figures under its
+own name. Not a blank — a false record of what a client was shown.
+
+Every insurer answer and every quote term now mints an immutable revision on write, by trigger, and
+a comparison references revision ids. A revision cannot be edited; the only write it accepts is the
+foreign key's own set-null when the row it came from is deleted at offboarding, and even that is
+checked column by column. Regenerating makes a new version beside the old, numbered by the
+database. Reading `?version=N` opens what was shown then, and the difference between then and now
+is derived rather than stored.
+
+Rejected: storing values on the comparison row (a second copy of the client's terms, ageing
+separately from the first) and reconstructing from an audit log (an audit payload is the wrong
+place for business values, and the log is not queryable as a comparison).
+
+## D-088 — ASAP does not name a recommended quote unless the brokerage says when it may
+
+D-086 said the cheapest quote wins only when the quotes are like for like and the premiums differ
+by more than 5%. The 5% came from nowhere: not the approved prototype, not the Intent & Skill Map,
+not the Economic State Machine, not any brokerage. It also decided something no constant is
+entitled to decide — which insurer a client should be advised to take — and hard-coding a Kenyan
+market value is forbidden outright.
+
+The rule is now `company_rules`, per brokerage, with the source it came from and the date somebody
+last checked it, and its history kept when it changes. Two modes: abstain, or name the cheaper
+quote when the same cover is priced twice and the gap is at least the brokerage's own figure. With
+no rule — the default, and what applies to every brokerage until one is set — ASAP states the
+differences in shillings and percent, says what one insurer stated and another did not, and names
+nobody. A rule that does not parse is treated as no rule, never as a licence to pick a number.
+
+A recommendation records no selection anywhere. Only placement does that, and a person does it.
+
+## D-089 — A reading is not a term
+
+The extractor proposes; a person decides. Quotation terms are read one row per occurrence, with
+the page and rectangle each came from, into `document_term_proposals`. Accepting or correcting one
+writes the confirmed term and keeps the extractor's own reading beside the correction; rejecting
+one writes nothing. A re-read updates only proposals nobody has decided, so a late extraction
+cannot overwrite a human correction.
+
+Which insurer's answer a quotation belongs to is always chosen by a person. ASAP does not match an
+insurer or a client by the resemblance of a name: an extracted "Jubilee Alliance" is not evidence
+that this brokerage's "Jubilee Insurance" sent the document, and the cost of assuming so is one
+insurer's excesses recorded against another's. One document belongs to one answer, enforced by a
+partial unique index and read first so the refusal is a sentence rather than a constraint error.
+
+There is no OCR. An image-only quotation says it needs a person, in those words.
+
+## D-090 — "Expiring soon" carries its own basis
+
+A quote holds, is expiring soon, has expired, or states no validity at all — four states, in
+words, never a colour alone. The threshold is a brokerage rule; where none is set, ASAP's default
+of 14 days applies and says on screen that it is ASAP's default rather than the brokerage's. An
+expired quotation is not an offer, so a comparison holding one cannot be presented to a client
+until it is generated again.

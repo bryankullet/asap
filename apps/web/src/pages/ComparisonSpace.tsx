@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ComparisonAction } from "@asap/schema";
 import { comparisonSpace } from "../live/comparison-space.js";
@@ -16,21 +16,23 @@ import { SpaceFrameView } from "../space/SpaceFrame.js";
  */
 export function ComparisonSpace() {
   const { opportunityId = "" } = useParams({ strict: false }) as { opportunityId?: string };
+  /* Reading an earlier version is a different address, so it can be linked and reopened. */
+  const { version } = useSearch({ strict: false }) as { version?: number };
   const navigate = useNavigate();
   const qc = useQueryClient();
   const tabs = useWorkspaceTabs(`/opportunities/${opportunityId}/comparison`);
   const [failure, setFailure] = useState<string | null>(null);
 
   const live = useQuery({
-    queryKey: ["comparison", opportunityId],
-    queryFn: () => api.comparison(opportunityId),
+    queryKey: ["comparison", opportunityId, version ?? null],
+    queryFn: () => api.comparison(opportunityId, version),
     retry: false,
   });
 
   const act = useMutation({
     mutationFn: (input: ComparisonAction) => api.comparisonAction(opportunityId, input),
     onSuccess: (res) => {
-      if (res.comparison) qc.setQueryData(["comparison", opportunityId], res.comparison);
+      if (res.comparison) qc.setQueryData(["comparison", opportunityId, version ?? null], res.comparison);
       /* The opportunity's own reading is now behind: a comparison is generated from its rows. */
       void qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
       setFailure(res.outcome === "blocked" ? res.reason : null);

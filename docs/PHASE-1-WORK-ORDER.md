@@ -270,15 +270,21 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-1 Client Space | Tested |
 | 4B-2 Opportunity and Quote Space | Tested — data foundation awaiting review |
 | 4B-3 Quote Comparison Space | Tested — awaiting review |
-| 4B-3A Reproducibility, recommendation rules, extraction | In progress |
+| 4B-3A Reproducibility, recommendation rules, extraction | Tested — awaiting review |
 | 4B-4 Placement and approval flow | Not started |
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
 
-### Gaps named by 4B-3
+### Gaps named by 4B-3, and what 4B-3A did about them
 
-**Quotation terms are not extracted from documents.** The extractor
+**Quotation terms are not extracted from documents. — Closed in 4B-3A.** The extractor now reads
+them, one row per occurrence, with the page and rectangle each was read from; a proposal becomes a
+term only when a person accepts or corrects it. The two defects below were the reason the original
+finding was recorded, and both are fixed. What follows is the original finding, kept because it is
+the measurement the fix was built against.
+
+**Original finding.** The extractor
 (`apps/extractor/src/asap_extractor/extract.py`) knows eight labelled fields, all of them from a
 policy schedule: policy number, insured name, insurer name, class of business, period start,
 period end, sum insured, premium. It has no notion of an excess, a limit as a distinct term, an
@@ -297,9 +303,23 @@ sentence returned: `class_of_business`, `premium`, `sum_insured` and a confused 
   spurious conflicting reading of the insured's name; and "Period from: … Period to: …" on one
   line puts both dates into `period_start`.
 
-Closing this needs a quotation-shaped label set, terms returned as a list rather than one value
-per key, and a route from a reviewed extraction to `quote_terms`. It is not started, and nothing
-in the product claims otherwise.
+Closing this needed a quotation-shaped label set, terms returned as a list rather than one value
+per key, and a route from a reviewed extraction to `quote_terms`. All three are now in place.
+
+### Still unsupported after 4B-3A
+
+- **No OCR.** An image-only quotation is reported as needing a person, in those words, on the
+  review screen and through Ask. It is not read, and nothing claims it was.
+- **Re-reading a document is not wired up.** The pipeline handles a re-read correctly and refuses
+  to touch a proposal a person has decided, but no route or job triggers one; the review action
+  says so rather than appearing to start something.
+- **`quote.track_validity` has no scheduled sweep.** A comparison derives and shows valid,
+  expiring soon, expired or not stated at the moment it is read, and an expired quote makes the
+  comparison unpresentable immediately. Nothing runs on a timer to notice an expiry between
+  readings; that belongs with the scheduled-jobs stage.
+- **Ask prepares, it does not confirm.** The model can read a quotation's proposals and explain
+  why no recommendation was made. Accepting, correcting or rejecting a reading is a person's
+  action through the validated route.
 
 
 ## Test baseline (verified at 381e439, 2026-09-25)

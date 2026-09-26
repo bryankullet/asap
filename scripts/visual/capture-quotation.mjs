@@ -28,6 +28,7 @@ const HARNESS = process.env.HARNESS ?? "http://127.0.0.1:5199/parity/shell-harne
 const OPP = "/opportunities/30000000-0000-4000-8000-00000000000a";
 const TERMS = `${OPP}/insurers/31000000-0000-4000-8000-00000000000a`;
 const COMPARISON = `${OPP}/comparison`;
+const READING = "/documents/3a000000-0000-4000-8000-00000000000a/quotation";
 
 const STATES = [
   { name: "opportunity-new", url: `${HARNESS}?at=${OPP}&stage=new` },
@@ -41,6 +42,10 @@ const STATES = [
   { name: "comparison-live", url: `${HARNESS}?at=${COMPARISON}&stage=live` },
   { name: "comparison-out-of-date", url: `${HARNESS}?at=${COMPARISON}&stage=stale` },
   { name: "comparison-presented", url: `${HARNESS}?at=${COMPARISON}&stage=presented` },
+  { name: "reading-unreviewed", url: `${HARNESS}?at=${READING}&stage=unreviewed` },
+  { name: "reading-reviewed", url: `${HARNESS}?at=${READING}&stage=reviewed` },
+  { name: "reading-unlinked", url: `${HARNESS}?at=${READING}&stage=unlinked` },
+  { name: "reading-unreadable", url: `${HARNESS}?at=${READING}&stage=unreadable` },
 ];
 
 const outDir = resolve(".local-visual/shots/quotation");

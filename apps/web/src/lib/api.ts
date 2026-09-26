@@ -1,6 +1,8 @@
 import {
   clientSpaceResponseSchema,
   comparisonActionResponseSchema,
+  quotationReadingResponseSchema,
+  quotationReviewResponseSchema,
   comparisonResponseSchema,
   opportunityActionResponseSchema,
   opportunityListResponseSchema,
@@ -8,6 +10,7 @@ import {
   uuidSchema,
   type CreateOpportunityRequest,
   type ComparisonAction,
+  type QuotationReviewAction,
   type OpportunityAction,
   onboardingResponseSchema,
   type SaveOnboardingRequest,
@@ -370,8 +373,17 @@ export const api = {
   opportunityAction: (id: string, input: OpportunityAction) =>
     request("POST", `/opportunities/${id}/actions`, opportunityActionResponseSchema, input),
   /** The quotes beside each other, and whether the comparison still describes them. */
-  comparison: (id: string) =>
-    request("GET", `/opportunities/${id}/comparison`, comparisonResponseSchema),
+  comparison: (id: string, version?: number) =>
+    request(
+      "GET",
+      `/opportunities/${id}/comparison${version === undefined ? "" : `?version=${version}`}`,
+      comparisonResponseSchema,
+    ),
+  /** What ASAP read from a quotation, and what a person has decided about each reading. */
+  quotationReading: (documentId: string) =>
+    request("GET", `/documents/${documentId}/quotation`, quotationReadingResponseSchema),
+  quotationReview: (documentId: string, input: QuotationReviewAction) =>
+    request("POST", `/documents/${documentId}/quotation/actions`, quotationReviewResponseSchema, input),
   comparisonAction: (id: string, input: ComparisonAction) =>
     request("POST", `/opportunities/${id}/comparison/actions`, comparisonActionResponseSchema, input),
 

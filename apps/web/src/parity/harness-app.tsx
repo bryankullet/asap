@@ -20,6 +20,7 @@ import "../styles/index.css";
 import { Onboarding } from "../pages/Onboarding.js";
 import { ClientSpace } from "../pages/ClientSpace.js";
 import { ComparisonSpace } from "../pages/ComparisonSpace.js";
+import { QuotationReading } from "../pages/QuotationReading.js";
 import { OpportunitySpace, QuoteSpace } from "../pages/OpportunitySpace.js";
 
 /**
@@ -69,6 +70,7 @@ const clientSpace = createRoute({ getParentRoute: () => root, path: "/clients/$c
 const opportunity = createRoute({ getParentRoute: () => root, path: "/opportunities/$opportunityId", component: OpportunitySpace });
 const quoteTerms = createRoute({ getParentRoute: () => root, path: "/opportunities/$opportunityId/insurers/$opportunityInsurerId", component: QuoteSpace });
 const comparison = createRoute({ getParentRoute: () => root, path: "/opportunities/$opportunityId/comparison", component: ComparisonSpace });
+const quotationReading = createRoute({ getParentRoute: () => root, path: "/documents/$documentId/quotation", component: QuotationReading });
 const onboarding = createRoute({ getParentRoute: () => root, path: "/onboarding", component: Onboarding });
 const routes = ["/automations", "/ask", "/import", "/email", "/clients", "/documents", "/files"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
@@ -80,7 +82,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([onboarding, clientSpace, opportunity, quoteTerms, comparison, ...boards, search, ...extra, ...routes, record]),
+  routeTree: root.addChildren([onboarding, clientSpace, opportunity, quoteTerms, comparison, quotationReading, ...boards, search, ...extra, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

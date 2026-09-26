@@ -9,14 +9,19 @@
 import pino from "pino";
 import { beforeEach, describe, expect, it } from "vitest";
 import { extractDocument } from "../src/documents/extraction.js";
-import { ExtractorUnavailable, scriptedExtractor, type Extractor } from "../src/documents/extractor.js";
+import {
+  ExtractorUnavailable,
+  scriptedExtractor,
+  type ExtractionResult,
+  type Extractor,
+} from "../src/documents/extractor.js";
 import { fakeFactory, type FakeDb } from "./_fake-supabase.js";
 
 const ORG = "10000000-0000-4000-8000-00000000000a";
 const DOC = "d0000000-0000-4000-8000-000000000001";
 const logger = pino({ level: "silent" });
 
-const RESULT = {
+const RESULT: ExtractionResult = {
   pages: [{ pageNumber: 1, text: "Policy No: MAR-4471", width: 612, height: 792 }],
   fields: [
     {
@@ -28,6 +33,8 @@ const RESULT = {
     },
     { fieldKey: "premium", value: null, page: null, region: null, condition: "missing" as const },
   ],
+  terms: [],
+  needsManualReview: null,
 };
 
 function makeDb(state = "queued"): FakeDb {

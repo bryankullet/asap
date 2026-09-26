@@ -50,7 +50,13 @@ function column(insurerId: string, insurerName: string, responseId: string, prem
     premiumAmount: premium,
     premiumCurrency: premium === null ? null : "KES",
     validUntil: "2027-12-31",
-    validityNote: null,
+    validity: {
+      state: "valid",
+      validUntil: "2027-12-31",
+      note: "These terms hold until 2027-12-31.",
+      thresholdDays: 14,
+      thresholdSource: "ASAP's default of 14 days, because no rule has been set for this brokerage.",
+    },
     source: null,
   };
 }
@@ -89,8 +95,10 @@ function body(over: Record<string, unknown> = {}) {
       awaiting: [],
       missingInformation: [],
     },
+    viewingHistory: false,
     comparison: {
       id: CMP,
+      version: 1,
       generatedAt: "2026-09-06T09:00:00.000Z",
       generatedByName: "Amina",
       presentedAt: null,
@@ -98,6 +106,8 @@ function body(over: Record<string, unknown> = {}) {
       stale: false,
       staleReason: null,
       changes: [],
+      changedValues: [],
+      presentable: { can: true, reason: null },
       columns: [column(INS_B, "CIC", RESP_B, "5620000.00"), column(INS_A, "Jubilee", RESP_A, "5310000.00")],
       rows: [
         {
@@ -108,11 +118,16 @@ function body(over: Record<string, unknown> = {}) {
         },
       ],
       recommendation: {
-        insurerId: INS_A,
-        insurerName: "Jubilee",
-        headline: "Jubilee on these terms.",
-        reasoning: ["Jubilee quotes KES 5,310,000, against KES 5,620,000 from CIC."],
+        insurerId: null,
+        insurerName: null,
+        headline: "ASAP is not recommending one of these.",
+        facts: ["Jubilee is KES 310,000 cheaper than CIC — 5.5%."],
+        reasoning: [
+          "No rule has been set for when ASAP may name a recommended quote, so it does not.",
+          "The differences are set out above; which cover suits this client is a judgement for the broker.",
+        ],
         caveats: [],
+        rule: null,
       },
     },
     history: [],
@@ -245,6 +260,7 @@ describe("when the last comparison lapsed", () => {
         history: [
           {
             id: CMP,
+            version: 1,
             generatedAt: "2026-09-06T09:00:00.000Z",
             generatedByName: "Amina",
             presentedAt: null,
@@ -270,6 +286,10 @@ describe("when the quotes have moved", () => {
       ...body().comparison,
       stale: true,
       staleReason: 'Jubilee changed the term "Own damage" after this comparison was made.',
+      presentable: {
+        can: false,
+        reason: 'Jubilee changed the term "Own damage" after this comparison was made.',
+      },
       changes: [
         {
           insurerId: INS_A,
@@ -304,12 +324,46 @@ describe("when the quotes have moved", () => {
 });
 
 describe("what it recommends", () => {
-  it("shows the reasoning, not just the name", async () => {
+  it("states the differences and names nobody when no rule is configured", async () => {
     stubApi(body());
     await open();
 
-    await waitFor(() => expect(screen.getAllByText("Jubilee on these terms.").length).toBeGreaterThan(0));
-    expect(screen.getAllByText(/against KES 5,620,000 from CIC/).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.getAllByText("ASAP is not recommending one of these.").length).toBeGreaterThan(0),
+    );
+    /* The fact is on screen; the judgement is not made. */
+    expect(screen.getAllByText(/Jubilee is KES 310,000 cheaper than CIC/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/judgement for the broker/).length).toBeGreaterThan(0);
+  });
+
+  it("shows a recommendation as the brokerage's own rule, with its provenance", async () => {
+    stubApi(
+      body({
+        comparison: {
+          ...body().comparison,
+          recommendation: {
+            insurerId: INS_A,
+            insurerName: "Jubilee",
+            headline: "Jubilee, under this brokerage's own rule.",
+            facts: ["Jubilee is KES 310,000 cheaper than CIC — 5.5%."],
+            reasoning: ["It remains a recommendation. Whether the cover suits this client is the broker's judgement."],
+            caveats: [],
+            rule: {
+              summary: "Name the cheaper quote when the same cover is priced twice and the gap is at least 5%.",
+              source: "Partners meeting, 4 September 2026.",
+              verifiedAt: "2026-09-04",
+            },
+          },
+        },
+      }),
+    );
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Jubilee, under this brokerage's own rule.").length).toBeGreaterThan(0),
+    );
+    expect(screen.getAllByText(/Partners meeting, 4 September 2026/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/the broker's judgement/).length).toBeGreaterThan(0);
   });
 
   it("shows an abstention as an abstention, with what it could not weigh", async () => {
@@ -321,8 +375,14 @@ describe("what it recommends", () => {
             insurerId: null,
             insurerName: null,
             headline: "These quotes are not yet like for like.",
-            reasoning: ["Jubilee quotes KES 5,310,000, against KES 5,620,000 from CIC."],
-            caveats: ["CIC did not state Theft excess."],
+            facts: ["CIC did not state Theft excess."],
+            reasoning: ["This brokerage's rule applies only where the same cover is priced twice."],
+            caveats: ["CIC: Theft excess was stated in terms that cannot be compared."],
+            rule: {
+              summary: "Name the cheaper quote when the gap is at least 5%.",
+              source: "Partners meeting.",
+              verifiedAt: "2026-09-04",
+            },
           },
         },
       }),
@@ -332,16 +392,176 @@ describe("what it recommends", () => {
     await waitFor(() =>
       expect(screen.getAllByText(/These quotes are not yet like for like/).length).toBeGreaterThan(0),
     );
-    expect(screen.getAllByText(/Bear in mind: CIC did not state Theft excess/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/CIC did not state Theft excess/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Bear in mind: CIC: Theft excess was stated in terms that cannot be compared/).length,
+    ).toBeGreaterThan(0);
+  });
+});
+
+
+describe("what the client was shown", () => {
+  it("shows what a value said then and what it says now", async () => {
+    stubApi(
+      body({
+        comparison: {
+          ...body().comparison,
+          stale: true,
+          staleReason: "Jubilee changed its quote after this comparison was made.",
+          presentable: { can: false, reason: "Jubilee changed its quote after this comparison was made." },
+          changedValues: [
+            {
+              insurerId: INS_A,
+              insurerName: "Jubilee",
+              termType: null,
+              label: "Premium",
+              was: "KES 5,310,000",
+              now: "KES 5,410,000",
+            },
+            {
+              insurerId: INS_A,
+              insurerName: "Jubilee",
+              termType: "excess",
+              label: "Own damage",
+              was: "5% min KES 30,000",
+              now: "5% min KES 50,000",
+            },
+          ],
+        },
+      }),
+    );
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/Was KES 5,310,000 → now KES 5,410,000/).length).toBeGreaterThan(0),
+    );
+    expect(screen.getAllByText(/Was 5% min KES 30,000 → now 5% min KES 50,000/).length).toBeGreaterThan(0);
+  });
+
+  it("says plainly when an earlier version is being read", async () => {
+    stubApi(
+      body({
+        viewingHistory: true,
+        comparison: { ...body().comparison, version: 1 },
+        history: [
+          {
+            id: "36000000-0000-4000-8000-00000000000b",
+            version: 2,
+            generatedAt: "2026-09-09T09:00:00.000Z",
+            generatedByName: "Amina",
+            presentedAt: null,
+            supersededAt: null,
+            supersededReason: null,
+          },
+        ],
+      }),
+    );
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/You are reading version 1, as it was made/).length).toBeGreaterThan(0),
+    );
+    expect(screen.getAllByText(/not what the quotes say now/).length).toBeGreaterThan(0);
+    /* And the other versions are reachable, each at its own address. */
+    const links = screen.getAllByRole("link", { name: /See what this one showed/i });
+    expect(links.length).toBeGreaterThan(0);
+    expect(links[0]!.getAttribute("href")).toContain("version=2");
+  });
+
+  it("survives a refresh: the reading comes from the server, not from the browser", async () => {
+    stubApi(body());
+    const first = await open();
+    await waitFor(() => expect(screen.getAllByText("KES 5,310,000").length).toBeGreaterThan(0));
+    first.unmount();
+
+    await open();
+    await waitFor(() => expect(screen.getAllByText("KES 5,310,000").length).toBeGreaterThan(0));
+    /* Nothing about the brokerage's quotes may be kept in the browser. */
+    expect(Object.keys(localStorage)).not.toContain("comparison");
+    expect(JSON.stringify(localStorage)).not.toMatch(/5,310,000|Jubilee|CIC/);
+  });
+});
+
+describe("how long a quote holds", () => {
+  it("names each validity state in words, not by colour", async () => {
+    stubApi(
+      body({
+        comparison: {
+          ...body().comparison,
+          presentable: {
+            can: false,
+            reason: "Jubilee has let these terms expire. An expired quotation is not an offer.",
+          },
+          columns: [
+            {
+              ...column(INS_B, "CIC", RESP_B, "5620000.00"),
+              validity: {
+                state: "not_stated",
+                validUntil: null,
+                note: "The insurer did not say how long these terms hold.",
+                thresholdDays: 14,
+                thresholdSource: "ASAP's default of 14 days, because no rule has been set for this brokerage.",
+              },
+            },
+            {
+              ...column(INS_A, "Jubilee", RESP_A, "5310000.00"),
+              validity: {
+                state: "expired",
+                validUntil: "2026-01-01",
+                note: "These terms have expired. Ask the insurer to confirm them again.",
+                thresholdDays: 14,
+                thresholdSource: "ASAP's default of 14 days, because no rule has been set for this brokerage.",
+              },
+            },
+          ],
+        },
+      }),
+    );
+    await open();
+
+    await waitFor(() => expect(screen.getAllByText(/Expired —/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Not stated — The insurer did not say how long/).length).toBeGreaterThan(0);
+  });
+
+  it("offers no way to put an expired comparison to the client, and says why", async () => {
+    stubApi(
+      body({
+        comparison: {
+          ...body().comparison,
+          presentable: {
+            can: false,
+            reason: "Jubilee has let these terms expire. An expired quotation is not an offer.",
+          },
+        },
+      }),
+    );
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getAllByText("This cannot go to the client yet").length).toBeGreaterThan(0),
+    );
+    expect(screen.getAllByText(/An expired quotation is not an offer/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /went to the client/i })).toBeNull();
   });
 });
 
 describe("what a person can do", () => {
   it("records that a current comparison went to the client", async () => {
-    stubApi(body(), body({ comparison: { ...body().comparison, presentedAt: "2026-09-07T09:00:00.000Z", presentedByName: "Amina" } }));
+    stubApi(
+      body(),
+      body({
+        comparison: {
+          ...body().comparison,
+          presentedAt: "2026-09-07T09:00:00.000Z",
+          presentedByName: "Amina",
+        },
+      }),
+    );
     await open();
 
-    await waitFor(() => expect(screen.getAllByText("Jubilee on these terms.").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getAllByText("ASAP is not recommending one of these.").length).toBeGreaterThan(0),
+    );
     await userEvent.click(screen.getAllByRole("button", { name: /went to the client/i })[0]!);
 
     await waitFor(() => expect(sent).toHaveLength(1));
@@ -355,7 +575,9 @@ describe("what a person can do", () => {
     stubApi(body({ permissions: { canGenerate: false, canPresent: false } }));
     await open();
 
-    await waitFor(() => expect(screen.getAllByText("Jubilee on these terms.").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.getAllByText("ASAP is not recommending one of these.").length).toBeGreaterThan(0),
+    );
     expect(screen.queryByRole("button", { name: /went to the client/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Compare/i })).toBeNull();
   });
