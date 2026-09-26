@@ -9,6 +9,7 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
@@ -241,6 +242,9 @@ export const insurerResponses = pgTable(
   },
   (t) => [
     unique("insurer_responses_one_per_insurer").on(t.opportunityInsurerId),
+    uniqueIndex("insurer_responses_one_per_source_document")
+      .on(t.organizationId, t.sourceDocumentId)
+      .where(sql`${t.sourceDocumentId} is not null`),
     check("insurer_responses_outcome_check", sql`${t.outcome} in ('quoted','declined','no_response')`),
     check("insurer_responses_premium_amount_check", sql`${t.premiumAmount} is null or ${t.premiumAmount} >= 0`),
     check("insurer_responses_premium_currency_check", sql`${t.premiumCurrency} is null or ${t.premiumCurrency} ~ '^[A-Z]{3}$'`),
@@ -291,6 +295,10 @@ export const quoteTerms = pgTable(
     unclear: boolean("unclear").notNull().default(false),
     evidenceDocumentId: uuid("evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
     evidencePage: integer("evidence_page"),
+    regionX: numeric("region_x"),
+    regionY: numeric("region_y"),
+    regionWidth: numeric("region_width"),
+    regionHeight: numeric("region_height"),
     position: integer("position").notNull().default(0),
     createdAt: createdAt(),
   },
@@ -317,6 +325,88 @@ export const quoteTerms = pgTable(
     index("quote_terms_insurer_response_id_idx").on(t.insurerResponseId),
     index("quote_terms_corrected_by_idx").on(t.correctedBy),
     index("quote_terms_evidence_document_id_idx").on(t.evidenceDocumentId),
+    check(
+      "quote_terms_region_is_whole",
+      sql`(${t.regionX} is null and ${t.regionY} is null and ${t.regionWidth} is null and ${t.regionHeight} is null)
+          or (${t.regionX} is not null and ${t.regionY} is not null
+              and ${t.regionWidth} is not null and ${t.regionWidth} > 0
+              and ${t.regionHeight} is not null and ${t.regionHeight} > 0)`,
+    ),
+  ],
+);
+
+/**
+ * What one insurer's answer said at one moment (0051). Immutable: a database trigger refuses any
+ * write but the foreign key's own set-null when the answer itself is deleted at offboarding.
+ */
+export const insurerResponseRevisions = pgTable(
+  "insurer_response_revisions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    insurerResponseId: uuid("insurer_response_id").references(() => insurerResponses.id, { onDelete: "set null" }),
+    opportunityId: uuid("opportunity_id").notNull().references(() => opportunities.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    outcome: text("outcome").notNull(),
+    receivedAt: timestamptz("received_at"),
+    premiumAmount: numeric("premium_amount", { precision: 14, scale: 2 }),
+    premiumCurrency: text("premium_currency"),
+    validUntil: date("valid_until"),
+    declineReason: text("decline_reason"),
+    sourceEmailMessageId: uuid("source_email_message_id").references(() => emailMessages.id, { onDelete: "set null" }),
+    sourceDocumentId: uuid("source_document_id").references(() => documents.id, { onDelete: "set null" }),
+    sourceNote: text("source_note"),
+    sha256: text("sha256").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("insurer_response_revisions_one_per_revision").on(t.insurerResponseId, t.revision),
+    check("insurer_response_revisions_revision_check", sql`${t.revision} >= 1`),
+    check("insurer_response_revisions_sha256_check", sql`length(${t.sha256}) = 64`),
+    index("insurer_response_revisions_organization_id_idx").on(t.organizationId),
+    index("insurer_response_revisions_insurer_response_id_idx").on(t.insurerResponseId),
+    index("insurer_response_revisions_opportunity_id_idx").on(t.opportunityId),
+    index("insurer_response_revisions_source_document_id_idx").on(t.sourceDocumentId),
+    index("insurer_response_revisions_source_email_message_id_idx").on(t.sourceEmailMessageId),
+  ],
+);
+
+/** What one term said at one moment, and where on the page it was read from (0051). Immutable. */
+export const quoteTermRevisions = pgTable(
+  "quote_term_revisions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    quoteTermId: uuid("quote_term_id").references(() => quoteTerms.id, { onDelete: "set null" }),
+    insurerResponseId: uuid("insurer_response_id").references(() => insurerResponses.id, { onDelete: "set null" }),
+    revision: integer("revision").notNull(),
+    termType: text("term_type").notNull(),
+    label: text("label").notNull(),
+    extractedValue: text("extracted_value"),
+    correctedValue: text("corrected_value"),
+    correctedBy: uuid("corrected_by").references(() => users.id),
+    correctedAt: timestamptz("corrected_at"),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    currency: text("currency"),
+    unclear: boolean("unclear").notNull().default(false),
+    evidenceDocumentId: uuid("evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
+    evidencePage: integer("evidence_page"),
+    regionX: numeric("region_x"),
+    regionY: numeric("region_y"),
+    regionWidth: numeric("region_width"),
+    regionHeight: numeric("region_height"),
+    sha256: text("sha256").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("quote_term_revisions_one_per_revision").on(t.quoteTermId, t.revision),
+    check("quote_term_revisions_revision_check", sql`${t.revision} >= 1`),
+    check("quote_term_revisions_sha256_check", sql`length(${t.sha256}) = 64`),
+    index("quote_term_revisions_organization_id_idx").on(t.organizationId),
+    index("quote_term_revisions_quote_term_id_idx").on(t.quoteTermId),
+    index("quote_term_revisions_insurer_response_id_idx").on(t.insurerResponseId),
+    index("quote_term_revisions_corrected_by_idx").on(t.correctedBy),
+    index("quote_term_revisions_evidence_document_id_idx").on(t.evidenceDocumentId),
   ],
 );
 
@@ -379,8 +469,11 @@ export const quoteComparisons = pgTable(
     presentedBy: uuid("presented_by").references(() => users.id),
     supersededAt: timestamptz("superseded_at"),
     supersededReason: text("superseded_reason"),
+    /* Numbered by the database, so two people regenerating at once cannot both be version 3. */
+    version: integer("version"),
   },
   (t) => [
+    unique("quote_comparisons_one_per_version").on(t.opportunityId, t.version),
     check(
       "quote_comparisons_presented_is_whole",
       sql`(${t.presentedAt} is null and ${t.presentedBy} is null)
@@ -417,6 +510,8 @@ export const quoteComparisonInputs = pgTable(
       .notNull()
       .references(() => insurers.id),
     responseSha256: text("response_sha256").notNull(),
+    /* The exact revision compared. Null only on comparisons made before 0051 existed. */
+    responseRevisionId: uuid("response_revision_id").references(() => insurerResponseRevisions.id),
     createdAt: createdAt(),
   },
   (t) => [
@@ -426,6 +521,7 @@ export const quoteComparisonInputs = pgTable(
     index("quote_comparison_inputs_comparison_id_idx").on(t.comparisonId),
     index("quote_comparison_inputs_insurer_response_id_idx").on(t.insurerResponseId),
     index("quote_comparison_inputs_insurer_id_idx").on(t.insurerId),
+    index("quote_comparison_inputs_response_revision_id_idx").on(t.responseRevisionId),
   ],
 );
 
@@ -444,6 +540,7 @@ export const quoteComparisonTerms = pgTable(
     termType: text("term_type").notNull(),
     label: text("label").notNull(),
     termSha256: text("term_sha256").notNull(),
+    termRevisionId: uuid("term_revision_id").references(() => quoteTermRevisions.id),
   },
   (t) => [
     unique("quote_comparison_terms_one_per_term").on(t.comparisonInputId, t.termType, t.label),
@@ -451,6 +548,105 @@ export const quoteComparisonTerms = pgTable(
     index("quote_comparison_terms_organization_id_idx").on(t.organizationId),
     index("quote_comparison_terms_comparison_input_id_idx").on(t.comparisonInputId),
     index("quote_comparison_terms_quote_term_id_idx").on(t.quoteTermId),
+    index("quote_comparison_terms_term_revision_id_idx").on(t.termRevisionId),
+  ],
+);
+
+
+/**
+ * What the extractor thinks a quotation says (0053).
+ *
+ * One row per occurrence, because a quotation states several excesses and flattening them into
+ * one field loses the one that mattered. A proposal is never a confirmed term: only a person
+ * accepting or correcting it writes to `quote_terms`.
+ */
+export const documentTermProposals = pgTable(
+  "document_term_proposals",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    termType: text("term_type").notNull(),
+    label: text("label").notNull(),
+    proposedValue: text("proposed_value"),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    currency: text("currency"),
+    pageNumber: integer("page_number"),
+    regionX: numeric("region_x"),
+    regionY: numeric("region_y"),
+    regionWidth: numeric("region_width"),
+    regionHeight: numeric("region_height"),
+    condition: text("condition").notNull().default("inferred"),
+    method: text("method").notNull(),
+    state: text("state").notNull().default("proposed"),
+    correctedValue: text("corrected_value"),
+    correctedAmount: numeric("corrected_amount", { precision: 14, scale: 2 }),
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    reviewedAt: timestamptz("reviewed_at"),
+    quoteTermId: uuid("quote_term_id").references(() => quoteTerms.id, { onDelete: "set null" }),
+    previousRevisionId: uuid("previous_revision_id").references(() => quoteTermRevisions.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("document_term_proposals_one_per_ordinal").on(t.documentId, t.ordinal),
+    check("document_term_proposals_ordinal_check", sql`${t.ordinal} >= 0`),
+    check(
+      "document_term_proposals_term_type_check",
+      sql`${t.termType} in ('excess','limit','condition','exclusion','benefit','levy','tax','subjectivity','other')`,
+    ),
+    check("document_term_proposals_label_check", sql`length(btrim(${t.label})) > 0`),
+    check("document_term_proposals_currency_check", sql`${t.currency} is null or ${t.currency} ~ '^[A-Z]{3}$'`),
+    check("document_term_proposals_page_number_check", sql`${t.pageNumber} is null or ${t.pageNumber} >= 1`),
+    check(
+      "document_term_proposals_condition_check",
+      sql`${t.condition} in ('known','inferred','conflicting','unclear')`,
+    ),
+    check("document_term_proposals_method_check", sql`length(btrim(${t.method})) > 0`),
+    check(
+      "document_term_proposals_state_check",
+      sql`${t.state} in ('proposed','accepted','corrected','rejected')`,
+    ),
+    check(
+      "document_term_proposals_decision_has_a_person",
+      sql`${t.state} = 'proposed' or (${t.reviewedBy} is not null and ${t.reviewedAt} is not null)`,
+    ),
+    check(
+      "document_term_proposals_corrected_has_a_value",
+      sql`${t.state} <> 'corrected' or ${t.correctedValue} is not null or ${t.correctedAmount} is not null`,
+    ),
+    check(
+      "document_term_proposals_applied_has_a_term",
+      sql`${t.state} not in ('accepted','corrected') or ${t.quoteTermId} is not null`,
+    ),
+    check(
+      "document_term_proposals_rejected_has_no_term",
+      sql`${t.state} <> 'rejected' or ${t.quoteTermId} is null`,
+    ),
+    check(
+      "document_term_proposals_says_something",
+      sql`${t.proposedValue} is not null or ${t.amount} is not null or ${t.condition} = 'unclear'`,
+    ),
+    check(
+      "document_term_proposals_amount_needs_currency",
+      sql`${t.amount} is null or ${t.currency} is not null`,
+    ),
+    check(
+      "document_term_proposals_region_is_whole",
+      sql`(${t.regionX} is null and ${t.regionY} is null and ${t.regionWidth} is null and ${t.regionHeight} is null)
+          or (${t.pageNumber} is not null and ${t.regionX} is not null and ${t.regionY} is not null
+              and ${t.regionWidth} is not null and ${t.regionWidth} > 0
+              and ${t.regionHeight} is not null and ${t.regionHeight} > 0)`,
+    ),
+    index("document_term_proposals_organization_id_idx").on(t.organizationId),
+    index("document_term_proposals_document_id_idx").on(t.documentId),
+    index("document_term_proposals_reviewed_by_idx").on(t.reviewedBy),
+    index("document_term_proposals_quote_term_id_idx").on(t.quoteTermId),
+    index("document_term_proposals_previous_revision_id_idx").on(t.previousRevisionId),
   ],
 );
 
@@ -465,3 +661,6 @@ export type QuoteRequestApproval = typeof quoteRequestApprovals.$inferSelect;
 export type QuoteComparison = typeof quoteComparisons.$inferSelect;
 export type QuoteComparisonInput = typeof quoteComparisonInputs.$inferSelect;
 export type QuoteComparisonTerm = typeof quoteComparisonTerms.$inferSelect;
+export type InsurerResponseRevision = typeof insurerResponseRevisions.$inferSelect;
+export type QuoteTermRevision = typeof quoteTermRevisions.$inferSelect;
+export type DocumentTermProposal = typeof documentTermProposals.$inferSelect;

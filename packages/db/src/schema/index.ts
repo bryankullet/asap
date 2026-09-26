@@ -16,6 +16,7 @@ export * from "./documents.js";
 export * from "./email.js";
 export * from "./onboarding.js";
 export * from "./quotations.js";
+export * from "./rules.js";
 export * from "./automations.js";
 export * from "./contacts.js";
 export * from "./imports.js";

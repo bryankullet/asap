@@ -97,18 +97,23 @@ begin
   values (p_id, '10000000-0000-4000-8000-00000000000a', 'd3000000-0000-4000-8000-00000000000a',
           'a0000000-0000-4000-8000-000000000001');
 
+  /* Naming the revision is required since 0051: a comparison points at what it compared. */
   insert into quote_comparison_inputs (organization_id, comparison_id, insurer_response_id,
-                                       insurer_id, response_sha256)
+                                       insurer_id, response_sha256, response_revision_id)
   select r.organization_id, p_id, r.id, oi.insurer_id,
-         app.insurer_response_digest(r.outcome, r.premium_amount, r.premium_currency, r.valid_until)
+         app.insurer_response_digest(r.outcome, r.premium_amount, r.premium_currency, r.valid_until),
+         (select rev.id from insurer_response_revisions rev
+           where rev.insurer_response_id = r.id order by rev.revision desc limit 1)
     from insurer_responses r join opportunity_insurers oi on oi.id = r.opportunity_insurer_id
    where r.opportunity_id = 'd3000000-0000-4000-8000-00000000000a';
 
   insert into quote_comparison_terms (organization_id, comparison_input_id, quote_term_id,
-                                      term_type, label, term_sha256)
+                                      term_type, label, term_sha256, term_revision_id)
   select t.organization_id, i.id, t.id, t.term_type, t.label,
          app.quote_term_digest(t.term_type, t.label, t.extracted_value, t.corrected_value,
-                               t.amount, t.currency, t.unclear)
+                               t.amount, t.currency, t.unclear),
+         (select rev.id from quote_term_revisions rev
+           where rev.quote_term_id = t.id order by rev.revision desc limit 1)
     from quote_comparison_inputs i
     join quote_terms t on t.insurer_response_id = i.insurer_response_id
    where i.comparison_id = p_id;
