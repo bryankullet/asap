@@ -357,6 +357,103 @@ export const quoteRequestApprovals = pgTable(
   ],
 );
 
+/**
+ * A comparison of the quotes received, and the digests of exactly what it compared. Superseding
+ * is the database's own work (0050): any change to an included response or term marks it stale.
+ */
+export const quoteComparisons = pgTable(
+  "quote_comparisons",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    opportunityId: uuid("opportunity_id")
+      .notNull()
+      .references(() => opportunities.id, { onDelete: "cascade" }),
+    generatedBy: uuid("generated_by")
+      .notNull()
+      .references(() => users.id),
+    generatedAt: timestamptz("generated_at").notNull().defaultNow(),
+    presentedAt: timestamptz("presented_at"),
+    presentedBy: uuid("presented_by").references(() => users.id),
+    supersededAt: timestamptz("superseded_at"),
+    supersededReason: text("superseded_reason"),
+  },
+  (t) => [
+    check(
+      "quote_comparisons_presented_is_whole",
+      sql`(${t.presentedAt} is null and ${t.presentedBy} is null)
+          or (${t.presentedAt} is not null and ${t.presentedBy} is not null)`,
+    ),
+    check(
+      "quote_comparisons_superseded_is_whole",
+      sql`(${t.supersededAt} is null and ${t.supersededReason} is null)
+          or (${t.supersededAt} is not null
+              and ${t.supersededReason} is not null and length(btrim(${t.supersededReason})) > 0)`,
+    ),
+    index("quote_comparisons_organization_id_idx").on(t.organizationId),
+    index("quote_comparisons_opportunity_id_idx").on(t.opportunityId),
+    index("quote_comparisons_generated_by_idx").on(t.generatedBy),
+    index("quote_comparisons_presented_by_idx").on(t.presentedBy),
+  ],
+);
+
+/** One insurer answer the comparison put in a column, with the digest of what it then said. */
+export const quoteComparisonInputs = pgTable(
+  "quote_comparison_inputs",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    comparisonId: uuid("comparison_id")
+      .notNull()
+      .references(() => quoteComparisons.id, { onDelete: "cascade" }),
+    insurerResponseId: uuid("insurer_response_id")
+      .notNull()
+      .references(() => insurerResponses.id, { onDelete: "cascade" }),
+    insurerId: uuid("insurer_id")
+      .notNull()
+      .references(() => insurers.id),
+    responseSha256: text("response_sha256").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("quote_comparison_inputs_one_per_response").on(t.comparisonId, t.insurerResponseId),
+    check("quote_comparison_inputs_response_sha256_check", sql`length(${t.responseSha256}) = 64`),
+    index("quote_comparison_inputs_organization_id_idx").on(t.organizationId),
+    index("quote_comparison_inputs_comparison_id_idx").on(t.comparisonId),
+    index("quote_comparison_inputs_insurer_response_id_idx").on(t.insurerResponseId),
+    index("quote_comparison_inputs_insurer_id_idx").on(t.insurerId),
+  ],
+);
+
+/** One term in that column. The label is kept so a removed term can still be named. */
+export const quoteComparisonTerms = pgTable(
+  "quote_comparison_terms",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    comparisonInputId: uuid("comparison_input_id")
+      .notNull()
+      .references(() => quoteComparisonInputs.id, { onDelete: "cascade" }),
+    quoteTermId: uuid("quote_term_id").references(() => quoteTerms.id, { onDelete: "set null" }),
+    termType: text("term_type").notNull(),
+    label: text("label").notNull(),
+    termSha256: text("term_sha256").notNull(),
+  },
+  (t) => [
+    unique("quote_comparison_terms_one_per_term").on(t.comparisonInputId, t.termType, t.label),
+    check("quote_comparison_terms_term_sha256_check", sql`length(${t.termSha256}) = 64`),
+    index("quote_comparison_terms_organization_id_idx").on(t.organizationId),
+    index("quote_comparison_terms_comparison_input_id_idx").on(t.comparisonInputId),
+    index("quote_comparison_terms_quote_term_id_idx").on(t.quoteTermId),
+  ],
+);
+
 export type RequirementTemplate = typeof requirementTemplates.$inferSelect;
 export type Opportunity = typeof opportunities.$inferSelect;
 export type OpportunityRequirement = typeof opportunityRequirements.$inferSelect;
@@ -365,3 +462,6 @@ export type QuoteRequest = typeof quoteRequests.$inferSelect;
 export type InsurerResponse = typeof insurerResponses.$inferSelect;
 export type QuoteTerm = typeof quoteTerms.$inferSelect;
 export type QuoteRequestApproval = typeof quoteRequestApprovals.$inferSelect;
+export type QuoteComparison = typeof quoteComparisons.$inferSelect;
+export type QuoteComparisonInput = typeof quoteComparisonInputs.$inferSelect;
+export type QuoteComparisonTerm = typeof quoteComparisonTerms.$inferSelect;
