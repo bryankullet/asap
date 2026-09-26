@@ -49,6 +49,7 @@ export const workItems = pgTable(
     reasonCode: text("reason_code"),
     requiredAction: text("required_action"),
     evidenceNeeded: text("evidence_needed"),
+    outcomeAfter: text("outcome_after"),
     steps: jsonb("steps")
       .notNull()
       .default(sql`'[]'::jsonb`),

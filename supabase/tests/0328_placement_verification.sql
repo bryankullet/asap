@@ -27,7 +27,7 @@ create or replace function pg_temp.ensure(p_source uuid, p_reason text, p_title 
   p_owner uuid default null)
 returns jsonb language sql as $$
   select public.work_item_ensure('10000000-0000-4000-8000-00000000000a', 'placement', p_source, p_reason,
-    'placement', p_title, 'Why', 'Do this', 'Evidence', p_status, p_party, p_since, null, p_owner,
+    'placement', p_title, 'Why', 'Do this', 'Evidence', 'Then this', p_status, p_party, p_since, null, p_owner,
     null, null, 'Commercial motor')
 $$;
 grant execute on function pg_temp.ensure(uuid, text, text, text, text, timestamptz, uuid) to authenticated;
@@ -66,11 +66,11 @@ $$, 'records of agreement and comparison are insert-only');
 
 select ok(
   (select p.prosecdef and p.proconfig @> array['search_path=public, pg_temp']
-     from pg_proc p where p.oid = 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)'::regprocedure),
+     from pg_proc p where p.oid = 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)'::regprocedure),
   'work_item_ensure is SECURITY DEFINER with a fixed search_path');
 select ok(
-  not has_function_privilege('public', 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)', 'execute')
-  and not has_function_privilege('anon', 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)', 'execute'),
+  not has_function_privilege('public', 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)', 'execute')
+  and not has_function_privilege('anon', 'public.work_item_ensure(uuid,text,uuid,text,text,text,text,text,text,text,text,text,timestamptz,timestamptz,uuid,uuid,uuid,text)', 'execute'),
   'PUBLIC and anon may not execute work_item_ensure');
 select ok(
   not has_function_privilege('public', 'public.work_item_resolve(uuid,text,uuid,text)', 'execute')
@@ -156,7 +156,7 @@ values ('e2100000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-0000000
 insert into insurers (id, organization_id, name)
 values ('e2200000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a', 'V Insurer');
 
-select pg_temp.login('a0000000-0000-4000-8000-000000000001', false);
+select pg_temp.login('a0000000-0000-4000-8000-000000000001', true);
 insert into opportunities (id, organization_id, client_id, work_item_id, title, class_of_business, created_by)
 values ('e2300000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-00000000000a',
         (select id from clients where organization_id = '10000000-0000-4000-8000-00000000000a' limit 1),
@@ -220,7 +220,7 @@ values ('e2c00000-0000-4000-8000-00000000000a', '10000000-0000-4000-8000-0000000
         'e2900000-0000-4000-8000-00000000000a', 'e2a00000-0000-4000-8000-00000000000a',
         'e2b00000-0000-4000-8000-00000000000a', 1);
 
-select pg_temp.login('a0000000-0000-4000-8000-000000000001', false);
+select pg_temp.login('a0000000-0000-4000-8000-000000000001', true);
 select throws_ok(
   $$insert into client_change_acceptances (organization_id, placement_id, client_id, placement_insurer_response_id,
       cover_match_result_id, decision, source, decided_at, recorded_by)
@@ -242,6 +242,7 @@ select throws_ok(
 -- ---------------------------------------------------------------------------------------------
 -- Prepared actions: written only by the API, immutable once prepared, decided once, by the caller.
 
+select pg_temp.login('a0000000-0000-4000-8000-000000000001', false);
 select throws_ok(
   $$insert into prepared_actions (organization_id, placement_id, action_type, payload, source_versions, fingerprint,
                                   permitted, idempotency_key, prepared_by, expires_at)

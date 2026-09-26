@@ -89,6 +89,9 @@ export const placementBasisSchema = z.object({
   expiryAt: z.string().nullable(),
   premiumBasis: z.string().nullable(),
   clientConditions: z.string().nullable(),
+  /** An explicit accepted cover period, from which an end date may be derived. Never assumed. */
+  periodMonths: z.number().int().nullable(),
+  periodDays: z.number().int().nullable(),
   premiumAmount: z.string().nullable(),
   premiumCurrency: z.string().nullable(),
   validUntil: z.string().nullable(),
@@ -204,10 +207,34 @@ export const coverMatchSchema = z.object({
       confirmedValue: z.string().nullable(),
       classification: MatchClass,
       material: z.boolean(),
+      /** How a derived value was reached, with its source: "1 Oct 2026 + 12 months = …". */
+      calculation: z.string().nullable(),
     }),
   ),
 });
 export type CoverMatchView = z.infer<typeof coverMatchSchema>;
+
+/**
+ * A client's own condition — "subject to inspection", "install a tracker" — and how it stands.
+ * Not a quotation difference: the client is never asked to accept their own condition again.
+ * `unresolved` blocks issuance; cover may still be in force while it is.
+ */
+export const ConditionState = z.enum(["confirmed_by_insurer", "satisfied", "waived", "unresolved"]);
+export type ConditionState = z.infer<typeof ConditionState>;
+
+export const clientConditionSchema = z.object({
+  id: uuidSchema,
+  position: z.number().int().min(0),
+  text: z.string(),
+  state: ConditionState,
+  resolvedAt: z.string().nullable(),
+  resolvedByName: z.string().nullable(),
+  reason: z.string().nullable(),
+  evidence: evidenceRefSchema.nullable(),
+  /** Set for a waiver: the instruction version the waiver created. */
+  newInstructionId: uuidSchema.nullable(),
+});
+export type ClientConditionView = z.infer<typeof clientConditionSchema>;
 
 export const ChangeDecision = z.enum(["accept_all", "reject", "partial"]);
 export type ChangeDecision = z.infer<typeof ChangeDecision>;
@@ -351,6 +378,7 @@ export const placementResponseSchema = z.object({
   sending: z.object({ available: z.boolean(), reason: z.string().max(300).nullable() }),
   coverMatch: coverMatchSchema.nullable(),
   changeAcceptance: changeAcceptanceSchema.nullable(),
+  conditions: z.array(clientConditionSchema),
   readiness: issuanceReadinessSchema,
   preparedActions: z.array(preparedActionSchema),
 });
@@ -369,6 +397,13 @@ export const recordInstructionRequestSchema = z.object({
   evidenceDocumentId: uuidSchema.optional(),
   evidenceNote: z.string().trim().max(1000).optional(),
   clientConditions: z.string().trim().max(2000).optional(),
+  /** The client's conditions, one each. When absent, each non-empty line of `clientConditions`. */
+  conditions: z.array(z.string().trim().min(3).max(1000)).max(20).optional(),
+  /** An explicit cover period the client accepted. The end date is derived from it, exactly. */
+  requestedPeriod: z
+    .object({ months: z.number().int().min(0).max(120).default(0), days: z.number().int().min(0).max(400).default(0) })
+    .refine((p) => p.months + p.days > 0, "A period must have a length.")
+    .optional(),
   instructedAt: z.string().datetime({ offset: true }),
   requestedEffectiveAt: z.string().datetime({ offset: true }),
   requestedExpiryAt: z.string().datetime({ offset: true }).optional(),
@@ -431,6 +466,8 @@ export const placementActionSchema = z.discriminatedUnion("action", [
       )
       .max(50)
       .optional(),
+    /** Client conditions this answer confirms, by id. Any not listed stay to be resolved. */
+    conditionsConfirmed: z.array(uuidSchema).max(20).optional(),
     receivedAt: z.string().datetime({ offset: true }),
     effectiveAt: z.string().datetime({ offset: true }).optional(),
     expiryAt: z.string().datetime({ offset: true }).optional(),
@@ -469,6 +506,21 @@ export const placementActionSchema = z.discriminatedUnion("action", [
       .array(z.object({ coverMatchItemId: uuidSchema, decision: z.enum(["accepted", "rejected", "clarify"]) }))
       .max(100)
       .optional(),
+  }),
+  /**
+   * Resolve one client condition. `satisfied` and `waived` need a reason and evidence; a waiver
+   * creates a new client-instruction version and never edits the accepted one.
+   */
+  z.object({
+    action: z.literal("resolve_client_condition"),
+    conditionId: uuidSchema,
+    resolution: z.enum(["confirmed_by_insurer", "satisfied", "waived"]),
+    reason: z.string().trim().max(1000).optional(),
+    resolvedAt: z.string().datetime({ offset: true }),
+    source: InstructionSource.optional(),
+    evidenceEmailMessageId: uuidSchema.optional(),
+    evidenceDocumentId: uuidSchema.optional(),
+    evidenceNote: z.string().trim().max(1000).optional(),
   }),
   /** Opens the 4B-5 handoff as Work. Refused unless readiness is `ready`. Creates no policy. */
   z.object({ action: z.literal("prepare_issuance") }),

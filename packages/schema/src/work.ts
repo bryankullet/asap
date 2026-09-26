@@ -113,6 +113,7 @@ export const WorkItemRow = z
     reason_code: z.string().nullable().optional(),
     required_action: z.string().nullable().optional(),
     evidence_needed: z.string().nullable().optional(),
+    outcome_after: z.string().nullable().optional(),
     steps: z.array(Step),
     exception: ExceptionRecord.nullable(),
     /** Bumped by every write; `version_current` compares against it. */
@@ -182,7 +183,7 @@ export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */
 export const WORK_ITEM_COLUMNS =
-  "id, organization_id, title, kind, client_id, policy_period_id, insurer_id, class_of_business, owner_id, task_status, task_party, task_since, task_next_check, cover_status, cover_inception_at, money_status, reason, source_type, source_id, reason_code, required_action, evidence_needed, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
+  "id, organization_id, title, kind, client_id, policy_period_id, insurer_id, class_of_business, owner_id, task_status, task_party, task_since, task_next_check, cover_status, cover_inception_at, money_status, reason, source_type, source_id, reason_code, required_action, evidence_needed, outcome_after, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
 export const RUN_COLUMNS =
   "id, organization_id, work_item_id, title, status, next_step, started_by, boot_token, started_at, ended_at, created_at, updated_at";
 

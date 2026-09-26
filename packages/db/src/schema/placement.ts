@@ -64,6 +64,9 @@ export const clientInstructions = pgTable(
     exceptionBy: uuid("exception_by").references(() => users.id),
     /* The instruction this one revises, when a client accepted an insurer's changes (0055). */
     revisesInstructionId: uuid("revises_instruction_id").references((): AnyPgColumn => clientInstructions.id),
+    /* An explicit accepted cover period (0056). The end is derived from it, never assumed. */
+    requestedPeriodMonths: integer("requested_period_months"),
+    requestedPeriodDays: integer("requested_period_days"),
   },
   (t) => [
     check(
@@ -431,6 +434,8 @@ export const placementBasisVersions = pgTable(
     premiumBasis: text("premium_basis"),
     clientConditions: text("client_conditions"),
     outstandingRequirements: text("outstanding_requirements"),
+    periodMonths: integer("period_months"),
+    periodDays: integer("period_days"),
     origin: text("origin").notNull(),
     createdBy: uuid("created_by").notNull().references(() => users.id),
     createdAt: createdAt(),
@@ -513,6 +518,8 @@ export const coverMatchItems = pgTable(
     classification: text("classification").notNull(),
     material: boolean("material").notNull().default(false),
     position: integer("position").notNull().default(0),
+    /* How a derived value was reached, when one was (0056): "1 Oct 2026 + 12 months". */
+    calculation: text("calculation"),
   },
   (t) => [
     unique("cover_match_items_one_per_position").on(t.coverMatchResultId, t.position),
@@ -662,3 +669,56 @@ export type PlacementRequestApproval = typeof placementRequestApprovals.$inferSe
 export type PlacementSubmission = typeof placementSubmissions.$inferSelect;
 export type PlacementInsurerResponse = typeof placementInsurerResponses.$inferSelect;
 export type PlacementCancellation = typeof placementCancellations.$inferSelect;
+
+/** A client's own condition, one per row, from the accepted instruction (0056). Immutable. */
+export const placementClientConditions = pgTable(
+  "placement_client_conditions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
+    clientInstructionId: uuid("client_instruction_id").notNull().references(() => clientInstructions.id),
+    position: integer("position").notNull(),
+    conditionText: text("condition_text").notNull(),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("placement_client_conditions_one_per_position").on(t.placementId, t.position),
+    index("placement_client_conditions_organization_id_idx").on(t.organizationId),
+    index("placement_client_conditions_placement_id_idx").on(t.placementId),
+    index("placement_client_conditions_instruction_idx").on(t.clientInstructionId),
+    index("placement_client_conditions_created_by_idx").on(t.createdBy),
+  ],
+);
+
+/** How a client condition was resolved (0056). No row means unresolved. */
+export const clientConditionResolutions = pgTable(
+  "client_condition_resolutions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
+    conditionId: uuid("condition_id").notNull().references(() => placementClientConditions.id, { onDelete: "cascade" }),
+    resolution: text("resolution").notNull(),
+    placementInsurerResponseId: uuid("placement_insurer_response_id").references(() => placementInsurerResponses.id),
+    reason: text("reason"),
+    evidenceEmailMessageId: uuid("evidence_email_message_id").references(() => emailMessages.id, { onDelete: "set null" }),
+    evidenceDocumentId: uuid("evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
+    evidenceNote: text("evidence_note"),
+    resolvedAt: timestamptz("resolved_at").notNull(),
+    newClientInstructionId: uuid("new_client_instruction_id").references(() => clientInstructions.id),
+    recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+    recordedAt: timestamptz("recorded_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("client_condition_resolutions_organization_id_idx").on(t.organizationId),
+    index("client_condition_resolutions_placement_id_idx").on(t.placementId),
+    index("client_condition_resolutions_condition_id_idx").on(t.conditionId),
+    index("client_condition_resolutions_response_idx").on(t.placementInsurerResponseId),
+    index("client_condition_resolutions_evidence_email_idx").on(t.evidenceEmailMessageId),
+    index("client_condition_resolutions_evidence_document_idx").on(t.evidenceDocumentId),
+    index("client_condition_resolutions_new_instruction_idx").on(t.newClientInstructionId),
+    index("client_condition_resolutions_recorded_by_idx").on(t.recordedBy),
+  ],
+);
