@@ -16,7 +16,9 @@ import { UiIntent } from "../intent.js";
  */
 /* `opportunity` is quotation work: it has its own title and its own records, and scoping to
  * the work item behind it would name the task rather than the thing being quoted. */
-export const AskScopeKind = z.enum(["brokerage", "client", "record", "opportunity"]);
+/* `placement` is one attempt to put one client's cover on risk: "has Jubilee confirmed?" and "is
+ * the client covered now?" mean this placement, not the quotation work that led to it. */
+export const AskScopeKind = z.enum(["brokerage", "client", "record", "opportunity", "placement"]);
 export type AskScopeKind = z.infer<typeof AskScopeKind>;
 
 export const askScopeSchema = z.object({

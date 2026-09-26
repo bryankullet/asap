@@ -18,6 +18,7 @@ import { onboardingRoutes } from "./routes/onboarding.js";
 import { clientRoutes } from "./routes/clients.js";
 import { comparisonRoutes } from "./routes/comparisons.js";
 import { opportunityRoutes } from "./routes/opportunities.js";
+import { placementRoutes } from "./routes/placement.js";
 import { quotationReadingRoutes } from "./routes/quotation-reading.js";
 import { ruleRoutes } from "./routes/rules.js";
 import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
@@ -212,6 +213,9 @@ export function createApp(deps: AppDeps) {
     "/email/threads/*",
     /* The brokerage's own rules, and the review of what was read from a quotation (4B-3A). */
     "/rules",
+    /* Placement (4B-4). Guarded from the first line — the /rules defect is not repeated. */
+    "/placements",
+    "/placements/*",
   ]) {
     app.use(path, guard);
   }
@@ -247,6 +251,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", comparisonRoutes({ logger }));
   app.route("/", ruleRoutes({ logger }));
   app.route("/", quotationReadingRoutes({ logger }));
+  app.route("/", placementRoutes({ logger }));
   app.route(
     "/",
     workRoutes({

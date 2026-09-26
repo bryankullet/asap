@@ -1,0 +1,314 @@
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PlacementSpace } from "./PlacementSpace.js";
+import { renderInRouter } from "../test-utils.js";
+import { resetWorkspaceTabs } from "../shell/workspace-tabs.js";
+
+vi.mock("../lib/supabase.js", () => ({
+  supabase: {
+    auth: {
+      getSession: async () => ({ data: { session: { access_token: "test-token" } } }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+  },
+}));
+
+/**
+ * One client's placement (4B-4).
+ *
+ * What these lock: the title is the work's own name; the three status layers stay on their own
+ * lines; a draft never looks sent; a confirmation that begins later is not active cover; a person
+ * who cannot approve is told who can; and every figure on screen came from the server.
+ */
+
+const ORG = "10000000-0000-4000-8000-00000000000a";
+const PLACEMENT = "40000000-0000-4000-8000-00000000000a";
+const PLACEMENT_2 = "40000000-0000-4000-8000-00000000000b";
+const REQ = "42000000-0000-4000-8000-00000000000a";
+
+const ME = {
+  user: { id: "90000000-0000-4000-8000-000000000001", email: "a@b.test", display_name: "Amina", full_name: null },
+  memberships: [],
+  active_organization: { id: ORG, name: "Acme Brokers", country: "KE", currency: "KES", timezone: "UTC" },
+  permissions: [],
+};
+
+type Stage = "instructed" | "draft" | "approved" | "submitted" | "confirmed-future" | "active" | "changed" | "declined" | "drifted";
+
+function body(stage: Stage = "instructed", over: Record<string, unknown> = {}) {
+  const hasRequest = stage !== "instructed" && stage !== "drifted";
+  const approved = ["approved", "submitted", "confirmed-future", "active", "changed", "declined"].includes(stage);
+  const sent = ["submitted", "confirmed-future", "active", "changed", "declined"].includes(stage);
+  const answer =
+    stage === "confirmed-future" ? { outcome: "confirmed_as_requested", effectiveAt: "2099-01-01T00:00:00.000Z" }
+    : stage === "active" ? { outcome: "confirmed_as_requested", effectiveAt: "2026-09-01T00:00:00.000Z" }
+    : stage === "changed" ? { outcome: "confirmed_with_changes", effectiveAt: "2026-09-01T00:00:00.000Z", changesNote: "Own damage excess raised to 7.5%." }
+    : stage === "declined" ? { outcome: "declined", effectiveAt: null, declineReason: "Outside appetite." }
+    : null;
+
+  const cover =
+    stage === "confirmed-future" ? { state: "confirmed", line: "Jubilee confirmed cover, beginning 1 Jan 2099. It has not started yet." }
+    : stage === "active" ? { state: "active", line: "Cover began 1 Sept 2026, until 31 Aug 2027." }
+    : stage === "changed" ? { state: "active", line: "Cover began 1 Sept 2026 on changed terms." }
+    : stage === "declined" ? { state: null, line: "Jubilee declined. There is no cover." }
+    : sent ? { state: "submitted", line: "Sent to Jubilee on 8 Sept 2026. Not confirmed — there is no cover yet." }
+    : hasRequest ? { state: "requested", line: "A request is prepared. It has not been sent, and there is no cover." }
+    : { state: null, line: "Nothing has been requested from the insurer yet." };
+
+  return {
+    placement: { id: PLACEMENT, title: "Acme motor fleet placement — 2027", requestedEffectiveAt: "2026-10-01T00:00:00.000Z", requestedExpiryAt: null, createdAt: "2026-09-07T10:40:00.000Z" },
+    client: { id: "20000000-0000-4000-8000-00000000000a", name: "Acme Ltd" },
+    opportunity: { id: "30000000-0000-4000-8000-00000000000a", title: "Acme motor fleet quotation — 2027", classOfBusiness: "Commercial motor" },
+    insurer: { id: "21000000-0000-4000-8000-00000000000a", name: "Jubilee" },
+    workItem: sent && answer === null
+      ? { id: "26000000-0000-4000-8000-00000000000b", taskStatus: "with_party", taskParty: "Jubilee", taskSince: "2026-09-08T11:02:00.000Z" }
+      : { id: "26000000-0000-4000-8000-00000000000b", taskStatus: "needs_you", taskParty: null, taskSince: null },
+    instruction: {
+      id: "41000000-0000-4000-8000-00000000000a", source: "telephone",
+      evidence: { kind: "note", id: null, label: "Client rang at 10:40 and chose Jubilee on the terms shown.", path: null },
+      clientConditions: null, instructedAt: "2026-09-07T10:40:00.000Z", recordedByName: "Amina",
+      recordedAt: "2026-09-07T10:45:00.000Z", comparisonVersion: 1, outsideComparison: false,
+      exceptionReason: null, supersededAt: null, supersededReason: null,
+    },
+    instructionHistory: [],
+    basis: {
+      premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30",
+      terms: [{ termType: "excess", label: "Own damage", value: "5% min KES 30,000", amount: null, currency: null, unclear: false }],
+    },
+    drift: stage === "drifted"
+      ? { stale: true, changes: [{ label: "Premium", was: "KES 5,310,000", now: "KES 5,410,000" }] }
+      : { stale: false, changes: [] },
+    request: hasRequest
+      ? {
+          id: REQ, version: 1, subject: "Placement instruction — Acme Ltd", body: "Please place cover.",
+          coverRequested: "Commercial motor for Acme Ltd", effectiveAt: "2026-10-01T00:00:00.000Z",
+          outstandingConditions: null, sha256: "a".repeat(64), preparedByName: "Otieno", preparedAt: "2026-09-07T11:00:00.000Z",
+          approval: approved ? { approvedByName: "Amina", approvedAt: "2026-09-07T12:00:00.000Z" } : null,
+          submission: sent
+            ? { method: "recorded_manual_email", recipient: "underwriting@jubilee.test", sentAt: "2026-09-08T11:02:00.000Z", evidence: { kind: "note", id: null, label: "Sent from my own mailbox at 11:02.", path: null }, recordedByName: "Otieno" }
+            : null,
+        }
+      : null,
+    requestHistory: [],
+    insurerResponse: answer === null ? null : {
+      outcome: answer.outcome, receivedAt: "2026-09-09T14:10:00.000Z",
+      effectiveAt: answer.effectiveAt, expiryAt: null, insurerReference: answer.outcome.startsWith("confirmed") ? "CN-2027-0041" : null,
+      changesNote: (answer as { changesNote?: string }).changesNote ?? null, informationRequired: null,
+      declineReason: (answer as { declineReason?: string }).declineReason ?? null,
+      evidence: { kind: "note", id: null, label: "Cover note received by email.", path: null }, recordedByName: "Amina",
+    },
+    cancellation: null,
+    cover,
+    blockers: stage === "drifted" ? ["The quotation changed after the client accepted it: Premium. Nothing can be sent until it is reviewed."]
+      : stage === "draft" ? ["The request is waiting for someone permitted to approve it."]
+      : stage === "changed" ? ["Jubilee confirmed on different terms: Own damage excess raised to 7.5%. The client must accept them before a policy is issued."]
+      : [],
+    nextAction: stage === "active" ? "Prepare policy issuance." : stage === "draft" ? "Have the request approved by someone permitted to approve placements." : "Prepare the placement request.",
+    permissions: { canRecordInstruction: true, canPrepare: true, canApprove: true, canRecordSubmission: true, canRecordResponse: true, approverRoles: ["Brokerage administrator", "Manager"] },
+    sending: { available: false, reason: "Sending from ASAP is not connected yet. Copy the approved request into the mailbox it should go from, then record that it was sent." },
+    issuance: { ready: stage === "active", reason: stage === "active" ? null : "Cover is not confirmed, so there is no policy to issue yet.", workItemId: null },
+    ...over,
+  };
+}
+
+let sent: { url: string; body: unknown }[] = [];
+
+function stubApi(byId: Record<string, unknown>, after?: unknown) {
+  sent = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    const u = String(url);
+    const method = (init as RequestInit | undefined)?.method ?? "GET";
+    const json = (v: unknown) => new Response(JSON.stringify(v), { headers: { "Content-Type": "application/json" } });
+    if (method !== "GET") sent.push({ url: u, body: JSON.parse(String((init as RequestInit).body ?? "{}")) });
+    if (u.endsWith("/me")) return json(ME);
+    for (const [id, reading] of Object.entries(byId)) {
+      if (u.includes(`/placements/${id}/actions`)) return json(after ?? { outcome: "done", reason: null, placement: reading });
+      if (u.endsWith(`/placements/${id}`)) return json(reading);
+    }
+    return json({});
+  });
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetWorkspaceTabs();
+});
+
+const open = (id = PLACEMENT) => renderInRouter(<PlacementSpace />, `/placements/${id}`);
+
+describe("the placement", () => {
+  it("is titled by the work's own name, never 'Placement Space'", async () => {
+    stubApi({ [PLACEMENT]: body() });
+    await open();
+    await waitFor(() => expect(screen.getAllByText("Acme motor fleet placement — 2027").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Placement Space|Space: Acme/i)).toBeNull();
+  });
+
+  it("shows what the client instructed, how it arrived, and the comparison they were shown", async () => {
+    stubApi({ [PLACEMENT]: body() });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/Jubilee, instructed by telephone/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Client rang at 10:40/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Comparison v1").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: /See what the client was shown/ })[0]!.getAttribute("href")).toContain("version=1");
+  });
+
+  it("shows the frozen terms the client accepted", async () => {
+    stubApi({ [PLACEMENT]: body() });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/FROZEN WHEN THEY INSTRUCTED/i).length).toBeGreaterThan(0));
+    expect(screen.getAllByText("KES 5,310,000").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("5% min KES 30,000").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a draft never looks sent", () => {
+  it("labels a prepared request a draft, and the cover as requested with no cover", async () => {
+    stubApi({ [PLACEMENT]: body("draft") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText("Draft").length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Requested — A request is prepared. It has not been sent, and there is no cover/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Sent$/)).toBeNull();
+  });
+
+  it("labels an approved request as approved and not sent, and says why sending is manual", async () => {
+    stubApi({ [PLACEMENT]: body("approved") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText("Approved, not sent").length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Sending from ASAP is not connected yet/).length).toBeGreaterThan(0);
+  });
+
+  it("names the insurer and the date once it has been sent, never a bare 'Waiting'", async () => {
+    stubApi({ [PLACEMENT]: body("submitted") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/With Jubilee since 8 Sept/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Not confirmed — there is no cover yet/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Waiting$/)).toBeNull();
+  });
+});
+
+describe("the cover line", () => {
+  it("does not call a confirmation that begins later active cover", async () => {
+    stubApi({ [PLACEMENT]: body("confirmed-future") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/Confirmed — Jubilee confirmed cover, beginning/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/It has not started yet/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Active cover/)).toBeNull();
+  });
+
+  it("says Active cover, never Active alone, once cover has begun", async () => {
+    stubApi({ [PLACEMENT]: body("active") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/Active cover — Cover began/).length).toBeGreaterThan(0));
+  });
+
+  it("names the changes when the insurer confirmed on different terms", async () => {
+    stubApi({ [PLACEMENT]: body("changed") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/Confirmed on changed terms/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Own damage excess raised to 7.5%/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Prepare policy issuance/ })).toBeNull();
+  });
+
+  it("says a decline is no cover", async () => {
+    stubApi({ [PLACEMENT]: body("declined") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/declined. There is no cover/).length).toBeGreaterThan(0));
+  });
+});
+
+describe("approval", () => {
+  it("tells somebody who cannot approve exactly who can", async () => {
+    stubApi({ [PLACEMENT]: body("draft", { permissions: { ...body().permissions, canApprove: false } }) });
+    await open();
+    const button = (await screen.findAllByRole("button", { name: /Approve this version/ }))[0]!;
+    expect(button).toBeDisabled();
+    expect(screen.getAllByText(/ask someone who is a Brokerage administrator or Manager/).length).toBeGreaterThan(0);
+  });
+
+  it("sends the approval of that exact version", async () => {
+    stubApi({ [PLACEMENT]: body("draft") }, { outcome: "done", reason: null, placement: body("approved") });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Approve this version/ }))[0]!);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.body).toEqual({ action: "approve_request", placementRequestId: REQ });
+    await waitFor(() => expect(screen.getAllByText("Approved, not sent").length).toBeGreaterThan(0));
+  });
+
+  it("shows the server's refusal where it happened, and records nothing", async () => {
+    stubApi({ [PLACEMENT]: body("draft") }, { outcome: "blocked", reason: "You may not approve placement requests — ask someone who is a Manager.", placement: null });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Approve this version/ }))[0]!);
+    await waitFor(() => expect(screen.getAllByText("That was not recorded").length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/ask someone who is a Manager/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Draft").length).toBeGreaterThan(0);
+  });
+});
+
+describe("recording that it was sent", () => {
+  it("asks for how, to whom, when and what shows it — then sends a typed action with one key", async () => {
+    stubApi({ [PLACEMENT]: body("approved") }, { outcome: "done", reason: null, placement: body("submitted") });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Record that it was sent/ }))[0]!);
+
+    await screen.findAllByText(/RECORD THAT IT WAS SENT/i);
+    expect(screen.getAllByText(/is not evidence/).length).toBeGreaterThan(0);
+
+    await userEvent.type(screen.getByLabelText(/To whom/), "underwriting@jubilee.test");
+    await userEvent.type(screen.getByLabelText(/^When/), "2026-09-08");
+    await userEvent.type(screen.getByLabelText(/What shows it was sent/), "Sent from my own mailbox at 11:02 to the Jubilee desk.");
+    await userEvent.click(screen.getAllByRole("button", { name: /Record it as sent/ })[0]!);
+
+    await waitFor(() => expect(sent).toHaveLength(1));
+    const payload = sent[0]!.body as Record<string, string>;
+    expect(payload["action"]).toBe("record_submission");
+    expect(payload["placementRequestId"]).toBe(REQ);
+    expect(payload["recipient"]).toBe("underwriting@jubilee.test");
+    expect(payload["idempotencyKey"]!.length).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("a quotation that moved", () => {
+  it("names what changed and blocks preparing a request", async () => {
+    stubApi({ [PLACEMENT]: body("drifted") });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/THE QUOTATION CHANGED AFTER THE CLIENT ACCEPTED IT/i).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/Accepted KES 5,310,000 → now KES 5,410,000/).length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole("button", { name: /Prepare the request/ }))[0]).toBeDisabled();
+  });
+});
+
+describe("policy issuance", () => {
+  it("is offered only once cover is confirmed as requested", async () => {
+    stubApi({ [PLACEMENT]: body("active") }, { outcome: "done", reason: null, placement: body("active", { issuance: { ready: true, reason: null, workItemId: "26000000-0000-4000-8000-0000000000ff" } }) });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Prepare policy issuance/ }))[0]!);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.body).toEqual({ action: "prepare_issuance" });
+  });
+});
+
+describe("two placements, and a refresh", () => {
+  it("keeps two placements apart, each in its own tab", async () => {
+    stubApi({
+      [PLACEMENT]: body(),
+      [PLACEMENT_2]: body("instructed", { placement: { ...body().placement, id: PLACEMENT_2, title: "Acme property placement — 2027" } }),
+    });
+    const first = await open();
+    await waitFor(() => expect(screen.getAllByText("Acme motor fleet placement — 2027").length).toBeGreaterThan(0));
+    first.unmount();
+    await open(PLACEMENT_2);
+    await waitFor(() => expect(screen.getAllByText("Acme property placement — 2027").length).toBeGreaterThan(0));
+  });
+
+  it("reads everything again from the server after a refresh, and keeps nothing in the browser", async () => {
+    stubApi({ [PLACEMENT]: body("submitted") });
+    const first = await open();
+    await waitFor(() => expect(screen.getAllByText(/With Jubilee since/).length).toBeGreaterThan(0));
+    first.unmount();
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/With Jubilee since/).length).toBeGreaterThan(0));
+    expect(JSON.stringify(localStorage)).not.toMatch(/5,310,000|Jubilee|underwriting@/);
+  });
+});

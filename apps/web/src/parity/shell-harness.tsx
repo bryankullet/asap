@@ -309,6 +309,91 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
    * can be photographed: nothing asked yet, prepared, approved-but-unsent, quoted, declined.
    */
   /*
+   * One placement. `stage` photographs each step it passes through, so the capture proves each
+   * reads as what it is: instructed, draft, approved-not-sent, sent, confirmed-not-begun, active
+   * cover, confirmed on changed terms, and a quotation that moved under the instruction.
+   */
+  if (u.includes("/placements/")) {
+    const q = new URLSearchParams(location.search);
+    const stage = q.get("stage") ?? "instructed";
+    const hasRequest = !["instructed", "drifted"].includes(stage);
+    const approved = ["approved", "submitted", "future", "active", "changed"].includes(stage);
+    const wasSent = ["submitted", "future", "active", "changed"].includes(stage);
+    const answer = stage === "future" ? { outcome: "confirmed_as_requested", effectiveAt: "2099-01-01T00:00:00.000Z" }
+      : stage === "active" ? { outcome: "confirmed_as_requested", effectiveAt: "2026-09-01T00:00:00.000Z" }
+      : stage === "changed" ? { outcome: "confirmed_with_changes", effectiveAt: "2026-09-01T00:00:00.000Z" }
+      : null;
+    const cover = stage === "future" ? { state: "confirmed", line: "Placeholder Insurer confirmed cover, beginning 1 Jan 2099. It has not started yet." }
+      : stage === "active" ? { state: "active", line: "Cover began 1 Sept 2026, until 31 Aug 2027." }
+      : stage === "changed" ? { state: "active", line: "Cover began 1 Sept 2026 on changed terms." }
+      : wasSent ? { state: "submitted", line: "Sent to Placeholder Insurer on 8 Sept 2026. Not confirmed — there is no cover yet." }
+      : hasRequest ? { state: "requested", line: "A request is prepared. It has not been sent, and there is no cover." }
+      : { state: null, line: "Nothing has been requested from the insurer yet." };
+    return json({
+      placement: { id: "40000000-0000-4000-8000-00000000000a", title: "Placeholder Company motor fleet placement — 2027", requestedEffectiveAt: "2026-10-01T00:00:00.000Z", requestedExpiryAt: null, createdAt: "2026-09-07T10:40:00.000Z" },
+      client: { id: CLIENT, name: "Placeholder Company" },
+      opportunity: { id: "30000000-0000-4000-8000-00000000000a", title: "Placeholder Company motor fleet quotation — 2027", classOfBusiness: "Commercial motor" },
+      insurer: { id: "21000000-0000-4000-8000-00000000000a", name: "Placeholder Insurer" },
+      workItem: wasSent && answer === null
+        ? { id: "26000000-0000-4000-8000-00000000000b", taskStatus: "with_party", taskParty: "Placeholder Insurer", taskSince: "2026-09-08T11:02:00.000Z" }
+        : { id: "26000000-0000-4000-8000-00000000000b", taskStatus: "needs_you", taskParty: null, taskSince: null },
+      instruction: {
+        id: "41000000-0000-4000-8000-00000000000a", source: "telephone",
+        evidence: { kind: "note", id: null, label: "Client rang at 10:40 and chose Placeholder Insurer on the terms shown.", path: null },
+        clientConditions: null, instructedAt: "2026-09-07T10:40:00.000Z", recordedByName: "Parity Harness",
+        recordedAt: "2026-09-07T10:45:00.000Z", comparisonVersion: 1, outsideComparison: false,
+        exceptionReason: null, supersededAt: null, supersededReason: null,
+      },
+      instructionHistory: [],
+      basis: {
+        premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30",
+        terms: [
+          { termType: "limit", label: "Third party property damage", value: "KES 20,000,000", amount: null, currency: null, unclear: false },
+          { termType: "excess", label: "Own damage", value: "5% of claim, minimum KES 30,000", amount: null, currency: null, unclear: false },
+        ],
+      },
+      drift: stage === "drifted"
+        ? { stale: true, changes: [{ label: "Premium", was: "KES 5,310,000", now: "KES 5,410,000" }, { label: "Own damage", was: "5% of claim, minimum KES 30,000", now: "5% of claim, minimum KES 50,000" }] }
+        : { stale: false, changes: [] },
+      request: hasRequest ? {
+        id: "42000000-0000-4000-8000-00000000000a", version: 1, subject: "Placement instruction — Placeholder Company",
+        body: "Please place cover.", coverRequested: "Commercial motor for Placeholder Company",
+        effectiveAt: "2026-10-01T00:00:00.000Z", outstandingConditions: null, sha256: "a".repeat(64),
+        preparedByName: "Parity Harness", preparedAt: "2026-09-07T11:00:00.000Z",
+        approval: approved ? { approvedByName: "Parity Harness", approvedAt: "2026-09-07T12:00:00.000Z" } : null,
+        submission: wasSent ? { method: "recorded_manual_email", recipient: "underwriting@placeholder-insurer.test", sentAt: "2026-09-08T11:02:00.000Z", evidence: { kind: "note", id: null, label: "Sent from my own mailbox at 11:02.", path: null }, recordedByName: "Parity Harness" } : null,
+      } : null,
+      requestHistory: [],
+      insurerResponse: answer === null ? null : {
+        outcome: answer.outcome, receivedAt: "2026-09-09T14:10:00.000Z", effectiveAt: answer.effectiveAt, expiryAt: null,
+        insurerReference: "CN-2027-0041",
+        changesNote: stage === "changed" ? "Own damage excess raised to 7.5%, minimum KES 45,000." : null,
+        informationRequired: null, declineReason: null,
+        evidence: { kind: "note", id: null, label: "Cover note received by email at 14:10.", path: null }, recordedByName: "Parity Harness",
+      },
+      cancellation: null,
+      cover,
+      blockers: stage === "drifted" ? ["The quotation changed after the client accepted it: Premium, Own damage. Nothing can be sent until it is reviewed."]
+        : stage === "draft" ? ["The request is waiting for someone permitted to approve it."]
+        : stage === "approved" ? ["The approved request has not been sent. Sending from ASAP is not connected; send it yourself and record how."]
+        : stage === "changed" ? ["Placeholder Insurer confirmed on different terms: Own damage excess raised to 7.5%, minimum KES 45,000. The client must accept them before a policy is issued."]
+        : stage === "instructed" ? ["No placement request has been prepared yet."] : [],
+      nextAction: stage === "active" ? "Prepare policy issuance."
+        : stage === "draft" ? "Have the request approved by someone permitted to approve placements."
+        : stage === "approved" ? "Send the approved request to the insurer yourself, then record how it was sent."
+        : stage === "submitted" ? "Record the insurer's answer when it arrives."
+        : stage === "changed" ? "Put the changed terms to the client."
+        : stage === "drifted" ? "Review what changed in the quotation, and record the client's instruction again if it matters."
+        : stage === "future" ? "Prepare policy issuance." : "Prepare the placement request.",
+      permissions: {
+        canRecordInstruction: true, canPrepare: true, canApprove: q.get("perms") !== "officer",
+        canRecordSubmission: true, canRecordResponse: true, approverRoles: ["Brokerage administrator", "Manager"],
+      },
+      sending: { available: false, reason: "Sending from ASAP is not connected yet. Copy the approved request into the mailbox it should go from, then record that it was sent." },
+      issuance: { ready: stage === "active" || stage === "future", reason: stage === "active" || stage === "future" ? null : "Cover is not confirmed, so there is no policy to issue yet.", workItemId: null },
+    });
+  }
+  /*
    * What ASAP read from a quotation, and the review of it. `stage` photographs each state:
    * unreviewed, already decided, not yet linked to an insurer's answer, and unreadable.
    */

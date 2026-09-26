@@ -29,6 +29,17 @@ export type FakeDb = {
    * accepts every insert would pass while the real thing sent a second email.
    */
   uniques?: Record<string, string[][]>;
+  /**
+   * Stand-ins for BEFORE INSERT triggers, per table. The database numbers a placement request's
+   * version, supersedes the old one and stales its approval (0054); a route test that skipped all
+   * of that would pass against behaviour the real thing does not have. Return an error to refuse
+   * the insert as the trigger would, or mutate `row` and the other tables as the trigger does.
+   * The trigger's own behaviour is proven in pgTAP; this only keeps the route honest about it.
+   */
+  beforeInsert?: Record<
+    string,
+    (row: Record<string, unknown>, db: FakeDb) => { code: string; message: string } | void
+  >;
 };
 
 class Query {
@@ -263,6 +274,17 @@ export function fakeFactory(db: FakeDb): SupabaseFactory {
                   Promise.resolve(resolve(manyResult)),
                 single: async () => ({ data: many[0] ?? null, error: null }),
                 maybeSingle: async () => ({ data: many[0] ?? null, error: null }),
+              }),
+            };
+          }
+          const refusal = db.beforeInsert?.[table]?.(row, db);
+          if (refusal) {
+            const failure = { ...refusal, details: null, hint: null };
+            return {
+              then: (resolve: (v: { error: unknown }) => unknown) => Promise.resolve(resolve({ error: failure })),
+              select: () => ({
+                single: async () => ({ data: null, error: failure }),
+                maybeSingle: async () => ({ data: null, error: failure }),
               }),
             };
           }

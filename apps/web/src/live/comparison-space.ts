@@ -86,6 +86,8 @@ export function comparisonSpace(
   data: ComparisonResponse | undefined,
   state: { loading: boolean; error: string | null; missing: boolean; busy: boolean },
   opportunityId: string,
+  /** True while a person is recording the client's instruction. Interface state only. */
+  recordingInstruction = false,
 ): SpaceFrame {
   const title = data?.opportunity.title ?? "Quotation comparison";
   const self: SpaceRef = {
@@ -296,6 +298,64 @@ export function comparisonSpace(
     });
   }
 
+  /*
+   * The client's instruction. Only against a comparison that was put to the client, and only
+   * with the source and the evidence of what they said — a recommendation is not a decision,
+   * and a broker's click is not the client's.
+   */
+  if (recordingInstruction && c !== null && c.presentedAt !== null && c.presentable.can) {
+    blocks.push({
+      id: "instruction-form",
+      type: "form",
+      label: "RECORD THE CLIENT'S INSTRUCTION",
+      evidence: [],
+      state: "ready",
+      stateNote: null,
+      submitLabel: "Record the instruction",
+      busy: state.busy,
+      actions: [
+        {
+          verb: "record_evidence",
+          label: "Record the instruction",
+          stepId: "instruction-form",
+          to: null,
+          disabledReason: null,
+          notPermittedReason: null,
+        },
+      ],
+      fields: [
+        {
+          name: "insurerResponseId", label: "Which quote the client chose", kind: "select",
+          value: "", placeholder: "", required: true,
+          hint: "Only the quotes in this comparison. ASAP does not pick one for the client.",
+          error: null,
+          options: c.columns.map((col) => ({
+            value: col.responseId,
+            label: `${col.insurerName} — ${money(col.premiumAmount, col.premiumCurrency) || "no premium stated"}`,
+          })),
+        },
+        {
+          name: "source", label: "How the client told you", kind: "select", value: "telephone", placeholder: "",
+          required: true, hint: "", error: null,
+          options: [
+            { value: "telephone", label: "By telephone" },
+            { value: "email", label: "By email" },
+            { value: "meeting", label: "At a meeting" },
+            { value: "in_person", label: "In person" },
+          ],
+        },
+        { name: "instructedAt", label: "When", kind: "date", value: "", placeholder: "", required: true, hint: "", error: null, options: [] },
+        {
+          name: "evidenceNote", label: "What the client said", kind: "textarea", value: "", placeholder: "",
+          required: true, hint: "Who said it, when, and in their words where you can. This is the record of their decision.",
+          error: null, options: [],
+        },
+        { name: "clientConditions", label: "Anything the client asked to be different", kind: "textarea", value: "", placeholder: "", required: false, hint: "", error: null, options: [] },
+        { name: "requestedEffectiveAt", label: "Cover asked to begin", kind: "date", value: "", placeholder: "", required: true, hint: "", error: null, options: [] },
+      ],
+    });
+  }
+
   /* ---- What a person can do ------------------------------------------------------------------ */
 
   const actions: SpaceFrameAction[] = [backToWork];
@@ -311,6 +371,16 @@ export function comparisonSpace(
         to: null,
         /* The server refuses it anyway; saying so here means the control is never a dead end. */
         disabledReason: data.readiness.ready ? null : (data.readiness.blockers[0] ?? null),
+        notPermittedReason: null,
+      });
+    }
+    if (c !== null && c.presentable.can && c.presentedAt !== null && !data.viewingHistory) {
+      actions.push({
+        verb: "record_evidence",
+        label: "Record the client's instruction",
+        stepId: "instruct",
+        to: null,
+        disabledReason: null,
         notPermittedReason: null,
       });
     }

@@ -10,6 +10,7 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { mapDatabaseError } from "../../errors.js";
+import { coverOf as coverOfForTool } from "../../routes/placement.js";
 
 /**
  * The declared tools — the only way a model reaches brokerage data (§45 rule 6: no unrestricted
@@ -527,6 +528,110 @@ const getCompanyRules: DeclaredTool = {
   },
 };
 
+
+/**
+ * One placement, as the facts stand: what the client instructed, what was sent, what came back,
+ * and whether there is cover now.
+ *
+ * This is how Ask answers "is the client covered now?" honestly. The cover line is derived from
+ * the insurer's evidenced confirmation and its own effective date — not from a request having
+ * been prepared, or sent, or approved. And it is how Ask answers "send this to Jubilee": the
+ * result says sending is unavailable, so the only true reply is to open the approved draft.
+ *
+ * Read-only, like every tool here. Recording an instruction, approving, recording a submission or
+ * a confirmation is a person's action through the validated route; this tool can only describe
+ * what those actions have established.
+ */
+const getPlacement: DeclaredTool = {
+  declaration: {
+    name: "get_placement",
+    description:
+      "The state of one placement: the client's recorded instruction and its evidence, the frozen terms the client accepted, the request (draft, approved, or sent — with the evidence of sending), the insurer's answer, the derived cover line, what is blocking the next step, and who may approve. 'Is the client covered?' must be answered from `cover` only: `requested` and `submitted` mean there is NO cover; `confirmed` means cover has not started; only `active` is cover in force. Sending from ASAP is unavailable — never say something was sent unless `request.sentAt` is set. Pass a placementId, or an opportunityId to find its current placement.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        placementId: { type: "string", description: "The placement's id." },
+        opportunityId: { type: "string", description: "The quotation work's id, to find its current placement." },
+      },
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const input = z
+      .object({ placementId: uuid.optional(), opportunityId: uuid.optional() })
+      .refine((v) => v.placementId !== undefined || v.opportunityId !== undefined)
+      .parse(args);
+
+    let query = ctx.db
+      .from("placements")
+      .select("id, opportunity_id, insurer_id, client_instruction_id, requested_effective_at, basis_premium_amount, basis_premium_currency, basis_valid_until, abandoned_at")
+      .eq("organization_id", ctx.organizationId);
+    query = input.placementId !== undefined
+      ? query.eq("id", input.placementId)
+      : query.eq("opportunity_id", input.opportunityId!).is("abandoned_at", null);
+    const { data, error } = await query.limit(1).maybeSingle();
+    if (error) throw mapDatabaseError(error);
+    if (!data) {
+      return {
+        placement: null,
+        note: "No client instruction has been recorded for this, so nothing is being placed. A recommendation is not an instruction.",
+      };
+    }
+    const p = data as Record<string, unknown>;
+
+    const [instructionQ, requestsQ, responseQ, cancellationQ, insurerQ] = await Promise.all([
+      ctx.db.from("client_instructions").select("source, evidence_note, evidence_document_id, evidence_email_message_id, instructed_at, outside_comparison, superseded_at").eq("organization_id", ctx.organizationId).eq("id", p["client_instruction_id"] as string).maybeSingle(),
+      ctx.db.from("placement_requests").select("id, version, superseded_at").eq("organization_id", ctx.organizationId).eq("placement_id", p["id"] as string).is("superseded_at", null),
+      ctx.db.from("placement_insurer_responses").select("outcome, effective_at, expiry_at, insurer_reference, changes_note, information_required, decline_reason").eq("organization_id", ctx.organizationId).eq("placement_id", p["id"] as string).is("superseded_at", null).maybeSingle(),
+      ctx.db.from("placement_cancellations").select("cancelled_at, reason").eq("organization_id", ctx.organizationId).eq("placement_id", p["id"] as string).maybeSingle(),
+      ctx.db.from("insurers").select("name").eq("organization_id", ctx.organizationId).eq("id", p["insurer_id"] as string).maybeSingle(),
+    ]);
+
+    const request = ((requestsQ.data ?? []) as Record<string, unknown>[])[0] ?? null;
+    const [approvalQ, submissionQ] = request === null
+      ? [{ data: null }, { data: null }]
+      : await Promise.all([
+          ctx.db.from("placement_request_approvals").select("approved_at").eq("organization_id", ctx.organizationId).eq("placement_request_id", request["id"] as string).is("superseded_at", null).maybeSingle(),
+          ctx.db.from("placement_submissions").select("sent_at, method, recipient").eq("organization_id", ctx.organizationId).eq("placement_request_id", request["id"] as string).maybeSingle(),
+        ]);
+
+    const response = responseQ.data as Record<string, unknown> | null;
+    const submission = submissionQ.data as Record<string, unknown> | null;
+    const insurerName = (insurerQ.data as { name: string } | null)?.name ?? "the insurer";
+
+    return {
+      placement: {
+        id: p["id"],
+        insurer: insurerName,
+        requestedEffectiveAt: p["requested_effective_at"],
+        abandoned: p["abandoned_at"] !== null,
+      },
+      instruction: instructionQ.data,
+      acceptedTerms: {
+        premiumAmount: p["basis_premium_amount"],
+        premiumCurrency: p["basis_premium_currency"],
+        validUntil: p["basis_valid_until"],
+      },
+      request: request === null
+        ? null
+        : {
+            version: request["version"],
+            approved: approvalQ.data !== null,
+            /* Null means not sent. Nothing in ASAP sends; a person records sending with evidence. */
+            sentAt: submission?.["sent_at"] ?? null,
+            sentBy: submission?.["method"] ?? null,
+          },
+      insurerAnswer: response,
+      /* Derived from evidence and the insurer's own dates, never from a request existing. */
+      cover: coverOfForTool(request, submission, response, cancellationQ.data as Record<string, unknown> | null, insurerName),
+      sending: {
+        available: false,
+        reason: "Sending from ASAP is not connected. Open the approved request and send it from the mailbox it should go from, then record how it was sent.",
+      },
+    };
+  },
+};
+
 /** Every tool the model may be told about. Nothing outside this list is reachable. */
 export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   findClients,
@@ -538,6 +643,7 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getQuoteComparison,
   getQuotationReading,
   getCompanyRules,
+  getPlacement,
 ];
 
 export const TOOL_DECLARATIONS: AiToolDeclaration[] = DECLARED_TOOLS.map((t) => t.declaration);

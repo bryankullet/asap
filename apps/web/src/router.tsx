@@ -36,6 +36,7 @@ import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
 import { ClientSpace } from "./pages/ClientSpace.js";
 import { ComparisonSpace } from "./pages/ComparisonSpace.js";
+import { PlacementSpace } from "./pages/PlacementSpace.js";
 import { QuotationReading } from "./pages/QuotationReading.js";
 import { OpportunitySpace, QuoteSpace } from "./pages/OpportunitySpace.js";
 
@@ -232,6 +233,12 @@ const comparison = createRoute({
   /* `?version=` opens the comparison a client was shown then, so it can be linked and reopened. */
   validateSearch: z.object({ version: z.coerce.number().int().min(1).optional().catch(undefined) }),
 });
+/* One client's placement. Its own address, so it can be linked from Work and reopened. */
+const placement = createRoute({
+  getParentRoute: () => shell,
+  path: "/placements/$placementId",
+  component: PlacementSpace,
+});
 /* Reviewing what ASAP read from a quotation. Its own address, so it can be linked and reopened. */
 const quotationReading = createRoute({
   getParentRoute: () => shell,
@@ -393,6 +400,7 @@ const routeTree = rootRoute.addChildren([
         opportunity,
         comparison,
         quotationReading,
+        placement,
         quote,
         files,
         clientFile,

@@ -81,6 +81,11 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     path: "/opportunities/$opportunityId/insurers/$opportunityInsurerId",
     component: page,
   });
+  const placement = createRoute({
+    getParentRoute: () => root,
+    path: "/placements/$placementId",
+    component: page,
+  });
   const quotationReading = createRoute({
     getParentRoute: () => root,
     path: "/documents/$documentId/quotation",
@@ -97,7 +102,7 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     component: page,
   });
   const router = createRouter({
-    routeTree: root.addChildren([...routes, creation, record, file, agreement, document, conversation, client, opportunity, quote, comparison, quotationReading]),
+    routeTree: root.addChildren([...routes, creation, record, file, agreement, document, conversation, client, opportunity, quote, comparison, quotationReading, placement]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   // Test-only router; the app's typed router registration does not apply here.

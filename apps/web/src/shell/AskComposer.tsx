@@ -90,8 +90,18 @@ export function AskComposer() {
     // change to the path shape cannot leave this silently scoping every question to the brokerage.
     select: (state) => {
       for (const match of state.matches) {
-        const params = match.params as { recordId?: string; clientId?: string; opportunityId?: string };
+        const params = match.params as {
+          recordId?: string;
+          clientId?: string;
+          opportunityId?: string;
+          placementId?: string;
+        };
         if (params.recordId) return { kind: "record" as const, id: params.recordId };
+        /*
+         * A placement scopes to itself, so "has Jubilee confirmed?" and "is the client covered
+         * now?" are asked about this attempt, not the quotation work that led to it.
+         */
+        if (params.placementId) return { kind: "placement" as const, id: params.placementId };
         /*
          * Quotation work scopes to its own work item, so "add Jubilee to this" and "which insurer
          * has responded" stay attached to the opportunity a person is looking at. The id sent is

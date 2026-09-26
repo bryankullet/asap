@@ -16,6 +16,7 @@ import { runAsk } from "../ai/ask.js";
 import { requireProvider } from "../ai/gateway.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
+import { placementTitle } from "./placement.js";
 
 /**
  * Ask ASAP — the conversation surface (Architecture §16, §18; Phase 5 of the UI plan).
@@ -44,6 +45,26 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     id: string | null,
   ): Promise<AskScope | null> {
     if (kind === "brokerage" || !id) return { kind: "brokerage", id: null, label: orgName };
+    if (kind === "placement") {
+      const { data, error } = await db
+        .from("placements")
+        .select("id, opportunity_id")
+        .eq("organization_id", orgId)
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw mapDatabaseError(error);
+      const row = data as { id: string; opportunity_id: string } | null;
+      if (row === null) return null;
+      /* The label is the placement's own name, derived from the work's title as on screen. */
+      const opp = await db
+        .from("opportunities")
+        .select("title")
+        .eq("organization_id", orgId)
+        .eq("id", row.opportunity_id)
+        .maybeSingle();
+      const title = (opp.data as { title: string } | null)?.title ?? "Placement";
+      return { kind: "placement", id: row.id, label: placementTitle(title) };
+    }
     if (kind === "opportunity") {
       const { data, error } = await db
         .from("opportunities")
@@ -194,7 +215,7 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     const scopeHint =
       scope.kind === "brokerage"
         ? `The broker is asking about ${org.name} as a whole.`
-        : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : "the record"} "${scope.label}" (id ${scope.id}).`;
+        : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : scope.kind === "placement" ? "the placement" : "the record"} "${scope.label}" (id ${scope.id}).`;
 
     let outcome;
     try {

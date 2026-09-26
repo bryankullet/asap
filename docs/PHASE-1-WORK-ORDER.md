@@ -269,9 +269,9 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 |---|---|
 | 4B-1 Client Space | Tested |
 | 4B-2 Opportunity and Quote Space | Tested — data foundation awaiting review |
-| 4B-3 Quote Comparison Space | Tested — awaiting review |
-| 4B-3A Reproducibility, recommendation rules, extraction | Tested — awaiting review |
-| 4B-4 Placement and approval flow | Not started |
+| 4B-3 Quote Comparison Space | Accepted |
+| 4B-3A Reproducibility, recommendation rules, extraction | Accepted |
+| 4B-4 Placement and approval flow | Tested — awaiting review |
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
@@ -305,6 +305,27 @@ sentence returned: `class_of_business`, `premium`, `sum_insured` and a confused 
 
 Closing this needed a quotation-shaped label set, terms returned as a list rather than one value
 per key, and a route from a reviewed extraction to `quote_terms`. All three are now in place.
+
+### What 4B-5 inherits from 4B-4
+
+- **The handoff is Work, not a policy.** `prepare_issuance` opens one Work item titled
+  "… placement — 2027 — policy issuance", once, and only after cover is confirmed as requested.
+  No `policies` row is written anywhere in 4B-4; pgTAP asserts it.
+- **Confirmed on changed terms has no acceptance action yet.** The placement blocks issuance and
+  says the client must accept the changes. Today the honest route is to put the changes to the
+  client and record a fresh confirmation *as requested* once they agree. A dedicated "client
+  accepted the insurer's changes" step, with its own evidence, belongs with issuance.
+- **`placement.verify_cover_match` is still a gap.** A confirmation is recorded with its terms in
+  words; nothing yet compares the insurer's confirmed terms field by field against the frozen
+  basis. "Confirmed on changed terms" is a person's judgement, recorded with the changes named.
+- **The premium condition is not checked.** The economic model says placed cover needs the
+  premium condition met (`money.check_payment_condition`). "Active cover" here follows the
+  insurer's effective date only, as the 4B-4 brief defines it. Money is 4D.
+- **Confirmation overdue has no timer.** Work shows "With Jubilee since 8 Sep" from the moment of
+  submission, which is what a person needs to see; nothing yet raises it after N days. That is the
+  scheduled-jobs stage, like the validity sweep.
+- **Quote expiry after instruction** is caught at submission (a revised quote blocks it) and on
+  the comparison (an expired quote is unpresentable). It does not yet raise Work by itself.
 
 ### Still unsupported after 4B-3A
 

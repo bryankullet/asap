@@ -258,6 +258,17 @@ export function termDigest(term: QuoteTerm): string {
 
 /* ---- Reading it ------------------------------------------------------------------------------ */
 
+/** Exported so placement can refuse an instruction against a comparison nobody could present. */
+export async function loadComparisonView(
+  db: SupabaseClient,
+  ctx: Ctx,
+  organizationId: string,
+  id: string,
+  version: number | null = null,
+): Promise<ComparisonResponse> {
+  return load(db, ctx, organizationId, id, version);
+}
+
 async function load(
   db: SupabaseClient,
   ctx: Ctx,

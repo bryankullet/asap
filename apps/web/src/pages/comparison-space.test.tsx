@@ -582,3 +582,27 @@ describe("what a person can do", () => {
     expect(screen.queryByRole("button", { name: /Compare/i })).toBeNull();
   });
 });
+
+
+describe("recording the client's instruction", () => {
+  it("is offered only on a comparison that was put to the client, and asks how they said it", async () => {
+    stubApi(
+      body({
+        comparison: { ...body().comparison, presentedAt: "2026-09-07T09:00:00.000Z", presentedByName: "Amina" },
+      }),
+    );
+    await open();
+
+    await userEvent.click((await screen.findAllByRole("button", { name: /Record the client's instruction/ }))[0]!);
+    await screen.findAllByText(/RECORD THE CLIENT'S INSTRUCTION/i);
+    expect(screen.getAllByText(/ASAP does not pick one for the client/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/This is the record of their decision/).length).toBeGreaterThan(0);
+  });
+
+  it("is not offered on a comparison nobody has shown the client", async () => {
+    stubApi(body());
+    await open();
+    await waitFor(() => expect(screen.getAllByText("KES 5,310,000").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: /Record the client's instruction/ })).toBeNull();
+  });
+});

@@ -1687,3 +1687,50 @@ words, never a colour alone. The threshold is a brokerage rule; where none is se
 of 14 days applies and says on screen that it is ASAP's default rather than the brokerage's. An
 expired quotation is not an offer, so a comparison holding one cannot be presented to a client
 until it is generated again.
+
+
+## D-091 — Placement never infers one step from the one before it
+
+A recommendation is not a client decision; a decision is not an approved request; an approved
+request is not a submitted one; a submitted request is not confirmed cover; confirmed cover is not
+an issued policy. Each is a separate fact in 0054 with its own table, and each later fact is
+refused by the database unless the one before it exists: nothing is submitted without a live
+approval of the same digest, and no insurer answer is recorded without a submission.
+
+None of the placement tables stores a status. The cover line is derived from which facts exist,
+through the single cover vocabulary in `status.ts` — `CoverStatus` and `COVER_LABELS` — rather
+than a second enum, so "Active cover" is spelled in exactly one place.
+
+## D-092 — A client's instruction needs to say how it arrived
+
+An instruction names its source — email, document, telephone, meeting, signed acceptance, in
+person — and carries evidence: the email, the document, or a note of at least a sentence saying
+who said what and when. A broker pressing a button records nothing on its own. It must name the
+exact comparison version the client was shown; that comparison must be current, presentable and
+recorded as presented. A quote outside the comparison is allowed only as an exception, by someone
+who may approve placements, with a reason, and it is marked for ever.
+
+Changing the choice, or instructing against revised terms, supersedes the old instruction and
+abandons its placement. Neither is deleted.
+
+## D-093 — The placement freezes what the client accepted
+
+At instruction the placement copies the premium, currency and validity, and every term by its
+revision id, into `placement_basis_terms`. Nothing reads the live quotation to say what was
+accepted. If the quotation moves afterwards, the placement names each change as accepted → now,
+and a database trigger refuses submission until a person has dealt with it — which, where it is
+material, means a new client instruction.
+
+## D-094 — Submission is recorded with evidence, and only then
+
+Sending from ASAP is unavailable. Preparing makes a draft, approving makes an approved draft, and
+neither populates any submission field. A person records sending with the method, the recipient,
+the time, evidence of at least a sentence or a document, and an idempotency key; free text saying
+"sent" is refused by a check constraint. The provider path exists in the schema for the day a
+sending integration does, and requires the provider's own message id.
+
+## D-095 — Who may approve is read from the brokerage, not written in code
+
+A person refused an approval is told which roles in their own brokerage hold `placement:approve`,
+read from `roles` and `role_permissions`. The Work item records that approval is required.
+Nothing about the placement changes.

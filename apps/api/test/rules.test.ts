@@ -92,6 +92,32 @@ const RECOMMENDATION = {
   verifiedAt: "2026-09-04",
 };
 
+describe("who may reach it at all", () => {
+  /*
+   * The defect this locks: `/rules` was registered but left out of the authenticated prefix
+   * list, so the handler ran without a session and fell over on `c.get("auth")` — a 500 where a
+   * 401 belonged. A route that decides what ASAP will say about a client's cover must refuse an
+   * unauthenticated caller at the door, and be held to it.
+   */
+  it("refuses a request with no session", async () => {
+    expect((await build().request("/rules")).status).toBe(401);
+  });
+
+  it("refuses a write with no session, and writes nothing", async () => {
+    const res = await build().request("/rules", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(RECOMMENDATION),
+    });
+    expect(res.status).toBe(401);
+    expect(db.tables["company_rules"]).toHaveLength(0);
+  });
+
+  it("refuses a token that belongs to nobody", async () => {
+    expect((await build().request("/rules", { headers: asUser("tok-nobody") })).status).toBe(401);
+  });
+});
+
 describe("what applies where nothing is set", () => {
   it("says what the defaults are rather than leaving them implied", async () => {
     const body = await read();

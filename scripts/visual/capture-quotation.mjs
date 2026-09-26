@@ -29,6 +29,7 @@ const OPP = "/opportunities/30000000-0000-4000-8000-00000000000a";
 const TERMS = `${OPP}/insurers/31000000-0000-4000-8000-00000000000a`;
 const COMPARISON = `${OPP}/comparison`;
 const READING = "/documents/3a000000-0000-4000-8000-00000000000a/quotation";
+const PLACEMENT = "/placements/40000000-0000-4000-8000-00000000000a";
 
 const STATES = [
   { name: "opportunity-new", url: `${HARNESS}?at=${OPP}&stage=new` },
@@ -46,6 +47,15 @@ const STATES = [
   { name: "reading-reviewed", url: `${HARNESS}?at=${READING}&stage=reviewed` },
   { name: "reading-unlinked", url: `${HARNESS}?at=${READING}&stage=unlinked` },
   { name: "reading-unreadable", url: `${HARNESS}?at=${READING}&stage=unreadable` },
+  { name: "placement-instructed", url: `${HARNESS}?at=${PLACEMENT}&stage=instructed` },
+  { name: "placement-draft", url: `${HARNESS}?at=${PLACEMENT}&stage=draft` },
+  { name: "placement-draft-cannot-approve", url: `${HARNESS}?at=${PLACEMENT}&stage=draft&perms=officer` },
+  { name: "placement-approved-not-sent", url: `${HARNESS}?at=${PLACEMENT}&stage=approved` },
+  { name: "placement-submitted", url: `${HARNESS}?at=${PLACEMENT}&stage=submitted` },
+  { name: "placement-confirmed-not-begun", url: `${HARNESS}?at=${PLACEMENT}&stage=future` },
+  { name: "placement-active-cover", url: `${HARNESS}?at=${PLACEMENT}&stage=active` },
+  { name: "placement-changed-terms", url: `${HARNESS}?at=${PLACEMENT}&stage=changed` },
+  { name: "placement-quote-moved", url: `${HARNESS}?at=${PLACEMENT}&stage=drifted` },
 ];
 
 const outDir = resolve(".local-visual/shots/quotation");

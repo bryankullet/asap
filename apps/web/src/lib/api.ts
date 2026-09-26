@@ -1,6 +1,9 @@
 import {
   clientSpaceResponseSchema,
   comparisonActionResponseSchema,
+  placementActionResponseSchema,
+  placementResponseSchema,
+  recordInstructionResponseSchema,
   quotationReadingResponseSchema,
   quotationReviewResponseSchema,
   comparisonResponseSchema,
@@ -10,6 +13,8 @@ import {
   uuidSchema,
   type CreateOpportunityRequest,
   type ComparisonAction,
+  type PlacementAction,
+  type RecordInstructionRequest,
   type QuotationReviewAction,
   type OpportunityAction,
   onboardingResponseSchema,
@@ -379,6 +384,13 @@ export const api = {
       `/opportunities/${id}/comparison${version === undefined ? "" : `?version=${version}`}`,
       comparisonResponseSchema,
     ),
+  /** One placement: instruction, frozen basis, request, approval, submission, answer, cover. */
+  placement: (id: string) => request("GET", `/placements/${id}`, placementResponseSchema),
+  placementAction: (id: string, input: PlacementAction) =>
+    request("POST", `/placements/${id}/actions`, placementActionResponseSchema, input),
+  /** The client's instruction. Creates the placement; needs the source and the evidence. */
+  recordInstruction: (opportunityId: string, input: RecordInstructionRequest) =>
+    request("POST", `/opportunities/${opportunityId}/instruction`, recordInstructionResponseSchema, input),
   /** What ASAP read from a quotation, and what a person has decided about each reading. */
   quotationReading: (documentId: string) =>
     request("GET", `/documents/${documentId}/quotation`, quotationReadingResponseSchema),

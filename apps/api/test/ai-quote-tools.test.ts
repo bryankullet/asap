@@ -210,3 +210,82 @@ describe("get_company_rules", () => {
     expect(out.note).toBeNull();
   });
 });
+
+describe("get_placement", () => {
+  const PLACEMENT = "40000000-0000-4000-8000-00000000000a";
+  const INSTR = "41000000-0000-4000-8000-00000000000a";
+  const REQ = "42000000-0000-4000-8000-00000000000a";
+
+  const placementTables = (over: Record<string, Record<string, unknown>[]> = {}) => ({
+    ...baseTables(),
+    placements: [
+      {
+        id: PLACEMENT, organization_id: ORG, opportunity_id: OPP, insurer_id: INS_A,
+        client_instruction_id: INSTR, requested_effective_at: "2026-10-01T00:00:00Z",
+        basis_premium_amount: "5310000.00", basis_premium_currency: "KES", basis_valid_until: "2027-06-30",
+        abandoned_at: null,
+      },
+    ],
+    client_instructions: [
+      { id: INSTR, organization_id: ORG, source: "telephone", evidence_note: "Client rang and chose Jubilee.", evidence_document_id: null, evidence_email_message_id: null, instructed_at: "2026-09-07T10:40:00Z", outside_comparison: false, superseded_at: null },
+    ],
+    placement_requests: [{ id: REQ, organization_id: ORG, placement_id: PLACEMENT, version: 1, superseded_at: null }],
+    placement_request_approvals: [] as Record<string, unknown>[],
+    placement_submissions: [] as Record<string, unknown>[],
+    placement_insurer_responses: [] as Record<string, unknown>[],
+    placement_cancellations: [] as Record<string, unknown>[],
+    ...over,
+  }) as FakeDb["tables"];
+
+  it("says nothing is being placed when no instruction exists — a recommendation is not one", async () => {
+    const out = (await toolByName("get_placement")!.run({ opportunityId: OPP }, context(baseTables()))) as {
+      placement: unknown; note: string;
+    };
+    expect(out.placement).toBeNull();
+    expect(out.note).toMatch(/A recommendation is not an instruction/);
+  });
+
+  it("never reports a draft as sent, and says sending is unavailable", async () => {
+    const out = (await toolByName("get_placement")!.run({ placementId: PLACEMENT }, context(placementTables()))) as {
+      request: { approved: boolean; sentAt: string | null };
+      cover: { state: string };
+      sending: { available: boolean; reason: string };
+    };
+    expect(out.request.sentAt).toBeNull();
+    expect(out.cover.state).toBe("requested");
+    expect(out.sending.available).toBe(false);
+    expect(out.sending.reason).toMatch(/not connected/);
+  });
+
+  it("answers 'is the client covered?' from the insurer's evidenced dates, not from the request", async () => {
+    const tables = placementTables({
+      placement_submissions: [{ organization_id: ORG, placement_request_id: REQ, sent_at: "2026-09-08T11:02:00Z", method: "recorded_manual_email", recipient: "uw@jubilee.test" }],
+      placement_insurer_responses: [{ organization_id: ORG, placement_id: PLACEMENT, outcome: "confirmed_as_requested", effective_at: "2099-01-01T00:00:00Z", expiry_at: null, insurer_reference: "CN-1", changes_note: null, information_required: null, decline_reason: null, superseded_at: null }],
+    });
+    const out = (await toolByName("get_placement")!.run({ placementId: PLACEMENT }, context(tables))) as {
+      cover: { state: string; line: string };
+    };
+    /* Confirmed, but beginning in the future: the honest answer is "not yet". */
+    expect(out.cover.state).toBe("confirmed");
+    expect(out.cover.line).toMatch(/has not started yet/);
+  });
+
+  it("names the changed terms when the insurer confirmed on different ones", async () => {
+    const tables = placementTables({
+      placement_submissions: [{ organization_id: ORG, placement_request_id: REQ, sent_at: "2026-09-08T11:02:00Z", method: "recorded_manual_email", recipient: "uw@jubilee.test" }],
+      placement_insurer_responses: [{ organization_id: ORG, placement_id: PLACEMENT, outcome: "confirmed_with_changes", effective_at: "2026-09-01T00:00:00Z", expiry_at: null, insurer_reference: null, changes_note: "Excess raised to 7.5%.", information_required: null, decline_reason: null, superseded_at: null }],
+    });
+    const out = (await toolByName("get_placement")!.run({ placementId: PLACEMENT }, context(tables))) as {
+      insurerAnswer: { outcome: string; changes_note: string };
+    };
+    expect(out.insurerAnswer.outcome).toBe("confirmed_with_changes");
+    expect(out.insurerAnswer.changes_note).toBe("Excess raised to 7.5%.");
+  });
+
+  it("is read-only: it writes nothing, whatever it is asked", async () => {
+    const tables = placementTables();
+    const db: FakeDb = { users: {}, inserts: [], rpc: {}, tables: tables as FakeDb["tables"] };
+    await toolByName("get_placement")!.run({ placementId: PLACEMENT }, { db: fakeFactory(db).service(), organizationId: ORG });
+    expect(db.inserts).toHaveLength(0);
+  });
+});
