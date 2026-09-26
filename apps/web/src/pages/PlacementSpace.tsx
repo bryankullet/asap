@@ -232,6 +232,33 @@ export function PlacementSpace() {
           });
           return;
         }
+        if (step.startsWith("condition:")) {
+          setFailure(null);
+          setDrafting(step as PlacementDraft);
+          return;
+        }
+        if (step.startsWith("condition-insurer:")) {
+          act.mutate({
+            action: "resolve_client_condition",
+            conditionId: step.slice("condition-insurer:".length),
+            resolution: "confirmed_by_insurer",
+            resolvedAt: new Date().toISOString(),
+          });
+          return;
+        }
+        if (step.startsWith("condition-form:")) {
+          const [, conditionId = "", mode] = step.split(":");
+          act.mutate({
+            action: "resolve_client_condition",
+            conditionId,
+            resolution: mode === "waived" ? "waived" : "satisfied",
+            resolvedAt: values["resolvedAt"] ? new Date(values["resolvedAt"]).toISOString() : "",
+            reason: values["reason"] ?? "",
+            evidenceNote: values["evidenceNote"] ?? "",
+            ...(mode === "waived" ? { source: (values["source"] ?? "email") as "email" } : {}),
+          });
+          return;
+        }
         if (step.startsWith("confirm:")) {
           decide.mutate({ id: step.slice("confirm:".length), verb: "confirm" });
           return;

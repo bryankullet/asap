@@ -58,21 +58,30 @@ function row(i: number) {
   return {
     id,
     organization_id: ORG,
-    title: `Placeholder work item ${i + 1}`,
+    title: i === 0 ? "Placeholder Company motor fleet placement — 2027: cover confirmation requested" : `Placeholder work item ${i + 1}`,
     kind: (["placement", "renewal", "claim", "endorsement"] as const)[i % 4]!,
     client_id: CLIENT,
     policy_period_id: null,
     insurer_id: null,
     class_of_business: null,
     owner_id: OWNER,
-    task_status: external ? "with_party" : "needs_you",
-    task_party: external ? PARTIES[i % PARTIES.length]! : null,
+    task_status: external || i === 0 ? "with_party" : "needs_you",
+    task_party: i === 0 ? "Placeholder Insurer" : external ? PARTIES[i % PARTIES.length]! : null,
     task_since: "2026-08-12T00:00:00.000Z",
-    task_next_check: external ? "2026-08-26T00:00:00.000Z" : null,
+    task_next_check: external || i === 0 ? "2026-08-26T00:00:00.000Z" : null,
     cover_status: null,
     cover_inception_at: null,
     money_status: null,
-    reason: "This is the reason the engine recorded against the row, shown behind one click.",
+    reason: i === 0
+      ? "The request was sent and the insurer has not answered."
+      : "This is the reason the engine recorded against the row, shown behind one click.",
+    /* The first row is a placement's reason-keyed Work (4B-4A/4B): every field from the server. */
+    source_type: i === 0 ? "placement" : null,
+    source_id: i === 0 ? "40000000-0000-4000-8000-00000000000a" : null,
+    reason_code: i === 0 ? "awaiting_insurer" : null,
+    required_action: i === 0 ? "Record the insurer's answer when it arrives, with its evidence." : null,
+    evidence_needed: i === 0 ? "The insurer's confirmation, decline or query." : null,
+    outcome_after: i === 0 ? "The confirmation is checked against what the client accepted." : null,
     steps: [],
     exception: null,
     version: 1,
@@ -95,7 +104,7 @@ const context = (r: ReturnType<typeof row>) => ({
   priority: "high" as const,
   period: null,
   facts: [],
-  links: { work: `/r/${r.id}`, client: `/files/${CLIENT}`, policy: null, ask: r.title },
+  links: { work: r.source_type === "placement" ? `/placements/${r.source_id}` : `/r/${r.id}`, client: `/files/${CLIENT}`, policy: null, ask: r.title },
 });
 
 globalThis.fetch = (async (url: RequestInfo | URL) => {
@@ -315,7 +324,13 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
    */
   if (u.includes("/placements/")) {
     const q = new URLSearchParams(location.search);
-    const stage = q.get("stage") ?? "instructed";
+    const asked = q.get("stage") ?? "instructed";
+    /* 4B-4B stages start from an existing one and are adjusted by placementStage() below. */
+    const BASE: Record<string, string> = {
+      "condition-unresolved": "active", "condition-satisfied": "active", "condition-waived": "active",
+      "end-date-added": "changed", partial: "changed", "prepared-stale": "prepared", receipt: "accepted",
+    };
+    const stage = BASE[asked] ?? asked;
     const hasRequest = !["instructed", "drifted"].includes(stage);
     const approved = ["approved", "submitted", "future", "active", "changed", "rejected", "accepted", "prepared"].includes(stage);
     const wasSent = ["submitted", "future", "active", "changed", "rejected", "accepted", "prepared"].includes(stage);
@@ -363,7 +378,9 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
           : null;
     const deferred = "Whether premium must be paid before issuance is a brokerage rule that arrives with Money (4D). It is not checked, and not assumed.";
     const ready = stage === "active" || stage === "future" || stage === "accepted";
-    return json({
+    // Harness-only: the stub is a plain object adjusted per photographed stage.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const reading: Record<string, any> = {
       work: [{
         id: "26000000-0000-4000-8000-00000000000c", reason, headline, why, action, evidence, after: "The next step opens in Work.",
         taskStatus: withInsurer ? "with_party" : "needs_you", taskParty: withInsurer ? "Placeholder Insurer" : null,
@@ -452,7 +469,8 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
         canRecordSubmission: true, canRecordResponse: true, approverRoles: ["Brokerage administrator", "Manager"],
       },
       sending: { available: false, reason: "Sending from ASAP is not connected yet. Copy the approved request into the mailbox it should go from, then record that it was sent." },
-    });
+    };
+    return json(placementStage(asked, reading));
   }
   /*
    * What ASAP read from a quotation, and the review of it. `stage` photographs each state:
@@ -846,3 +864,93 @@ installSession();
  * be hoisted above both, and the first `/me` would go out before either existed.
  */
 await import("./harness-app.js");
+
+/**
+ * The 4B-4B stages, as adjustments of a base placement reading: client conditions in each state,
+ * an insurer-added end date, a partial answer, a stale prepared action and a receipt. Harness-only.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function placementStage(stage: string, r: any): any {
+  const deferred = "Whether premium must be paid before issuance is a brokerage rule that arrives with Money (4D). It is not checked, and not assumed.";
+  const condition = (state: string, extra: Record<string, unknown> = {}) => ({
+    id: "47000000-0000-4000-8000-00000000000a", position: 0, text: "Subject to a satisfactory motor inspection of every vehicle", state,
+    resolvedAt: state === "unresolved" ? null : "2026-09-12T10:00:00.000Z",
+    resolvedByName: state === "unresolved" ? null : "Parity Harness",
+    reason: state === "satisfied" ? "Inspection completed and passed for all five vehicles." : state === "waived" ? "Client withdrew the tracker requirement for this period." : null,
+    evidence: state === "unresolved" ? null : { kind: "note", id: null, label: state === "waived" ? "Client's email of 12 September withdrawing it." : "Assessor's report dated 11 September, filed.", path: null },
+    newInstructionId: state === "waived" ? "41000000-0000-4000-8000-00000000000b" : null,
+    ...extra,
+  });
+  const tracker = { id: "47000000-0000-4000-8000-00000000000b", position: 1, text: "Install an approved tracker in every vehicle" };
+  const work = (reason: string, headline: string, why: string, action: string, evidence: string) => [{
+    id: "26000000-0000-4000-8000-00000000000d", reason, headline, why, action, evidence, after: "Once every condition is resolved, the policy can be issued.",
+    taskStatus: "needs_you", taskParty: null, taskSince: null, taskNextCheck: null, ownerName: null,
+  }];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r0: any = {
+    ...r,
+    conditions: r.conditions ?? [],
+    basis: { ...r.basis, periodMonths: r.basis.periodMonths ?? null, periodDays: r.basis.periodDays ?? null },
+    coverMatch: r.coverMatch === null ? null : { ...r.coverMatch, items: r.coverMatch.items.map((i: Record<string, unknown>) => ({ calculation: null, ...i })) },
+  };
+  switch (stage) {
+    case "condition-unresolved":
+      return {
+        ...r0,
+        conditions: [condition("unresolved"), condition("unresolved", tracker)],
+        readiness: { state: "blocked", reasons: [{ code: "condition_unresolved", message: "The client's conditions are not resolved: Subject to a satisfactory motor inspection of every vehicle; Install an approved tracker in every vehicle. Each must be confirmed by the insurer, satisfied with evidence, or waived by the client." }], deferredChecks: [deferred], workItemId: null },
+        work: work("resolve_client_conditions", "resolve the client's conditions", "Cover matches what the client accepted, but one or more of the client's own conditions is not resolved.", "For each condition: record the insurer's confirmation, evidence that it was satisfied, or the client's waiver.", "The insurer's confirmation, evidence of what satisfied it, or the client's waiver and how it arrived."),
+      };
+    case "condition-satisfied":
+      return { ...r0, conditions: [condition("satisfied"), condition("confirmed_by_insurer", { ...tracker, reason: null })] };
+    case "condition-waived":
+      return {
+        ...r0,
+        conditions: [condition("satisfied"), condition("waived", tracker)],
+        instructionHistory: [{ ...r0.instruction, id: "41000000-0000-4000-8000-00000000000a", supersededAt: "2026-09-12T10:05:00.000Z", supersededReason: "The client waived a condition: Install an approved tracker in every vehicle" }],
+        instruction: { ...r0.instruction, id: "41000000-0000-4000-8000-00000000000b", source: "email", clientConditions: "Subject to a satisfactory motor inspection of every vehicle", evidence: { kind: "note", id: null, label: "Client's email of 12 September withdrawing it.", path: null } },
+      };
+    case "end-date-added":
+      return {
+        ...r0,
+        coverMatch: {
+          ...r0.coverMatch, materialDifferences: 1,
+          items: [
+            ...r0.coverMatch.items.filter((i: { material: boolean }) => !i.material),
+            { id: "44000000-0000-4000-8000-000000000009", field: "expiry_at", termType: null, label: "Cover ends", acceptedValue: null, confirmedValue: "2027-08-31T23:59:59.000Z", classification: "added_by_insurer", material: true, calculation: null },
+          ],
+        },
+        blockers: ["Placeholder Insurer's confirmed terms differ from what the client accepted: Cover ends. The client never accepted an end date; the insurer set one."],
+        readiness: { state: "blocked", reasons: [{ code: "unaccepted_differences", message: "The confirmed terms differ from what the client accepted in 1 place, and the client has not accepted them." }], deferredChecks: [deferred], workItemId: null },
+      };
+    case "partial":
+      return {
+        ...r0,
+        changeAcceptance: {
+          decision: "partial", decidedAt: "2026-09-10T09:00:00.000Z", source: "email",
+          evidence: { kind: "note", id: null, label: "Client replied at 09:00: the excess is acceptable, the riot exclusion is not.", path: null },
+          recordedByName: "Parity Harness",
+          items: [{ label: "Own damage", decision: "accepted" }, { label: "Riot and strike", decision: "clarify" }],
+          followUpDraft: "Draft to Placeholder Insurer — not sent:\n\nDear Underwriter,\n\nOur client Placeholder Company has reviewed your confirmation.\nThey ask you to clarify: Riot and strike.\n\nKind regards",
+        },
+        readiness: { state: "blocked", reasons: [{ code: "unaccepted_differences", message: "The client accepted only some of the insurer's changes." }], deferredChecks: [deferred], workItemId: null },
+        work: work("clarify_changes", "clarify the terms the client queried", "The client accepted some of the insurer's changes and asked about others.", "Clarify the queried terms with the insurer or the client, then record the client's decision.", "The client's decision on the remaining changes."),
+      };
+    case "prepared-stale":
+      return { ...r0, preparedActions: r0.preparedActions.map((a: Record<string, unknown>) => ({ ...a, state: "stale" })) };
+    case "receipt":
+      return {
+        ...r0,
+        preparedActions: [{
+          id: "46000000-0000-4000-8000-00000000000c", actionType: "record_client_acceptance", placementId: "40000000-0000-4000-8000-00000000000a", opportunityId: null,
+          summary: "Record that the client accepted Placeholder Insurer's changes",
+          changes: ["The client's acceptance of: Own damage, Riot and strike.", "A new client instruction, keeping the original.", "What the client accepted becomes version 2, from Placeholder Insurer's confirmation; the cover is checked again."],
+          blockers: [], permitted: true, requiresConfirmation: true, state: "executed",
+          preparedAt: "2026-09-10T09:02:00.000Z", expiresAt: "2026-09-11T09:02:00.000Z", preparedByName: "Parity Harness",
+          receipt: { message: "Record that the client accepted Placeholder Insurer's changes — done.", at: "2026-09-10T09:03:00.000Z", by: "Parity Harness" },
+        }],
+      };
+    default:
+      return r0;
+  }
+}

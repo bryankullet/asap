@@ -532,6 +532,11 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
     return { outcome: "refused", reason: `This action was ${state === "stale" ? "out of date" : state} and cannot be confirmed. Prepare it again.`, action: await viewOf(env, row) };
   }
 
+  /* Somebody else's proposal is theirs. It is not touched, and nothing is recorded against it. */
+  if (row["prepared_by"] !== env.userId) {
+    return { outcome: "refused", reason: "Only the person it was prepared for can confirm it. Prepare your own.", action: await viewOf(env, row) };
+  }
+
   const refuse = async (to: "stale" | "refused" | "expired", reason: string): Promise<ConfirmPreparedActionResponse> => {
     const after = await decide(env, id, to, null);
     await env.audit({
@@ -569,12 +574,17 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
 
   /* The same validated path the screen uses. Its own checks run again, in full. */
   let outcome: { outcome: "done" | "already" | "blocked"; reason: string | null };
+  /* A payload that no longer parses as the contract is refused, never coerced into something. */
   if (type === "record_instruction") {
-    const parsed = recordInstructionRequestSchema.parse(row["payload"]);
-    outcome = await executeRecordInstruction(env, row["opportunity_id"] as string, parsed);
+    const parsed = recordInstructionRequestSchema.safeParse(row["payload"]);
+    if (!parsed.success) return refuse("refused", "This prepared action is not a valid instruction, so it was not run.");
+    outcome = await executeRecordInstruction(env, row["opportunity_id"] as string, parsed.data);
   } else {
-    const parsed = placementActionSchema.parse(row["payload"]);
-    outcome = await executePlacementAction(env, placementId!, parsed);
+    const parsed = placementActionSchema.safeParse(row["payload"]);
+    if (!parsed.success || parsed.data.action !== type) {
+      return refuse("refused", "This prepared action is not a valid placement action, so it was not run.");
+    }
+    outcome = await executePlacementAction(env, placementId!, parsed.data);
   }
   if (outcome.outcome === "blocked") return refuse("refused", outcome.reason ?? "It could not be done.");
 
@@ -596,6 +606,9 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
 export async function discardPreparedAction(env: Env, id: string): Promise<ConfirmPreparedActionResponse> {
   const row = await readRow(env, id);
   if (row["state"] !== "prepared") return { outcome: "already", reason: null, action: await viewOf(env, row) };
+  if (row["prepared_by"] !== env.userId) {
+    return { outcome: "refused", reason: "Only the person it was prepared for can discard it.", action: await viewOf(env, row) };
+  }
   const after = await decide(env, id, "discarded", null);
   await env.audit({ action: "prepared_action.discarded", objectType: "prepared_action", objectId: id, result: "success", newState: {} });
   return { outcome: "done", reason: null, action: await viewOf(env, after ?? row) };

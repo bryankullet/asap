@@ -122,6 +122,13 @@ const DECISION_WORDS: Record<NonNullable<PlacementResponse["changeAcceptance"]>[
 
 const ITEM_DECISION_WORDS = { accepted: "Accepted", rejected: "Rejected", clarify: "Asked to clarify" } as const;
 
+const CONDITION_WORDS: Record<PlacementResponse["conditions"][number]["state"], { label: string; tone: SpaceTone }> = {
+  confirmed_by_insurer: { label: "Confirmed by insurer", tone: "done" },
+  satisfied: { label: "Satisfied", tone: "done" },
+  waived: { label: "Waived by the client", tone: "neutral" },
+  unresolved: { label: "Unresolved", tone: "attention" },
+};
+
 const PREPARED_STATE_WORDS: Record<PlacementResponse["preparedActions"][number]["state"], { label: string; tone: SpaceTone }> = {
   prepared: { label: "Waiting for you to confirm", tone: "attention" },
   executed: { label: "Done", tone: "done" },
@@ -172,7 +179,8 @@ function open(label: string, to: SpaceRef): SpaceFrameAction {
  * business fact. Every value it collects goes to the server as a typed action, and nothing is
  * recorded until the server says so.
  */
-export type PlacementDraft = "submission" | "response" | "acceptance" | null;
+/** `condition:<id>:satisfied|waived` opens the form to resolve one client condition. */
+export type PlacementDraft = "submission" | "response" | "acceptance" | `condition:${string}:${"satisfied" | "waived"}` | null;
 
 export function placementSpace(
   data: PlacementResponse | undefined,
@@ -523,19 +531,38 @@ export function placementSpace(
       evidence: [],
       actions: [],
       state: "ready",
-      stateNote: m.current
-        ? `Compared ${day(m.comparedAt)} by ${m.comparedByName ?? "ASAP, on recording the confirmation"}, against version ${m.basisVersion} of what the client accepted.`
-        : `${m.staleReason ?? "An input moved."} Run the check again before relying on it.`,
+      stateNote: null,
       columns: [{ label: "Term" }, { label: "Client accepted" }, { label: `${d.insurer.name} confirmed` }, { label: "Result" }],
-      rows: shown.slice(0, 50).map((x) => ({
+      rows: [
+        {
+          id: "checked",
+          cells: m.current
+            ? [
+                { value: "Checked", tone: "neutral" as SpaceTone },
+                { value: `Version ${m.basisVersion} of what the client accepted`, tone: "neutral" as SpaceTone },
+                { value: `${d.insurer.name}'s live answer`, tone: "neutral" as SpaceTone },
+                { value: `${day(m.comparedAt)} · ${m.comparedByName ?? "by ASAP, on recording the confirmation"}`, tone: "neutral" as SpaceTone },
+              ]
+            : [
+                { value: "Out of date", tone: "attention" as SpaceTone },
+                { value: m.staleReason ?? "An input moved.", tone: "attention" as SpaceTone },
+                { value: "Run the check again before relying on it.", tone: "attention" as SpaceTone },
+                { value: day(m.comparedAt), tone: "neutral" as SpaceTone },
+              ],
+        },
+        ...shown.slice(0, 49).map((x) => ({
         id: x.id,
         cells: [
           { value: x.label, tone: "neutral" as SpaceTone },
-          { value: x.acceptedValue ?? "Not stated", tone: "neutral" as SpaceTone },
-          { value: x.confirmedValue ?? "Not stated", tone: "neutral" as SpaceTone },
-          { value: `${MATCH_WORDS[x.classification].label}${x.material ? "" : x.classification === "match" ? "" : " (not material)"}`, tone: MATCH_WORDS[x.classification].tone },
+          { value: x.field === "effective_at" || x.field === "expiry_at" ? (x.acceptedValue === null ? "Not stated" : day(x.acceptedValue)) : (x.acceptedValue ?? "Not stated"), tone: "neutral" as SpaceTone },
+          { value: x.field === "effective_at" || x.field === "expiry_at" ? (x.confirmedValue === null ? "Not stated" : day(x.confirmedValue)) : (x.confirmedValue ?? "Not stated"), tone: "neutral" as SpaceTone },
+          {
+            value: `${MATCH_WORDS[x.classification].label}${x.material ? "" : x.classification === "match" ? "" : " (not material)"}${x.calculation === null ? "" : ` — ${x.calculation}`}`.slice(0, 400),
+            tone: MATCH_WORDS[x.classification].tone,
+          },
         ],
       })),
+      ],
     });
   }
 
@@ -581,6 +608,97 @@ export function placementSpace(
     });
   }
 
+  /* ---- The client's own conditions: resolved one by one, never "accepted" again -------------- */
+
+  const insurerConfirmed = d.insurerResponse !== null && d.insurerResponse.outcome.startsWith("confirmed");
+  if (d.conditions.length > 0) {
+    const open = d.conditions.filter((c) => c.state === "unresolved").length;
+    blocks.push({
+      id: "conditions",
+      type: "rows",
+      label: open === 0 ? "THE CLIENT'S CONDITIONS — ALL RESOLVED" : `THE CLIENT'S CONDITIONS — ${open} UNRESOLVED`,
+      evidence: [],
+      actions: [],
+      state: "ready",
+      stateNote: null,
+      rows: [
+        row(
+          "conditions-rule",
+          d.cover.state === "active" && open > 0
+            ? "Cover is in force on the insurer's terms. Policy issuance waits until every condition is resolved."
+            : "Each condition is confirmed by the insurer, satisfied with evidence, or waived by the client.",
+          "The client is never asked to accept their own condition again. An unresolved condition blocks policy issuance.",
+        ),
+        ...d.conditions.slice(0, 20).map((c) => {
+        const w = CONDITION_WORDS[c.state];
+        const cannotEdit = d.permissions.canPrepare ? null : "You may not resolve a client condition.";
+        return row(
+          `condition-${c.id}`,
+          c.text,
+          c.state === "unresolved"
+            ? "Not confirmed by the insurer, not shown to be satisfied, and not waived."
+            : [
+                c.state === "confirmed_by_insurer" ? "In the insurer's live confirmation" : null,
+                c.reason === null ? null : `Why: ${c.reason}`,
+                c.evidence === null || c.state === "confirmed_by_insurer" ? null : `Evidence: ${c.evidence.label}`,
+                `${c.resolvedByName ?? "A colleague"} · ${day(c.resolvedAt)}`,
+                c.state === "waived" ? "Recorded as a new version of the client's instruction; the accepted one is kept." : null,
+              ].filter((v): v is string => v !== null).join(" · "),
+          {
+            badge: w.label,
+            badgeTone: w.tone,
+            actions: c.state === "unresolved"
+              ? [
+                  ...(insurerConfirmed ? [act("Confirmed by the insurer", `condition-insurer:${c.id}`, "record_evidence", null, cannotEdit)] : []),
+                  act("Record it satisfied", `condition:${c.id}:satisfied`, "record_evidence", null, cannotEdit),
+                  act("Record the client's waiver", `condition:${c.id}:waived`, "record_evidence", null, d.permissions.canRecordInstruction ? null : "You may not record a client's waiver."),
+                ]
+              : [],
+          },
+        );
+      }),
+      ],
+    });
+  }
+
+  if (drafting !== null && drafting.startsWith("condition:")) {
+    const [, conditionId, mode] = drafting.split(":");
+    const c = d.conditions.find((x) => x.id === conditionId);
+    if (c !== undefined && c.state === "unresolved") {
+      blocks.push({
+        id: "condition-form",
+        type: "form",
+        label: mode === "waived" ? "RECORD THE CLIENT'S WAIVER" : "RECORD THAT THE CONDITION WAS SATISFIED",
+        evidence: [],
+        state: "ready",
+        stateNote: null,
+        submitLabel: mode === "waived" ? "Record the waiver" : "Record it satisfied",
+        busy: state.busy,
+        actions: [act(mode === "waived" ? "Record the waiver" : "Record it satisfied", `condition-form:${c.id}:${mode}`, "record_evidence")],
+        fields: [
+          ...(mode === "waived"
+            ? [{
+                name: "source", label: "How the waiver arrived", kind: "select" as const, value: "email", placeholder: "", required: true, hint: "", error: null,
+                options: [
+                  { value: "email", label: "By email" }, { value: "document", label: "In a document" }, { value: "telephone", label: "By telephone" },
+                  { value: "meeting", label: "At a meeting" }, { value: "signed_acceptance", label: "By signed acceptance" }, { value: "in_person", label: "In person" },
+                ],
+              }]
+            : []),
+          { name: "resolvedAt", label: "When", kind: "date" as const, value: "", placeholder: "", required: true, hint: "", error: null, options: [] },
+          {
+            name: "reason", label: mode === "waived" ? "Why the client withdrew it" : "What satisfied it", kind: "textarea" as const, value: "", placeholder: "", required: true,
+            hint: (mode === "waived"
+              ? `"${c.text}" — a waiver changes what the client instructed, so it is recorded as a new instruction version. The accepted one is kept as it was.`
+              : `"${c.text}"`).slice(0, 300),
+            error: null, options: [],
+          },
+          { name: "evidenceNote", label: "What shows it", kind: "textarea" as const, value: "", placeholder: "", required: true, hint: "Who said or did what, when, and where the record is.", error: null, options: [] },
+        ],
+      });
+    }
+  }
+
   /* ---- Whether policy issuance may begin ---------------------------------------------------- */
 
   const rd = d.readiness;
@@ -622,7 +740,9 @@ export function placementSpace(
             ...pa.changes.map((c) => `Will change: ${c}`),
             ...pa.blockers.map((b) => `Blocked: ${b}`),
             pa.receipt === null ? null : `Receipt: ${pa.receipt.message} (${day(pa.receipt.at)}${pa.receipt.by === null ? "" : `, ${pa.receipt.by}`})`,
-            live ? `Prepared by ${pa.preparedByName ?? "Ask"} · valid until ${day(pa.expiresAt)}` : null,
+            live ? (pa.permitted ? "You may do this." : "You may not do this; someone with the permission must confirm it.") : null,
+            live ? `Prepared by ${pa.preparedByName ?? "Ask"} · expires ${new Date(pa.expiresAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : null,
+            live ? "Nothing is recorded until you confirm it." : null,
           ].filter((v): v is string => v !== null).join(" · "),
           {
             badge: st.label,

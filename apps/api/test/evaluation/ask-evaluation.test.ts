@@ -20,6 +20,7 @@ import { fakeProvider, type FakeScript } from "../../src/ai/providers/fake.js";
 import { createApp } from "../../src/app.js";
 import type { Mailer } from "../../src/mail/index.js";
 import { fakeFactory, type FakeDb } from "../_fake-supabase.js";
+import { AMINA as P_AMINA, INS_A, OPP, makeDb as makePlacementDb } from "../_placement-fixture.js";
 import {
   ASK_EVALUATION,
   EVAL_CLAIM,
@@ -357,4 +358,132 @@ describe(`Ask evaluation set (${live ? "configured provider" : "deterministic pr
       expect(body.message?.body ?? "").not.toMatch(/<[a-z/]/i);
     });
   }
+});
+
+/* =============================================================================================
+ * Placement actions through Ask (4B-4B).
+ *
+ * The deterministic provider plays a competent model that uses `prepare_placement_action`. What is
+ * evaluated is everything around it: the tool prepares and never executes; names that match no
+ * record are answered with a question, not a guess; a proposal that went stale or expired is
+ * refused on confirmation; confirmation runs once and replays its receipt; and nothing claims an
+ * action happened before a receipt exists. The live-model run of these cases is deferred until a
+ * provider is configured.
+ * ============================================================================================= */
+
+
+const FALSE_SUCCESS = [/\bhas been (recorded|placed|approved|sent|confirmed)\b/i, /\bI (have )?(recorded|approved|sent|placed)\b/i, /\bdone\b/i];
+const PLACEMENT_WRITES = ["client_instructions", "placements", "placement_requests", "placement_request_approvals", "placement_submissions", "placement_insurer_responses", "client_change_acceptances", "client_condition_resolutions", "policies"];
+
+const answer = (text: string) => JSON.stringify({ type: "answer", target: null, panel: null, view: "summary", answer: text, suggestions: [] });
+const preparing = (args: Record<string, unknown>, text: string) => ({
+  reply: { text: "", toolCalls: [{ id: "p1", name: "prepare_placement_action", arguments: args }], stop: "tool_use" as const },
+  then: { text: answer(text), toolCalls: [], stop: "end" as const },
+});
+
+const INSTRUCTION_FACTS = {
+  source: "telephone",
+  evidenceNote: "Client rang at 10:40 on 7 September and chose Jubilee on the terms shown.",
+  instructedAt: "2026-09-07T10:40:00.000Z",
+  requestedEffectiveAt: "2026-10-01T00:00:00.000Z",
+};
+
+const PLACEMENT_SCRIPT: FakeScript = [
+  { match: /chose Jubilee/i, ...preparing({ actionType: "record_instruction", opportunityId: OPP, insurerName: "Jubilee", params: INSTRUCTION_FACTS }, "I have prepared the client's instruction for Jubilee. It waits for you to confirm; nothing is recorded until you do.") },
+  { match: /chose Madison/i, ...preparing({ actionType: "record_instruction", opportunityId: OPP, insurerName: "Madison", params: INSTRUCTION_FACTS }, "Madison is not one of the quotes the client was shown. Which insurer did they choose?") },
+  { match: /client said yes/i, ...preparing({ actionType: "record_instruction", opportunityId: OPP }, "Which insurer did the client choose?") },
+];
+
+describe("Ask evaluation — placement actions (deterministic provider)", () => {
+  let db: FakeDb;
+  let app: ReturnType<typeof createApp>;
+  beforeEach(() => {
+    db = makePlacementDb();
+    db.tables["conversations"] = [];
+    db.tables["conversation_messages"] = [];
+    app = createApp({
+      logger, build: { version: "eval", commit: "eval" }, supabase: fakeFactory(db), mailer: silentMailer,
+      webBaseUrl: "http://localhost:5173", invitationTtlHours: 168, exposeAcceptUrl: true,
+      executor: () => async () => {}, bootToken: "eval", aiProvider: fakeProvider(PLACEMENT_SCRIPT),
+    });
+  });
+
+  const ask = async (question: string) => {
+    const res = await app.request("/ask", {
+      method: "POST",
+      headers: { Authorization: "Bearer tok-amina", "Content-Type": "application/json" },
+      body: JSON.stringify({ question, scope: { kind: "opportunity", id: OPP } }),
+    });
+    expect(res.status).toBe(200);
+    // Test-only: asserted field by field against the contract.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (await res.json()) as any;
+  };
+  const post = async (path: string) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (await (await app.request(path, { method: "POST", headers: { Authorization: "Bearer tok-amina", "Content-Type": "application/json" }, body: "{}" })).json()) as any;
+  const noBusinessWrites = () => {
+    for (const t of PLACEMENT_WRITES) expect(db.inserts.filter((i) => i.table === t)).toEqual([]);
+  };
+  const noFalseSuccess = (text: string) => {
+    for (const re of FALSE_SUCCESS) expect(text).not.toMatch(re);
+  };
+
+  it("prepares without executing: one prepared action, no business record, no claim it happened", async () => {
+    const body = await ask("The client chose Jubilee on the phone this morning.");
+    expect(body.state).toBe("answered");
+    expect(body.message.tools_used.map((t: { name: string }) => t.name)).toEqual(["prepare_placement_action"]);
+    expect(db.tables["prepared_actions"]).toHaveLength(1);
+    expect(db.tables["prepared_actions"]![0]).toMatchObject({ state: "prepared", prepared_by: P_AMINA.id, action_type: "record_instruction" });
+    noBusinessWrites();
+    noFalseSuccess(body.message.body);
+  });
+
+  it("refuses an invented insurer: nothing is prepared, and the answer is a question", async () => {
+    const body = await ask("The client chose Madison.");
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
+    noBusinessWrites();
+    expect(body.message.body).toMatch(/\?/);
+    noFalseSuccess(body.message.body);
+  });
+
+  it("a missing fact is one short question, never a default", async () => {
+    const body = await ask("The client said yes.");
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
+    noBusinessWrites();
+    expect(body.message.body).toMatch(/Which insurer/);
+  });
+
+  it("successful confirmation writes the record once, with a receipt; replay returns the same receipt", async () => {
+    await ask("The client chose Jubilee on the phone this morning.");
+    const id = db.tables["prepared_actions"]![0]!["id"] as string;
+    const first = await post(`/prepared-actions/${id}/confirm`);
+    expect(first.outcome).toBe("done");
+    expect(first.action.receipt.message).toMatch(/Record that the client chose Jubilee/);
+    const replay = await post(`/prepared-actions/${id}/confirm`);
+    expect(replay.outcome).toBe("already");
+    expect(replay.action.receipt).toEqual(first.action.receipt);
+    expect(db.tables["client_instructions"]).toHaveLength(1);
+    expect(db.tables["placements"]).toHaveLength(1);
+    expect(db.tables["client_instructions"]![0]).toMatchObject({ insurer_response_id: expect.any(String) });
+    expect(db.tables["opportunity_insurers"]!.find((o) => o["insurer_id"] === INS_A)).toBeDefined();
+  });
+
+  it("a proposal that went stale is refused on confirmation, and records nothing", async () => {
+    await ask("The client chose Jubilee on the phone this morning.");
+    const id = db.tables["prepared_actions"]![0]!["id"] as string;
+    db.tables["quote_comparisons"]![0]!["presented_at"] = null; // the comparison it rested on moved
+    const res = await post(`/prepared-actions/${id}/confirm`);
+    expect(res).toMatchObject({ outcome: "refused", action: { state: "stale" } });
+    noBusinessWrites();
+  });
+
+  it("an expired proposal is refused on confirmation, and records nothing", async () => {
+    await ask("The client chose Jubilee on the phone this morning.");
+    const row = db.tables["prepared_actions"]![0]!;
+    row["expires_at"] = "2020-01-01T00:00:00.000Z";
+    const res = await post(`/prepared-actions/${row["id"] as string}/confirm`);
+    expect(res).toMatchObject({ outcome: "refused", action: { state: "expired" } });
+    noBusinessWrites();
+  });
 });

@@ -60,6 +60,14 @@ const STATES = [
   { name: "placement-changes-rejected", url: `${HARNESS}?at=${PLACEMENT}&stage=rejected` },
   { name: "placement-changes-accepted-ready", url: `${HARNESS}?at=${PLACEMENT}&stage=accepted` },
   { name: "placement-ask-prepared", url: `${HARNESS}?at=${PLACEMENT}&stage=prepared` },
+  /* 4B-4B: client conditions, the end date, partial answers, stale proposals and receipts. */
+  { name: "placement-condition-unresolved", url: `${HARNESS}?at=${PLACEMENT}&stage=condition-unresolved` },
+  { name: "placement-condition-satisfied", url: `${HARNESS}?at=${PLACEMENT}&stage=condition-satisfied` },
+  { name: "placement-condition-waived", url: `${HARNESS}?at=${PLACEMENT}&stage=condition-waived` },
+  { name: "placement-end-date-added", url: `${HARNESS}?at=${PLACEMENT}&stage=end-date-added` },
+  { name: "placement-partial-acceptance", url: `${HARNESS}?at=${PLACEMENT}&stage=partial` },
+  { name: "placement-prepared-stale", url: `${HARNESS}?at=${PLACEMENT}&stage=prepared-stale` },
+  { name: "placement-receipt", url: `${HARNESS}?at=${PLACEMENT}&stage=receipt` },
 ];
 
 const outDir = resolve(".local-visual/shots/quotation");

@@ -9,12 +9,13 @@ import {
   type QuoteTermType,
   type RecordInstructionRequest,
 } from "@asap/schema";
+import { pgMoney } from "../numeric.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditEntry } from "../audit.js";
 import { hasPermission, type resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError } from "../errors.js";
 import { loadComparisonView, responseDigest } from "../routes/comparisons.js";
-import { summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "./cover-match.js";
+import { endOfPeriod, summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "./cover-match.js";
 import {
   REASON_COPY,
   syncPlacementWork,
@@ -201,6 +202,11 @@ export async function executeRecordInstruction(
   }
 
   const now = new Date().toISOString();
+  /* The client's conditions, one each: given as a list, or one per non-empty line of the text. */
+  const conditionTexts = (input.conditions ?? (input.clientConditions ?? "").split("\n"))
+    .map((c) => c.trim())
+    .filter((c) => c.length >= 3);
+  const conditionsText = conditionTexts.length === 0 ? (input.clientConditions ?? null) : conditionTexts.join("\n");
   if (live !== null) {
     const reason =
       live.insurer_response_id === response.id
@@ -256,7 +262,9 @@ export async function executeRecordInstruction(
       evidence_email_message_id: input.evidenceEmailMessageId ?? null,
       evidence_document_id: input.evidenceDocumentId ?? null,
       evidence_note: input.evidenceNote ?? null,
-      client_conditions: input.clientConditions ?? null,
+      client_conditions: conditionsText,
+      requested_period_months: input.requestedPeriod?.months ?? null,
+      requested_period_days: input.requestedPeriod?.days ?? null,
       instructed_at: input.instructedAt,
       recorded_by: env.userId,
       outside_comparison: input.outsideComparison !== undefined,
@@ -301,7 +309,7 @@ export async function executeRecordInstruction(
       basis_valid_until: response.valid_until,
       basis_sha256: responseDigest({
         outcome: response.outcome,
-        premiumAmount: response.premium_amount,
+        premiumAmount: pgMoney(response.premium_amount),
         premiumCurrency: response.premium_currency,
         validUntil: response.valid_until,
       }),
@@ -328,7 +336,9 @@ export async function executeRecordInstruction(
       premium_amount: response.premium_amount,
       premium_currency: response.premium_currency,
       premium_basis: null,
-      client_conditions: input.clientConditions ?? null,
+      client_conditions: conditionsText,
+      period_months: input.requestedPeriod?.months ?? null,
+      period_days: input.requestedPeriod?.days ?? null,
       origin: "instruction",
       created_by: env.userId,
     })
@@ -356,9 +366,20 @@ export async function executeRecordInstruction(
       term_type: r["term_type"],
       label: r["label"],
       value: (r["corrected_value"] as string | null) ?? (r["extracted_value"] as string | null),
-      amount: r["amount"],
+      amount: pgMoney(r["amount"]),
       currency: r["currency"],
       unclear: Boolean(r["unclear"]),
+    });
+  }
+
+  for (const [position, text] of conditionTexts.entries()) {
+    await db.from("placement_client_conditions").insert({
+      organization_id: org,
+      placement_id: placementId,
+      client_instruction_id: instructionId,
+      position,
+      condition_text: text,
+      created_by: env.userId,
     });
   }
 
@@ -572,7 +593,7 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
         return blocked("Say what the insurer changed. A confirmation on different terms is not a confirmation of what the client asked for.");
       }
       if (input.outcome === "confirmed_with_changes" && (input.termChanges?.length ?? 0) === 0 &&
-          input.confirmedPremiumAmount === undefined && input.effectiveAt === view.basis.effectiveAt) {
+          input.confirmedPremiumAmount === undefined && input.effectiveAt === view.basis.effectiveAt && (input.expiryAt ?? null) === view.basis.expiryAt) {
         return blocked("List what changed — each term, the premium or the dates — so it can be checked against what the client accepted.");
       }
       if (input.outcome === "more_information_required" && (input.informationRequired ?? "").trim().length < 5) return blocked("Say what the insurer needs.");
@@ -599,7 +620,15 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
           outcome: input.outcome,
           received_at: input.receivedAt,
           effective_at: input.effectiveAt ?? null,
-          expiry_at: input.expiryAt ?? (confirmed ? b.expiryAt : null),
+          /*
+           * "As requested" with no end date stated is the end the client accepted: an accepted
+           * date, or one derived exactly from an accepted period. Never an assumed term.
+           */
+          expiry_at:
+            input.expiryAt ??
+            (input.outcome === "confirmed_as_requested"
+              ? (b.expiryAt ?? (b.effectiveAt !== null && (b.periodMonths ?? 0) + (b.periodDays ?? 0) > 0 ? endOfPeriod(b.effectiveAt, b.periodMonths ?? 0, b.periodDays ?? 0) : null))
+              : null),
           insurer_reference: input.insurerReference ?? null,
           changes_note: input.changesNote ?? null,
           information_required: input.informationRequired ?? null,
@@ -640,6 +669,19 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
           });
         }
         await runCoverMatch(env, placementId, null);
+        /* The conditions this answer confirms. Any it does not name stay to be resolved. */
+        for (const conditionId of new Set(input.conditionsConfirmed ?? [])) {
+          if (!view.conditions.some((c) => c.id === conditionId)) continue;
+          await db.from("client_condition_resolutions").insert({
+            organization_id: org,
+            placement_id: placementId,
+            condition_id: conditionId,
+            resolution: "confirmed_by_insurer",
+            placement_insurer_response_id: responseId,
+            resolved_at: input.receivedAt,
+            recorded_by: env.userId,
+          });
+        }
       }
 
       await env.audit({
@@ -695,6 +737,9 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
       return done();
     }
 
+    case "resolve_client_condition":
+      return resolveClientCondition(env, view, input);
+
     case "prepare_issuance": {
       if (!hasPermission(ctx, "placement", "edit")) return blocked("You may not prepare policy issuance.");
       if (view.readiness.state !== "ready") {
@@ -749,6 +794,8 @@ async function runCoverMatch(env: Env, placementId: string, comparedBy: string |
     premiumBasis: basis.premiumBasis,
     clientConditions: basis.clientConditions,
     outstandingRequirements: null,
+    periodMonths: basis.periodMonths,
+    periodDays: basis.periodDays,
     terms: basis.terms,
   };
   const confirmationSide: ConfirmationSide = {
@@ -757,14 +804,14 @@ async function runCoverMatch(env: Env, placementId: string, comparedBy: string |
     subject: (response["confirmed_subject"] as string | null) ?? null,
     effectiveAt: (response["effective_at"] as string | null) ?? null,
     expiryAt: (response["expiry_at"] as string | null) ?? null,
-    premiumAmount: (response["confirmed_premium_amount"] as string | null) ?? null,
+    premiumAmount: pgMoney(response["confirmed_premium_amount"]),
     premiumCurrency: (response["confirmed_premium_currency"] as string | null) ?? null,
     premiumBasis: (response["confirmed_premium_basis"] as string | null) ?? null,
     terms: ((termsQ.data ?? []) as Record<string, unknown>[]).map((t) => ({
       termType: t["term_type"] as string,
       label: t["label"] as string,
       value: (t["value"] as string | null) ?? null,
-      amount: (t["amount"] as string | null) ?? null,
+      amount: pgMoney(t["amount"]),
       currency: (t["currency"] as string | null) ?? null,
       unclear: Boolean(t["unclear"]),
     })),
@@ -798,6 +845,7 @@ async function runCoverMatch(env: Env, placementId: string, comparedBy: string |
       confirmed_value: item.confirmedValue,
       classification: item.classification,
       material: item.material,
+      calculation: item.calculation,
       position,
     });
   }
@@ -829,7 +877,8 @@ async function recordClientAcceptance(
   if (match === null || match.id !== input.coverMatchId) return blocked("That is not the current cover check. Decide against the one on screen.");
   if (!match.current) return blocked(`That cover check is out of date: ${match.staleReason ?? "an input moved."} Run it again first.`);
   if (match.materialDifferences === 0) return blocked("There is nothing to accept: the confirmation matches what the client agreed.");
-  if (view.changeAcceptance !== null) return done("already");
+  const decided = await db.from("client_change_acceptances").select("id").eq("organization_id", org).eq("cover_match_result_id", match.id).maybeSingle();
+  if (decided.data) return done("already");
 
   if (input.evidenceEmailMessageId === undefined && input.evidenceDocumentId === undefined && (input.evidenceNote ?? "").trim().length < 10) {
     return blocked("Say how the client's decision arrived: link the email, attach the document, or write down who said what and when.");
@@ -998,6 +1047,8 @@ type Basis = {
   premiumCurrency: string | null;
   premiumBasis: string | null;
   clientConditions: string | null;
+  periodMonths: number | null;
+  periodDays: number | null;
   terms: { termType: QuoteTermType; label: string; value: string | null; amount: string | null; currency: string | null; unclear: boolean }[];
 };
 
@@ -1026,15 +1077,17 @@ async function currentBasis(db: SupabaseClient, org: string, placementId: string
     subject: (v["subject"] as string | null) ?? null,
     effectiveAt: (v["effective_at"] as string | null) ?? null,
     expiryAt: (v["expiry_at"] as string | null) ?? null,
-    premiumAmount: (v["premium_amount"] as string | null) ?? null,
+    premiumAmount: pgMoney(v["premium_amount"]),
     premiumCurrency: (v["premium_currency"] as string | null) ?? null,
     premiumBasis: (v["premium_basis"] as string | null) ?? null,
     clientConditions: (v["client_conditions"] as string | null) ?? null,
+    periodMonths: (v["period_months"] as number | null) ?? null,
+    periodDays: (v["period_days"] as number | null) ?? null,
     terms: ((terms.data ?? []) as Record<string, unknown>[]).map((t) => ({
       termType: t["term_type"] as QuoteTermType,
       label: t["label"] as string,
       value: (t["value"] as string | null) ?? null,
-      amount: (t["amount"] as string | null) ?? null,
+      amount: pgMoney(t["amount"]),
       currency: (t["currency"] as string | null) ?? null,
       unclear: Boolean(t["unclear"]),
     })),
@@ -1135,10 +1188,20 @@ export async function load(
   const acceptanceQ = match === null
     ? { data: null }
     : await db.from("client_change_acceptances").select("*").eq("organization_id", org).eq("cover_match_result_id", match["id"] as string).maybeSingle();
-  const acceptance = acceptanceQ.data as Record<string, unknown> | null;
+  /*
+   * The decision on this check — or, once a full acceptance produced the current accepted
+   * version and the cover was checked again, the acceptance that produced it. It stays visible.
+   */
+  const acceptance =
+    (acceptanceQ.data as Record<string, unknown> | null) ??
+    (((await db.from("client_change_acceptances").select("*").eq("organization_id", org).eq("placement_id", id).eq("new_basis_version_id", basis.id).maybeSingle()).data as Record<string, unknown> | null) ?? null);
   const acceptanceItems = acceptance === null
     ? []
     : (((await db.from("client_change_acceptance_items").select("*").eq("organization_id", org).eq("client_change_acceptance_id", acceptance["id"] as string)).data ?? []) as Record<string, unknown>[]);
+  /* The items a decision was about, from the check it was made on — which may be an earlier one. */
+  const decidedItems = acceptanceItems.length === 0
+    ? []
+    : (((await db.from("cover_match_items").select("id, label").eq("organization_id", org).in("id", acceptanceItems.map((ai) => ai["cover_match_item_id"] as string))).data ?? []) as Record<string, unknown>[]);
 
   const people = await names(db, [
     ...instructions.map((i) => i["recorded_by"] as string),
@@ -1203,6 +1266,7 @@ export async function load(
           confirmedValue: (it["confirmed_value"] as string | null) ?? null,
           classification: it["classification"] as NonNullable<PlacementResponse["coverMatch"]>["items"][number]["classification"],
           material: Boolean(it["material"]),
+          calculation: (it["calculation"] as string | null) ?? null,
         })),
       };
 
@@ -1215,10 +1279,10 @@ export async function load(
         evidence: evidence(acceptance, "Recorded by a person."),
         recordedByName: people.get(acceptance["recorded_by"] as string) ?? null,
         items: acceptanceItems.map((ai) => ({
-          label: (matchItems.find((mi) => mi["id"] === ai["cover_match_item_id"])?.["label"] as string | undefined) ?? "A term",
+          label: (decidedItems.find((mi) => mi["id"] === ai["cover_match_item_id"])?.["label"] as string | undefined) ?? "A term",
           decision: ai["decision"] as "accepted" | "rejected" | "clarify",
         })),
-        followUpDraft: followUpDraft(acceptance["decision"] as string, insurer.name, client.name, acceptanceItems, matchItems),
+        followUpDraft: followUpDraft(acceptance["decision"] as string, insurer.name, client.name, acceptanceItems, decidedItems),
       };
 
   const view: PlacementResponse = {
@@ -1239,6 +1303,8 @@ export async function load(
       expiryAt: basis.expiryAt,
       premiumBasis: basis.premiumBasis,
       clientConditions: basis.clientConditions,
+      periodMonths: basis.periodMonths,
+      periodDays: basis.periodDays,
       premiumAmount: basis.premiumAmount,
       premiumCurrency: basis.premiumCurrency,
       validUntil: (p["basis_valid_until"] as string | null) ?? null,
@@ -1286,7 +1352,7 @@ export async function load(
         : {
             id: response["id"] as string,
             outcome: response["outcome"] as NonNullable<PlacementResponse["insurerResponse"]>["outcome"],
-            confirmedPremiumAmount: (response["confirmed_premium_amount"] as string | null) ?? null,
+            confirmedPremiumAmount: pgMoney(response["confirmed_premium_amount"]),
             confirmedPremiumCurrency: (response["confirmed_premium_currency"] as string | null) ?? null,
             confirmedPremiumBasis: (response["confirmed_premium_basis"] as string | null) ?? null,
             confirmedSubject: (response["confirmed_subject"] as string | null) ?? null,
@@ -1295,7 +1361,7 @@ export async function load(
               termType: t["term_type"] as QuoteTermType,
               label: t["label"] as string,
               value: (t["value"] as string | null) ?? null,
-              amount: (t["amount"] as string | null) ?? null,
+              amount: pgMoney(t["amount"]),
               currency: (t["currency"] as string | null) ?? null,
               unclear: Boolean(t["unclear"]),
             })),
@@ -1324,6 +1390,7 @@ export async function load(
     sending: { available: false, reason: SENDING_REASON },
     coverMatch,
     changeAcceptance,
+    conditions: await conditionsOf(db, org, id, response === null ? null : (response["id"] as string)),
     readiness: { state: "blocked", reasons: [], deferredChecks: [], workItemId: null },
     preparedActions: await preparedFor(db, org, id, people),
   };
@@ -1385,12 +1452,14 @@ export function desiredWork(view: PlacementResponse): WorkTarget | null {
 
   const m = view.coverMatch;
   if (m === null || !m.current) return at("verify_cover_match");
-  if (m.materialDifferences === 0) return at("issue_policy");
+  const unresolved = view.conditions.some((c) => c.state === "unresolved");
+  if (m.materialDifferences === 0) return at(unresolved ? "resolve_client_conditions" : "issue_policy");
   const a = view.changeAcceptance;
   if (a === null) return at("review_changed_terms");
   if (a.decision === "partial") return at("clarify_changes");
   if (a.decision === "reject") return at("resolve_rejected_changes");
-  return at("verify_cover_match");
+  /* A full acceptance that still leaves a difference means the insurer's answer moved again. */
+  return at("review_changed_terms");
 }
 
 /**
@@ -1423,9 +1492,18 @@ export function readinessOf(view: PlacementResponse): PlacementResponse["readine
             ? `The confirmed terms differ from what the client accepted in ${m.materialDifferences} ${m.materialDifferences === 1 ? "place" : "places"}, and the client has not accepted them.`
             : a.decision === "reject"
               ? "The client rejected the insurer's changes."
-              : "The client accepted only some of the insurer's changes.",
+              : a.decision === "partial"
+                ? "The client accepted only some of the insurer's changes."
+                : "The confirmation still differs from what the client accepted, even after the client's acceptance.",
       });
     }
+  }
+  const open = view.conditions.filter((c) => c.state === "unresolved");
+  if (open.length > 0) {
+    reasons.push({
+      code: "condition_unresolved",
+      message: `The client's ${open.length === 1 ? "condition is" : "conditions are"} not resolved: ${open.map((c) => c.text).join("; ")}. Each must be confirmed by the insurer, satisfied with evidence, or waived by the client.`.slice(0, 400),
+    });
   }
   if (!view.permissions.canPrepare) reasons.push({ code: "not_permitted", message: "You may not prepare policy issuance." });
 
@@ -1491,10 +1569,12 @@ function legacyBasis(p: Record<string, unknown>): Basis {
     subject: null,
     effectiveAt: p["requested_effective_at"] as string,
     expiryAt: (p["requested_expiry_at"] as string | null) ?? null,
-    premiumAmount: (p["basis_premium_amount"] as string | null) ?? null,
+    premiumAmount: pgMoney(p["basis_premium_amount"]),
     premiumCurrency: (p["basis_premium_currency"] as string | null) ?? null,
     premiumBasis: null,
     clientConditions: null,
+    periodMonths: null,
+    periodDays: null,
     terms: [],
   };
 }
@@ -1555,8 +1635,151 @@ export function fingerprintOf(view: PlacementResponse): { versions: Record<strin
     acceptance: view.changeAcceptance?.decidedAt ?? null,
     cancelled: view.cancellation?.cancelledAt ?? null,
     quoteDrift: view.drift.stale,
+    conditions: view.conditions.map((c) => `${c.id}:${c.state}`),
   };
   return { versions, fingerprint: createHash("sha256").update(JSON.stringify(versions)).digest("hex") };
+}
+
+/* =============================================================================================
+ * Client conditions.
+ * ============================================================================================= */
+
+/**
+ * Each condition and where it stands. A waiver or a satisfied condition is final; a condition the
+ * insurer confirmed is confirmed only while that answer is the live one — a later answer that
+ * does not repeat it puts it back to unresolved.
+ */
+async function conditionsOf(db: SupabaseClient, org: string, placementId: string, liveResponseId: string | null): Promise<PlacementResponse["conditions"]> {
+  const [condQ, resQ] = await Promise.all([
+    db.from("placement_client_conditions").select("id, position, condition_text").eq("organization_id", org).eq("placement_id", placementId).order("position", { ascending: true }),
+    db.from("client_condition_resolutions").select("*").eq("organization_id", org).eq("placement_id", placementId),
+  ]);
+  const resolutions = (resQ.data ?? []) as Record<string, unknown>[];
+  const people = await names(db, resolutions.map((r) => r["recorded_by"] as string));
+  return ((condQ.data ?? []) as { id: string; position: number; condition_text: string }[]).map((c) => {
+    const mine = resolutions.filter((r) => r["condition_id"] === c.id);
+    const final = mine.find((r) => r["resolution"] === "waived") ?? mine.find((r) => r["resolution"] === "satisfied");
+    const confirmed = mine.find((r) => r["resolution"] === "confirmed_by_insurer" && r["placement_insurer_response_id"] === liveResponseId);
+    const r = final ?? confirmed ?? null;
+    return {
+      id: c.id,
+      position: c.position,
+      text: c.condition_text,
+      state: r === null ? "unresolved" : (r["resolution"] as "confirmed_by_insurer" | "satisfied" | "waived"),
+      resolvedAt: r === null ? null : (r["resolved_at"] as string),
+      resolvedByName: r === null ? null : (people.get(r["recorded_by"] as string) ?? null),
+      reason: r === null ? null : ((r["reason"] as string | null) ?? null),
+      evidence: r === null ? null : r["resolution"] === "confirmed_by_insurer" ? { kind: "note", id: null, label: "In the insurer's live confirmation.", path: null } : evidence(r, "Recorded by a person."),
+      newInstructionId: r === null ? null : ((r["new_client_instruction_id"] as string | null) ?? null),
+    };
+  });
+}
+
+async function resolveClientCondition(
+  env: Env,
+  view: PlacementResponse,
+  input: Extract<PlacementAction, { action: "resolve_client_condition" }>,
+): Promise<Outcome> {
+  const { db, ctx } = env;
+  const org = env.organizationId;
+  const placementId = view.placement.id;
+  if (!hasPermission(ctx, "placement", input.resolution === "waived" ? "create" : "edit")) {
+    return blocked(input.resolution === "waived" ? "You may not record a client's waiver." : "You may not resolve a client condition.");
+  }
+  const condition = view.conditions.find((c) => c.id === input.conditionId);
+  if (condition === undefined) return blocked("That condition is not one of this placement's.");
+  if (condition.state === input.resolution) return done("already");
+  if (condition.state === "satisfied" || condition.state === "waived") {
+    return blocked(`That condition is already ${condition.state === "waived" ? "waived" : "satisfied"}.`);
+  }
+
+  const hasEvidence = input.evidenceEmailMessageId !== undefined || input.evidenceDocumentId !== undefined || (input.evidenceNote ?? "").trim().length >= 10;
+
+  if (input.resolution === "confirmed_by_insurer") {
+    const ir = view.insurerResponse;
+    if (ir === null || !ir.outcome.startsWith("confirmed")) return blocked("The insurer has not confirmed cover, so it has confirmed no condition.");
+    const inserted = await db.from("client_condition_resolutions").insert({
+      organization_id: org, placement_id: placementId, condition_id: condition.id, resolution: "confirmed_by_insurer",
+      placement_insurer_response_id: ir.id, resolved_at: input.resolvedAt, recorded_by: env.userId,
+    });
+    if (inserted.error) return done("already");
+  } else {
+    if ((input.reason ?? "").trim().length < 5) return blocked("Say why: what satisfied the condition, or why the client withdrew it.");
+    if (!hasEvidence) return blocked("A condition is resolved with evidence: link the email, attach the document, or write down who said what and when.");
+
+    let newInstructionId: string | null = null;
+    if (input.resolution === "waived") {
+      if (input.source === undefined) return blocked("Say how the client's waiver arrived.");
+      /*
+       * A waiver changes what the client instructed, so it is a new instruction version. The
+       * accepted one is kept, superseded, exactly as it was.
+       */
+      const old = view.instruction;
+      const oldRow = (await db.from("client_instructions").select("*").eq("organization_id", org).eq("id", old.id).maybeSingle()).data as Record<string, unknown> | null;
+      if (oldRow === null) return blocked("The current instruction could not be read.");
+      const remaining = view.conditions.filter((c) => c.id !== condition.id && c.state !== "waived").map((c) => c.text);
+      const now = new Date().toISOString();
+      await db
+        .from("client_instructions")
+        .update({ superseded_at: now, superseded_reason: `The client waived a condition: ${condition.text}`.slice(0, 500) })
+        .eq("organization_id", org)
+        .eq("id", old.id)
+        .is("superseded_at", null);
+      const created = await db
+        .from("client_instructions")
+        .insert({
+          organization_id: org,
+          opportunity_id: view.opportunity.id,
+          client_id: view.client.id,
+          comparison_id: oldRow["comparison_id"] ?? null,
+          insurer_response_id: oldRow["insurer_response_id"],
+          response_revision_id: oldRow["response_revision_id"],
+          source: input.source,
+          evidence_email_message_id: input.evidenceEmailMessageId ?? null,
+          evidence_document_id: input.evidenceDocumentId ?? null,
+          evidence_note: input.evidenceNote ?? null,
+          client_conditions: remaining.length === 0 ? null : remaining.join("\n"),
+          requested_period_months: oldRow["requested_period_months"] ?? null,
+          requested_period_days: oldRow["requested_period_days"] ?? null,
+          instructed_at: input.resolvedAt,
+          recorded_by: env.userId,
+          outside_comparison: Boolean(oldRow["outside_comparison"]),
+          exception_reason: oldRow["exception_reason"] ?? null,
+          exception_by: oldRow["exception_by"] ?? null,
+          revises_instruction_id: old.id,
+        })
+        .select("id")
+        .maybeSingle();
+      newInstructionId = (created.data as { id: string } | null)?.id ?? null;
+      if (newInstructionId === null) return blocked("The waiver could not be recorded. Try again.");
+      await db.from("placements").update({ client_instruction_id: newInstructionId, updated_at: now }).eq("organization_id", org).eq("id", placementId);
+    }
+
+    const inserted = await db.from("client_condition_resolutions").insert({
+      organization_id: org,
+      placement_id: placementId,
+      condition_id: condition.id,
+      resolution: input.resolution,
+      reason: input.reason ?? null,
+      evidence_email_message_id: input.evidenceEmailMessageId ?? null,
+      evidence_document_id: input.evidenceDocumentId ?? null,
+      evidence_note: input.evidenceNote ?? null,
+      resolved_at: input.resolvedAt,
+      new_client_instruction_id: newInstructionId,
+      recorded_by: env.userId,
+    });
+    if (inserted.error) return done("already");
+  }
+
+  await env.audit({
+    action: `placement.condition_${input.resolution}`,
+    objectType: "placement",
+    objectId: placementId,
+    result: "success",
+    newState: { conditionId: condition.id, resolution: input.resolution },
+  });
+  await load(db, ctx, org, placementId, { sync: true });
+  return done();
 }
 
 /* ---- Helpers ----------------------------------------------------------------------------------- */

@@ -26,6 +26,7 @@ export type PlacementReason =
   | "review_changed_terms"
   | "clarify_changes"
   | "resolve_rejected_changes"
+  | "resolve_client_conditions"
   | "issue_policy";
 
 export const ALL_REASONS: PlacementReason[] = [
@@ -40,6 +41,7 @@ export const ALL_REASONS: PlacementReason[] = [
   "review_changed_terms",
   "clarify_changes",
   "resolve_rejected_changes",
+  "resolve_client_conditions",
   "issue_policy",
 ];
 
@@ -130,6 +132,13 @@ export const REASON_COPY: Record<PlacementReason, Copy> = {
     evidence: "The insurer's revised confirmation, or a new client instruction.",
     after: "A confirmation on the agreed terms makes policy issuance possible.",
   },
+  resolve_client_conditions: {
+    headline: "resolve the client's conditions",
+    why: "Cover matches what the client accepted, but one or more of the client's own conditions is not resolved.",
+    action: "For each condition: record the insurer's confirmation, evidence that it was satisfied, or the client's waiver.",
+    evidence: "The insurer's confirmation, evidence of what satisfied it, or the client's waiver and how it arrived.",
+    after: "Once every condition is resolved, the policy can be issued.",
+  },
   issue_policy: {
     headline: "issue policy from confirmed cover",
     why: "Cover is confirmed and matches what the client accepted.",
@@ -173,6 +182,7 @@ export async function ensureWork(db: SupabaseClient, w: WorkContext, t: WorkTarg
     p_reason: copy.why,
     p_required_action: copy.action,
     p_evidence_needed: copy.evidence,
+    p_outcome_after: copy.after,
     p_task_status: t.status,
     p_task_party: t.party,
     p_task_since: t.since,

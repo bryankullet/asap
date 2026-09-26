@@ -19,289 +19,22 @@ import { createApp } from "../src/app.js";
 import type { Mailer } from "../src/mail/index.js";
 import { coverOf, placementTitle } from "../src/routes/placement.js";
 import { fakeFactory, type FakeDb } from "./_fake-supabase.js";
-
-const ORG = "10000000-0000-4000-8000-00000000000a";
-const OTHER_ORG = "10000000-0000-4000-8000-00000000000b";
-const AMINA = { id: "a0000000-0000-4000-8000-000000000001", email: "admin@acme-brokers.test" };
-const OTIENO = { id: "a0000000-0000-4000-8000-000000000003", email: "placement@acme-brokers.test" };
-const BAHATI = { id: "a0000000-0000-4000-8000-000000000002", email: "readonly@acme-brokers.test" };
-const ADMIN_ROLE = "30000000-0000-4000-8000-000000000001";
-const READONLY_ROLE = "30000000-0000-4000-8000-000000000002";
-const PLACEMENT_ROLE = "30000000-0000-4000-8000-000000000003";
-const MANAGER_ROLE = "30000000-0000-4000-8000-000000000004";
-
-const CLIENT = "20000000-0000-4000-8000-00000000000a";
-const WORK = "26000000-0000-4000-8000-00000000000a";
-const OPP = "30000000-0000-4000-8000-00000000000a";
-const OPP2 = "30000000-0000-4000-8000-00000000000c";
-const INS_A = "21000000-0000-4000-8000-00000000000a";
-const INS_B = "21000000-0000-4000-8000-00000000000b";
-const INS_C = "21000000-0000-4000-8000-00000000000c";
-const APPROACH_A = "31000000-0000-4000-8000-00000000000a";
-const APPROACH_B = "31000000-0000-4000-8000-00000000000b";
-const APPROACH_C = "31000000-0000-4000-8000-00000000000c";
-const RESP_A = "34000000-0000-4000-8000-00000000000a";
-const RESP_B = "34000000-0000-4000-8000-00000000000b";
-const RESP_C = "34000000-0000-4000-8000-00000000000c";
-const REV_A = "37000000-0000-4000-8000-00000000000a";
-const REV_B = "37000000-0000-4000-8000-00000000000b";
-const REV_C = "37000000-0000-4000-8000-00000000000c";
-const TERM_A = "35000000-0000-4000-8000-00000000000a";
-const TERM_REV_A = "38000000-0000-4000-8000-00000000000a";
-const CMP = "36000000-0000-4000-8000-00000000000a";
-const EMAIL = "3d000000-0000-4000-8000-00000000000a";
-const DOC = "3a000000-0000-4000-8000-00000000000a";
-const iso = "2026-09-05T09:00:00.000Z";
-const LATER = "2027-06-30";
-
-const PERMS: Record<string, [string, string][]> = {
-  [ADMIN_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "approve"], ["placement", "send_external"], ["space", "create"]],
-  [MANAGER_ROLE]: [["placement", "approve"]],
-  [PLACEMENT_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "send_external"], ["space", "create"]],
-  [READONLY_ROLE]: [["placement", "view"]],
-};
-
-function membership(userId: string, roleId: string, org = ORG) {
-  return {
-    id: `60000000-0000-4000-8000-00000000000${userId.slice(-1)}`,
-    organization_id: org,
-    user_id: userId,
-    is_owner: roleId === ADMIN_ROLE,
-    status: "active",
-    joined_at: iso,
-    organization: { id: org, name: "Acme Brokers", country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
-    role: { id: roleId, key: "r", name: "R", description: null, is_system: true },
-  };
-}
-
-function response(id: string, approachId: string, premium: string, validUntil = LATER) {
-  return {
-    id, organization_id: ORG, opportunity_id: OPP, opportunity_insurer_id: approachId,
-    outcome: "quoted", received_at: iso, source_note: "Quotation letter.", source_document_id: null,
-    source_email_message_id: null, premium_amount: premium, premium_currency: "KES",
-    valid_until: validUntil, decline_reason: null, recorded_by: AMINA.id, recorded_at: iso,
-  };
-}
-
-function revisionOf(id: string, r: Record<string, unknown>, revision = 1) {
-  return {
-    id, organization_id: ORG, insurer_response_id: r["id"], opportunity_id: OPP, revision,
-    outcome: r["outcome"], received_at: r["received_at"], premium_amount: r["premium_amount"],
-    premium_currency: r["premium_currency"], valid_until: r["valid_until"], decline_reason: null,
-    source_document_id: null, source_email_message_id: null, source_note: r["source_note"],
-    sha256: "0".repeat(64), created_at: iso,
-  };
-}
-
-function makeDb(): FakeDb {
-  const resA = response(RESP_A, APPROACH_A, "5310000.00");
-  const resB = response(RESP_B, APPROACH_B, "5620000.00");
-  const resC = response(RESP_C, APPROACH_C, "5900000.00");
-  const db: FakeDb = {
-    users: { "tok-amina": AMINA, "tok-otieno": OTIENO, "tok-bahati": BAHATI },
-    inserts: [],
-    rpc: {},
-    tables: {
-      users: [
-        { id: AMINA.id, email: AMINA.email, full_name: "Amina", display_name: "Amina", active_organization_id: ORG },
-        { id: OTIENO.id, email: OTIENO.email, full_name: "Otieno", display_name: "Otieno", active_organization_id: ORG },
-        { id: BAHATI.id, email: BAHATI.email, full_name: "Bahati", display_name: "Bahati", active_organization_id: ORG },
-      ],
-      organization_memberships: [membership(AMINA.id, ADMIN_ROLE), membership(OTIENO.id, PLACEMENT_ROLE), membership(BAHATI.id, READONLY_ROLE)],
-      roles: [
-        { id: ADMIN_ROLE, organization_id: ORG, name: "Brokerage administrator" },
-        { id: MANAGER_ROLE, organization_id: ORG, name: "Manager" },
-        { id: PLACEMENT_ROLE, organization_id: ORG, name: "Placement officer" },
-        { id: READONLY_ROLE, organization_id: ORG, name: "Read-only user" },
-      ],
-      role_permissions: Object.entries(PERMS).flatMap(([role, perms]) =>
-        perms.map(([object_type, verb]) => ({ role_id: role, permission: { object_type, verb } })),
-      ),
-      clients: [{ id: CLIENT, organization_id: ORG, name: "Acme Ltd", kind: "corporate", file_status: "cleared", created_at: iso, deleted_at: null }],
-      insurers: [
-        { id: INS_A, organization_id: ORG, name: "Jubilee" },
-        { id: INS_B, organization_id: ORG, name: "CIC" },
-        { id: INS_C, organization_id: ORG, name: "Britam" },
-      ],
-      work_items: [
-        { id: WORK, organization_id: ORG, client_id: CLIENT, kind: "new_business", title: "Acme motor fleet quotation — 2027", task_status: "needs_you", task_party: null, task_since: null, version: 1, steps: [], created_at: iso, deleted_at: null },
-      ],
-      requirement_templates: [],
-      opportunities: [
-        { id: OPP, organization_id: ORG, client_id: CLIENT, work_item_id: WORK, title: "Acme motor fleet quotation — 2027", class_of_business: "Commercial motor", risk_summary: null, cover_start: null, cover_end: null, source_email_message_id: null, source_document_id: null, owner_id: AMINA.id, created_by: AMINA.id, created_at: iso, closed_at: null, closed_outcome: null, closed_reason: null },
-      ],
-      opportunity_requirements: [],
-      opportunity_insurers: [
-        { id: APPROACH_A, organization_id: ORG, opportunity_id: OPP, insurer_id: INS_A, added_by: AMINA.id, added_at: iso, removed_at: null, removed_by: null, removed_reason: null },
-        { id: APPROACH_B, organization_id: ORG, opportunity_id: OPP, insurer_id: INS_B, added_by: AMINA.id, added_at: iso, removed_at: null, removed_by: null, removed_reason: null },
-        { id: APPROACH_C, organization_id: ORG, opportunity_id: OPP, insurer_id: INS_C, added_by: AMINA.id, added_at: iso, removed_at: null, removed_by: null, removed_reason: null },
-      ],
-      quote_requests: [],
-      insurer_responses: [resA, resB, resC],
-      insurer_response_revisions: [revisionOf(REV_A, resA), revisionOf(REV_B, resB), revisionOf(REV_C, resC)],
-      quote_terms: [
-        { id: TERM_A, organization_id: ORG, insurer_response_id: RESP_A, term_type: "excess", label: "Own damage", extracted_value: "5% min KES 30,000", corrected_value: null, corrected_by: null, corrected_at: null, amount: null, currency: null, unclear: false, evidence_document_id: null, evidence_page: null, position: 0, created_at: iso },
-      ],
-      quote_term_revisions: [
-        { id: TERM_REV_A, organization_id: ORG, quote_term_id: TERM_A, insurer_response_id: RESP_A, revision: 1, term_type: "excess", label: "Own damage", extracted_value: "5% min KES 30,000", corrected_value: null, corrected_by: null, corrected_at: null, amount: null, currency: null, unclear: false, evidence_document_id: null, evidence_page: null, region_x: null, region_y: null, region_width: null, region_height: null, sha256: "0".repeat(64), created_at: iso },
-      ],
-      /* A comparison of A and B — not C — made, current, and put to the client. */
-      quote_comparisons: [
-        { id: CMP, organization_id: ORG, opportunity_id: OPP, generated_by: AMINA.id, generated_at: iso, presented_at: iso, presented_by: AMINA.id, superseded_at: null, superseded_reason: null, version: 1 },
-      ],
-      quote_comparison_inputs: [
-        { id: "3e000000-0000-4000-8000-00000000000a", organization_id: ORG, comparison_id: CMP, insurer_response_id: RESP_A, insurer_id: INS_A, response_sha256: "0".repeat(64), response_revision_id: REV_A, created_at: iso },
-        { id: "3e000000-0000-4000-8000-00000000000b", organization_id: ORG, comparison_id: CMP, insurer_response_id: RESP_B, insurer_id: INS_B, response_sha256: "0".repeat(64), response_revision_id: REV_B, created_at: iso },
-      ],
-      quote_comparison_terms: [
-        { id: "3f000000-0000-4000-8000-00000000000a", organization_id: ORG, comparison_input_id: "3e000000-0000-4000-8000-00000000000a", quote_term_id: TERM_A, term_type: "excess", label: "Own damage", term_sha256: "0".repeat(64), term_revision_id: TERM_REV_A },
-      ],
-      company_rules: [],
-      documents: [],
-      email_messages: [],
-      policies: [],
-      client_instructions: [],
-      placements: [],
-      placement_basis_terms: [],
-      placement_requests: [],
-      placement_request_approvals: [],
-      placement_submissions: [],
-      placement_insurer_responses: [],
-      placement_cancellations: [],
-      placement_basis_versions: [],
-      placement_confirmation_terms: [],
-      cover_match_results: [],
-      cover_match_items: [],
-      client_change_acceptances: [],
-      client_change_acceptance_items: [],
-      prepared_actions: [],
-      audit_log: [],
-    },
-    defaults: {
-      client_instructions: { superseded_at: null, superseded_reason: null, outside_comparison: false, exception_reason: null, exception_by: null, client_conditions: null, evidence_email_message_id: null, evidence_document_id: null, evidence_note: null, recorded_at: iso },
-      placements: { abandoned_at: null, abandoned_reason: null, requested_expiry_at: null },
-      placement_requests: { superseded_at: null, superseded_reason: null, outstanding_conditions: null, prepared_at: iso },
-      placement_request_approvals: { superseded_at: null, superseded_reason: null, approved_at: iso },
-      placement_submissions: { evidence_document_id: null, evidence_note: null, provider_message_id: null, recorded_at: iso },
-      placement_insurer_responses: { superseded_at: null, superseded_reason: null, effective_at: null, expiry_at: null, insurer_reference: null, changes_note: null, information_required: null, decline_reason: null, evidence_document_id: null, evidence_email_message_id: null, evidence_note: null, recorded_at: iso },
-      placement_cancellations: { evidence_document_id: null, evidence_email_message_id: null, evidence_note: null, recorded_at: iso },
-      placement_basis_versions: { created_at: iso },
-      cover_match_results: { compared_at: iso },
-      client_change_acceptances: { recorded_at: iso },
-      prepared_actions: { state: "prepared", decided_by: null, decided_at: null, receipt: null, prepared_at: iso },
-    },
-    uniques: {
-      client_instructions: [],
-      placements: [["client_instruction_id"]],
-      placement_submissions: [["organization_id", "idempotency_key"], ["placement_request_id"]],
-      placement_cancellations: [["placement_id"]],
-      placement_basis_versions: [["placement_id", "version"]],
-      client_change_acceptances: [["cover_match_result_id"]],
-      prepared_actions: [["organization_id", "idempotency_key"]],
-    },
-  };
-
-  /* ---- The triggers of 0054, stood in for so the route meets the sequencing it really will. -- */
-  db.beforeInsert = {
-    placement_requests: (row, d) => {
-      const mine = (d.tables["placement_requests"] ?? []).filter((r) => r["placement_id"] === row["placement_id"]);
-      row["version"] = mine.reduce((m, r) => Math.max(m, r["version"] as number), 0) + 1;
-      /* The digest is the database's: distinct per content, so an edit really is a new digest. */
-      row["sha256"] = String(JSON.stringify([row["subject"], row["body_text"], row["cover_requested"], row["outstanding_conditions"] ?? null]).length)
-        .padStart(64, "a");
-      for (const r of mine) {
-        if (r["superseded_at"] === null) {
-          r["superseded_at"] = iso;
-          r["superseded_reason"] = "A newer version of this request was prepared.";
-          for (const a of d.tables["placement_request_approvals"] ?? []) {
-            if (a["placement_request_id"] === r["id"] && a["superseded_at"] === null) {
-              a["superseded_at"] = iso;
-              a["superseded_reason"] = "The request was changed after it was approved.";
-            }
-          }
-        }
-      }
-    },
-    placement_request_approvals: (row, d) => {
-      const live = (d.tables["placement_request_approvals"] ?? []).find(
-        (a) => a["placement_request_id"] === row["placement_request_id"] && a["superseded_at"] === null,
-      );
-      if (live) return { code: "23505", message: "one live approval per request" };
-      const req = (d.tables["placement_requests"] ?? []).find((r) => r["id"] === row["placement_request_id"]);
-      if (!req || req["sha256"] !== row["sha256"]) return { code: "23514", message: "approval must cover the request" };
-    },
-    placement_submissions: (row, d) => {
-      const approval = (d.tables["placement_request_approvals"] ?? []).find(
-        (a) => a["placement_request_id"] === row["placement_request_id"] && a["superseded_at"] === null,
-      );
-      if (!approval || approval["sha256"] !== row["sha256"]) return { code: "23514", message: "not approved" };
-    },
-    placement_insurer_responses: (row, d) => {
-      const reqs = (d.tables["placement_requests"] ?? []).filter((r) => r["placement_id"] === row["placement_id"]).map((r) => r["id"]);
-      const sent = (d.tables["placement_submissions"] ?? []).some((s) => reqs.includes(s["placement_request_id"]));
-      if (!sent) return { code: "23514", message: "nothing sent" };
-    },
-  };
-
-  /*
-   * The engine's Work functions of 0055, stood in for: identity is (organization, source type,
-   * source id, reason code) — never the title — and at most one open item per identity.
-   */
-  db.rpc = {
-    quote_comparison_changes: () => ({ data: [] }),
-    work_item_ensure: (args) => {
-      const rows = db.tables["work_items"]!;
-      if (args["p_task_status"] === "with_party" && (!args["p_task_party"] || !args["p_task_since"])) {
-        return { error: { code: "23514", message: "with_party needs a party and a since date" } };
-      }
-      const open = rows.find(
-        (r) =>
-          r["organization_id"] === args["p_organization_id"] &&
-          r["source_type"] === args["p_source_type"] &&
-          r["source_id"] === args["p_source_id"] &&
-          r["reason_code"] === args["p_reason_code"] &&
-          r["task_status"] !== "done",
-      );
-      const fields = {
-        title: args["p_title"], reason: args["p_reason"], required_action: args["p_required_action"],
-        evidence_needed: args["p_evidence_needed"], task_status: args["p_task_status"], task_party: args["p_task_party"],
-        task_since: args["p_task_since"], task_next_check: args["p_task_next_check"],
-        owner_id: args["p_owner_id"] ?? open?.["owner_id"] ?? null,
-      };
-      if (open) {
-        Object.assign(open, fields, { version: (open["version"] as number) + 1 });
-        db.tables["audit_log"]!.push({ action: "work.refreshed", organization_id: open["organization_id"] });
-        return { data: { id: open["id"], reopened: true } };
-      }
-      const id = `26000000-0000-4000-8000-${String(100000000000 + rows.length).slice(-12)}`;
-      rows.push({
-        id, organization_id: args["p_organization_id"], kind: args["p_kind"], client_id: args["p_client_id"],
-        insurer_id: args["p_insurer_id"], source_type: args["p_source_type"], source_id: args["p_source_id"],
-        reason_code: args["p_reason_code"], version: 1, steps: [], created_at: iso, deleted_at: null, ...fields,
-      });
-      db.tables["audit_log"]!.push({ action: "work.opened", organization_id: args["p_organization_id"] });
-      return { data: { id, reopened: false } };
-    },
-    work_item_resolve: (args) => {
-      let n = 0;
-      for (const r of db.tables["work_items"]!) {
-        if (
-          r["organization_id"] === args["p_organization_id"] &&
-          r["source_type"] === args["p_source_type"] &&
-          r["source_id"] === args["p_source_id"] &&
-          r["reason_code"] === args["p_reason_code"] &&
-          r["task_status"] !== "done"
-        ) {
-          r["task_status"] = "done";
-          r["version"] = (r["version"] as number) + 1;
-          n += 1;
-        }
-      }
-      return { data: n };
-    },
-  };
-  return db;
-}
+import {
+  OTHER_ORG,
+  AMINA,
+  OTIENO,
+  OPP,
+  OPP2,
+  RESP_A,
+  RESP_B,
+  RESP_C,
+  TERM_REV_A,
+  CMP,
+  EMAIL,
+  DOC,
+  iso,
+  makeDb,
+} from "./_placement-fixture.js";
 
 let db: FakeDb;
 const silentMailer: Mailer = { sendInvitation: async () => {} };
@@ -1170,7 +903,8 @@ describe("cover reality and client acceptance (4B-4A)", () => {
       ],
     }));
     const m = (await read(id)).body.coverMatch;
-    const [excess, riot] = m.items.filter((i: { material: boolean }) => i.material);
+    const excess = m.items.find((i: { label: string }) => i.label === "Own damage");
+    const riot = m.items.find((i: { label: string }) => i.label === "Riot and strike");
 
     const half = await act(id, ACCEPTANCE(m.id, { decision: "partial", items: [{ coverMatchItemId: excess.id, decision: "accepted" }] }));
     expect(half.outcome).toBe("blocked");
@@ -1186,7 +920,7 @@ describe("cover reality and client acceptance (4B-4A)", () => {
     expect(body.basis.version).toBe(1);
     expect(body.readiness.state).toBe("blocked");
     expect(body.work[0].reason).toBe("clarify_changes");
-    expect(body.changeAcceptance.items).toEqual([
+    expect([...body.changeAcceptance.items].sort((x: { label: string }, y: { label: string }) => x.label.localeCompare(y.label))).toEqual([
       { label: "Own damage", decision: "accepted" },
       { label: "Riot and strike", decision: "clarify" },
     ]);
@@ -1429,5 +1163,245 @@ describe("Work on the board (4B-4A)", () => {
     expect(row.links.work).toBe(`/placements/${id}`);
     expect(row.reason).toMatch(/nothing has been prepared for the insurer yet/);
     expect(row.item.required_action).toMatch(/Prepare the placement request/);
+  });
+});
+
+/* =============================================================================================
+ * 4B-4B — client conditions, the accepted end date, and prepared-action hardening.
+ * ============================================================================================= */
+
+const CONDITIONS = ["Subject to a satisfactory motor inspection", "Install an approved tracker in every vehicle"];
+
+async function placedWithConditions() {
+  const res = await instruct({ conditions: CONDITIONS });
+  expect(res.outcome).toBe("done");
+  return res.placementId as string;
+}
+
+const RESOLVE = (conditionId: string, over: Record<string, unknown> = {}) => ({
+  action: "resolve_client_condition",
+  conditionId,
+  resolution: "satisfied",
+  reason: "Inspection report received and passed.",
+  resolvedAt: "2026-09-12T10:00:00.000Z",
+  evidenceNote: "Inspection report from the assessor dated 11 September, filed with the email.",
+  ...over,
+});
+
+describe("client conditions (4B-4B)", () => {
+  it("records each condition from the accepted instruction, unresolved", async () => {
+    const id = await placedWithConditions();
+    const { body } = await read(id);
+    expect(body.conditions.map((c: { text: string; state: string }) => [c.text, c.state])).toEqual(CONDITIONS.map((t) => [t, "unresolved"]));
+    expect(body.instruction.clientConditions).toBe(CONDITIONS.join("\n"));
+  });
+
+  it("splits a written list into one condition per line — for any condition, none hard-coded", async () => {
+    const res = await instruct({ clientConditions: "Confirm the driver list\n\nProvide the valuation report" });
+    const { body } = await read(res.placementId);
+    expect(body.conditions.map((c: { text: string }) => c.text)).toEqual(["Confirm the driver list", "Provide the valuation report"]);
+  });
+
+  it("is never treated as matching: a clean confirmation that omits them still blocks issuance", async () => {
+    const id = await placedWithConditions();
+    await submitted(id);
+    await act(id, CONFIRM());
+    const { body } = await read(id);
+    expect(body.coverMatch).toMatchObject({ current: true, materialDifferences: 0 });
+    expect(body.coverMatch.items.some((i: { acceptedValue: string | null }) => CONDITIONS.includes(i.acceptedValue ?? ""))).toBe(false);
+    expect(body.conditions.every((c: { state: string }) => c.state === "unresolved")).toBe(true);
+    expect(body.readiness.state).toBe("blocked");
+    expect(body.readiness.reasons.map((r: { code: string }) => r.code)).toEqual(["condition_unresolved"]);
+    expect(body.work.map((w: { reason: string }) => w.reason)).toEqual(["resolve_client_conditions"]);
+    expect(body.changeAcceptance).toBeNull();
+  });
+
+  it("keeps cover reality separate: active cover with an unresolved condition still blocks issuance", async () => {
+    const id = await placedWithConditions();
+    await submitted(id);
+    await act(id, CONFIRM());
+    db.tables["placement_insurer_responses"]![0]!["effective_at"] = "2026-09-01T00:00:00.000Z";
+    const { body } = await read(id);
+    expect(body.cover.state).toBe("active");
+    expect(body.readiness.state).toBe("blocked");
+    expect((await act(id, { action: "prepare_issuance" })).outcome).toBe("blocked");
+  });
+
+  it("a condition the insurer's confirmation names is confirmed by the insurer", async () => {
+    const id = await placedWithConditions();
+    await submitted(id);
+    const before = (await read(id)).body.conditions;
+    await act(id, CONFIRM({ conditionsConfirmed: [before[0].id] }));
+    const { body } = await read(id);
+    expect(body.conditions.map((c: { state: string }) => c.state)).toEqual(["confirmed_by_insurer", "unresolved"]);
+  });
+
+  it("an insurer confirmation lapses when that answer is superseded", async () => {
+    const id = await placedWithConditions();
+    await submitted(id);
+    const c0 = (await read(id)).body.conditions[0].id;
+    await act(id, CONFIRM({ conditionsConfirmed: [c0] }));
+    await act(id, CONFIRM({ insurerReference: "CN-2027-0042" }));
+    expect((await read(id)).body.conditions[0].state).toBe("unresolved");
+  });
+
+  it("satisfied needs a reason and evidence, and records who, when and why", async () => {
+    const id = await placedWithConditions();
+    const c0 = (await read(id)).body.conditions[0].id;
+    expect((await act(id, RESOLVE(c0, { evidenceNote: undefined }))).reason).toMatch(/resolved with evidence/);
+    expect((await act(id, RESOLVE(c0, { reason: undefined }))).reason).toMatch(/Say why/);
+    expect((await act(id, RESOLVE(c0))).outcome).toBe("done");
+    const c = (await read(id)).body.conditions[0];
+    expect(c).toMatchObject({ state: "satisfied", resolvedByName: "Amina", reason: "Inspection report received and passed.", resolvedAt: "2026-09-12T10:00:00.000Z" });
+    expect(c.evidence.label).toMatch(/Inspection report from the assessor/);
+    expect((await act(id, RESOLVE(c0))).outcome).toBe("already");
+    expect(db.tables["client_condition_resolutions"]).toHaveLength(1);
+  });
+
+  it("a waiver creates a new instruction version, keeps the accepted one, and needs evidence", async () => {
+    const id = await placedWithConditions();
+    const before = (await read(id)).body;
+    const c1 = before.conditions[1].id;
+    const w = RESOLVE(c1, { resolution: "waived", source: "email", reason: "Client withdrew the tracker requirement for this renewal." });
+    expect((await act(id, { ...w, source: undefined })).reason).toMatch(/how the client's waiver arrived/);
+    expect((await act(id, w)).outcome).toBe("done");
+    const { body } = await read(id);
+    expect(body.instruction.id).not.toBe(before.instruction.id);
+    expect(body.instruction.clientConditions).toBe(CONDITIONS[0]);
+    expect(body.instructionHistory.find((i: { id: string }) => i.id === before.instruction.id).clientConditions).toBe(CONDITIONS.join("\n"));
+    expect(db.tables["client_instructions"]!.find((i) => i["id"] === body.instruction.id)!["revises_instruction_id"]).toBe(before.instruction.id);
+    expect(body.conditions[1]).toMatchObject({ state: "waived", newInstructionId: body.instruction.id });
+    expect((await act(id, w)).outcome).toBe("already");
+    expect(db.tables["client_instructions"]).toHaveLength(2);
+  });
+
+  it("once every condition is resolved and the cover matches, issuance becomes ready", async () => {
+    const id = await placedWithConditions();
+    await submitted(id);
+    const cs = (await read(id)).body.conditions;
+    await act(id, CONFIRM({ conditionsConfirmed: [cs[0].id] }));
+    expect((await read(id)).body.readiness.state).toBe("blocked");
+    await act(id, RESOLVE(cs[1].id, { reason: "Trackers fitted and certificates received." }));
+    const { body } = await read(id);
+    expect(body.readiness).toMatchObject({ state: "ready", reasons: [] });
+    expect(body.work.map((w: { reason: string }) => w.reason)).toEqual(["issue_policy"]);
+  });
+
+  it("refuses a condition that is not this placement's", async () => {
+    const id = await placedWithConditions();
+    const res = await act(id, RESOLVE("f9000000-0000-4000-8000-000000000001"));
+    expect(res.outcome).toBe("blocked");
+    expect(res.reason).toMatch(/not one of this placement's/);
+  });
+});
+
+describe("the accepted end date (4B-4B)", () => {
+  const noEnd = { requestedExpiryAt: undefined };
+
+  it("no requested end + an insurer end date is a material added term that blocks issuance", async () => {
+    const id = (await instruct(noEnd)).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ outcome: "confirmed_with_changes", changesNote: "The insurer set the period end." }));
+    const { body } = await read(id);
+    const end = body.coverMatch.items.find((i: { field: string }) => i.field === "expiry_at");
+    expect(end).toMatchObject({ classification: "added_by_insurer", material: true, acceptedValue: null, calculation: null });
+    expect(body.readiness.reasons.map((r: { code: string }) => r.code)).toContain("unaccepted_differences");
+    expect(body.work[0].reason).toBe("review_changed_terms");
+  });
+
+  it("an explicit accepted duration and the exact derived end matches, with the calculation shown", async () => {
+    const id = (await instruct({ ...noEnd, requestedPeriod: { months: 12, days: 0 } })).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ expiryAt: "2027-10-01T00:00:00.000Z" }));
+    const { body } = await read(id);
+    expect(body.basis).toMatchObject({ periodMonths: 12, periodDays: 0, expiryAt: null });
+    const end = body.coverMatch.items.find((i: { field: string }) => i.field === "expiry_at");
+    expect(end).toMatchObject({ classification: "match", material: false, acceptedValue: "2027-10-01T00:00:00.000Z" });
+    expect(end.calculation).toMatch(/Cover begins 1 Oct 2026 \+ 12 months = 1 Oct 2027, from the cover period in the client's accepted instruction/);
+    expect(body.readiness.state).toBe("ready");
+  });
+
+  it("an explicit duration and a wrong end is a changed term", async () => {
+    const id = (await instruct({ ...noEnd, requestedPeriod: { months: 12, days: 0 } })).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ expiryAt: "2027-09-30T23:59:59.000Z" }));
+    const end = (await read(id)).body.coverMatch.items.find((i: { field: string }) => i.field === "expiry_at");
+    expect(end).toMatchObject({ classification: "changed", material: true });
+  });
+
+  it("as requested, with no end stated, takes the end derived from the accepted period", async () => {
+    const id = (await instruct({ ...noEnd, requestedPeriod: { months: 6, days: 0 } })).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ expiryAt: undefined }));
+    const { body } = await read(id);
+    expect(body.insurerResponse.expiryAt).toBe("2027-04-01T00:00:00.000Z");
+    expect(body.coverMatch.materialDifferences).toBe(0);
+  });
+
+  it("the client accepting the added end: new instruction version, kept on refresh, idempotent", async () => {
+    const id = (await instruct(noEnd)).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ outcome: "confirmed_with_changes", changesNote: "The insurer set the period end." }));
+    const before = (await read(id)).body;
+    const acceptance = ACCEPTANCE(before.coverMatch.id, { evidenceNote: "Client replied at 09:00 accepting the period ending 30 September 2027." });
+    expect((await act(id, acceptance)).outcome).toBe("done");
+
+    const again = (await read(id)).body;
+    expect(again.instruction.id).not.toBe(before.instruction.id);
+    expect(again.instructionHistory.map((i: { id: string }) => i.id)).toContain(before.instruction.id);
+    expect(again.basis).toMatchObject({ version: 2, origin: "client_accepted_changes", expiryAt: "2027-09-30T23:59:59.000Z" });
+    expect(again.changeAcceptance.evidence.label).toMatch(/accepting the period ending 30 September 2027/);
+    expect(again.readiness.state).toBe("ready");
+
+    const refreshed = (await read(id)).body;
+    expect(refreshed.changeAcceptance).toEqual(again.changeAcceptance);
+    expect(refreshed.basis).toEqual(again.basis);
+
+    expect((await act(id, acceptance)).outcome).toBe("blocked");
+    expect(db.tables["client_change_acceptances"]).toHaveLength(1);
+    expect(db.tables["client_instructions"]).toHaveLength(2);
+    expect(db.tables["placement_basis_versions"]).toHaveLength(2);
+  });
+});
+
+describe("prepared-action hardening (4B-4B)", () => {
+  it("cannot be confirmed by someone other than the person it was prepared for", async () => {
+    const id = await placed();
+    const p = await prepare(id, { actionType: "prepare_request" });
+    const res = await confirm(p.action.id, "tok-otieno");
+    expect(res.outcome).toBe("refused");
+    expect(res.reason).toMatch(/Only the person it was prepared for/);
+    expect(db.tables["prepared_actions"]![0]!["state"]).toBe("prepared");
+    expect(db.tables["placement_requests"]).toHaveLength(0);
+  });
+
+  it("a malformed payload is refused, never run", async () => {
+    const id = await placed();
+    const p = await prepare(id, { actionType: "prepare_request" });
+    db.tables["prepared_actions"]![0]!["payload"] = { action: "prepare_request", subject: "" };
+    const res = await confirm(p.action.id);
+    expect(res.outcome).toBe("refused");
+    expect(res.reason).toMatch(/not a valid placement action/);
+    expect(db.tables["placement_requests"]).toHaveLength(0);
+  });
+
+  it("a payload for a different action than the one prepared is refused", async () => {
+    const id = await placed();
+    const p = await prepare(id, { actionType: "prepare_issuance" });
+    db.tables["prepared_actions"]![0]!["payload"] = REQUEST;
+    expect((await confirm(p.action.id)).outcome).toBe("refused");
+    expect(db.tables["placement_requests"]).toHaveLength(0);
+  });
+
+  it("a successful confirmation writes one receipt and one execution audit; replay returns it", async () => {
+    const id = await placed();
+    const p = await prepare(id, { actionType: "prepare_request" });
+    const first = await confirm(p.action.id);
+    const second = await confirm(p.action.id);
+    expect(first.outcome).toBe("done");
+    expect(second.outcome).toBe("already");
+    expect(second.action.receipt).toEqual(first.action.receipt);
+    expect(db.tables["audit_log"]!.filter((a) => a["action"] === "prepared_action.executed")).toHaveLength(1);
+    expect(db.tables["audit_log"]!.filter((a) => a["action"] === "placement.request_prepared")).toHaveLength(1);
   });
 });

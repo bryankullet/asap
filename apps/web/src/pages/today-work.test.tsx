@@ -87,7 +87,7 @@ function attention(rows: WorkItemRow[], over: Partial<AttentionResponse> = {}): 
         },
       ],
       runFailure: null,
-      links: { work: `/r/${row.id}`, client: `/files/${CLIENT}`, policy: null, ask: row.title },
+      links: { work: row.source_type === "placement" ? `/placements/${row.source_id}` : `/r/${row.id}`, client: `/files/${CLIENT}`, policy: null, ask: row.title },
     })),
     sections: [
       { key: "needs_you", label: "What matters now", visible: rows.length, returned: rows.length },
@@ -117,7 +117,7 @@ function workList(rows: WorkItemRow[], over: Partial<WorkListResponse> = {}): Wo
       period: null,
       owner: { id: OWNER, name: "Amina Yusuf" },
       priority: "high",
-      links: { work: `/r/${row.id}`, client: `/files/${CLIENT}`, policy: null, ask: row.title },
+      links: { work: row.source_type === "placement" ? `/placements/${row.source_id}` : `/r/${row.id}`, client: `/files/${CLIENT}`, policy: null, ask: row.title },
       facts: [],
       signals: [
         {
@@ -308,6 +308,41 @@ describe("Work, from GET /work", () => {
   it("does not put For review among the main views", () => {
     const space = workSpace(workList([item()]), READY, PERMS);
     expect(space.filters.map((f) => f.id)).not.toContain("review");
+  });
+
+  it("shows a placement's Work from structured server fields, and opens the placement itself", () => {
+    const row = firstRow(
+      workSpace(
+        workList([
+          item({
+            title: "Acme motor fleet placement — 2027: cover confirmation requested",
+            kind: "placement",
+            task_status: "with_party",
+            task_party: "Jubilee",
+            task_since: "2026-08-12T00:00:00.000Z",
+            reason: "The request was sent and the insurer has not answered.",
+            source_type: "placement",
+            source_id: "40000000-0000-4000-8000-00000000000a",
+            reason_code: "awaiting_insurer",
+            required_action: "Record the insurer's answer when it arrives, with its evidence.",
+            evidence_needed: "The insurer's confirmation, decline or query.",
+            outcome_after: "The confirmation is checked against what the client accepted.",
+          }),
+        ]),
+        READY,
+        PERMS,
+      ),
+    );
+    expect(row.title).toBe("Acme motor fleet placement — 2027: cover confirmation requested");
+    expect(row.note).toMatch(/With Jubilee since/);
+    expect(row.why).toContain("The request was sent and the insurer has not answered.");
+    expect(row.why).toContain("To do: Record the insurer's answer when it arrives, with its evidence.");
+    expect(row.why).toContain("Evidence needed: The insurer's confirmation, decline or query.");
+    expect(row.why).toContain("Then: The confirmation is checked against what the client accepted.");
+    expect(row.related?.path).toBe("/placements/40000000-0000-4000-8000-00000000000a");
+    for (const banned of [/Needs you/, /^Waiting$/, /Active cover/]) {
+      expect(`${row.title} ${row.note} ${row.badge ?? ""}`).not.toMatch(banned);
+    }
   });
 
   it("builds a row with owner, holder, next check, priority, reason and where it opens", () => {

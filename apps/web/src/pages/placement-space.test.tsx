@@ -75,6 +75,7 @@ function body(stage: Stage = "instructed", over: Record<string, unknown> = {}) {
     basis: {
       version: 1, origin: "instruction", classOfBusiness: "Commercial motor", subject: null,
       effectiveAt: "2026-10-01T00:00:00.000Z", expiryAt: null, premiumBasis: null, clientConditions: null,
+      periodMonths: null, periodDays: null,
       premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30",
       terms: [{ termType: "excess", label: "Own damage", value: "5% min KES 30,000", amount: null, currency: null, unclear: false }],
     },
@@ -117,6 +118,7 @@ function body(stage: Stage = "instructed", over: Record<string, unknown> = {}) {
     work: [workFor(stage, sent && answer === null)],
     coverMatch: stage === "changed" ? CHANGED_MATCH : stage === "active" || stage === "confirmed-future" ? CLEAN_MATCH : null,
     changeAcceptance: null,
+    conditions: [],
     readiness: stage === "active"
       ? { state: "ready", reasons: [], deferredChecks: [DEFERRED], workItemId: null }
       : { state: "blocked", reasons: [{ code: stage === "changed" ? "unaccepted_differences" : "not_confirmed", message: stage === "changed" ? "The confirmed terms differ from what the client accepted in 1 place, and the client has not accepted them." : "The insurer has not confirmed cover." }], deferredChecks: [DEFERRED], workItemId: null },
@@ -160,7 +162,7 @@ function workFor(stage: Stage, withInsurer: boolean) {
 
 const matchItem = (id: string, label: string, a: string | null, c: string | null, classification: string, material: boolean) => ({
   id: `44000000-0000-4000-8000-00000000000${id}`, field: label === "Own damage" ? "term" : label.toLowerCase(), termType: label === "Own damage" ? "excess" : null,
-  label, acceptedValue: a, confirmedValue: c, classification, material,
+  label, acceptedValue: a, confirmedValue: c, classification, material, calculation: null as string | null,
 });
 const CLEAN_MATCH = {
   id: "45000000-0000-4000-8000-00000000000a", comparedAt: "2026-09-09T14:11:00.000Z", comparedByName: null, basisVersion: 1,
@@ -499,5 +501,99 @@ describe("what Ask prepared (4B-4A)", () => {
     await open();
     const button = (await screen.findAllByRole("button", { name: /Confirm and record/ }))[0]!;
     expect(button).toBeDisabled();
+  });
+});
+
+/* ---- 4B-4B ----------------------------------------------------------------------------------- */
+
+const CONDITION = (state: string, over: Record<string, unknown> = {}) => ({
+  id: "47000000-0000-4000-8000-00000000000a", position: 0, text: "Subject to a satisfactory motor inspection", state,
+  resolvedAt: state === "unresolved" ? null : "2026-09-12T10:00:00.000Z",
+  resolvedByName: state === "unresolved" ? null : "Amina",
+  reason: state === "satisfied" ? "Inspection passed." : state === "waived" ? "Client withdrew it." : null,
+  evidence: state === "unresolved" ? null : { kind: "note", id: null, label: "Assessor's report dated 11 September.", path: null },
+  newInstructionId: state === "waived" ? "41000000-0000-4000-8000-00000000000b" : null,
+  ...over,
+});
+const BLOCKED_BY_CONDITION = { state: "blocked", reasons: [{ code: "condition_unresolved", message: "The client's condition is not resolved: Subject to a satisfactory motor inspection." }], deferredChecks: [DEFERRED], workItemId: null };
+
+describe("the client's conditions (4B-4B)", () => {
+  it("shows an unresolved condition beside active cover, and says issuance waits", async () => {
+    stubApi({ [PLACEMENT]: body("active", { conditions: [CONDITION("unresolved")], readiness: BLOCKED_BY_CONDITION }) });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/THE CLIENT'S CONDITIONS — 1 UNRESOLVED/i).length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Unresolved").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Cover is in force on the insurer's terms. Policy issuance waits/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/POLICY ISSUANCE IS BLOCKED/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /accept.*condition/i })).toBeNull();
+    expect(screen.getAllByText(/never asked to accept their own condition again/).length).toBeGreaterThan(0);
+  });
+
+  it("records a condition satisfied, with a reason and evidence", async () => {
+    stubApi({ [PLACEMENT]: body("active", { conditions: [CONDITION("unresolved")], readiness: BLOCKED_BY_CONDITION }) });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Record it satisfied/ }))[0]!);
+    await screen.findAllByText(/RECORD THAT THE CONDITION WAS SATISFIED/i);
+    await userEvent.type(screen.getByLabelText(/^When/), "2026-09-12");
+    await userEvent.type(screen.getByLabelText(/What satisfied it/), "Inspection passed.");
+    await userEvent.type(screen.getByLabelText(/What shows it/), "Assessor's report dated 11 September, filed.");
+    await userEvent.click(screen.getAllByRole("button", { name: /Record it satisfied/ }).at(-1)!);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.body).toMatchObject({ action: "resolve_client_condition", conditionId: CONDITION("x").id, resolution: "satisfied", reason: "Inspection passed." });
+  });
+
+  it("records a waiver as a new instruction version, and says so before it is sent", async () => {
+    stubApi({ [PLACEMENT]: body("active", { conditions: [CONDITION("unresolved")], readiness: BLOCKED_BY_CONDITION }) });
+    await open();
+    await userEvent.click((await screen.findAllByRole("button", { name: /Record the client's waiver/ }))[0]!);
+    await waitFor(() => expect(screen.getAllByText(/recorded as a new instruction version. The accepted one is kept/).length).toBeGreaterThan(0));
+    await userEvent.type(screen.getByLabelText(/^When/), "2026-09-12");
+    await userEvent.type(screen.getByLabelText(/Why the client withdrew it/), "Client withdrew the inspection requirement.");
+    await userEvent.type(screen.getByLabelText(/What shows it/), "Client's email of 12 September withdrawing it.");
+    await userEvent.click(screen.getAllByRole("button", { name: /Record the waiver/ }).at(-1)!);
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.body).toMatchObject({ action: "resolve_client_condition", resolution: "waived", source: "email" });
+  });
+
+  it("shows a satisfied and a waived condition with who, when, why and evidence", async () => {
+    stubApi({ [PLACEMENT]: body("active", { conditions: [CONDITION("satisfied"), CONDITION("waived", { id: "47000000-0000-4000-8000-00000000000b", position: 1, text: "Install a tracker" })] }) });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/ALL RESOLVED/i).length).toBeGreaterThan(0));
+    expect(screen.getAllByText("Satisfied").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Waived by the client").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Why: Inspection passed. · Evidence: Assessor's report dated 11 September. · Amina/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Recorded as a new version of the client's instruction/).length).toBeGreaterThan(0);
+  });
+});
+
+describe("the end date and the confirmation panel (4B-4B)", () => {
+  it("shows an insurer-added end date as a difference, and a derived one with its calculation", async () => {
+    const withEnd = {
+      ...CHANGED_MATCH,
+      items: [
+        matchItem("3", "Cover ends", null, "2027-09-30T23:59:59.000Z", "added_by_insurer", true),
+        { ...matchItem("4", "Premium", "KES 5,310,000", "KES 5,310,000", "match", false) },
+      ].map((i) => (i.label === "Cover ends" ? { ...i, field: "expiry_at" } : i)),
+    };
+    stubApi({ [PLACEMENT]: body("changed", { coverMatch: withEnd }) });
+    await open();
+    await waitFor(() => expect(screen.getAllByText("Added by the insurer").length).toBeGreaterThan(0));
+    expect(screen.getAllByText("30 Sept 2027").length).toBeGreaterThan(0);
+  });
+
+  it("shows an end date derived from the accepted period with its calculation and source", async () => {
+    const derived = { ...CLEAN_MATCH, items: [{ ...matchItem("5", "Cover ends", "2027-10-01T00:00:00.000Z", "2027-10-01T00:00:00.000Z", "match", false), field: "expiry_at", calculation: "Cover begins 1 Oct 2026 + 12 months = 1 Oct 2027, from the cover period in the client's accepted instruction." }] };
+    stubApi({ [PLACEMENT_2]: body("active", { placement: { ...body().placement, id: PLACEMENT_2 }, coverMatch: derived }) });
+    await open(PLACEMENT_2);
+    await waitFor(() => expect(screen.getAllByText(/Matches — Cover begins 1 Oct 2026 \+ 12 months = 1 Oct 2027/).length).toBeGreaterThan(0));
+  });
+
+  it("the confirmation panel shows the exact change, the permission, the blockers and the expiry", async () => {
+    stubApi({ [PLACEMENT]: body("draft", { preparedActions: [PREPARED] }) });
+    await open();
+    await waitFor(() => expect(screen.getAllByText(/Will change: Approval of this exact version/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/You may do this\./).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/expires 8 Sept/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Nothing is recorded until you confirm it/).length).toBeGreaterThan(0);
   });
 });

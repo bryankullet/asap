@@ -5,7 +5,7 @@
  * immutable inputs it is given in production: an accepted basis version and a confirmation.
  */
 import { describe, expect, it } from "vitest";
-import { summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "../src/placement/cover-match.js";
+import { endOfPeriod, summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "../src/placement/cover-match.js";
 
 const basis = (over: Partial<BasisSide> = {}): BasisSide => ({
   insurerName: "Jubilee",
@@ -18,6 +18,8 @@ const basis = (over: Partial<BasisSide> = {}): BasisSide => ({
   premiumBasis: null,
   clientConditions: null,
   outstandingRequirements: null,
+  periodMonths: null,
+  periodDays: null,
   terms: [
     { termType: "excess", label: "Own damage", value: "5% min KES 30,000", amount: null, currency: null, unclear: false },
     { termType: "limit", label: "Third party property", value: "KES 20,000,000", amount: null, currency: null, unclear: false },
@@ -117,12 +119,50 @@ describe("verify_cover_match", () => {
     expect(item.classification).toBe("missing_from_confirmation");
   });
 
-  it("keeps the client's own conditions in view until a person says they were met", () => {
-    const item = find(verifyCoverMatch(basis({ clientConditions: "Windscreen cover included" }), confirmation()), "Client conditions");
-    expect(item).toMatchObject({ classification: "unclear", material: false });
+  it("never matches the client's own conditions: they are resolved separately, one by one", () => {
+    const items = verifyCoverMatch(basis({ clientConditions: "Subject to inspection" }), confirmation());
+    expect(items.find((i) => i.label === "Client conditions")).toBeUndefined();
+    expect(items.every((i) => i.acceptedValue !== "Subject to inspection")).toBe(true);
   });
 
   it("reports a field neither side states as not applicable, never as a blank", () => {
     expect(find(verifyCoverMatch(basis(), confirmation()), "Premium basis").classification).toBe("not_applicable");
+  });
+});
+
+describe("the end of cover (4B-4B)", () => {
+  const noEnd = (over: Partial<BasisSide> = {}) => basis({ expiryAt: null, ...over });
+
+  it("an end date the client never accepted is a material term the insurer added", () => {
+    const item = find(verifyCoverMatch(noEnd(), confirmation({ expiryAt: "2027-09-30T23:59:59.000Z" })), "Cover ends");
+    expect(item).toMatchObject({ classification: "added_by_insurer", material: true, calculation: null });
+  });
+
+  it("assumes no annual term: without an accepted end or period, twelve months is not a match either", () => {
+    const item = find(verifyCoverMatch(noEnd(), confirmation({ expiryAt: "2027-10-01T00:00:00.000Z" })), "Cover ends");
+    expect(item.classification).toBe("added_by_insurer");
+  });
+
+  it("an explicit accepted period and the exact derived end is a match, with its calculation", () => {
+    const item = find(verifyCoverMatch(noEnd({ periodMonths: 12, periodDays: 0 }), confirmation({ expiryAt: "2027-10-01T00:00:00.000Z" })), "Cover ends");
+    expect(item).toMatchObject({ classification: "match", material: false, acceptedValue: "2027-10-01T00:00:00.000Z" });
+    expect(item.calculation).toBe("Cover begins 1 Oct 2026 + 12 months = 1 Oct 2027, from the cover period in the client's accepted instruction.");
+  });
+
+  it("an explicit period and a different end is a changed term", () => {
+    const item = find(verifyCoverMatch(noEnd({ periodMonths: 12, periodDays: 0 }), confirmation({ expiryAt: "2027-09-30T23:59:59.000Z" })), "Cover ends");
+    expect(item).toMatchObject({ classification: "changed", material: true });
+    expect(item.calculation).toMatch(/\+ 12 months = 1 Oct 2027/);
+  });
+
+  it("derives months then days, and a missing month end falls to that month's last day", () => {
+    expect(endOfPeriod("2026-10-01T00:00:00.000Z", 6, 0)).toBe("2027-04-01T00:00:00.000Z");
+    expect(endOfPeriod("2026-10-01T00:00:00.000Z", 0, 90)).toBe("2026-12-30T00:00:00.000Z");
+    expect(endOfPeriod("2027-01-31T00:00:00.000Z", 1, 0)).toBe("2027-02-28T00:00:00.000Z");
+  });
+
+  it("an accepted end date is compared as a date, and a period does not override it", () => {
+    const item = find(verifyCoverMatch(basis({ periodMonths: 12 }), confirmation()), "Cover ends");
+    expect(item).toMatchObject({ classification: "match", calculation: null });
   });
 });

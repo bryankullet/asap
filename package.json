@@ -17,6 +17,7 @@
     "lint:secrets": "node scripts/secret-scan.mjs",
     "test": "turbo run test",
     "test:rls": "bash scripts/test-rls.sh",
+    "test:connected": "bash scripts/test-connected.sh",
     "db:reset": "supabase db reset",
     "db:verify:local": "bash scripts/db-verify-local.sh",
     "db:drift": "pnpm --filter @asap/db run drift",

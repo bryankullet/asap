@@ -1049,6 +1049,32 @@
 }
 
 /*
+ * On a phone a table of three or more columns becomes one small card per row, each value under
+ * its column's name. Side by side, four columns at 390px leave a word per line.
+ */
+@media (max-width: 720px) {
+  .sp-grid[data-wide] .sp-grid-head {
+    display: none;
+  }
+  .sp-grid[data-wide] .sp-grid-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 6px 0;
+  }
+  .sp-grid[data-wide] .sp-grid-row > * {
+    padding: 3px 12px;
+  }
+  .sp-grid[data-wide] .sp-grid-row > *::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+}
+
+/*
  * On a phone a row's text and its badge-and-buttons stack. Side by side, a long badge and two
  * buttons claim the width and the text is squeezed to a word per line.
  */

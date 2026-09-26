@@ -147,7 +147,8 @@ function NoteBlock({ block }: Props<"note">) {
 function CompareBlock({ block }: Props<"compare">) {
   const columns = `minmax(0,1.1fr) repeat(${block.columns.length}, minmax(0,1fr))`;
   return (
-    <div className="sp-grid">
+    // Three or more columns stack on a phone, each value under its column's name (space.css).
+    <div className="sp-grid" data-wide={block.columns.length > 2 ? "true" : undefined}>
       <div className="sp-grid-head" style={{ gridTemplateColumns: columns }}>
         <div>{block.termHeading}</div>
         {block.columns.map((c, i) => (
@@ -162,7 +163,11 @@ function CompareBlock({ block }: Props<"compare">) {
         >
           <div className="sp-grid-term">{row.label}</div>
           {row.cells.map((cell, j) => (
-            <div key={j} className={cell.tone === "neutral" ? undefined : toneClass(cell.tone)}>
+            <div
+              key={j}
+              className={cell.tone === "neutral" ? undefined : toneClass(cell.tone)}
+              data-label={block.columns[j]?.label ?? ""}
+            >
               {cell.value}
             </div>
           ))}
@@ -175,7 +180,8 @@ function CompareBlock({ block }: Props<"compare">) {
 function TableBlock({ block }: Props<"table">) {
   const columns = `repeat(${block.columns.length}, minmax(0,1fr))`;
   return (
-    <div className="sp-grid">
+    // Three or more columns stack on a phone, each value under its column's name (space.css).
+    <div className="sp-grid" data-wide={block.columns.length > 2 ? "true" : undefined}>
       <div className="sp-grid-head" style={{ gridTemplateColumns: columns }}>
         {block.columns.map((c, i) => (
           <div key={`${c.label}-${i}`}>{c.label}</div>
@@ -184,7 +190,11 @@ function TableBlock({ block }: Props<"table">) {
       {block.rows.map((row) => (
         <div className="sp-grid-row" key={row.id} style={{ gridTemplateColumns: columns }}>
           {row.cells.map((cell, j) => (
-            <div key={j} className={cell.tone === "neutral" ? undefined : toneClass(cell.tone)}>
+            <div
+              key={j}
+              className={cell.tone === "neutral" ? undefined : toneClass(cell.tone)}
+              data-label={block.columns[j]?.label ?? ""}
+            >
               {cell.value}
             </div>
           ))}
