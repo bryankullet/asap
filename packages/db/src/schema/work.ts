@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -9,6 +10,7 @@ import {
   pgTable,
   text,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { createdAt, deletedAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
@@ -41,6 +43,12 @@ export const workItems = pgTable(
     coverInceptionAt: timestamptz("cover_inception_at"),
     moneyStatus: text("money_status"),
     reason: text("reason"),
+    /* The business identity this item is about (0055). Deduplication is on these, not the title. */
+    sourceType: text("source_type"),
+    sourceId: uuid("source_id"),
+    reasonCode: text("reason_code"),
+    requiredAction: text("required_action"),
+    evidenceNeeded: text("evidence_needed"),
     steps: jsonb("steps")
       .notNull()
       .default(sql`'[]'::jsonb`),
@@ -60,6 +68,16 @@ export const workItems = pgTable(
     index("work_items_owner_id_idx").on(t.ownerId),
     index("work_items_client_id_idx").on(t.clientId),
     index("work_items_insurer_id_idx").on(t.insurerId),
+    index("work_items_source_idx").on(t.organizationId, t.sourceType, t.sourceId),
+    uniqueIndex("work_items_one_open_per_source_reason")
+      .on(t.organizationId, t.sourceType, t.sourceId, t.reasonCode)
+      .where(sql`source_id is not null and task_status <> 'done' and deleted_at is null`),
+    check(
+      "work_items_source_is_whole",
+      sql`(source_type is null and source_id is null and reason_code is null)
+          or (source_type is not null and source_id is not null and reason_code is not null)`,
+    ),
+    check("work_items_reason_code_shape", sql`reason_code is null or reason_code ~ '^[a-z][a-z_]{2,60}$'`),
   ],
 );
 

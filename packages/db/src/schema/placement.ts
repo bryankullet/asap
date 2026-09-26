@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   boolean,
   check,
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   text,
@@ -60,6 +62,8 @@ export const clientInstructions = pgTable(
     outsideComparison: boolean("outside_comparison").notNull().default(false),
     exceptionReason: text("exception_reason"),
     exceptionBy: uuid("exception_by").references(() => users.id),
+    /* The instruction this one revises, when a client accepted an insurer's changes (0055). */
+    revisesInstructionId: uuid("revises_instruction_id").references((): AnyPgColumn => clientInstructions.id),
   },
   (t) => [
     check(
@@ -98,6 +102,7 @@ export const clientInstructions = pgTable(
     index("client_instructions_evidence_email_message_id_idx").on(t.evidenceEmailMessageId),
     index("client_instructions_recorded_by_idx").on(t.recordedBy),
     index("client_instructions_exception_by_idx").on(t.exceptionBy),
+    index("client_instructions_revises_instruction_id_idx").on(t.revisesInstructionId),
     uniqueIndex("client_instructions_one_live_per_opportunity")
       .on(t.opportunityId)
       .where(sql`${t.supersededAt} is null`),
@@ -156,7 +161,7 @@ export const placementBasisTerms = pgTable(
     id: uuidPrimaryKey(),
     organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
     placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
-    quoteTermRevisionId: uuid("quote_term_revision_id").notNull().references(() => quoteTermRevisions.id),
+    quoteTermRevisionId: uuid("quote_term_revision_id").references(() => quoteTermRevisions.id),
     termType: text("term_type").notNull(),
     label: text("label").notNull(),
     value: text("value"),
@@ -164,9 +169,13 @@ export const placementBasisTerms = pgTable(
     currency: text("currency"),
     unclear: boolean("unclear").notNull().default(false),
     createdAt: createdAt(),
+    basisVersionId: uuid("basis_version_id").references((): AnyPgColumn => placementBasisVersions.id),
   },
   (t) => [
-    unique("placement_basis_terms_one_per_revision").on(t.placementId, t.quoteTermRevisionId),
+    index("placement_basis_terms_basis_version_id_idx").on(t.basisVersionId),
+    uniqueIndex("placement_basis_terms_one_per_version_term")
+      .on(t.basisVersionId, t.termType, t.label)
+      .where(sql`${t.basisVersionId} is not null`),
     index("placement_basis_terms_organization_id_idx").on(t.organizationId),
     index("placement_basis_terms_placement_id_idx").on(t.placementId),
     index("placement_basis_terms_quote_term_revision_id_idx").on(t.quoteTermRevisionId),
@@ -313,6 +322,12 @@ export const placementInsurerResponses = pgTable(
     recordedAt: timestamptz("recorded_at").notNull().defaultNow(),
     supersededAt: timestamptz("superseded_at"),
     supersededReason: text("superseded_reason"),
+    confirmedInsurerName: text("confirmed_insurer_name"),
+    confirmedClassOfBusiness: text("confirmed_class_of_business"),
+    confirmedSubject: text("confirmed_subject"),
+    confirmedPremiumAmount: numeric("confirmed_premium_amount", { precision: 14, scale: 2 }),
+    confirmedPremiumCurrency: text("confirmed_premium_currency"),
+    confirmedPremiumBasis: text("confirmed_premium_basis"),
   },
   (t) => [
     check(
@@ -397,7 +412,249 @@ export const placementCancellations = pgTable(
   ],
 );
 
+/** What the client accepted, as versions. Version 1 is the instruction; later ones are acceptances. */
+export const placementBasisVersions = pgTable(
+  "placement_basis_versions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    clientInstructionId: uuid("client_instruction_id").notNull().references(() => clientInstructions.id),
+    insurerId: uuid("insurer_id").notNull().references(() => insurers.id),
+    classOfBusiness: text("class_of_business"),
+    subject: text("subject"),
+    effectiveAt: timestamptz("effective_at"),
+    expiryAt: timestamptz("expiry_at"),
+    premiumAmount: numeric("premium_amount", { precision: 14, scale: 2 }),
+    premiumCurrency: text("premium_currency"),
+    premiumBasis: text("premium_basis"),
+    clientConditions: text("client_conditions"),
+    outstandingRequirements: text("outstanding_requirements"),
+    origin: text("origin").notNull(),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("placement_basis_versions_one_per_version").on(t.placementId, t.version),
+    check("placement_basis_versions_version_check", sql`${t.version} >= 1`),
+    check("placement_basis_versions_origin_check", sql`${t.origin} in ('instruction','client_accepted_changes')`),
+    index("placement_basis_versions_organization_id_idx").on(t.organizationId),
+    index("placement_basis_versions_placement_id_idx").on(t.placementId),
+    index("placement_basis_versions_client_instruction_id_idx").on(t.clientInstructionId),
+    index("placement_basis_versions_insurer_id_idx").on(t.insurerId),
+    index("placement_basis_versions_created_by_idx").on(t.createdBy),
+  ],
+);
+
+/** The terms an insurer confirmed, one row each. Immutable. */
+export const placementConfirmationTerms = pgTable(
+  "placement_confirmation_terms",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementInsurerResponseId: uuid("placement_insurer_response_id").notNull().references(() => placementInsurerResponses.id, { onDelete: "cascade" }),
+    termType: text("term_type").notNull(),
+    label: text("label").notNull(),
+    value: text("value"),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    currency: text("currency"),
+    unclear: boolean("unclear").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("placement_confirmation_terms_one_per_term").on(t.placementInsurerResponseId, t.termType, t.label),
+    check(
+      "placement_confirmation_terms_term_type_check",
+      sql`${t.termType} in ('excess','limit','condition','exclusion','benefit','levy','tax','subjectivity','other')`,
+    ),
+    check("placement_confirmation_terms_label_check", sql`length(btrim(${t.label})) > 0`),
+    index("placement_confirmation_terms_organization_id_idx").on(t.organizationId),
+    index("placement_confirmation_terms_response_idx").on(t.placementInsurerResponseId),
+  ],
+);
+
+/** A confirmation against an accepted basis version, field by field. */
+export const coverMatchResults = pgTable(
+  "cover_match_results",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
+    basisVersionId: uuid("basis_version_id").notNull().references(() => placementBasisVersions.id),
+    placementInsurerResponseId: uuid("placement_insurer_response_id").notNull().references(() => placementInsurerResponses.id),
+    comparedBy: uuid("compared_by").references(() => users.id),
+    comparedAt: timestamptz("compared_at").notNull().defaultNow(),
+    materialDifferences: integer("material_differences").notNull().default(0),
+    unclearCount: integer("unclear_count").notNull().default(0),
+  },
+  (t) => [
+    check("cover_match_results_material_differences_check", sql`${t.materialDifferences} >= 0`),
+    check("cover_match_results_unclear_count_check", sql`${t.unclearCount} >= 0`),
+    index("cover_match_results_organization_id_idx").on(t.organizationId),
+    index("cover_match_results_placement_id_idx").on(t.placementId),
+    index("cover_match_results_basis_version_id_idx").on(t.basisVersionId),
+    index("cover_match_results_response_idx").on(t.placementInsurerResponseId),
+    index("cover_match_results_compared_by_idx").on(t.comparedBy),
+  ],
+);
+
+export const coverMatchItems = pgTable(
+  "cover_match_items",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    coverMatchResultId: uuid("cover_match_result_id").notNull().references(() => coverMatchResults.id, { onDelete: "cascade" }),
+    field: text("field").notNull(),
+    termType: text("term_type"),
+    label: text("label").notNull(),
+    acceptedValue: text("accepted_value"),
+    confirmedValue: text("confirmed_value"),
+    classification: text("classification").notNull(),
+    material: boolean("material").notNull().default(false),
+    position: integer("position").notNull().default(0),
+  },
+  (t) => [
+    unique("cover_match_items_one_per_position").on(t.coverMatchResultId, t.position),
+    check("cover_match_items_field_check", sql`length(btrim(${t.field})) > 0`),
+    check(
+      "cover_match_items_classification_check",
+      sql`${t.classification} in ('match','changed','missing_from_confirmation','added_by_insurer','unclear','not_applicable')`,
+    ),
+    index("cover_match_items_organization_id_idx").on(t.organizationId),
+    index("cover_match_items_result_idx").on(t.coverMatchResultId),
+  ],
+);
+
+/** The client's answer to an insurer's changes. Only a full acceptance changes what was agreed. */
+export const clientChangeAcceptances = pgTable(
+  "client_change_acceptances",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").notNull().references(() => placements.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    placementInsurerResponseId: uuid("placement_insurer_response_id").notNull().references(() => placementInsurerResponses.id),
+    coverMatchResultId: uuid("cover_match_result_id").notNull().references(() => coverMatchResults.id),
+    decision: text("decision").notNull(),
+    source: text("source").notNull(),
+    evidenceEmailMessageId: uuid("evidence_email_message_id").references(() => emailMessages.id, { onDelete: "set null" }),
+    evidenceDocumentId: uuid("evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
+    evidenceNote: text("evidence_note"),
+    decidedAt: timestamptz("decided_at").notNull(),
+    newClientInstructionId: uuid("new_client_instruction_id").references(() => clientInstructions.id),
+    newBasisVersionId: uuid("new_basis_version_id").references(() => placementBasisVersions.id),
+    recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+    recordedAt: timestamptz("recorded_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("client_change_acceptances_one_per_match").on(t.coverMatchResultId),
+    check("client_change_acceptances_decision_check", sql`${t.decision} in ('accept_all','reject','partial')`),
+    check(
+      "client_change_acceptances_source_check",
+      sql`${t.source} in ('email','document','telephone','meeting','signed_acceptance','in_person')`,
+    ),
+    check(
+      "client_change_acceptances_evidence_is_required",
+      sql`${t.evidenceEmailMessageId} is not null or ${t.evidenceDocumentId} is not null
+          or (${t.evidenceNote} is not null and length(btrim(${t.evidenceNote})) >= 10)`,
+    ),
+    check(
+      "client_change_acceptances_only_full_changes_the_basis",
+      sql`${t.decision} = 'accept_all' or (${t.newClientInstructionId} is null and ${t.newBasisVersionId} is null)`,
+    ),
+    index("client_change_acceptances_organization_id_idx").on(t.organizationId),
+    index("client_change_acceptances_placement_id_idx").on(t.placementId),
+    index("client_change_acceptances_client_id_idx").on(t.clientId),
+    index("client_change_acceptances_response_idx").on(t.placementInsurerResponseId),
+    index("client_change_acceptances_match_idx").on(t.coverMatchResultId),
+    index("client_change_acceptances_evidence_email_idx").on(t.evidenceEmailMessageId),
+    index("client_change_acceptances_evidence_document_idx").on(t.evidenceDocumentId),
+    index("client_change_acceptances_new_instruction_idx").on(t.newClientInstructionId),
+    index("client_change_acceptances_new_basis_idx").on(t.newBasisVersionId),
+    index("client_change_acceptances_recorded_by_idx").on(t.recordedBy),
+  ],
+);
+
+export const clientChangeAcceptanceItems = pgTable(
+  "client_change_acceptance_items",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    clientChangeAcceptanceId: uuid("client_change_acceptance_id").notNull().references(() => clientChangeAcceptances.id, { onDelete: "cascade" }),
+    coverMatchItemId: uuid("cover_match_item_id").notNull().references(() => coverMatchItems.id),
+    decision: text("decision").notNull(),
+  },
+  (t) => [
+    unique("client_change_acceptance_items_one_per_item").on(t.clientChangeAcceptanceId, t.coverMatchItemId),
+    check("client_change_acceptance_items_decision_check", sql`${t.decision} in ('accepted','rejected','clarify')`),
+    index("client_change_acceptance_items_organization_id_idx").on(t.organizationId),
+    index("client_change_acceptance_items_acceptance_idx").on(t.clientChangeAcceptanceId),
+    index("client_change_acceptance_items_match_item_idx").on(t.coverMatchItemId),
+  ],
+);
+
+/** What Ask prepared, held on the server until a person confirms it. */
+export const preparedActions = pgTable(
+  "prepared_actions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id").references(() => placements.id, { onDelete: "cascade" }),
+    opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "cascade" }),
+    actionType: text("action_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    sourceVersions: jsonb("source_versions").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    changes: jsonb("changes").notNull().default(sql`'[]'::jsonb`),
+    blockers: jsonb("blockers").notNull().default(sql`'[]'::jsonb`),
+    permitted: boolean("permitted").notNull(),
+    requiresConfirmation: boolean("requires_confirmation").notNull().default(true),
+    idempotencyKey: text("idempotency_key").notNull(),
+    state: text("state").notNull().default("prepared"),
+    preparedBy: uuid("prepared_by").notNull().references(() => users.id),
+    preparedAt: timestamptz("prepared_at").notNull().defaultNow(),
+    expiresAt: timestamptz("expires_at").notNull(),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamptz("decided_at"),
+    receipt: jsonb("receipt"),
+  },
+  (t) => [
+    unique("prepared_actions_one_per_key").on(t.organizationId, t.idempotencyKey),
+    check(
+      "prepared_actions_action_type_check",
+      sql`${t.actionType} in ('record_instruction','prepare_request','request_approval','approve_request','record_submission','record_insurer_response','record_client_acceptance','prepare_issuance')`,
+    ),
+    check("prepared_actions_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
+    check("prepared_actions_source_versions_check", sql`jsonb_typeof(${t.sourceVersions}) = 'object'`),
+    check("prepared_actions_fingerprint_check", sql`length(${t.fingerprint}) = 64`),
+    check("prepared_actions_changes_check", sql`jsonb_typeof(${t.changes}) = 'array'`),
+    check("prepared_actions_blockers_check", sql`jsonb_typeof(${t.blockers}) = 'array'`),
+    check("prepared_actions_idempotency_key_check", sql`length(btrim(${t.idempotencyKey})) between 8 and 200`),
+    check(
+      "prepared_actions_state_check",
+      sql`${t.state} in ('prepared','executed','stale','refused','discarded','expired')`,
+    ),
+    check("prepared_actions_has_a_subject", sql`${t.placementId} is not null or ${t.opportunityId} is not null`),
+    check(
+      "prepared_actions_decision_is_whole",
+      sql`${t.state} in ('prepared','expired') or (${t.decidedBy} is not null and ${t.decidedAt} is not null)`,
+    ),
+    check("prepared_actions_executed_has_receipt", sql`${t.state} <> 'executed' or ${t.receipt} is not null`),
+    index("prepared_actions_organization_id_idx").on(t.organizationId),
+    index("prepared_actions_placement_id_idx").on(t.placementId),
+    index("prepared_actions_opportunity_id_idx").on(t.opportunityId),
+    index("prepared_actions_prepared_by_idx").on(t.preparedBy),
+    index("prepared_actions_decided_by_idx").on(t.decidedBy),
+  ],
+);
+
 export type ClientInstruction = typeof clientInstructions.$inferSelect;
+export type PlacementBasisVersion = typeof placementBasisVersions.$inferSelect;
+export type CoverMatchResult = typeof coverMatchResults.$inferSelect;
+export type CoverMatchItem = typeof coverMatchItems.$inferSelect;
+export type ClientChangeAcceptance = typeof clientChangeAcceptances.$inferSelect;
+export type PreparedAction = typeof preparedActions.$inferSelect;
 export type Placement = typeof placements.$inferSelect;
 export type PlacementBasisTerm = typeof placementBasisTerms.$inferSelect;
 export type PlacementRequest = typeof placementRequests.$inferSelect;

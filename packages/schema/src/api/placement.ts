@@ -80,6 +80,15 @@ export type ClientInstructionView = z.infer<typeof clientInstructionSchema>;
 
 /** What the client accepted, frozen. Never read from the live quotation. */
 export const placementBasisSchema = z.object({
+  /** Version 1 is the instruction; a later version exists only where the client accepted changes. */
+  version: z.number().int().min(1),
+  origin: z.enum(["instruction", "client_accepted_changes"]),
+  classOfBusiness: z.string().nullable(),
+  subject: z.string().nullable(),
+  effectiveAt: z.string().nullable(),
+  expiryAt: z.string().nullable(),
+  premiumBasis: z.string().nullable(),
+  clientConditions: z.string().nullable(),
   premiumAmount: z.string().nullable(),
   premiumCurrency: z.string().nullable(),
   validUntil: z.string().nullable(),
@@ -131,8 +140,24 @@ export const placementRequestSchema = z.object({
 });
 export type PlacementRequestView = z.infer<typeof placementRequestSchema>;
 
+export const confirmationTermSchema = z.object({
+  termType: QuoteTermType,
+  label: z.string(),
+  value: z.string().nullable(),
+  amount: z.string().nullable(),
+  currency: z.string().nullable(),
+  unclear: z.boolean(),
+});
+
 export const placementInsurerResponseSchema = z.object({
+  id: uuidSchema,
   outcome: PlacementInsurerOutcome,
+  confirmedPremiumAmount: z.string().nullable(),
+  confirmedPremiumCurrency: z.string().nullable(),
+  confirmedPremiumBasis: z.string().nullable(),
+  confirmedSubject: z.string().nullable(),
+  confirmedClassOfBusiness: z.string().nullable(),
+  terms: z.array(confirmationTermSchema),
   receivedAt: z.string(),
   effectiveAt: z.string().nullable(),
   expiryAt: z.string().nullable(),
@@ -144,6 +169,130 @@ export const placementInsurerResponseSchema = z.object({
   recordedByName: z.string().nullable(),
 });
 export type PlacementInsurerResponseView = z.infer<typeof placementInsurerResponseSchema>;
+
+export const MatchClass = z.enum([
+  "match",
+  "changed",
+  "missing_from_confirmation",
+  "added_by_insurer",
+  "unclear",
+  "not_applicable",
+]);
+export type MatchClass = z.infer<typeof MatchClass>;
+
+/**
+ * The insurer's confirmation against what the client accepted, field by field. `current` is
+ * false when either input has moved since — a newer accepted basis, or a newer insurer answer —
+ * and a stale check says nothing about the cover as it stands.
+ */
+export const coverMatchSchema = z.object({
+  id: uuidSchema,
+  comparedAt: z.string(),
+  comparedByName: z.string().nullable(),
+  basisVersion: z.number().int().min(1),
+  current: z.boolean(),
+  staleReason: z.string().nullable(),
+  materialDifferences: z.number().int().min(0),
+  unclearCount: z.number().int().min(0),
+  items: z.array(
+    z.object({
+      id: uuidSchema,
+      field: z.string(),
+      termType: z.string().nullable(),
+      label: z.string(),
+      acceptedValue: z.string().nullable(),
+      confirmedValue: z.string().nullable(),
+      classification: MatchClass,
+      material: z.boolean(),
+    }),
+  ),
+});
+export type CoverMatchView = z.infer<typeof coverMatchSchema>;
+
+export const ChangeDecision = z.enum(["accept_all", "reject", "partial"]);
+export type ChangeDecision = z.infer<typeof ChangeDecision>;
+
+export const changeAcceptanceSchema = z.object({
+  decision: ChangeDecision,
+  decidedAt: z.string(),
+  source: InstructionSource,
+  evidence: evidenceRefSchema,
+  recordedByName: z.string().nullable(),
+  items: z.array(z.object({ label: z.string(), decision: z.enum(["accepted", "rejected", "clarify"]) })),
+  /**
+   * What to send next, as a draft. Never sent, and never said to have been: sending from ASAP is
+   * not connected, so a person copies it into the mailbox it should go from.
+   */
+  followUpDraft: z.string().nullable(),
+});
+export type ChangeAcceptanceView = z.infer<typeof changeAcceptanceSchema>;
+
+/**
+ * Whether policy issuance may begin. `blocked` always carries its reasons; nothing here is a
+ * "not yet" without saying what is missing.
+ */
+export const issuanceReadinessSchema = z.object({
+  state: z.enum(["ready", "blocked"]),
+  reasons: z.array(z.object({ code: z.string(), message: z.string().max(400) })),
+  /** Recorded, not enforced: payment before issuance becomes a company rule when Money exists. */
+  deferredChecks: z.array(z.string().max(300)),
+  workItemId: uuidSchema.nullable(),
+});
+export type IssuanceReadiness = z.infer<typeof issuanceReadinessSchema>;
+
+/** One placement Work item, with everything a broker needs to act on it without Activity. */
+export const placementWorkSchema = z.object({
+  id: uuidSchema,
+  reason: z.string(),
+  /** The part after the task-status label: "approve placement request". */
+  headline: z.string(),
+  why: z.string(),
+  action: z.string(),
+  evidence: z.string(),
+  after: z.string(),
+  taskStatus: z.enum(["needs_you", "with_party", "in_progress", "done"]),
+  taskParty: z.string().nullable(),
+  taskSince: z.string().nullable(),
+  taskNextCheck: z.string().nullable(),
+  ownerName: z.string().nullable(),
+});
+export type PlacementWork = z.infer<typeof placementWorkSchema>;
+
+export const PreparedActionType = z.enum([
+  "record_instruction",
+  "prepare_request",
+  "request_approval",
+  "approve_request",
+  "record_submission",
+  "record_insurer_response",
+  "record_client_acceptance",
+  "prepare_issuance",
+]);
+export type PreparedActionType = z.infer<typeof PreparedActionType>;
+
+/**
+ * What Ask prepared, held on the server. It executes only when a person confirms it, and only if
+ * nothing it was built from has moved since.
+ */
+export const preparedActionSchema = z.object({
+  id: uuidSchema,
+  actionType: PreparedActionType,
+  placementId: uuidSchema.nullable(),
+  opportunityId: uuidSchema.nullable(),
+  summary: z.string().max(300),
+  changes: z.array(z.string().max(400)),
+  blockers: z.array(z.string().max(400)),
+  permitted: z.boolean(),
+  requiresConfirmation: z.boolean(),
+  state: z.enum(["prepared", "executed", "stale", "refused", "discarded", "expired"]),
+  preparedAt: z.string(),
+  expiresAt: z.string(),
+  preparedByName: z.string().nullable(),
+  receipt: z
+    .object({ message: z.string(), at: z.string(), by: z.string().nullable() })
+    .nullable(),
+});
+export type PreparedActionView = z.infer<typeof preparedActionSchema>;
 
 export const placementResponseSchema = z.object({
   placement: z.object({
@@ -162,6 +311,8 @@ export const placementResponseSchema = z.object({
     taskParty: z.string().nullable(),
     taskSince: z.string().nullable(),
   }),
+  /** Every open Work item for this placement, with its reason. One lifecycle reason at a time. */
+  work: z.array(placementWorkSchema),
   instruction: clientInstructionSchema,
   instructionHistory: z.array(clientInstructionSchema),
   basis: placementBasisSchema,
@@ -198,12 +349,10 @@ export const placementResponseSchema = z.object({
     approverRoles: z.array(z.string()),
   }),
   sending: z.object({ available: z.boolean(), reason: z.string().max(300).nullable() }),
-  /** Whether policy issuance may be prepared — only once cover is confirmed. */
-  issuance: z.object({
-    ready: z.boolean(),
-    reason: z.string().max(300).nullable(),
-    workItemId: uuidSchema.nullable(),
-  }),
+  coverMatch: coverMatchSchema.nullable(),
+  changeAcceptance: changeAcceptanceSchema.nullable(),
+  readiness: issuanceReadinessSchema,
+  preparedActions: z.array(preparedActionSchema),
 });
 export type PlacementResponse = z.infer<typeof placementResponseSchema>;
 
@@ -257,9 +406,31 @@ export const placementActionSchema = z.discriminatedUnion("action", [
     /** The same intent retried carries the same key, so a double click records one submission. */
     idempotencyKey: z.string().trim().min(8).max(200),
   }),
+  /** Put the approval in front of a named person. Assigns the Work; approves nothing. */
+  z.object({ action: z.literal("request_approval"), approverUserId: uuidSchema }),
   z.object({
     action: z.literal("record_insurer_response"),
     outcome: PlacementInsurerOutcome,
+    confirmedPremiumAmount: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+    confirmedPremiumCurrency: z.string().regex(/^[A-Z]{3}$/).optional(),
+    confirmedPremiumBasis: z.string().trim().max(300).optional(),
+    confirmedSubject: z.string().trim().max(500).optional(),
+    confirmedClassOfBusiness: z.string().trim().max(100).optional(),
+    /**
+     * Where the insurer's terms differ from what was requested: each changed, added or removed
+     * term. Omitted terms are confirmed as requested. `value: null` means the insurer dropped it.
+     */
+    termChanges: z
+      .array(
+        z.object({
+          termType: QuoteTermType,
+          label: z.string().trim().min(1).max(200),
+          value: z.string().trim().max(500).nullable(),
+          unclear: z.boolean().optional(),
+        }),
+      )
+      .max(50)
+      .optional(),
     receivedAt: z.string().datetime({ offset: true }),
     effectiveAt: z.string().datetime({ offset: true }).optional(),
     expiryAt: z.string().datetime({ offset: true }).optional(),
@@ -279,7 +450,27 @@ export const placementActionSchema = z.discriminatedUnion("action", [
     evidenceEmailMessageId: uuidSchema.optional(),
     evidenceNote: z.string().trim().max(1000).optional(),
   }),
-  /** Opens the 4B-5 handoff as Work. Refused until cover is confirmed. Creates no policy. */
+  /** Re-run the cover check against the current accepted basis and insurer answer. */
+  z.object({ action: z.literal("verify_cover_match") }),
+  /**
+   * The client's answer to the insurer's changes. Partial acceptance is never treated as full:
+   * each item the client queried is recorded as such, and what was agreed does not change.
+   */
+  z.object({
+    action: z.literal("record_client_acceptance"),
+    coverMatchId: uuidSchema,
+    decision: ChangeDecision,
+    source: InstructionSource,
+    decidedAt: z.string().datetime({ offset: true }),
+    evidenceEmailMessageId: uuidSchema.optional(),
+    evidenceDocumentId: uuidSchema.optional(),
+    evidenceNote: z.string().trim().max(1000).optional(),
+    items: z
+      .array(z.object({ coverMatchItemId: uuidSchema, decision: z.enum(["accepted", "rejected", "clarify"]) }))
+      .max(100)
+      .optional(),
+  }),
+  /** Opens the 4B-5 handoff as Work. Refused unless readiness is `ready`. Creates no policy. */
   z.object({ action: z.literal("prepare_issuance") }),
 ]);
 export type PlacementAction = z.infer<typeof placementActionSchema>;
@@ -290,3 +481,40 @@ export const placementActionResponseSchema = z.object({
   placement: placementResponseSchema.nullable().default(null),
 });
 export type PlacementActionResponse = z.infer<typeof placementActionResponseSchema>;
+
+
+/* ---- Preparing an action for a person to confirm --------------------------------------------- */
+
+/**
+ * What Ask (or a screen) asks the server to prepare. Names may stand in for ids where a person
+ * spoke them — "Jubilee", "Mary" — and the server resolves them against this placement's own
+ * records only, exactly, never by resemblance. A missing fact comes back as one question.
+ */
+export const prepareActionRequestSchema = z.object({
+  actionType: PreparedActionType,
+  placementId: uuidSchema.optional(),
+  opportunityId: uuidSchema.optional(),
+  insurerName: z.string().trim().max(200).optional(),
+  approverName: z.string().trim().max(200).optional(),
+  params: z.record(z.string(), z.unknown()).default({}),
+});
+export type PrepareActionRequest = z.infer<typeof prepareActionRequestSchema>;
+
+export const prepareActionResponseSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("prepared"), action: preparedActionSchema }),
+  z.object({
+    state: z.literal("clarify"),
+    question: z.string().max(400),
+    missing: z.array(z.string().max(100)),
+    options: z.array(z.object({ label: z.string().max(200), value: z.string().max(200) })).max(20),
+  }),
+  z.object({ state: z.literal("refused"), reason: z.string().max(400) }),
+]);
+export type PrepareActionResponse = z.infer<typeof prepareActionResponseSchema>;
+
+export const confirmPreparedActionResponseSchema = z.object({
+  outcome: z.enum(["done", "already", "refused"]),
+  reason: z.string().max(400).nullable().default(null),
+  action: preparedActionSchema.nullable().default(null),
+});
+export type ConfirmPreparedActionResponse = z.infer<typeof confirmPreparedActionResponseSchema>;
