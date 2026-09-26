@@ -272,7 +272,8 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-3 Quote Comparison Space | Accepted |
 | 4B-3A Reproducibility, recommendation rules, extraction | Accepted |
 | 4B-4 Placement and approval flow | Accepted as foundation |
-| 4B-4A Ask actions, Work clarity, cover match, client acceptance | Tested — awaiting review |
+| 4B-4A Ask actions, Work clarity, cover match, client acceptance | Superseded by 4B-4B corrections |
+| 4B-4B Client conditions, accepted end date, connected verification | Tested — awaiting review |
 | 4B-5 Policy issuance handoff | Not started |
 
 Updated after every commit.
@@ -323,6 +324,20 @@ per key, and a route from a reviewed extraction to `quote_terms`. All three are 
   ids, stale when either moves) and the client's acceptance of changed terms (accept all creates a
   new instruction revision and basis version; reject and partial never change what was agreed).
 
+### What 4B-4B changed
+
+- **Client conditions** are their own state (D-100): one row per condition from the accepted
+  instruction, each confirmed by the insurer, satisfied with evidence, waived by the client
+  (a new instruction version), or unresolved — which blocks issuance.
+- **The end date** matches only an accepted end date, or one derived exactly from an explicit
+  accepted cover period, with the calculation shown (D-101). No annual term is assumed.
+- **Placement records are written through the API only** (D-102); prepared actions are decided
+  only by the person who prepared them, and never after expiry.
+- **Connected verification** (D-103): `pnpm test:connected` runs the real API against PostgREST
+  and a disposable database. It found and this stage fixed two production defects: money read
+  from PostgREST as JSON numbers (500 on recording a quote; comparison digests that could never
+  match the database's), and Ask scopes `opportunity`/`placement` refused by a stale check.
+
 ### Scheduled gaps left open by 4B-4A
 
 Opening a placement derives its state and brings its Work into line immediately, and every blocked
@@ -335,10 +350,12 @@ opening something:
 - **Quote expiry after instruction** raises Work only when the placement is next opened or acted
   on (it becomes *review what changed in the quotation*). No sweep notices it in between.
 - **`quote.track_validity` has no scheduled sweep** (unchanged from 4B-3A).
+- **Unresolved client conditions raise no reminder.** They block issuance and show as Work
+  when the placement is opened or acted on; nothing chases them on a timer.
 - **Prepared actions expire lazily.** A prepared action past its 24-hour window is refused and
   marked expired when someone tries to confirm it; nothing sweeps unconfirmed ones.
 
-All four belong with the scheduled-jobs stage.
+All five belong with the scheduled-jobs stage.
 
 ### Still unsupported after 4B-3A
 

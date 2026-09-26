@@ -1776,3 +1776,40 @@ or answered with one question; nothing is defaulted. Confirmation re-reads the p
 the action as stale if the digest moved, re-checks permission, then runs the same service function
 the screen's action route runs. Prepared actions live in the database, not the browser, so a
 refresh does not lose one; they are shown on the placement with a confirm panel and a receipt.
+
+## D-100 — A client's condition is resolved, never "accepted" again
+
+A condition the client attached to their instruction ("subject to inspection", "install a tracker",
+"provide the driver list") is not a quotation difference, and the cover check no longer compares it
+at all. Each is stored as its own immutable row from the accepted instruction, and its state is
+derived: **confirmed by insurer** (named in the live confirmation; it lapses if that answer is
+superseded), **satisfied** (reason and evidence), **waived** (reason and evidence, and a new
+client-instruction version — the accepted one is kept), or **unresolved**. An unresolved condition
+blocks issuance readiness and opens *resolve the client's conditions* in Work, even while cover is
+genuinely in force. Nothing names a Kenyan condition; any condition works.
+
+## D-101 — An end date matches only what the client accepted
+
+With an accepted end date, the confirmation's end is compared as a date. With none, and an
+explicit accepted cover period (months and/or days), the exact end is derived — whole calendar
+months then days, to the same instant, a missing month-end falling to that month's last day —
+and the match or change is shown with its calculation and source. With neither, any end the
+insurer states is a material term the insurer added, and the client must accept it (a new
+instruction version and accepted basis version, with evidence). No default annual term, twelve
+months or unwritten convention exists anywhere.
+
+## D-102 — Placement records are written through the API only
+
+A browser session and the API both reach the database as `authenticated`; only the API carries
+the server-held key. Every placement table now refuses an insert or update from `authenticated`
+or `anon` without it (`app.placement_writes_through_api`). A prepared action is decided only by
+the person who prepared it, never after it expired, and what it will do cannot change.
+
+## D-103 — The final placement verdict rests on a connected run
+
+`scripts/test-connected.sh` runs the real API (routes, services, Ask tool loop, the production
+Supabase factory) through a real PostgREST against a disposable database built from the
+migrations, with signed JWTs and RLS. The one stand-in is Supabase Auth's token lookup. It is
+excluded from the ordinary test run and required before a placement stage is declared ready. Money
+read from the database passes through `pgMoney`, because PostgREST returns `numeric` as JSON
+numbers while the database's own digests use the fixed-scale text.
