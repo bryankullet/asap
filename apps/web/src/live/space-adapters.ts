@@ -357,7 +357,12 @@ function attentionRow(row: AttentionResponse["items"][number]): SpaceRow {
      * row that cannot say why it is on the screen is a row a person learns to distrust — and
      * because putting it in front of every row would bury the work itself.
      */
-    why: `${row.reason} ${row.signals.map((s) => s.because).join(" ")}`.trim(),
+    why: [
+      row.reason,
+      row.item.required_action ? `To do: ${row.item.required_action}` : null,
+      row.item.evidence_needed ? `Evidence needed: ${row.item.evidence_needed}` : null,
+      ...row.signals.map((s) => s.because),
+    ].filter((v): v is string => v !== null && v !== "").join(" ").trim(),
     related: refForWorkItem(row.item, row.links),
     region: null,
     actions: [openAction(row.item, row.links)],
@@ -539,7 +544,12 @@ function workRow(
     note: noteFor(row),
     badge: badgeForWork(row),
     badgeTone: toneForWork(row),
-    why: `${row.reason} ${row.signals.map((s) => s.because).join(" ")}`.trim(),
+    why: [
+      row.reason,
+      row.item.required_action ? `To do: ${row.item.required_action}` : null,
+      row.item.evidence_needed ? `Evidence needed: ${row.item.evidence_needed}` : null,
+      ...row.signals.map((s) => s.because),
+    ].filter((v): v is string => v !== null && v !== "").join(" ").trim(),
     related: refForWorkItem(row.item, row.links),
     region: null,
     actions,

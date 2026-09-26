@@ -1048,6 +1048,18 @@
   color: var(--color-ink-done);
 }
 
+/*
+ * On a phone a row's text and its badge-and-buttons stack. Side by side, a long badge and two
+ * buttons claim the width and the text is squeezed to a word per line.
+ */
+@media (max-width: 720px) {
+  .sp-row-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sp-row-actions {
+    justify-content: flex-start;
+  }
+}
 @media (max-width: 720px) {
   .sp-sheet {
     width: 100%;

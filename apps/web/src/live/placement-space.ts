@@ -1,5 +1,6 @@
 import {
   COVER_LABELS,
+  TASK_LABELS,
   type PlacementResponse,
   type SpaceFrame,
   type SpaceFrameAction,
@@ -82,22 +83,53 @@ function money(amount: string | null, currency: string | null): string {
   return Number.isNaN(n) ? `${currency} ${amount}` : `${currency} ${n.toLocaleString("en-KE")}`;
 }
 
-/** The work headline. Names the outside party and the date, never a bare "Waiting". */
-function workWords(w: PlacementResponse["workItem"]): { label: string; tone: SpaceTone } {
+/**
+ * The work headline: the task-status label, then what the work is — "Your work — approve
+ * placement request", "With Jubilee since 12 Aug — cover confirmation requested". Names the outside
+ * party and the date, never a bare "Waiting", and never puts cover status in this position.
+ */
+export function workHeadline(w: PlacementResponse["work"][number] | undefined): { label: string; tone: SpaceTone } {
+  if (w === undefined) return { label: `${TASK_LABELS.done} — nothing open on this placement`, tone: "neutral" };
   switch (w.taskStatus) {
     case "needs_you":
-      return { label: "Yours", tone: "attention" };
+      return { label: `${TASK_LABELS.needs_you} — ${w.headline}`, tone: "attention" };
     case "with_party":
       return {
-        label: w.taskParty === null ? "With someone else" : `With ${w.taskParty}${w.taskSince ? ` since ${short(w.taskSince)}` : ""}`,
+        label: `${TASK_LABELS.with_party} ${w.taskParty ?? "the other party"}${w.taskSince ? ` since ${short(w.taskSince)}` : ""} — ${w.headline}`,
         tone: "waiting",
       };
     case "in_progress":
-      return { label: "In progress", tone: "active" };
+      return { label: `${TASK_LABELS.in_progress} — ${w.headline}`, tone: "active" };
     default:
-      return { label: "Done", tone: "neutral" };
+      return { label: `${TASK_LABELS.done} — ${w.headline}`, tone: "neutral" };
   }
 }
+
+const MATCH_WORDS: Record<NonNullable<PlacementResponse["coverMatch"]>["items"][number]["classification"], { label: string; tone: SpaceTone }> = {
+  match: { label: "Matches", tone: "done" },
+  changed: { label: "Changed by the insurer", tone: "attention" },
+  missing_from_confirmation: { label: "Not in the confirmation", tone: "attention" },
+  added_by_insurer: { label: "Added by the insurer", tone: "attention" },
+  unclear: { label: "A person must check", tone: "waiting" },
+  not_applicable: { label: "Stated by neither", tone: "neutral" },
+};
+
+const DECISION_WORDS: Record<NonNullable<PlacementResponse["changeAcceptance"]>["decision"], string> = {
+  accept_all: "accepted all of the insurer's changes",
+  reject: "rejected the insurer's changes",
+  partial: "accepted some of the insurer's changes and not others",
+};
+
+const ITEM_DECISION_WORDS = { accepted: "Accepted", rejected: "Rejected", clarify: "Asked to clarify" } as const;
+
+const PREPARED_STATE_WORDS: Record<PlacementResponse["preparedActions"][number]["state"], { label: string; tone: SpaceTone }> = {
+  prepared: { label: "Waiting for you to confirm", tone: "attention" },
+  executed: { label: "Done", tone: "done" },
+  stale: { label: "Out of date — not run", tone: "neutral" },
+  refused: { label: "Refused — not run", tone: "attention" },
+  discarded: { label: "Discarded", tone: "neutral" },
+  expired: { label: "Expired — not run", tone: "neutral" },
+};
 
 const ready = { evidence: [], actions: [], state: "ready" as const, stateNote: null };
 
@@ -140,7 +172,7 @@ function open(label: string, to: SpaceRef): SpaceFrameAction {
  * business fact. Every value it collects goes to the server as a typed action, and nothing is
  * recorded until the server says so.
  */
-export type PlacementDraft = "submission" | "response" | null;
+export type PlacementDraft = "submission" | "response" | "acceptance" | null;
 
 export function placementSpace(
   data: PlacementResponse | undefined,
@@ -153,7 +185,7 @@ export function placementSpace(
     spaceKind: "placement",
     recordType: "placement",
     recordId: placementId,
-    workflowId: data?.workItem.id ?? null,
+    workflowId: data?.work[0]?.id ?? data?.workItem.id ?? null,
     path: `/placements/${placementId}`,
     title,
     label: "PLACEMENT",
@@ -180,7 +212,7 @@ export function placementSpace(
 
   const d = data;
   const blocks: SpaceFrameBlock[] = [];
-  const work = workWords(d.workItem);
+  const work = workHeadline(d.work[0]);
 
   const opportunityRef: SpaceRef = {
     spaceKind: "placement", recordType: "opportunity", recordId: d.opportunity.id, workflowId: null,
@@ -227,6 +259,28 @@ export function placementSpace(
       label: "BEFORE THIS CAN MOVE",
       ...ready,
       items: d.blockers.slice(0, 12).map((text) => ({ text })),
+    });
+  }
+
+  /* ---- The Work: why it is open, who has it, and what closes it ----------------------------- */
+
+  if (d.work.length > 0) {
+    blocks.push({
+      id: "work",
+      type: "rows",
+      label: "IN WORK",
+      ...ready,
+      rows: d.work.slice(0, 5).map((w) => {
+        const h = workHeadline(w);
+        return row(`work-${w.id}`, h.label, [
+          w.why,
+          `To do: ${w.action}`,
+          `Evidence needed: ${w.evidence}`,
+          w.ownerName === null ? null : `With ${w.ownerName} in the brokerage`,
+          w.taskNextCheck === null ? null : `Next check ${day(w.taskNextCheck)}`,
+          `Then: ${w.after}`,
+        ].filter((v): v is string => v !== null).join(" · "), { badge: w.taskStatus === "with_party" ? TASK_LABELS.with_party : TASK_LABELS[w.taskStatus], badgeTone: h.tone });
+      }),
     });
   }
 
@@ -288,7 +342,9 @@ export function placementSpace(
   blocks.push({
     id: "basis",
     type: "table",
-    label: "WHAT THE CLIENT ACCEPTED — FROZEN WHEN THEY INSTRUCTED",
+    label: d.basis.origin === "instruction"
+      ? "WHAT THE CLIENT ACCEPTED — FROZEN WHEN THEY INSTRUCTED"
+      : `WHAT THE CLIENT ACCEPTED — VERSION ${d.basis.version}, AFTER ACCEPTING THE INSURER'S CHANGES`,
     ...ready,
     columns: [{ label: "Term" }, { label: "As accepted" }],
     rows: [
@@ -451,6 +507,138 @@ export function placementSpace(
     });
   }
 
+  /* ---- The cover check: the confirmation against what the client accepted ------------------- */
+
+  const m = d.coverMatch;
+  if (m !== null) {
+    const shown = m.items.filter((x) => x.classification !== "not_applicable");
+    blocks.push({
+      id: "cover-match",
+      type: "table",
+      label: m.current
+        ? m.materialDifferences === 0
+          ? "CONFIRMATION CHECKED — IT MATCHES WHAT THE CLIENT ACCEPTED"
+          : `CONFIRMATION CHECKED — ${m.materialDifferences} ${m.materialDifferences === 1 ? "DIFFERENCE" : "DIFFERENCES"} FROM WHAT THE CLIENT ACCEPTED`
+        : "CONFIRMATION CHECK — OUT OF DATE",
+      evidence: [],
+      actions: [],
+      state: "ready",
+      stateNote: m.current
+        ? `Compared ${day(m.comparedAt)} by ${m.comparedByName ?? "ASAP, on recording the confirmation"}, against version ${m.basisVersion} of what the client accepted.`
+        : `${m.staleReason ?? "An input moved."} Run the check again before relying on it.`,
+      columns: [{ label: "Term" }, { label: "Client accepted" }, { label: `${d.insurer.name} confirmed` }, { label: "Result" }],
+      rows: shown.slice(0, 50).map((x) => ({
+        id: x.id,
+        cells: [
+          { value: x.label, tone: "neutral" as SpaceTone },
+          { value: x.acceptedValue ?? "Not stated", tone: "neutral" as SpaceTone },
+          { value: x.confirmedValue ?? "Not stated", tone: "neutral" as SpaceTone },
+          { value: `${MATCH_WORDS[x.classification].label}${x.material ? "" : x.classification === "match" ? "" : " (not material)"}`, tone: MATCH_WORDS[x.classification].tone },
+        ],
+      })),
+    });
+  }
+
+  /* ---- The client's answer to the insurer's changes ----------------------------------------- */
+
+  const ca = d.changeAcceptance;
+  if (ca !== null) {
+    blocks.push({
+      id: "acceptance",
+      type: "rows",
+      label: "WHAT THE CLIENT SAID ABOUT THE CHANGES",
+      ...ready,
+      rows: [
+        row("acceptance", `The client ${DECISION_WORDS[ca.decision]}`, `${SOURCE_WORDS[ca.source]} on ${day(ca.decidedAt)} · ${ca.evidence.label} · Recorded by ${ca.recordedByName ?? "a colleague"}`, {
+          badge: ca.decision === "accept_all" ? "Accepted" : ca.decision === "reject" ? "Rejected" : "Partly accepted",
+          badgeTone: ca.decision === "accept_all" ? "done" : "attention",
+        }),
+        ...ca.items.slice(0, 30).map((it, n) => row(`acceptance-${n}`, it.label, ITEM_DECISION_WORDS[it.decision], { badge: ITEM_DECISION_WORDS[it.decision], badgeTone: it.decision === "accepted" ? "done" : "attention" })),
+      ],
+    });
+    if (ca.followUpDraft !== null) {
+      blocks.push({
+        id: "follow-up",
+        type: "note",
+        label: null,
+        ...ready,
+        tone: "waiting",
+        title: "A draft to the insurer — not sent",
+        text: `${ca.followUpDraft.slice(0, 1000)}\n\nSending from ASAP is not connected. Copy it into the mailbox it should go from.`,
+      });
+    }
+  } else if (m !== null && m.current && m.materialDifferences > 0) {
+    blocks.push({
+      id: "acceptance-none",
+      type: "note",
+      label: null,
+      ...ready,
+      tone: "attention",
+      title: "The client has not accepted these changes",
+      text: d.cover.state === "active"
+        ? `${d.insurer.name}'s cover is in force on its own terms. That is not the client's agreement: put each difference to the client and record what they decide. Policy issuance waits until then.`
+        : "Put each difference to the client and record what they decide. Policy issuance waits until then.",
+    });
+  }
+
+  /* ---- Whether policy issuance may begin ---------------------------------------------------- */
+
+  const rd = d.readiness;
+  blocks.push(
+    rd.state === "ready"
+      ? {
+          id: "readiness",
+          type: "note",
+          label: "POLICY ISSUANCE",
+          ...ready,
+          tone: "done",
+          title: "Ready for policy issuance",
+          text: `Cover is confirmed and matches what the client accepted. No policy has been created. ${rd.deferredChecks.join(" ")}`,
+        }
+      : {
+          id: "readiness",
+          type: "missing",
+          label: "POLICY ISSUANCE IS BLOCKED",
+          ...ready,
+          items: [...rd.reasons.map((x) => ({ text: x.message })), ...rd.deferredChecks.map((text) => ({ text: `Not checked yet: ${text}` }))].slice(0, 12),
+        },
+  );
+
+  /* ---- What Ask prepared, waiting for a person ---------------------------------------------- */
+
+  if (d.preparedActions.length > 0) {
+    blocks.push({
+      id: "prepared",
+      type: "rows",
+      label: "PREPARED FOR YOU TO CONFIRM",
+      ...ready,
+      rows: d.preparedActions.slice(0, 10).map((pa) => {
+        const st = PREPARED_STATE_WORDS[pa.state];
+        const live = pa.state === "prepared";
+        return row(
+          `prepared-${pa.id}`,
+          pa.summary,
+          [
+            ...pa.changes.map((c) => `Will change: ${c}`),
+            ...pa.blockers.map((b) => `Blocked: ${b}`),
+            pa.receipt === null ? null : `Receipt: ${pa.receipt.message} (${day(pa.receipt.at)}${pa.receipt.by === null ? "" : `, ${pa.receipt.by}`})`,
+            live ? `Prepared by ${pa.preparedByName ?? "Ask"} · valid until ${day(pa.expiresAt)}` : null,
+          ].filter((v): v is string => v !== null).join(" · "),
+          {
+            badge: st.label,
+            badgeTone: st.tone,
+            actions: live
+              ? [
+                  act("Confirm and record", `confirm:${pa.id}`, "approve", pa.blockers.length > 0 ? pa.blockers[0]! : null, pa.permitted ? null : "You may not do this. Someone with the permission must confirm it."),
+                  act("Discard", `discard:${pa.id}`, "resolve"),
+                ]
+              : [],
+          },
+        );
+      }),
+    });
+  }
+
   /* ---- The forms that record what happened outside ASAP ------------------------------------- */
 
   if (drafting === "submission" && r !== null && r.approval !== null && r.submission === null) {
@@ -511,8 +699,58 @@ export function placementSpace(
         { name: "effectiveAt", label: "Cover begins", kind: "date", value: "", placeholder: "", required: false, hint: "Required for a confirmation. The insurer's date, not ours.", error: null, options: [] },
         { name: "expiryAt", label: "Cover ends", kind: "date", value: "", placeholder: "", required: false, hint: "", error: null, options: [] },
         { name: "insurerReference", label: "Their reference", kind: "text", value: "", placeholder: "Cover note number", required: false, hint: "", error: null, options: [] },
+        { name: "confirmedPremiumAmount", label: "Premium they confirmed", kind: "text", value: "", placeholder: "Leave empty if as quoted", required: false, hint: "Numbers only, e.g. 5310000.", error: null, options: [] },
+        { name: "changedTerms", label: "Terms they changed, one per line", kind: "textarea", value: "", placeholder: "Own damage: 7.5% min KES 45,000", required: false, hint: "Label: new value. A label not in the accepted terms is recorded as added by the insurer; \"Label: removed\" records one they dropped.", error: null, options: [] },
         { name: "detail", label: "What changed, what they need, or why they declined", kind: "textarea", value: "", placeholder: "", required: false, hint: "", error: null, options: [] },
         { name: "evidenceNote", label: "What shows it", kind: "textarea", value: "", placeholder: "", required: true, hint: "How their answer arrived, and when.", error: null, options: [] },
+      ],
+    });
+  }
+
+  if (drafting === "acceptance" && m !== null && m.current && m.materialDifferences > 0 && ca === null) {
+    const material = m.items.filter((x) => x.material).slice(0, 8);
+    blocks.push({
+      id: "acceptance-form",
+      type: "form",
+      label: "RECORD WHAT THE CLIENT DECIDED",
+      evidence: [],
+      state: "ready",
+      stateNote: null,
+      submitLabel: "Record the client's decision",
+      busy: state.busy,
+      actions: [act("Record the client's decision", `accept-form:${m.id}`, "record_evidence")],
+      fields: [
+        {
+          name: "decision", label: "The client's decision", kind: "select", value: "accept_all", placeholder: "", required: true,
+          hint: "Partly accepting is not accepting: each difference below is recorded as decided.", error: null,
+          options: [
+            { value: "accept_all", label: "Accepted all the changes" },
+            { value: "reject", label: "Rejected the changes" },
+            { value: "partial", label: "Accepted some, not others" },
+          ],
+        },
+        {
+          name: "source", label: "How it arrived", kind: "select", value: "email", placeholder: "", required: true, hint: "", error: null,
+          options: [
+            { value: "email", label: "By email" },
+            { value: "document", label: "In a document" },
+            { value: "telephone", label: "By telephone" },
+            { value: "meeting", label: "At a meeting" },
+            { value: "signed_acceptance", label: "By signed acceptance" },
+            { value: "in_person", label: "In person" },
+          ],
+        },
+        { name: "decidedAt", label: "When", kind: "date", value: "", placeholder: "", required: true, hint: "", error: null, options: [] },
+        { name: "evidenceNote", label: "What shows it", kind: "textarea", value: "", placeholder: "", required: true, hint: "Who said it, when, and where it is.", error: null, options: [] },
+        ...material.map((x) => ({
+          name: `item:${x.id}`, label: `${x.label}: ${x.acceptedValue ?? "not stated"} → ${x.confirmedValue ?? "not stated"}`.slice(0, 120),
+          kind: "select" as const, value: "accepted", placeholder: "", required: false, hint: "Used when the decision is partial.", error: null,
+          options: [
+            { value: "accepted", label: "Accepted" },
+            { value: "rejected", label: "Rejected" },
+            { value: "clarify", label: "Asked to clarify" },
+          ],
+        })),
       ],
     });
   }
@@ -531,7 +769,14 @@ export function placementSpace(
   if (r?.submission && (ir === null || ir.outcome === "more_information_required")) {
     actions.push(act("Record the insurer's answer", "respond", "record_evidence", null, d.permissions.canRecordResponse ? null : "You may not record what the insurer said."));
   }
-  if (d.issuance.ready && d.issuance.workItemId === null) {
+  const confirmed = ir !== null && (ir.outcome === "confirmed_as_requested" || ir.outcome === "confirmed_with_changes");
+  if (confirmed && (m === null || !m.current)) {
+    actions.push(act("Check the confirmation against what was agreed", "verify", "prepare", null, d.permissions.canRecordResponse ? null : "You may not run the cover check."));
+  }
+  if (m !== null && m.current && m.materialDifferences > 0 && ca === null) {
+    actions.push(act("Record the client's decision on the changes", "accept", "record_evidence", null, d.permissions.canRecordInstruction ? null : "You may not record a client's decision."));
+  }
+  if (rd.state === "ready" && rd.workItemId === null) {
     actions.push(act("Prepare policy issuance", "issuance", "prepare", null, d.permissions.canPrepare ? null : "You may not prepare policy issuance."));
   }
 
@@ -541,7 +786,7 @@ export function placementSpace(
     label: "WHAT HAPPENS NEXT",
     ...ready,
     rows: [
-      row("next", d.nextAction, work.label === "Yours" ? "This is with you." : work.label, { badge: work.label, badgeTone: work.tone, actions }),
+      row("next", d.nextAction, work.label, { badge: d.work[0] === undefined ? TASK_LABELS.done : d.work[0].taskStatus === "with_party" ? TASK_LABELS.with_party : TASK_LABELS[d.work[0].taskStatus], badgeTone: work.tone, actions }),
       row("quotation", "The quotation work", "Requirements, the insurers approached, and what each said.", { related: opportunityRef, actions: [open("Open", opportunityRef)] }),
     ],
   });
@@ -560,6 +805,8 @@ export function placementSpace(
   if (r?.approval) events.push({ id: "a-now", at: r.approval.approvedAt, when: day(r.approval.approvedAt), text: `Version ${r.version} approved by ${r.approval.approvedByName ?? "a colleague"}.`, tone: "active" });
   if (r?.submission) events.push({ id: "s-now", at: r.submission.sentAt, when: day(r.submission.sentAt), text: `Sent to ${d.insurer.name}: ${METHOD_WORDS[r.submission.method].toLowerCase()}.`, tone: "active" });
   if (ir !== null) events.push({ id: "o-now", at: ir.receivedAt, when: day(ir.receivedAt), text: `${d.insurer.name}: ${OUTCOME_WORDS[ir.outcome].label.toLowerCase()}.`, tone: OUTCOME_WORDS[ir.outcome].tone });
+  if (m !== null) events.push({ id: "m-now", at: m.comparedAt, when: day(m.comparedAt), text: m.materialDifferences === 0 ? "Confirmation checked: it matches what the client accepted." : `Confirmation checked: ${m.materialDifferences} ${m.materialDifferences === 1 ? "difference" : "differences"} from what the client accepted.`, tone: m.materialDifferences === 0 ? "done" : "attention" });
+  if (ca !== null) events.push({ id: "c-now", at: ca.decidedAt, when: day(ca.decidedAt), text: `The client ${DECISION_WORDS[ca.decision]}.`, tone: ca.decision === "accept_all" ? "done" : "attention" });
 
   blocks.push({
     id: "timeline",

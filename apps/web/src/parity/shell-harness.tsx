@@ -317,19 +317,77 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
     const q = new URLSearchParams(location.search);
     const stage = q.get("stage") ?? "instructed";
     const hasRequest = !["instructed", "drifted"].includes(stage);
-    const approved = ["approved", "submitted", "future", "active", "changed"].includes(stage);
-    const wasSent = ["submitted", "future", "active", "changed"].includes(stage);
+    const approved = ["approved", "submitted", "future", "active", "changed", "rejected", "accepted", "prepared"].includes(stage);
+    const wasSent = ["submitted", "future", "active", "changed", "rejected", "accepted", "prepared"].includes(stage);
+    /* "rejected" and "accepted" are the client's answer to changed terms; "prepared" is Ask's. */
+    const changedTerms = ["changed", "rejected", "prepared"].includes(stage);
     const answer = stage === "future" ? { outcome: "confirmed_as_requested", effectiveAt: "2099-01-01T00:00:00.000Z" }
       : stage === "active" ? { outcome: "confirmed_as_requested", effectiveAt: "2026-09-01T00:00:00.000Z" }
-      : stage === "changed" ? { outcome: "confirmed_with_changes", effectiveAt: "2026-09-01T00:00:00.000Z" }
+      : changedTerms || stage === "accepted" ? { outcome: "confirmed_with_changes", effectiveAt: "2026-09-01T00:00:00.000Z" }
       : null;
     const cover = stage === "future" ? { state: "confirmed", line: "Placeholder Insurer confirmed cover, beginning 1 Jan 2099. It has not started yet." }
       : stage === "active" ? { state: "active", line: "Cover began 1 Sept 2026, until 31 Aug 2027." }
-      : stage === "changed" ? { state: "active", line: "Cover began 1 Sept 2026 on changed terms." }
+      : changedTerms || stage === "accepted" ? { state: "active", line: "Cover began 1 Sept 2026 on the insurer's changed terms, until 31 Aug 2027." }
       : wasSent ? { state: "submitted", line: "Sent to Placeholder Insurer on 8 Sept 2026. Not confirmed — there is no cover yet." }
       : hasRequest ? { state: "requested", line: "A request is prepared. It has not been sent, and there is no cover." }
       : { state: null, line: "Nothing has been requested from the insurer yet." };
+    const reason = stage === "instructed" ? "prepare_request" : stage === "drifted" ? "quote_moved" : stage === "draft" ? "approval_required"
+      : stage === "approved" ? "submission_proof_missing" : stage === "submitted" ? "awaiting_insurer" : changedTerms && stage !== "rejected" ? "review_changed_terms"
+      : stage === "rejected" ? "resolve_rejected_changes" : "issue_policy";
+    const copy: Record<string, [string, string, string, string]> = {
+      prepare_request: ["prepare the placement request", "The client has instructed, and nothing has been prepared for the insurer yet.", "Prepare the placement request from the frozen terms.", "None — a draft is not sent."],
+      quote_moved: ["review what changed in the quotation", "The insurer revised the quotation after the client accepted it.", "Review each change, and record the client's instruction again where it matters.", "A new client instruction, if the change is material."],
+      approval_required: ["approve placement request", "A placement request is prepared and nobody permitted has approved it.", "Approve the current version of the request.", "Approval by someone who may approve placements."],
+      submission_proof_missing: ["send the approved request and record how", "The request is approved but there is no evidence it reached the insurer.", "Send it yourself — sending from ASAP is not connected — then record how, to whom and when.", "The sent message, or a note of when, from which mailbox and to whom."],
+      awaiting_insurer: ["cover confirmation requested", "The request was sent and the insurer has not answered.", "Record the insurer's answer when it arrives, with its evidence.", "The insurer's confirmation, decline or query."],
+      review_changed_terms: ["review changed insurer terms", "The insurer confirmed cover on terms that differ from what the client accepted.", "Review each difference, put them to the client, and record the client's decision.", "The client's decision on the changes, and how it arrived."],
+      resolve_rejected_changes: ["resolve the rejected changes with the insurer", "The client rejected the insurer's changes. The insurer's cover stands as confirmed.", "Ask the insurer to confirm on the terms requested, or take the client's instruction again.", "The insurer's revised confirmation, or a new client instruction."],
+      issue_policy: ["issue policy from confirmed cover", "Cover is confirmed and matches what the client accepted.", "Issue the policy from the insurer's confirmation.", "The insurer's policy schedule, when it arrives."],
+    };
+    const [headline, why, action, evidence] = copy[reason]!;
+    const withInsurer = stage === "submitted";
+    const matchItems = (changed: boolean) => [
+      { id: "44000000-0000-4000-8000-000000000001", field: "insurer", termType: null, label: "Insurer", acceptedValue: "Placeholder Insurer", confirmedValue: "Placeholder Insurer", classification: "match", material: false },
+      { id: "44000000-0000-4000-8000-000000000002", field: "effective_at", termType: null, label: "Cover begins", acceptedValue: "1 Sept 2026", confirmedValue: "1 Sept 2026", classification: "match", material: false },
+      { id: "44000000-0000-4000-8000-000000000003", field: "premium", termType: null, label: "Premium", acceptedValue: "KES 5,310,000", confirmedValue: "KES 5,310,000", classification: "match", material: false },
+      { id: "44000000-0000-4000-8000-000000000004", field: "term", termType: "limit", label: "Third party property damage", acceptedValue: "KES 20,000,000", confirmedValue: "KES 20,000,000", classification: "match", material: false },
+      { id: "44000000-0000-4000-8000-000000000005", field: "term", termType: "excess", label: "Own damage", acceptedValue: changed ? "5% of claim, minimum KES 30,000" : "7.5% of claim, minimum KES 45,000", confirmedValue: "7.5% of claim, minimum KES 45,000", classification: changed ? "changed" : "match", material: changed },
+      ...(changed ? [{ id: "44000000-0000-4000-8000-000000000006", field: "term", termType: "exclusion", label: "Riot and strike", acceptedValue: null, confirmedValue: "Excluded", classification: "added_by_insurer", material: true }] : []),
+    ];
+    const coverMatch = changedTerms
+      ? { id: "45000000-0000-4000-8000-00000000000a", comparedAt: "2026-09-09T14:11:00.000Z", comparedByName: null, basisVersion: 1, current: true, staleReason: null, materialDifferences: 2, unclearCount: 0, items: matchItems(true) }
+      : stage === "accepted"
+        ? { id: "45000000-0000-4000-8000-00000000000b", comparedAt: "2026-09-10T09:01:00.000Z", comparedByName: null, basisVersion: 2, current: true, staleReason: null, materialDifferences: 0, unclearCount: 0, items: matchItems(false) }
+        : stage === "active" || stage === "future"
+          ? { id: "45000000-0000-4000-8000-00000000000c", comparedAt: "2026-09-09T14:11:00.000Z", comparedByName: null, basisVersion: 1, current: true, staleReason: null, materialDifferences: 0, unclearCount: 0, items: matchItems(false).slice(0, 4) }
+          : null;
+    const deferred = "Whether premium must be paid before issuance is a brokerage rule that arrives with Money (4D). It is not checked, and not assumed.";
+    const ready = stage === "active" || stage === "future" || stage === "accepted";
     return json({
+      work: [{
+        id: "26000000-0000-4000-8000-00000000000c", reason, headline, why, action, evidence, after: "The next step opens in Work.",
+        taskStatus: withInsurer ? "with_party" : "needs_you", taskParty: withInsurer ? "Placeholder Insurer" : null,
+        taskSince: withInsurer ? "2026-09-08T11:02:00.000Z" : null, taskNextCheck: null, ownerName: stage === "draft" ? "Parity Harness" : null,
+      }],
+      coverMatch,
+      changeAcceptance: stage === "rejected" ? {
+        decision: "reject", decidedAt: "2026-09-10T09:00:00.000Z", source: "email",
+        evidence: { kind: "note", id: null, label: "Client's finance director replied at 09:00 rejecting both changes.", path: null },
+        recordedByName: "Parity Harness", items: [{ label: "Own damage", decision: "rejected" }, { label: "Riot and strike", decision: "rejected" }],
+        followUpDraft: "Draft to Placeholder Insurer — not sent:\n\nDear Underwriter,\n\nOur client Placeholder Company has reviewed your confirmation.\nThey do not accept the change to: Own damage, Riot and strike. Please confirm cover on the terms requested.\n\nKind regards",
+      } : null,
+      readiness: ready
+        ? { state: "ready", reasons: [], deferredChecks: [deferred], workItemId: "26000000-0000-4000-8000-00000000000c" }
+        : { state: "blocked", reasons: changedTerms
+            ? [{ code: "unaccepted_differences", message: stage === "rejected" ? "The client rejected the insurer's changes." : "The confirmed terms differ from what the client accepted in 2 places, and the client has not accepted them." }]
+            : [{ code: "not_confirmed", message: "The insurer has not confirmed cover." }], deferredChecks: [deferred], workItemId: null },
+      preparedActions: stage === "prepared" ? [{
+        id: "46000000-0000-4000-8000-00000000000a", actionType: "record_client_acceptance", placementId: "40000000-0000-4000-8000-00000000000a", opportunityId: null,
+        summary: "Record that the client accepted Placeholder Insurer's changes",
+        changes: ["The client's acceptance of: Own damage, Riot and strike.", "A new client instruction, keeping the original.", "What the client accepted becomes version 2, from Placeholder Insurer's confirmation; the cover is checked again."],
+        blockers: [], permitted: true, requiresConfirmation: true, state: "prepared",
+        preparedAt: "2026-09-10T09:02:00.000Z", expiresAt: "2026-09-11T09:02:00.000Z", preparedByName: "Parity Harness", receipt: null,
+      }] : [],
       placement: { id: "40000000-0000-4000-8000-00000000000a", title: "Placeholder Company motor fleet placement — 2027", requestedEffectiveAt: "2026-10-01T00:00:00.000Z", requestedExpiryAt: null, createdAt: "2026-09-07T10:40:00.000Z" },
       client: { id: CLIENT, name: "Placeholder Company" },
       opportunity: { id: "30000000-0000-4000-8000-00000000000a", title: "Placeholder Company motor fleet quotation — 2027", classOfBusiness: "Commercial motor" },
@@ -346,10 +404,12 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
       },
       instructionHistory: [],
       basis: {
+        version: stage === "accepted" ? 2 : 1, origin: stage === "accepted" ? "client_accepted_changes" : "instruction",
+        classOfBusiness: "Commercial motor", subject: null, effectiveAt: "2026-09-01T00:00:00.000Z", expiryAt: null, premiumBasis: null, clientConditions: null,
         premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30",
         terms: [
           { termType: "limit", label: "Third party property damage", value: "KES 20,000,000", amount: null, currency: null, unclear: false },
-          { termType: "excess", label: "Own damage", value: "5% of claim, minimum KES 30,000", amount: null, currency: null, unclear: false },
+          { termType: "excess", label: "Own damage", value: stage === "accepted" ? "7.5% of claim, minimum KES 45,000" : "5% of claim, minimum KES 30,000", amount: null, currency: null, unclear: false },
         ],
       },
       drift: stage === "drifted"
@@ -365,9 +425,11 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
       } : null,
       requestHistory: [],
       insurerResponse: answer === null ? null : {
+        id: "43000000-0000-4000-8000-00000000000a", confirmedPremiumAmount: "5310000.00", confirmedPremiumCurrency: "KES",
+        confirmedPremiumBasis: null, confirmedSubject: null, confirmedClassOfBusiness: "Commercial motor", terms: [],
         outcome: answer.outcome, receivedAt: "2026-09-09T14:10:00.000Z", effectiveAt: answer.effectiveAt, expiryAt: null,
         insurerReference: "CN-2027-0041",
-        changesNote: stage === "changed" ? "Own damage excess raised to 7.5%, minimum KES 45,000." : null,
+        changesNote: answer.outcome === "confirmed_with_changes" ? "Own damage excess raised to 7.5%, minimum KES 45,000; riot and strike excluded." : null,
         informationRequired: null, declineReason: null,
         evidence: { kind: "note", id: null, label: "Cover note received by email at 14:10.", path: null }, recordedByName: "Parity Harness",
       },
@@ -376,7 +438,7 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
       blockers: stage === "drifted" ? ["The quotation changed after the client accepted it: Premium, Own damage. Nothing can be sent until it is reviewed."]
         : stage === "draft" ? ["The request is waiting for someone permitted to approve it."]
         : stage === "approved" ? ["The approved request has not been sent. Sending from ASAP is not connected; send it yourself and record how."]
-        : stage === "changed" ? ["Placeholder Insurer confirmed on different terms: Own damage excess raised to 7.5%, minimum KES 45,000. The client must accept them before a policy is issued."]
+        : changedTerms ? ["Placeholder Insurer's confirmed terms differ from what the client accepted: Own damage, Riot and strike. The cover is in force on the insurer's terms; the client has not agreed to them."]
         : stage === "instructed" ? ["No placement request has been prepared yet."] : [],
       nextAction: stage === "active" ? "Prepare policy issuance."
         : stage === "draft" ? "Have the request approved by someone permitted to approve placements."
@@ -390,7 +452,6 @@ globalThis.fetch = (async (url: RequestInfo | URL) => {
         canRecordSubmission: true, canRecordResponse: true, approverRoles: ["Brokerage administrator", "Manager"],
       },
       sending: { available: false, reason: "Sending from ASAP is not connected yet. Copy the approved request into the mailbox it should go from, then record that it was sent." },
-      issuance: { ready: stage === "active" || stage === "future", reason: stage === "active" || stage === "future" ? null : "Cover is not confirmed, so there is no policy to issue yet.", workItemId: null },
     });
   }
   /*

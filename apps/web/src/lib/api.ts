@@ -3,6 +3,8 @@ import {
   comparisonActionResponseSchema,
   placementActionResponseSchema,
   placementResponseSchema,
+  prepareActionResponseSchema,
+  confirmPreparedActionResponseSchema,
   recordInstructionResponseSchema,
   quotationReadingResponseSchema,
   quotationReviewResponseSchema,
@@ -14,6 +16,7 @@ import {
   type CreateOpportunityRequest,
   type ComparisonAction,
   type PlacementAction,
+  type PrepareActionRequest,
   type RecordInstructionRequest,
   type QuotationReviewAction,
   type OpportunityAction,
@@ -388,6 +391,13 @@ export const api = {
   placement: (id: string) => request("GET", `/placements/${id}`, placementResponseSchema),
   placementAction: (id: string, input: PlacementAction) =>
     request("POST", `/placements/${id}/actions`, placementActionResponseSchema, input),
+  /** Prepare an action for a person to confirm. Nothing is recorded until they do (4B-4A). */
+  preparePlacementAction: (placementId: string, input: PrepareActionRequest) =>
+    request("POST", `/placements/${placementId}/prepare`, prepareActionResponseSchema, input),
+  confirmPreparedAction: (id: string) =>
+    request("POST", `/prepared-actions/${id}/confirm`, confirmPreparedActionResponseSchema, {}),
+  discardPreparedAction: (id: string) =>
+    request("POST", `/prepared-actions/${id}/discard`, confirmPreparedActionResponseSchema, {}),
   /** The client's instruction. Creates the placement; needs the source and the evidence. */
   recordInstruction: (opportunityId: string, input: RecordInstructionRequest) =>
     request("POST", `/opportunities/${opportunityId}/instruction`, recordInstructionResponseSchema, input),

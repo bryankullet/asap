@@ -56,6 +56,10 @@ const STATES = [
   { name: "placement-active-cover", url: `${HARNESS}?at=${PLACEMENT}&stage=active` },
   { name: "placement-changed-terms", url: `${HARNESS}?at=${PLACEMENT}&stage=changed` },
   { name: "placement-quote-moved", url: `${HARNESS}?at=${PLACEMENT}&stage=drifted` },
+  /* 4B-4A: the cover check, the client's answer, and what Ask prepared. */
+  { name: "placement-changes-rejected", url: `${HARNESS}?at=${PLACEMENT}&stage=rejected` },
+  { name: "placement-changes-accepted-ready", url: `${HARNESS}?at=${PLACEMENT}&stage=accepted` },
+  { name: "placement-ask-prepared", url: `${HARNESS}?at=${PLACEMENT}&stage=prepared` },
 ];
 
 const outDir = resolve(".local-visual/shots/quotation");

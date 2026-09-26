@@ -8,7 +8,7 @@ import { useWorkspaceTabs } from "../shell/workspace-tabs.js";
 import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * One client's placement (4B-4).
+ * One client's placement (4B-4, 4B-4A).
  *
  * Every consequential step goes to the server as a typed action, and the screen always shows what
  * the server answered — including a refusal, with its reason. Nothing here decides whether a
@@ -29,6 +29,18 @@ export function PlacementSpace() {
     queryKey: ["placement", placementId],
     queryFn: () => api.placement(placementId),
     retry: false,
+  });
+
+  /* A prepared action runs only here, when a person confirms it — and the server re-checks it all. */
+  const decide = useMutation({
+    mutationFn: ({ id, verb }: { id: string; verb: "confirm" | "discard" }) =>
+      verb === "confirm" ? api.confirmPreparedAction(id) : api.discardPreparedAction(id),
+    onSuccess: (res) => {
+      setFailure(res.outcome === "refused" ? res.reason : null);
+      void qc.invalidateQueries({ queryKey: ["placement", placementId] });
+      void qc.invalidateQueries({ queryKey: ["work"] });
+    },
+    onError: (e) => setFailure(describeApiError(e)),
   });
 
   const act = useMutation({
@@ -68,7 +80,7 @@ export function PlacementSpace() {
       /* A refusal is shown where it happened, not as a broken screen: see `failure` below. */
       error: notFound ? null : live.isError ? describeApiError(live.error) : null,
       missing: notFound,
-      busy: act.isPending,
+      busy: act.isPending || decide.isPending,
     },
     placementId,
     drafting,
@@ -99,7 +111,7 @@ export function PlacementSpace() {
           return;
         }
         // One change at a time, so a double click cannot write twice.
-        if (act.isPending) return;
+        if (act.isPending || decide.isPending) return;
         const step = action.stepId ?? "";
         const values = (action as { values?: Record<string, string> }).values ?? {};
         const d = live.data;
@@ -155,6 +167,24 @@ export function PlacementSpace() {
             | "declined";
           const iso = (v: string | undefined) => (v ? new Date(v).toISOString() : undefined);
           const detail = values["detail"] ?? "";
+          /* "Label: value" per line; the label is matched to an accepted term to keep its type. */
+          const termChanges = (values["changedTerms"] ?? "")
+            .split("\n")
+            .map((line) => line.trim())
+            .filter((line) => line.includes(":"))
+            .map((line) => {
+              const at = line.indexOf(":");
+              const label = line.slice(0, at).trim();
+              const value = line.slice(at + 1).trim();
+              const known = d.basis.terms.find((t) => t.label.toLowerCase() === label.toLowerCase());
+              return {
+                termType: known?.termType ?? ("other" as const),
+                label: known?.label ?? label,
+                value: /^removed$/i.test(value) ? null : value,
+              };
+            })
+            .filter((t) => t.label.length > 0);
+          const premium = (values["confirmedPremiumAmount"] ?? "").replace(/[,\s]/g, "");
           const effectiveAt = iso(values["effectiveAt"]);
           const expiryAt = iso(values["expiryAt"]);
           act.mutate({
@@ -165,6 +195,8 @@ export function PlacementSpace() {
             ...(expiryAt === undefined ? {} : { expiryAt }),
             ...(values["insurerReference"] ? { insurerReference: values["insurerReference"] } : {}),
             ...(outcome === "confirmed_with_changes" ? { changesNote: detail } : {}),
+            ...(termChanges.length === 0 ? {} : { termChanges }),
+            ...(premium === "" ? {} : { confirmedPremiumAmount: premium }),
             ...(outcome === "more_information_required" ? { informationRequired: detail } : {}),
             ...(outcome === "declined" ? { declineReason: detail } : {}),
             evidenceNote: values["evidenceNote"] ?? "",
@@ -173,6 +205,39 @@ export function PlacementSpace() {
         }
         if (step === "issuance") {
           act.mutate({ action: "prepare_issuance" });
+          return;
+        }
+        if (step === "verify") {
+          act.mutate({ action: "verify_cover_match" });
+          return;
+        }
+        if (step === "accept") {
+          setFailure(null);
+          setDrafting("acceptance");
+          return;
+        }
+        if (step.startsWith("accept-form:")) {
+          const decision = (values["decision"] ?? "accept_all") as "accept_all" | "reject" | "partial";
+          const items = Object.entries(values)
+            .filter(([k]) => k.startsWith("item:"))
+            .map(([k, v]) => ({ coverMatchItemId: k.slice("item:".length), decision: v as "accepted" | "rejected" | "clarify" }));
+          act.mutate({
+            action: "record_client_acceptance",
+            coverMatchId: step.slice("accept-form:".length),
+            decision,
+            source: (values["source"] ?? "email") as "email",
+            decidedAt: values["decidedAt"] ? new Date(values["decidedAt"]).toISOString() : "",
+            evidenceNote: values["evidenceNote"] ?? "",
+            ...(decision === "partial" ? { items } : {}),
+          });
+          return;
+        }
+        if (step.startsWith("confirm:")) {
+          decide.mutate({ id: step.slice("confirm:".length), verb: "confirm" });
+          return;
+        }
+        if (step.startsWith("discard:")) {
+          decide.mutate({ id: step.slice("discard:".length), verb: "discard" });
         }
       }}
     />
