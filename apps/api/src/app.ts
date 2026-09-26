@@ -216,6 +216,8 @@ export function createApp(deps: AppDeps) {
     /* Placement (4B-4). Guarded from the first line — the /rules defect is not repeated. */
     "/placements",
     "/placements/*",
+    /* What Ask or a screen prepared, confirmed by a person (4B-4A). */
+    "/prepared-actions/*",
   ]) {
     app.use(path, guard);
   }

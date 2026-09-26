@@ -195,7 +195,7 @@ export function attentionRoutes() {
         facts: s.facts,
         runFailure: stuckByItem.has(s.item.id) ? failure(stuckByItem.get(s.item.id)!) : null,
         links: {
-          work: `/r/${s.item.id}`,
+          work: workLink(s.item),
           client: s.item.client_id ? `/files/${s.item.client_id}` : null,
           policy: s.period ? `/r/${s.period.id}?kind=policy` : null,
           // The words a person would type to reach this item in Ask.
@@ -323,7 +323,7 @@ export function attentionRoutes() {
               : null,
           priority: priorityOf(scoreOf(signals)),
           links: {
-            work: `/r/${item.id}`,
+            work: workLink(item),
             client: item.client_id ? `/files/${item.client_id}` : null,
             policy: period ? `/r/${period.id}?kind=policy` : null,
             ask: item.title,
@@ -346,4 +346,12 @@ export function attentionRoutes() {
     throw err;
   });
   return app;
+}
+
+/**
+ * Where a Work item opens. An item that is about a placement opens the placement itself — the
+ * reason, the evidence and the action are there — rather than a generic record page (4B-4A).
+ */
+function workLink(item: { id: string; source_type?: string | null | undefined; source_id?: string | null | undefined }): string {
+  return item.source_type === "placement" && item.source_id ? `/placements/${item.source_id}` : `/r/${item.id}`;
 }

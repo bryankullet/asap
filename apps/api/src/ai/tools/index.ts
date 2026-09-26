@@ -5,7 +5,10 @@ import {
   RUN_COLUMNS,
   WORK_ITEM_COLUMNS,
   WorkItemRow,
+  prepareActionRequestSchema,
   type AiToolDeclaration,
+  type PrepareActionRequest,
+  type PrepareActionResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
@@ -18,8 +21,11 @@ import { coverOf as coverOfForTool } from "../../routes/placement.js";
  *
  * Four rules hold for every tool here, and they are why this file can be short:
  *
- *  1. **Read-only.** Nothing in this file writes. A model proposes actions from the finite verb
- *     vocabulary and a person approves them through the engine; it never reaches a write path.
+ *  1. **Read-only.** Nothing in this file writes a business record. A model proposes actions from
+ *     the finite verb vocabulary and a person approves them through the engine; it never reaches a
+ *     write path. The one narrow exception is `prepare_placement_action` (4B-4A): it stores a
+ *     *proposal* — a prepared action, typed and validated, which does nothing until a person
+ *     confirms it on screen, and is refused then if anything it rests on has moved.
  *  2. **Under the caller's own session.** Each tool takes the request-scoped `db`, so RLS decides
  *     what exists. A tool cannot see a row its caller could not, and a model cannot widen that by
  *     asking differently.
@@ -29,7 +35,15 @@ import { coverOf as coverOfForTool } from "../../routes/placement.js";
  *     decide which of them to show; it never supplies the values (§45 rule 9).
  */
 
-export type ToolContext = { db: SupabaseClient; organizationId: string };
+export type ToolContext = {
+  db: SupabaseClient;
+  organizationId: string;
+  /**
+   * Prepares — never executes — a placement action for a person to confirm (4B-4A). Supplied by
+   * the signed-in request, bound to that person; absent anywhere else, and then the tool says so.
+   */
+  prepare?: (request: PrepareActionRequest) => Promise<PrepareActionResponse>;
+};
 
 export type DeclaredTool = {
   declaration: AiToolDeclaration;
@@ -633,6 +647,37 @@ const getPlacement: DeclaredTool = {
 };
 
 /** Every tool the model may be told about. Nothing outside this list is reachable. */
+const preparePlacementAction: DeclaredTool = {
+  declaration: {
+    name: "prepare_placement_action",
+    description:
+      "Prepare — never perform — one placement action for the broker to confirm on screen. Use it when the broker says things like 'The client chose Jubilee' (record_instruction, with opportunityId and insurerName), 'Prepare the placement request' (prepare_request), 'Ask Mary to approve this' (request_approval, approverName), 'Approve it' (approve_request), 'Record that I sent it outside ASAP' (record_submission), 'Jubilee confirmed cover' (record_insurer_response), 'The client accepted Jubilee's changes' (record_client_acceptance), or 'Prepare policy issuance' (prepare_issuance). Pass only facts the broker actually stated in `params` (dates as ISO 8601, `evidenceNote` in their words, `source` one of email, document, telephone, meeting, signed_acceptance, in_person). Never invent a date, a recipient or evidence. The result is `prepared` (tell the broker what will change and that it waits for them to confirm it on the placement), `clarify` (ask the broker exactly that one question), or `refused` (say why). Nothing is recorded, approved or sent until the broker confirms.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        actionType: {
+          type: "string",
+          enum: ["record_instruction", "prepare_request", "request_approval", "approve_request", "record_submission", "record_insurer_response", "record_client_acceptance", "prepare_issuance"],
+        },
+        placementId: { type: "string", description: "The placement's id, for every action except record_instruction." },
+        opportunityId: { type: "string", description: "The quotation work's id, for record_instruction." },
+        insurerName: { type: "string", description: "The insurer as the broker named it." },
+        approverName: { type: "string", description: "The approver as the broker named them." },
+        params: { type: "object", description: "Facts the broker stated, by field name.", additionalProperties: true },
+      },
+      required: ["actionType"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const input = prepareActionRequestSchema.parse(args);
+    if (ctx.prepare === undefined) {
+      return { state: "refused", reason: "Actions cannot be prepared from here. Open the placement and do it there." };
+    }
+    return await ctx.prepare(input);
+  },
+};
+
 export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   findClients,
   findWork,
@@ -644,6 +689,7 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getQuotationReading,
   getCompanyRules,
   getPlacement,
+  preparePlacementAction,
 ];
 
 export const TOOL_DECLARATIONS: AiToolDeclaration[] = DECLARED_TOOLS.map((t) => t.declaration);

@@ -289,3 +289,39 @@ describe("get_placement", () => {
     expect(db.inserts).toHaveLength(0);
   });
 });
+
+const PREP_PLACEMENT = "40000000-0000-4000-8000-00000000000a";
+
+describe("prepare_placement_action (4B-4A)", () => {
+  it("hands the request to the person's own preparer and returns what it said", async () => {
+    const seen: unknown[] = [];
+    const out = await toolByName("prepare_placement_action")!.run(
+      { actionType: "prepare_request", placementId: PREP_PLACEMENT },
+      {
+        ...context({}),
+        prepare: async (req) => {
+          seen.push(req);
+          return { state: "clarify", question: "Which placement?", missing: ["placementId"], options: [] };
+        },
+      },
+    );
+    expect(seen).toEqual([{ actionType: "prepare_request", placementId: PREP_PLACEMENT, params: {} }]);
+    expect(out).toMatchObject({ state: "clarify" });
+  });
+
+  it("refuses where no signed-in preparer exists, and writes nothing", async () => {
+    const db: FakeDb = { users: {}, inserts: [], rpc: {}, tables: {} };
+    const out = await toolByName("prepare_placement_action")!.run(
+      { actionType: "approve_request", placementId: PREP_PLACEMENT },
+      { db: fakeFactory(db).service(), organizationId: ORG },
+    );
+    expect(out).toMatchObject({ state: "refused" });
+    expect(db.inserts).toHaveLength(0);
+  });
+
+  it("rejects an action type outside the declared set", async () => {
+    await expect(
+      toolByName("prepare_placement_action")!.run({ actionType: "issue_policy", placementId: PREP_PLACEMENT }, context({})),
+    ).rejects.toThrow();
+  });
+});

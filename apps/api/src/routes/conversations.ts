@@ -16,6 +16,8 @@ import { runAsk } from "../ai/ask.js";
 import { requireProvider } from "../ai/gateway.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
+import { recordAudit } from "../audit.js";
+import { prepareAction } from "../placement/prepared.js";
 import { placementTitle } from "./placement.js";
 
 /**
@@ -227,6 +229,18 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         db,
         organizationId: org.id,
         logger,
+        /* Prepares only. The person confirms on the placement; nothing runs from the model. */
+        prepare: (req) =>
+          prepareAction(
+            {
+              db,
+              ctx,
+              organizationId: org.id,
+              userId: user.id,
+              audit: (entry) => recordAudit(db, logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }),
+            },
+            req,
+          ),
       });
     } catch (err) {
       if (err instanceof AiGatewayError) {
