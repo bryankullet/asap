@@ -1874,3 +1874,45 @@ the person was shown (`40001 stale_target` otherwise); and a premium basis the p
 policy number already on another live policy raises `23505 policy_number_conflict` — never a merge.
 Idempotent by key and by placement: a replay returns the one application and is audited
 `issuance.apply_replayed`.
+
+## D-110 — The Policy Space is one server-assembled read
+
+`GET /policies/:id/space` returns the policy, every period, cover state with its reason and evidence,
+facts and terms with their sources, differences, timeline, Work, related Spaces and available actions.
+React lays it out and derives nothing — in particular it never computes "Active cover" from dates.
+It reuses the placement and issuance loaders in read-only mode instead of re-querying their tables.
+
+## D-111 — Cover is evidence, not dates, in the Nairobi calendar
+
+A period is verified only by an insurer confirmation reached through an issuance application, or by a
+reviewed policy schedule or certificate applied to it (`document_applications`). Unverified periods
+have no cover state. A policy number, an uploaded unread document, a draft or a submitted request
+never makes cover. Expired is derived only from a verified period that has ended; Cancelled only from
+an explicit, evidenced cancellation. Days change at midnight Africa/Nairobi. Overlapping periods are a
+conflict: the server selects none, states no cover for today, and opens one Work item keyed
+`(policy, resolve_overlapping_periods)`, resolved when the overlap is gone.
+
+## D-112 — Values carry their source; terms are shown four ways
+
+Each fact is confirmed, extracted-and-accepted, corrected, manually recorded, missing, conflicting
+(an unresolved issued-policy difference) or unverified (hand-recorded on an unverified period), with
+page, region and reviewer where known. Terms are agreed (placement basis), insurer-confirmed, printed
+(issued document) and final (the reviewed printed value). A value is never borrowed from another
+period, and a missing term is named as missing.
+
+## D-113 — Creation forms preselect only what the server returns
+
+`/new/claim?policy=&period=` asks `GET /creation-context`, which reads the client, policy and period
+under the caller's session; anything else is not found, and the form falls back to asking for the
+client. A claim filed with a policy id is refused unless the policy is the client's. The person still
+supplies the incident or the change. A renewal started from a policy is titled by it, so a second
+start reopens the first. A claim filed against a policy carries the policy in its title too: before,
+a claim's identity was only the client and the incident date, so two policies' claims on one day
+reopened each other (found by the connected test on a re-run).
+
+## D-114 — One migration for 4C-1, and only for Ask
+
+0059 adds a nullable, indexed `prepared_actions.policy_id` (the guard checks it is in the same
+brokerage and keeps it immutable), admits it as a subject, adds `start_renewal`, and adds `policy` to
+the Ask scope check. The Policy Space itself needed no schema change. Read-only Ask calls load the
+Space with `readOnly`, which also skips the placement's Work sync, so asking writes nothing.

@@ -274,7 +274,7 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-4 Placement and approval flow | Accepted as foundation |
 | 4B-4A Ask actions, Work clarity, cover match, client acceptance | Superseded by 4B-4B corrections |
 | 4B-4B Client conditions, accepted end date, connected verification | Tested — awaiting review |
-| 4B-5 Policy issuance handoff | Tested locally — awaiting review; not deployed |
+| 4B-5 Policy issuance handoff | Accepted locally at `331aa4c`; not deployed |
 
 Updated after every commit.
 
@@ -384,6 +384,67 @@ per key, and a route from a reviewed extraction to `quote_terms`. All three are 
 - **Premium payment before issuance** remains a deferred company rule (Money, 4D).
 - **No timer** chases an insurer that has not sent the policy; the Work item names them and the
   date, and is raised when the placement is opened (scheduled-jobs stage).
+
+### Open debts that must not be lost
+
+These two stay here, word for word, until each is closed by the work named. Neither is closed by 4C-1.
+
+1. **The extractor chain is not connected end to end.** The 4B connected issuance test inserts
+   extractor-style output directly. A final end-to-end test must send a real issued-policy PDF
+   through storage, worker, extractor, review, comparison and application in one connected run.
+   (4C-1's connected Policy Space test inherits the same boundary: it inserts the extractor's rows
+   for the issued document and drives everything after them through the API.)
+2. **Hosted Supabase is behind.** Migrations `0044–0059` are unapplied to hosted Supabase, whose
+   verified head is `0043_document_applications`. Nothing on the branch is live until they are
+   applied, the branch is merged to `main`, Render deploys it, and the real Render URL is verified.
+
+## Increment 4C — servicing the book
+
+| Stage | State |
+|---|---|
+| 4C-1 Policy and Coverage Space | Tested locally — awaiting review; not deployed |
+| 4C-2 onwards (servicing and TOR, endorsements, claims, renewals) | Not started |
+
+### What 4C-1 built
+
+- **`GET /policies/:id/space`** assembles one real policy and every period server-side, under the
+  signed-in session (RLS applies, `policy:view` checked, another brokerage gets 404). It reuses the
+  placement and issuance loaders read-only, `document_applications` (0043) and
+  `placement_cancellations` (0054). React renders it and derives nothing (D-110).
+- **Cover state is derived from evidence** (`apps/api/src/policy/cover.ts`), in the Nairobi calendar:
+  no evidence → no cover state ("Cover not verified"); explicit cancellation in effect → Cancelled;
+  evidence and not started → Confirmed; evidence and today within → Active cover; evidence and
+  ended → Expired. Two periods covering today are a conflict: neither is chosen, cover is not
+  stated, and one reason-keyed Work item asks a person (D-111).
+- **Every value carries its source** — confirmed, extracted and accepted, corrected by a person,
+  manually recorded, missing, conflicting, unverified — with document, page, region and reviewer
+  where they exist. Terms are shown four ways: agreed, insurer-confirmed, printed, final (D-112).
+- **Evidence opens at the value**: `/documents/:id?page=&field=` draws the recorded region first.
+- **Actions**: Start renewal (`POST /policies/:id/renewal`, idempotent, titled by the policy);
+  Report claim and Request endorsement open their forms with client, policy and period preselected
+  from `GET /creation-context` — read under the session, so a URL cannot select another brokerage's
+  record — and nothing is written until the person gives the facts. Open servicing work is
+  disabled with its reason. Old `/r/:id?kind=policy` links now open the Policy Space (D-113).
+- **Ask**: a `policy` scope carrying the viewed period; `get_policy_space` (read-only — it never
+  syncs Work) and `prepare_policy_action` (prepares a renewal start through prepare → confirm →
+  execute; a claim or endorsement only returns its form). Migration **0059** adds `policy_id` to
+  `prepared_actions` and the `policy` Ask scope; nothing else (D-114).
+- **Defect found and fixed**: `/creation-context` was first mounted outside the session guard and
+  crashed instead of refusing; the connected test caught it, the guard now covers it, and a unit
+  test pins all four new routes to 401 without a session.
+- **Defect found and fixed**: a claim's identity was only the client and the incident date, so a
+  claim on one policy reopened a same-day claim on another. A claim filed against a policy now
+  carries the policy in its identity; a repeated click is still one claim.
+
+### What 4C-1 does not do
+
+- No servicing, TOR, endorsement, claim or renewal workflow beyond the entry points above.
+- No money state: premium is a recorded fact; nothing says paid, unpaid, received or reconciled.
+- Endorsements affecting a period are not yet recorded, and the Space says so rather than implying
+  the schedule is unchanged.
+- A period's cover evidence comes from an issuance application or a reviewed policy schedule
+  applied to it; cancellations are read only from `placement_cancellations`. A policy recorded by
+  hand has no way yet to record a cancellation — it is never shown as cancelled.
 
 ### Scheduled gaps left open by 4B-4A
 
