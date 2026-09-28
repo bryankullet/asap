@@ -274,7 +274,7 @@ Until step 4, migrations 0044–0047 stay unapplied on hosted Supabase.
 | 4B-4 Placement and approval flow | Accepted as foundation |
 | 4B-4A Ask actions, Work clarity, cover match, client acceptance | Superseded by 4B-4B corrections |
 | 4B-4B Client conditions, accepted end date, connected verification | Tested — awaiting review |
-| 4B-5 Policy issuance handoff | Not started |
+| 4B-5 Policy issuance handoff | Tested locally — awaiting review; not deployed |
 
 Updated after every commit.
 
@@ -337,6 +337,53 @@ per key, and a route from a reviewed extraction to `quote_terms`. All three are 
   and a disposable database. It found and this stage fixed two production defects: money read
   from PostgREST as JSON numbers (500 on recording a quote; comparison digests that could never
   match the database's), and Ask scopes `opportunity`/`placement` refused by a stale check.
+
+### What 4B-5 built
+
+- **Quotation records through the API only** (D-104, Part A) and **self-hosted fonts and a
+  favicon** (D-105, Part B), each committed on its own before issuance.
+- **Issuance is derived, never stored** (D-106). The stage — ready, approval required, submission
+  required, with the insurer, review required, differences to resolve, ready to apply, applied —
+  is computed from which records exist: a frozen request, an approval of its digest, evidence of
+  sending, the insurer's document, a reviewed reading, a current check, resolutions, an
+  application. There is no status column.
+- **The request is frozen and digested** in the database (0058); approval binds that digest. A new
+  version, or any change to what it rested on (instruction, basis, confirmation, cover check,
+  conditions) before it is sent, supersedes the request and its approval, keeps both, and audits
+  it (D-107).
+- **Sending is recorded, not performed.** A manual record needs evidence; a provider record needs
+  the provider's real message id (database check). No sending is wired in 4B-5.
+- **The insurer's document enters the existing pipeline**: its fields and terms are proposals,
+  each reviewed by a person (accept, correct, reject), with page and region. The check then
+  compares insured, insurer, policy number, class, inception, expiry, currency, premium, premium
+  basis, sum insured, every term and every client condition against the instruction, the frozen
+  basis and the confirmation, in six words: Matches / Changed / Missing from issued policy /
+  Added by insurer / Needs a person to check / Not stated in either source (D-108).
+- **Unresolved differences block apply** and are one reason-keyed Work item; cover status does not
+  change.
+- **Apply** (`policy_issuance_apply`, definer, API key, `placement:approve`) needs an explicit
+  target (create, or a named policy and period — never guessed), the expected values the person
+  was shown (stale protection), every difference resolved, a submitted request, a reviewed
+  document and a premium basis the person states. A policy number another policy carries is a
+  conflict, never a merge. Replays by key or by placement return the one application (D-109).
+- **Work** follows the stage: prepare the issuance request → approve → send → with the insurer,
+  named, since the date sent → review → resolve differences → apply → closed. Issuance Work opens
+  the issuance Space at `/placements/:id/issuance`. *Confirm complete* is not a separate reason:
+  applying is the completion, and a second confirmation would be a click with no evidence behind it.
+- **Ask** reads issuance with `get_issuance` and prepares every issuance action through the same
+  confirmed-prepared-action path; nine deterministic evaluation cases cover false "sent", false
+  "issued", missing target, missing basis, stale, expired, permission, success with replay, and
+  reads that write nothing.
+
+### What 4B-5 does not do
+
+- **Extraction is not re-run by 4B-5.** The connected test inserts the extractor's output (document,
+  fields, terms, pages, regions) as the owner and drives everything after it through the API; the
+  extractor itself is proven by its own suite.
+- **No email is sent and none is read** for issuance. Gmail is not configured (standing instruction).
+- **Premium payment before issuance** remains a deferred company rule (Money, 4D).
+- **No timer** chases an insurer that has not sent the policy; the Work item names them and the
+  date, and is raised when the placement is opened (scheduled-jobs stage).
 
 ### Scheduled gaps left open by 4B-4A
 

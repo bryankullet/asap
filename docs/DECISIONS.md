@@ -1832,3 +1832,45 @@ before any other trigger. The browser keeps SELECT under RLS. Classification:
 
 The internal extraction dispatcher (service role, behind the internal key) and the worker role are
 not browser sessions and are unaffected. Proven by pgTAP 0330 and the connected quotation-gate test.
+
+## D-105 — Fonts are served from the application's own origin
+
+The application loaded DM Sans and Manrope from Google Fonts, which is a third-party request on
+every page and a console error wherever egress is restricted. They are now bundled with
+`@fontsource` and served from the application's own origin, with an SVG favicon; visual captures
+record every console error, failed request and 4xx response with no filter. The static prototype
+under `docs/ui/prototype` still references Google Fonts; the application never loads it.
+
+## D-106 — Policy issuance is derived from records, never stored
+
+The issuance stage is computed on every read from which records exist (request, approval,
+submission, insurer document, reviewed reading, check, resolutions, application). No status column
+exists, and neither the model nor the browser can set one. The words on screen therefore cannot run
+ahead of the evidence: a draft is never "sent" and nothing is "issued" until the policy record is.
+
+## D-107 — An issuance approval covers one digest, and moves with its sources
+
+The database digests the frozen request and refuses an approval of any other digest. A newer
+version supersedes the old request and its approval (kept, audited `issuance.approval_superseded`).
+Before submission, a change to anything the request rested on — the client's instruction, the
+accepted basis, the cover confirmation, the cover check, the client's conditions — supersedes it
+the same way when the issuance is next read. After submission a changed request is a new
+conversation with the insurer and is refused.
+
+## D-108 — The issued-policy check is by calendar day, and conservative
+
+Dates compare by calendar day. A derived midnight end against a schedule printing the day before is
+"Needs a person to check" and material — the policy wording decides it, not ASAP. A policy number
+the insurer adds unrequested is not material; a missing requested one is. A sum insured only on the
+issued policy is material and needs a person, because nothing agreed stated one. Terms compare by
+type and label. An unresolved client condition is material.
+
+## D-109 — Applying an issued policy writes once, to a target a person named
+
+`policy_issuance_apply` is the only writer of `policy_issuance_applications` (select-only to every
+browser role). It requires the API key, membership and `placement:approve`; the latest check with
+every material difference resolved; a submitted request; a named target; for an update, the values
+the person was shown (`40001 stale_target` otherwise); and a premium basis the person stated. A
+policy number already on another live policy raises `23505 policy_number_conflict` — never a merge.
+Idempotent by key and by placement: a replay returns the one application and is audited
+`issuance.apply_replayed`.
