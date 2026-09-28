@@ -166,3 +166,35 @@ describe("the end of cover (4B-4B)", () => {
     expect(item).toMatchObject({ classification: "match", calculation: null });
   });
 });
+
+describe("the calendar-month rule, at its boundaries (D-101, confirmed)", () => {
+  const cases: [string, number, number, string, string][] = [
+    ["2027-01-31T00:00:00.000Z", 1, 0, "2027-02-28T00:00:00.000Z", "31 Jan + 1 month, common year → 28 Feb"],
+    ["2028-01-31T00:00:00.000Z", 1, 0, "2028-02-29T00:00:00.000Z", "31 Jan + 1 month, leap year → 29 Feb"],
+    ["2026-11-30T00:00:00.000Z", 3, 0, "2027-02-28T00:00:00.000Z", "30 Nov + 3 months → 28 Feb"],
+    ["2027-11-30T00:00:00.000Z", 3, 0, "2028-02-29T00:00:00.000Z", "30 Nov + 3 months into a leap year → 29 Feb"],
+    ["2026-08-31T00:00:00.000Z", 6, 0, "2027-02-28T00:00:00.000Z", "31 Aug + 6 months → 28 Feb"],
+    ["2026-03-31T00:00:00.000Z", 1, 0, "2026-04-30T00:00:00.000Z", "31 Mar + 1 month → 30 Apr"],
+    ["2027-12-31T00:00:00.000Z", 2, 0, "2028-02-29T00:00:00.000Z", "31 Dec + 2 months across a year end → 29 Feb"],
+    ["2028-02-29T00:00:00.000Z", 12, 0, "2029-02-28T00:00:00.000Z", "29 Feb + 12 months → 28 Feb"],
+    ["2028-02-29T00:00:00.000Z", 48, 0, "2032-02-29T00:00:00.000Z", "29 Feb + 48 months → 29 Feb"],
+    ["2026-01-31T00:00:00.000Z", 13, 0, "2027-02-28T00:00:00.000Z", "31 Jan + 13 months → 28 Feb"],
+    ["2027-01-31T00:00:00.000Z", 1, 1, "2027-03-01T00:00:00.000Z", "months first, then days: 31 Jan + 1 month + 1 day → 1 Mar"],
+    ["2026-10-01T09:30:00.000Z", 12, 0, "2027-10-01T09:30:00.000Z", "to the same instant"],
+  ];
+  for (const [start, months, days, end, why] of cases) {
+    it(why, () => {
+      expect(endOfPeriod(start, months, days)).toBe(end);
+    });
+  }
+
+  it("an explicit end date always wins: no derivation beside it", async () => {
+    const { derivedEnd } = await import("../src/placement/cover-match.js");
+    expect(derivedEnd("2027-01-31T00:00:00.000Z", "2027-06-30T00:00:00.000Z", 12, 0)).toEqual({ derivedExpiryAt: null, derivation: null });
+    expect(derivedEnd("2027-01-31T00:00:00.000Z", null, null, null)).toEqual({ derivedExpiryAt: null, derivation: null });
+    expect(derivedEnd("2027-01-31T00:00:00.000Z", null, 1, 0)).toEqual({
+      derivedExpiryAt: "2027-02-28T00:00:00.000Z",
+      derivation: "Cover begins 31 Jan 2027 + 1 month = 28 Feb 2027, from the cover period in the client's accepted instruction.",
+    });
+  });
+});

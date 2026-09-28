@@ -1405,3 +1405,44 @@ describe("prepared-action hardening (4B-4B)", () => {
     expect(db.tables["audit_log"]!.filter((a) => a["action"] === "placement.request_prepared")).toHaveLength(1);
   });
 });
+
+describe("the accepted period, frozen and correctable (4B-5)", () => {
+  const noEnd = { requestedExpiryAt: undefined };
+
+  it("freezes the derived end and its calculation with the accepted basis", async () => {
+    const id = (await instruct({ ...noEnd, requestedEffectiveAt: "2027-01-31T00:00:00.000Z", requestedPeriod: { months: 1, days: 0 } })).placementId as string;
+    const { body } = await read(id);
+    expect(body.basis).toMatchObject({ periodMonths: 1, periodDays: 0, derivedExpiryAt: "2027-02-28T00:00:00.000Z" });
+    expect(body.basis.derivation).toBe("Cover begins 31 Jan 2027 + 1 month = 28 Feb 2027, from the cover period in the client's accepted instruction.");
+    expect(db.tables["placement_basis_versions"]![0]).toMatchObject({ derived_expiry_at: "2027-02-28T00:00:00.000Z" });
+  });
+
+  it("never derives an end without an explicit period: no annual default", async () => {
+    const id = (await instruct(noEnd)).placementId as string;
+    const { body } = await read(id);
+    expect(body.basis).toMatchObject({ periodMonths: null, derivedExpiryAt: null, derivation: null, expiryAt: null });
+  });
+
+  it("corrects a wrongly recorded period as a new instruction and basis version, with evidence, and re-checks", async () => {
+    const id = (await instruct({ ...noEnd, requestedPeriod: { months: 6, days: 0 } })).placementId as string;
+    await submitted(id);
+    await act(id, CONFIRM({ expiryAt: "2027-10-01T00:00:00.000Z" }));
+    const before = (await read(id)).body;
+    expect(before.coverMatch.items.find((i: { field: string }) => i.field === "expiry_at").classification).toBe("changed");
+
+    const bare = await act(id, { action: "correct_cover_period", months: 12, days: 0, reason: "Recorded as six months in error.", source: "email", correctedAt: "2026-09-10T09:00:00.000Z" });
+    expect(bare.reason).toMatch(/what shows the correct period/);
+
+    const ok = await act(id, { action: "correct_cover_period", months: 12, days: 0, reason: "Recorded as six months in error.", source: "email", correctedAt: "2026-09-10T09:00:00.000Z", evidenceNote: "Client's email of 7 September asks for a twelve-month period." });
+    expect(ok.outcome).toBe("done");
+    const { body } = await read(id);
+    expect(body.basis).toMatchObject({ version: 2, origin: "period_corrected", periodMonths: 12, derivedExpiryAt: "2027-10-01T00:00:00.000Z" });
+    expect(body.instruction.id).not.toBe(before.instruction.id);
+    expect(body.instructionHistory.map((i: { id: string }) => i.id)).toContain(before.instruction.id);
+    expect(body.coverMatch).toMatchObject({ current: true, materialDifferences: 0 });
+    expect(body.coverMatch.items.find((i: { field: string }) => i.field === "expiry_at")).toMatchObject({ classification: "match" });
+
+    expect((await act(id, { action: "correct_cover_period", months: 12, days: 0, reason: "Recorded as six months in error.", source: "email", correctedAt: "2026-09-10T09:00:00.000Z", evidenceNote: "Client's email of 7 September asks for a twelve-month period." })).outcome).toBe("already");
+    expect(db.tables["placement_basis_versions"]).toHaveLength(2);
+  });
+});

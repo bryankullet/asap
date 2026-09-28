@@ -27,7 +27,13 @@ export type PlacementReason =
   | "clarify_changes"
   | "resolve_rejected_changes"
   | "resolve_client_conditions"
-  | "issue_policy";
+  | "issue_policy"
+  | "approve_issuance_request"
+  | "submit_issuance_request"
+  | "obtain_issued_policy"
+  | "review_issued_policy"
+  | "resolve_issued_policy_differences"
+  | "apply_issued_policy";
 
 export const ALL_REASONS: PlacementReason[] = [
   "quote_moved",
@@ -43,6 +49,12 @@ export const ALL_REASONS: PlacementReason[] = [
   "resolve_rejected_changes",
   "resolve_client_conditions",
   "issue_policy",
+  "approve_issuance_request",
+  "submit_issuance_request",
+  "obtain_issued_policy",
+  "review_issued_policy",
+  "resolve_issued_policy_differences",
+  "apply_issued_policy",
 ];
 
 type Copy = {
@@ -140,11 +152,53 @@ export const REASON_COPY: Record<PlacementReason, Copy> = {
     after: "Once every condition is resolved, the policy can be issued.",
   },
   issue_policy: {
-    headline: "issue policy from confirmed cover",
-    why: "Cover is confirmed and matches what the client accepted.",
-    action: "Issue the policy from the insurer's confirmation.",
-    evidence: "The insurer's policy schedule, when it arrives.",
-    after: "The policy is recorded in 4B-5.",
+    headline: "prepare the issuance request",
+    why: "Cover is confirmed and matches what the client accepted, so the insurer can be asked to issue the policy.",
+    action: "Prepare the issuance request from the accepted basis and the cover confirmation.",
+    evidence: "The client's instruction, the accepted basis and the insurer's cover confirmation — frozen into the request.",
+    after: "The request needs approval by someone permitted before it is sent.",
+  },
+  approve_issuance_request: {
+    headline: "approve the issuance request",
+    why: "The issuance request is prepared, and nothing goes to the insurer without approval of this exact version.",
+    action: "Read the request and approve it.",
+    evidence: "The frozen request and its digest.",
+    after: "Once approved, send it yourself and record how it was sent. A later change needs approving again.",
+  },
+  submit_issuance_request: {
+    headline: "send the issuance request",
+    why: "The request is approved but there is no evidence it reached the insurer. Sending from ASAP is not connected yet.",
+    action: "Send the approved request yourself, then record how, to whom and when, with evidence.",
+    evidence: "The sent message, or a note of when, from where and to whom.",
+    after: "The work moves to the insurer until their policy document arrives.",
+  },
+  obtain_issued_policy: {
+    headline: "obtain the issued policy",
+    why: "The insurer has the issuance request and has not yet sent the policy document.",
+    action: "Chase the insurer if it is late; record the policy document when it arrives.",
+    evidence: "The insurer's policy schedule or policy document.",
+    after: "What is read from it is reviewed by a person and checked against what was agreed.",
+  },
+  review_issued_policy: {
+    headline: "review the issued policy",
+    why: "The insurer's policy document has arrived. What was read from it has to be confirmed by a person and checked against what was agreed.",
+    action: "Accept, correct or reject each value read from the document, then run the check.",
+    evidence: "The policy document, at the page and place each value was read.",
+    after: "Matching policies are ready to apply; differences are listed for a decision.",
+  },
+  resolve_issued_policy_differences: {
+    headline: "resolve differences in the issued policy",
+    why: "The issued policy differs from what the client accepted. The policy record is not written until each difference is decided.",
+    action: "For each difference, record the client's acceptance of the issued value, or confirm it is immaterial, with evidence.",
+    evidence: "The client's acceptance and how it arrived, or the reason the difference does not matter.",
+    after: "Once every difference is resolved, the issued policy can be applied to the policy record.",
+  },
+  apply_issued_policy: {
+    headline: "apply the issued policy",
+    why: "The issued policy has been checked and every difference resolved. The policy record has not been written yet.",
+    action: "Choose whether to create a policy or update a named one, preview the change, and apply it.",
+    evidence: "The reviewed policy document and the check.",
+    after: "The policy and its period are written once, with the evidence linked, and this work closes.",
   },
 };
 

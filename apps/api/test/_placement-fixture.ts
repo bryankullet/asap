@@ -161,6 +161,18 @@ export function makeDb(): FakeDb {
       client_change_acceptance_items: [],
       prepared_actions: [],
       placement_client_conditions: [],
+      policy_issuance_applications: [],
+      policy_periods: [],
+      policy_versions: [],
+      document_fields: [],
+      document_term_proposals: [],
+      issuance_requests: [],
+      issuance_request_approvals: [],
+      issuance_submissions: [],
+      issued_policy_documents: [],
+      issued_policy_checks: [],
+      issued_policy_check_items: [],
+      issued_policy_resolutions: [],
       client_condition_resolutions: [],
       audit_log: [],
     },
@@ -176,6 +188,12 @@ export function makeDb(): FakeDb {
       cover_match_results: { compared_at: iso },
       client_change_acceptances: { recorded_at: iso },
       client_condition_resolutions: { placement_insurer_response_id: null, reason: null, evidence_email_message_id: null, evidence_document_id: null, evidence_note: null, new_client_instruction_id: null, recorded_at: iso },
+      issuance_requests: { superseded_at: null, superseded_reason: null, prepared_at: iso },
+      issuance_request_approvals: { superseded_at: null, superseded_reason: null, approved_at: iso },
+      issuance_submissions: { evidence_document_id: null, evidence_note: null, provider_message_id: null, recorded_at: iso },
+      issued_policy_documents: { note: null, issuance_request_id: null },
+      issued_policy_checks: { compared_at: iso },
+      issued_policy_resolutions: { evidence_email_message_id: null, evidence_document_id: null, evidence_note: null, recorded_at: iso },
       prepared_actions: { state: "prepared", decided_by: null, decided_at: null, receipt: null, prepared_at: iso },
     },
     uniques: {
@@ -187,6 +205,9 @@ export function makeDb(): FakeDb {
       client_change_acceptances: [["cover_match_result_id"]],
       prepared_actions: [["organization_id", "idempotency_key"]],
       placement_client_conditions: [["placement_id", "position"]],
+      issuance_submissions: [["organization_id", "idempotency_key"], ["issuance_request_id"]],
+      issued_policy_documents: [["placement_id", "document_id"]],
+      issued_policy_resolutions: [["issued_policy_check_item_id"]],
     },
   };
 
@@ -225,6 +246,31 @@ export function makeDb(): FakeDb {
       );
       if (!approval || approval["sha256"] !== row["sha256"]) return { code: "23514", message: "not approved" };
     },
+    /* 0058: the issuance request is numbered, digested and supersedes the last — and its approval. */
+    issuance_requests: (row, d) => {
+      const mine = (d.tables["issuance_requests"] ?? []).filter((r) => r["placement_id"] === row["placement_id"]);
+      row["version"] = mine.reduce((m, r) => Math.max(m, r["version"] as number), 0) + 1;
+      row["sha256"] = String(JSON.stringify(row["payload"]).length).padStart(64, "b");
+      for (const r of mine) {
+        if (r["superseded_at"] !== null) continue;
+        r["superseded_at"] = iso;
+        r["superseded_reason"] = "A newer version of this request was prepared.";
+        for (const a of d.tables["issuance_request_approvals"] ?? []) {
+          if (a["issuance_request_id"] === r["id"] && a["superseded_at"] === null) {
+            a["superseded_at"] = iso;
+            a["superseded_reason"] = "The request was changed after it was approved.";
+          }
+        }
+      }
+    },
+    issuance_request_approvals: (row, d) => {
+      const req = (d.tables["issuance_requests"] ?? []).find((r) => r["id"] === row["issuance_request_id"]);
+      if (!req || req["superseded_at"] !== null || req["sha256"] !== row["sha256"]) return { code: "23514", message: "approval must cover the current request" };
+    },
+    issuance_submissions: (row, d) => {
+      const approval = (d.tables["issuance_request_approvals"] ?? []).find((a) => a["issuance_request_id"] === row["issuance_request_id"] && a["superseded_at"] === null);
+      if (!approval) return { code: "23514", message: "not approved" };
+    },
     placement_insurer_responses: (row, d) => {
       const reqs = (d.tables["placement_requests"] ?? []).filter((r) => r["placement_id"] === row["placement_id"]).map((r) => r["id"]);
       const sent = (d.tables["placement_submissions"] ?? []).some((s) => reqs.includes(s["placement_request_id"]));
@@ -238,6 +284,33 @@ export function makeDb(): FakeDb {
    */
   db.rpc = {
     quote_comparison_changes: () => ({ data: [] }),
+    /* 0058's apply, stood in for: idempotent per placement, refuses unresolved differences. */
+    policy_issuance_apply: (args) => {
+      const done = db.tables["policy_issuance_applications"]!.find((a) => a["placement_id"] === args["p_placement_id"] || a["idempotency_key"] === args["p_idempotency_key"]);
+      if (done) return { data: { application_id: done["id"], repeat: true } };
+      const items = db.tables["issued_policy_check_items"]!.filter((i) => i["issued_policy_check_id"] === args["p_check_id"] && i["material"] === true);
+      if (items.some((i) => !db.tables["issued_policy_resolutions"]!.some((r) => r["issued_policy_check_item_id"] === i["id"]))) {
+        return { error: { code: "23514", message: "differences_unresolved" } };
+      }
+      const v = args["p_values"] as Record<string, string | null>;
+      const n = db.tables["policies"]!.length;
+      const policyId = `4a000000-0000-4000-8000-${String(100000000000 + n).slice(-12)}`;
+      const periodId = `4b000000-0000-4000-8000-${String(100000000000 + n).slice(-12)}`;
+      const placement = db.tables["placements"]!.find((p) => p["id"] === args["p_placement_id"])!;
+      db.tables["policies"]!.push({ id: policyId, organization_id: ORG, client_id: placement["client_id"], insurer_id: placement["insurer_id"], policy_number: v["policy_number"], deleted_at: null });
+      db.tables["policy_periods"]!.push({ id: periodId, organization_id: ORG, policy_id: policyId, period_start: v["period_start"], period_end: v["period_end"], premium_amount: v["premium"] });
+      const check = db.tables["issued_policy_checks"]!.find((c) => c["id"] === args["p_check_id"])!;
+      const doc = db.tables["issued_policy_documents"]!.find((d) => d["id"] === check["issued_policy_document_id"])!;
+      const id = `4c000000-0000-4000-8000-${String(100000000000 + n).slice(-12)}`;
+      db.tables["policy_issuance_applications"]!.push({
+        id, organization_id: ORG, placement_id: args["p_placement_id"], target_mode: args["p_mode"], policy_id: policyId, policy_period_id: periodId,
+        client_instruction_id: check["client_instruction_id"], basis_version_id: check["basis_version_id"], insurer_response_id: RESP_A,
+        placement_insurer_response_id: check["placement_insurer_response_id"], issued_policy_document_id: doc["id"], document_id: doc["document_id"],
+        issued_policy_check_id: check["id"], issuance_request_id: args["p_request_id"], changes: v["changes"] ?? [], applied_by: AMINA.id,
+        applied_at: iso, idempotency_key: args["p_idempotency_key"],
+      });
+      return { data: { application_id: id, repeat: false } };
+    },
     work_item_ensure: (args) => {
       const rows = db.tables["work_items"]!;
       if (args["p_task_status"] === "with_party" && (!args["p_task_party"] || !args["p_task_since"])) {

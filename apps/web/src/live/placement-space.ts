@@ -364,6 +364,21 @@ export function placementSpace(
         ],
       },
       {
+        id: "end",
+        cells: [
+          { value: "Cover ends", tone: "neutral" as SpaceTone },
+          {
+            /* An accepted end date as it is; a calculated one with its calculation and its source. */
+            value: d.basis.expiryAt !== null
+              ? day(d.basis.expiryAt)
+              : d.basis.derivedExpiryAt !== null
+                ? `${day(d.basis.derivedExpiryAt)} — calculated. ${d.basis.derivation ?? ""}`.slice(0, 400)
+                : "Not stated — the insurer's confirmed end date is used once the client accepts it",
+            tone: (d.basis.expiryAt === null && d.basis.derivedExpiryAt === null ? "attention" : "neutral") as SpaceTone,
+          },
+        ],
+      },
+      {
         id: "valid",
         cells: [
           { value: "Quote valid until", tone: "neutral" as SpaceTone },
@@ -896,9 +911,15 @@ export function placementSpace(
   if (m !== null && m.current && m.materialDifferences > 0 && ca === null) {
     actions.push(act("Record the client's decision on the changes", "accept", "record_evidence", null, d.permissions.canRecordInstruction ? null : "You may not record a client's decision."));
   }
-  if (rd.state === "ready" && rd.workItemId === null) {
+  if (rd.state === "ready" && rd.workItemId === null && d.issuance === null) {
     actions.push(act("Prepare policy issuance", "issuance", "prepare", null, d.permissions.canPrepare ? null : "You may not prepare policy issuance."));
   }
+  /* Issuance has its own Space: the request, the insurer's document, the check and the policy record. */
+  const issuanceRef: SpaceRef = {
+    spaceKind: "placement", recordType: "issuance", recordId: d.placement.id, workflowId: null,
+    path: `/placements/${d.placement.id}/issuance`, title: `Policy issuance — ${d.placement.title}`, label: "POLICY ISSUANCE",
+  };
+  if (d.issuance !== null) actions.push(open(d.issuance.stage === "applied" ? "Open the policy issuance" : "Open policy issuance", issuanceRef));
 
   blocks.push({
     id: "next",

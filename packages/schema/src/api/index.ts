@@ -8,6 +8,7 @@ export * from "./documents.js";
 export * from "./clients.js";
 export * from "./opportunities.js";
 export * from "./placement.js";
+export * from "./issuance.js";
 export * from "./compliance.js";
 export * from "./servicing.js";
 export * from "./contacts.js";

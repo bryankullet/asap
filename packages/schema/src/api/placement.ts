@@ -82,7 +82,7 @@ export type ClientInstructionView = z.infer<typeof clientInstructionSchema>;
 export const placementBasisSchema = z.object({
   /** Version 1 is the instruction; a later version exists only where the client accepted changes. */
   version: z.number().int().min(1),
-  origin: z.enum(["instruction", "client_accepted_changes"]),
+  origin: z.enum(["instruction", "client_accepted_changes", "period_corrected"]),
   classOfBusiness: z.string().nullable(),
   subject: z.string().nullable(),
   effectiveAt: z.string().nullable(),
@@ -92,6 +92,9 @@ export const placementBasisSchema = z.object({
   /** An explicit accepted cover period, from which an end date may be derived. Never assumed. */
   periodMonths: z.number().int().nullable(),
   periodDays: z.number().int().nullable(),
+  /** The end the explicit period gives, and the calculation, frozen with the basis. */
+  derivedExpiryAt: z.string().nullable(),
+  derivation: z.string().nullable(),
   premiumAmount: z.string().nullable(),
   premiumCurrency: z.string().nullable(),
   validUntil: z.string().nullable(),
@@ -294,6 +297,12 @@ export const PreparedActionType = z.enum([
   "record_insurer_response",
   "record_client_acceptance",
   "prepare_issuance",
+  "prepare_issuance_request",
+  "approve_issuance_request",
+  "record_issuance_submission",
+  "resolve_issued_policy_difference",
+  "apply_issued_policy",
+  "correct_cover_period",
 ]);
 export type PreparedActionType = z.infer<typeof PreparedActionType>;
 
@@ -380,6 +389,11 @@ export const placementResponseSchema = z.object({
   changeAcceptance: changeAcceptanceSchema.nullable(),
   conditions: z.array(clientConditionSchema),
   readiness: issuanceReadinessSchema,
+  /**
+   * Where policy issuance has got to, derived (4B-5). Null before the placement is ready for it.
+   * The policy is issued only once `applicationId` exists.
+   */
+  issuance: z.object({ stage: z.string(), since: z.string().nullable(), applicationId: uuidSchema.nullable(), policyId: uuidSchema.nullable() }).nullable(),
   preparedActions: z.array(preparedActionSchema),
 });
 export type PlacementResponse = z.infer<typeof placementResponseSchema>;
@@ -518,6 +532,22 @@ export const placementActionSchema = z.discriminatedUnion("action", [
     reason: z.string().trim().max(1000).optional(),
     resolvedAt: z.string().datetime({ offset: true }),
     source: InstructionSource.optional(),
+    evidenceEmailMessageId: uuidSchema.optional(),
+    evidenceDocumentId: uuidSchema.optional(),
+    evidenceNote: z.string().trim().max(1000).optional(),
+  }),
+  /**
+   * Correct a cover period that was recorded wrongly. A new client-instruction version and a new
+   * accepted basis version, with the reason and evidence; the originals are kept. Refused once the
+   * policy has been applied.
+   */
+  z.object({
+    action: z.literal("correct_cover_period"),
+    months: z.number().int().min(0).max(120),
+    days: z.number().int().min(0).max(400),
+    reason: z.string().trim().min(5).max(1000),
+    source: InstructionSource,
+    correctedAt: z.string().datetime({ offset: true }),
     evidenceEmailMessageId: uuidSchema.optional(),
     evidenceDocumentId: uuidSchema.optional(),
     evidenceNote: z.string().trim().max(1000).optional(),

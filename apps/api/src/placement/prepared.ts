@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  issuanceActionSchema,
   placementActionSchema,
   recordInstructionRequestSchema,
   type PlacementAction,
@@ -23,6 +24,11 @@ import {
   toPreparedView,
   type Env,
 } from "./service.js";
+import { executeIssuanceAction, issuanceFingerprint, loadIssuance, previewApply } from "./issuance.js";
+
+const ISSUANCE_TYPES: PreparedActionType[] = [
+  "prepare_issuance_request", "approve_issuance_request", "record_issuance_submission", "resolve_issued_policy_difference", "apply_issued_policy",
+];
 
 /**
  * Prepared actions (4B-4A): what Ask — or a screen — asks ASAP to do, held on the server until a
@@ -75,6 +81,7 @@ export async function prepareAction(env: Env, req: PrepareActionRequest): Promis
   if (req.placementId === undefined) {
     return clarify("Which placement is this about? Open it, or name the client and insurer.", ["placementId"]);
   }
+  if (ISSUANCE_TYPES.includes(req.actionType)) return prepareIssuance(env, req.placementId, req);
   const view = await load(env.db, env.ctx, env.organizationId, req.placementId);
   const built = await buildPlacementAction(env, view, req);
   if ("state" in built) return built;
@@ -371,15 +378,179 @@ async function buildPlacementAction(env: Env, view: PlacementResponse, req: Prep
         changes: ["Work: issue the policy from the confirmed cover. No policy is created now."],
       };
 
+    case "correct_cover_period": {
+      const missing: string[] = [];
+      if (typeof p["months"] !== "number" && typeof p["days"] !== "number") missing.push("months");
+      if (str(p["reason"]) === undefined) missing.push("reason");
+      if (str(p["source"]) === undefined) missing.push("source");
+      if (str(p["correctedAt"]) === undefined) missing.push("correctedAt");
+      if (!hasEvidence(p)) missing.push("evidence");
+      if (missing.length > 0) {
+        return clarify("To correct the cover period, say the right period, why it was wrong, how the client said so, when, and where the evidence is.", missing);
+      }
+      const parsed = placementActionSchema.safeParse({
+        action: "correct_cover_period", months: p["months"] ?? 0, days: p["days"] ?? 0,
+        reason: str(p["reason"]), source: str(p["source"]), correctedAt: str(p["correctedAt"]), ...evidenceOf(p),
+      });
+      if (!parsed.success) return refused(`That correction could not be prepared: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")} is not valid.`);
+      return {
+        payload: parsed.data,
+        summary: "Correct the cover period the client accepted",
+        changes: ["A new client instruction with the corrected period, keeping the original.", "What the client accepted becomes a new version, with the end date calculated again."],
+      };
+    }
+
     case "record_instruction":
       return refused("An instruction is recorded against the quotation work, not a placement.");
+
+    default:
+      return refused("That action belongs to policy issuance.");
   }
+}
+
+/* =============================================================================================
+ * Issuance (4B-5): the same exact, confirmed path — prepared against the issuance as it stands.
+ * ============================================================================================= */
+
+async function prepareIssuance(env: Env, placementId: string, req: PrepareActionRequest): Promise<PrepareActionResponse> {
+  const v = await loadIssuance(env, placementId);
+  const p = req.params;
+  const insurer = v.insurer.name;
+  if (req.insurerName !== undefined && !same(req.insurerName, insurer)) return refused(`This placement is with ${insurer}, not ${req.insurerName}.`);
+  const blockers: string[] = [];
+  let payload: unknown;
+  let summary: string;
+  let changes: string[];
+  let permitted: boolean;
+
+  switch (req.actionType) {
+    case "prepare_issuance_request": {
+      if (v.stage === "not_ready") return refused(`Policy issuance cannot begin: ${v.readiness.reasons.map((r) => r.message).join(" ")}`.slice(0, 400));
+      if (v.stage === "applied") return refused("The policy has already been applied from this placement.");
+      payload = {
+        action: "prepare_issuance_request",
+        requiredDocuments: Array.isArray(p["requiredDocuments"]) ? p["requiredDocuments"].filter((d): d is string => typeof d === "string") : [],
+        ...(str(p["requestedPolicyNumber"]) === undefined ? {} : { requestedPolicyNumber: str(p["requestedPolicyNumber"]) }),
+      };
+      summary = `Prepare the issuance request to ${insurer}`;
+      changes = [
+        v.request === null ? "A frozen issuance request, version 1, from the accepted basis and the cover confirmation." : `A new version replacing version ${v.request.version}; its approval, if any, no longer applies.`,
+        "Nothing is sent. It needs approval by someone permitted.",
+      ];
+      permitted = v.permissions.canPrepare;
+      break;
+    }
+    case "approve_issuance_request": {
+      if (v.request === null) return refused("There is no issuance request to approve. Prepare it first.");
+      if (v.request.approval !== null) blockers.push("This version is already approved.");
+      payload = { action: "approve_issuance_request", issuanceRequestId: v.request.id };
+      summary = `Approve version ${v.request.version} of the issuance request`;
+      changes = [`Approval of this exact version (${v.request.sha256.slice(0, 12)}…). A later change needs approving again.`, "It is not sent by approving it."];
+      permitted = v.permissions.canApprove;
+      break;
+    }
+    case "record_issuance_submission": {
+      if (v.request === null) return refused("There is no issuance request to record as sent.");
+      if (v.request.approval === null) return refused("The issuance request has not been approved. A draft is not sent, and cannot be recorded as sent.");
+      const missing: string[] = [];
+      if (str(p["recipient"]) === undefined) missing.push("recipient");
+      if (str(p["sentAt"]) === undefined) missing.push("sentAt");
+      if (str(p["evidenceDocumentId"]) === undefined && (str(p["evidenceNote"])?.length ?? 0) < 10) missing.push("evidence");
+      if (missing.length > 0) return clarify("To record that it was sent outside ASAP, say to whom, when, and how you know — attach the sent message or note from which mailbox it went.", missing);
+      payload = {
+        action: "record_issuance_submission", issuanceRequestId: v.request.id, method: str(p["method"]) ?? "recorded_manual_email",
+        recipient: str(p["recipient"]), sentAt: str(p["sentAt"]),
+        ...(str(p["evidenceDocumentId"]) === undefined ? {} : { evidenceDocumentId: str(p["evidenceDocumentId"]) }),
+        ...(str(p["evidenceNote"]) === undefined ? {} : { evidenceNote: str(p["evidenceNote"]) }),
+        idempotencyKey: `prepared:${v.request.id}:${str(p["sentAt"])}`,
+      };
+      summary = `Record that the issuance request went to ${insurer} on ${day(str(p["sentAt"])!)}`;
+      changes = [`A record that version ${v.request.version} was sent to ${str(p["recipient"])}, by a person, outside ASAP.`, `Work: with ${insurer} until the policy document arrives.`];
+      permitted = v.permissions.canSubmit;
+      break;
+    }
+    case "resolve_issued_policy_difference": {
+      const open = v.check?.current ? v.check.items.filter((i) => i.material && i.resolution === null) : [];
+      if (open.length === 0) return refused("There is no unresolved difference in the issued policy.");
+      const named = str(p["itemId"]) ?? str(p["label"]);
+      const found = named === undefined ? (open.length === 1 ? open : []) : open.filter((i) => i.id === named || same(i.label, named));
+      if (found.length !== 1) return clarify("Which difference?", ["itemId"], open.map((i) => ({ label: i.label, value: i.id })));
+      const missing: string[] = [];
+      if (str(p["reason"]) === undefined) missing.push("reason");
+      if (str(p["resolvedAt"]) === undefined) missing.push("resolvedAt");
+      if (!hasEvidence(p)) missing.push("evidence");
+      if (missing.length > 0) return clarify(`To resolve "${found[0]!.label}", say why, when it was decided, and where the evidence is.`, missing);
+      payload = {
+        action: "resolve_issued_policy_difference", itemId: found[0]!.id, resolution: str(p["resolution"]) ?? "client_accepted_issued_value",
+        reason: str(p["reason"]), resolvedAt: str(p["resolvedAt"]), ...evidenceOf(p),
+      };
+      summary = `Resolve the difference in ${found[0]!.label}`;
+      changes = [`${found[0]!.label}: ${found[0]!.classificationWords}. Recorded as resolved, with its evidence.`, "The policy record is not written by this."];
+      permitted = v.permissions.canPrepare;
+      break;
+    }
+    case "apply_issued_policy": {
+      const mode = str(p["mode"]);
+      if (mode !== "create" && mode !== "update") {
+        return clarify("Create a new policy from the issued policy, or update one this client already has?", ["mode"], [
+          { label: "Create a new policy", value: "create" },
+          ...v.candidates.slice(0, 18).map((c) => ({ label: `Update ${c.policyNumber ?? "(no number)"} with ${c.insurerName}`, value: `update:${c.policyId}:${c.periodId}` })),
+        ]);
+      }
+      let policyId: string | undefined;
+      let periodId: string | undefined;
+      if (mode === "update") {
+        const named = str(p["policyNumber"]);
+        const hits = v.candidates.filter((c) => c.policyId === str(p["policyId"]) || (named !== undefined && same(c.policyNumber ?? "", named)));
+        if (hits.length !== 1) {
+          return clarify("Which of this client's policies should be updated?", ["policyId"], v.candidates.slice(0, 20).map((c) => ({ label: `${c.policyNumber ?? "(no number)"} with ${c.insurerName}`, value: c.policyId })));
+        }
+        policyId = hits[0]!.policyId;
+        periodId = hits[0]!.periodId;
+      }
+      const basis = str(p["premiumBasis"]);
+      const issuedPremium = v.documents[0]?.fields.find((f) => f.key === "premium" && f.state !== "rejected");
+      if (issuedPremium !== undefined && basis !== "gross" && basis !== "total_payable") {
+        return clarify("Is the issued premium the gross premium or the total payable?", ["premiumBasis"], [{ label: "Gross premium", value: "gross" }, { label: "Total payable", value: "total_payable" }]);
+      }
+      const preview = await previewApply(env, placementId, { mode, ...(policyId ? { policyId } : {}), ...(periodId ? { periodId } : {}), ...(basis === "gross" || basis === "total_payable" ? { premiumBasis: basis } : {}) }, { audit: false });
+      blockers.push(...preview.blocked, ...preview.conflicts);
+      payload = {
+        action: "apply_issued_policy", mode, ...(policyId ? { policyId, periodId } : {}),
+        ...(mode === "update" ? { expected: preview.expected } : {}),
+        ...(basis === "gross" || basis === "total_payable" ? { premiumBasis: basis } : {}),
+        idempotencyKey: `prepared-apply:${placementId}:${v.check?.id ?? "none"}`,
+      };
+      summary = mode === "create" ? "Create the policy from the issued policy" : `Update ${preview.target.label} from the issued policy`;
+      changes = [
+        ...preview.rows.filter((r) => r.status === "will_change").map((r) => `${r.label}: ${r.current ?? "—"} → ${r.issued ?? "—"}`),
+        "Written once, with the policy document and the check linked. The Work closes.",
+      ];
+      permitted = v.permissions.canApply;
+      break;
+    }
+    default:
+      return refused("That is not an issuance action.");
+  }
+
+  const parsed = issuanceActionSchema.safeParse(payload);
+  if (!parsed.success) return refused(`That could not be prepared: ${parsed.error.issues.map((i) => i.path.join(".")).join(", ")} is not valid.`);
+  return store(env, {
+    actionType: req.actionType, placementId, opportunityId: null, payload: parsed.data, ...issuanceFingerprint(v),
+    summary, changes, blockers, permitted,
+  });
 }
 
 function permittedFor(env: Env, type: PreparedActionType): boolean {
   switch (type) {
+    case "approve_issuance_request":
+    case "apply_issued_policy":
+      return hasPermission(env.ctx, "placement", "approve");
+    case "record_issuance_submission":
+      return hasPermission(env.ctx, "placement", "send_external");
     case "record_instruction":
     case "record_client_acceptance":
+    case "correct_cover_period":
       return hasPermission(env.ctx, "placement", "create");
     case "approve_request":
       return hasPermission(env.ctx, "placement", "approve");
@@ -562,6 +733,8 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
     const opportunityId = row["opportunity_id"] as string;
     const view = await loadComparisonView(env.db, env.ctx, env.organizationId, opportunityId);
     current = instructionFingerprint(view.comparison, await liveInstructionId(env, opportunityId)).fingerprint;
+  } else if (ISSUANCE_TYPES.includes(type)) {
+    current = issuanceFingerprint(await loadIssuance(env, placementId)).fingerprint;
   } else {
     current = fingerprintOf(await load(env.db, env.ctx, env.organizationId, placementId)).fingerprint;
   }
@@ -579,6 +752,10 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
     const parsed = recordInstructionRequestSchema.safeParse(row["payload"]);
     if (!parsed.success) return refuse("refused", "This prepared action is not a valid instruction, so it was not run.");
     outcome = await executeRecordInstruction(env, row["opportunity_id"] as string, parsed.data);
+  } else if (ISSUANCE_TYPES.includes(type)) {
+    const parsed = issuanceActionSchema.safeParse(row["payload"]);
+    if (!parsed.success || parsed.data.action !== type) return refuse("refused", "This prepared action is not a valid issuance action, so it was not run.");
+    outcome = await executeIssuanceAction(env, placementId!, parsed.data);
   } else {
     const parsed = placementActionSchema.safeParse(row["payload"]);
     if (!parsed.success || parsed.data.action !== type) {

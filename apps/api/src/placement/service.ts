@@ -1,3 +1,4 @@
+import { issuanceSummary } from "./issuance.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   type ClientInstructionView,
@@ -15,7 +16,7 @@ import type { AuditEntry } from "../audit.js";
 import { hasPermission, type resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError } from "../errors.js";
 import { loadComparisonView, responseDigest } from "../routes/comparisons.js";
-import { endOfPeriod, summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "./cover-match.js";
+import { derivedEnd, endOfPeriod, summarise, verifyCoverMatch, type BasisSide, type ConfirmationSide } from "./cover-match.js";
 import {
   REASON_COPY,
   syncPlacementWork,
@@ -339,6 +340,8 @@ export async function executeRecordInstruction(
       client_conditions: conditionsText,
       period_months: input.requestedPeriod?.months ?? null,
       period_days: input.requestedPeriod?.days ?? null,
+      /* The end an explicit period gives, and how, frozen with what the client accepted. */
+      ...frozenEnd(input.requestedEffectiveAt, input.requestedExpiryAt ?? null, input.requestedPeriod?.months ?? null, input.requestedPeriod?.days ?? null),
       origin: "instruction",
       created_by: env.userId,
     })
@@ -740,6 +743,9 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
     case "resolve_client_condition":
       return resolveClientCondition(env, view, input);
 
+    case "correct_cover_period":
+      return correctCoverPeriod(env, view, input);
+
     case "prepare_issuance": {
       if (!hasPermission(ctx, "placement", "edit")) return blocked("You may not prepare policy issuance.");
       if (view.readiness.state !== "ready") {
@@ -1037,7 +1043,7 @@ async function recordClientAcceptance(
 type Basis = {
   id: string;
   version: number;
-  origin: "instruction" | "client_accepted_changes";
+  origin: "instruction" | "client_accepted_changes" | "period_corrected";
   insurerId: string;
   classOfBusiness: string | null;
   subject: string | null;
@@ -1049,6 +1055,8 @@ type Basis = {
   clientConditions: string | null;
   periodMonths: number | null;
   periodDays: number | null;
+  derivedExpiryAt: string | null;
+  derivation: string | null;
   terms: { termType: QuoteTermType; label: string; value: string | null; amount: string | null; currency: string | null; unclear: boolean }[];
 };
 
@@ -1083,6 +1091,8 @@ async function currentBasis(db: SupabaseClient, org: string, placementId: string
     clientConditions: (v["client_conditions"] as string | null) ?? null,
     periodMonths: (v["period_months"] as number | null) ?? null,
     periodDays: (v["period_days"] as number | null) ?? null,
+    derivedExpiryAt: (v["derived_expiry_at"] as string | null) ?? null,
+    derivation: (v["derivation"] as string | null) ?? null,
     terms: ((terms.data ?? []) as Record<string, unknown>[]).map((t) => ({
       termType: t["term_type"] as QuoteTermType,
       label: t["label"] as string,
@@ -1110,7 +1120,8 @@ export async function load(
   ctx: Ctx,
   org: string,
   id: string,
-  options: { sync?: boolean } = {},
+  /** `readOnly`: describe the placement without bringing its Work into line — for Ask's reads. */
+  options: { sync?: boolean; readOnly?: boolean } = {},
 ): Promise<PlacementResponse> {
   const placementQ = await db.from("placements").select("*").eq("organization_id", org).eq("id", id).maybeSingle();
   if (placementQ.error) throw mapDatabaseError(placementQ.error);
@@ -1305,6 +1316,8 @@ export async function load(
       clientConditions: basis.clientConditions,
       periodMonths: basis.periodMonths,
       periodDays: basis.periodDays,
+      derivedExpiryAt: basis.derivedExpiryAt,
+      derivation: basis.derivation,
       premiumAmount: basis.premiumAmount,
       premiumCurrency: basis.premiumCurrency,
       validUntil: (p["basis_valid_until"] as string | null) ?? null,
@@ -1393,7 +1406,12 @@ export async function load(
     conditions: await conditionsOf(db, org, id, response === null ? null : (response["id"] as string)),
     readiness: { state: "blocked", reasons: [], deferredChecks: [], workItemId: null },
     preparedActions: await preparedFor(db, org, id, people),
+    issuance: null,
   };
+
+  /* Issuance follows readiness; its stage decides the Work once issuance has begun. */
+  view.readiness = readinessOf(view);
+  view.issuance = await issuanceSummary(db, org, view);
 
   const abandoned = p.abandoned_at !== null;
   const target = abandoned ? null : desiredWork(view);
@@ -1404,7 +1422,7 @@ export async function load(
     target === null
       ? open.length === 0
       : open.length === 1 && open[0]!.reason === target.reason && open[0]!.taskStatus === target.status && open[0]!.taskParty === target.party;
-  if (options.sync === true || !agrees) {
+  if (options.readOnly !== true && (options.sync === true || !agrees)) {
     open = await syncPlacementWork(db, workContext(org, view), target);
   }
 
@@ -1453,13 +1471,37 @@ export function desiredWork(view: PlacementResponse): WorkTarget | null {
   const m = view.coverMatch;
   if (m === null || !m.current) return at("verify_cover_match");
   const unresolved = view.conditions.some((c) => c.state === "unresolved");
-  if (m.materialDifferences === 0) return at(unresolved ? "resolve_client_conditions" : "issue_policy");
+  if (m.materialDifferences === 0) return unresolved ? at("resolve_client_conditions") : issuanceWork(view, at);
   const a = view.changeAcceptance;
   if (a === null) return at("review_changed_terms");
   if (a.decision === "partial") return at("clarify_changes");
   if (a.decision === "reject") return at("resolve_rejected_changes");
   /* A full acceptance that still leaves a difference means the insurer's answer moved again. */
   return at("review_changed_terms");
+}
+
+/** Once cover matches, the issuance stage names the one thing to do next. */
+function issuanceWork(view: PlacementResponse, at: (r: WorkTarget["reason"], s?: WorkTarget["status"], p?: string | null, since?: string | null) => WorkTarget): WorkTarget | null {
+  switch (view.issuance?.stage ?? "ready") {
+    case "not_ready":
+    case "ready":
+      return at("issue_policy");
+    case "approval_required":
+      return at("approve_issuance_request");
+    case "submission_required":
+      return at("submit_issuance_request");
+    case "with_insurer":
+      return at("obtain_issued_policy", "with_party", view.insurer.name, view.issuance?.since ?? null);
+    case "review_required":
+      return at("review_issued_policy");
+    case "differences_to_resolve":
+      return at("resolve_issued_policy_differences");
+    case "ready_to_apply":
+      return at("apply_issued_policy");
+    case "applied":
+    default:
+      return null;
+  }
 }
 
 /**
@@ -1575,6 +1617,8 @@ function legacyBasis(p: Record<string, unknown>): Basis {
     clientConditions: null,
     periodMonths: null,
     periodDays: null,
+    derivedExpiryAt: null,
+    derivation: null,
     terms: [],
   };
 }
@@ -1780,6 +1824,84 @@ async function resolveClientCondition(
   });
   await load(db, ctx, org, placementId, { sync: true });
   return done();
+}
+
+/**
+ * A cover period recorded wrongly, corrected before issuance. The accepted instruction and basis
+ * are kept exactly as they were; the correction is a new instruction version (with its reason and
+ * evidence) and a new basis version whose derived end is recalculated and frozen. The cover check
+ * is run again against it.
+ */
+async function correctCoverPeriod(
+  env: Env,
+  view: PlacementResponse,
+  input: Extract<PlacementAction, { action: "correct_cover_period" }>,
+): Promise<Outcome> {
+  const { db, ctx } = env;
+  const org = env.organizationId;
+  const placementId = view.placement.id;
+  if (!hasPermission(ctx, "placement", "create")) return blocked("You may not correct what the client instructed.");
+  if (input.months + input.days === 0) return blocked("A period must have a length.");
+  const applied = await db.from("policy_issuance_applications").select("id").eq("organization_id", org).eq("placement_id", placementId).maybeSingle();
+  if (applied.data) return blocked("The policy has already been applied from this placement. A period change now is an endorsement, not a correction.");
+  if (input.evidenceEmailMessageId === undefined && input.evidenceDocumentId === undefined && (input.evidenceNote ?? "").trim().length < 10) {
+    return blocked("Say what shows the correct period: link the email, attach the document, or write down who said what and when.");
+  }
+  const b = view.basis;
+  if (b.periodMonths === input.months && b.periodDays === input.days) return done("already");
+
+  const old = view.instruction;
+  const oldRow = (await db.from("client_instructions").select("*").eq("organization_id", org).eq("id", old.id).maybeSingle()).data as Record<string, unknown> | null;
+  if (oldRow === null) return blocked("The current instruction could not be read.");
+  const now = new Date().toISOString();
+  await db.from("client_instructions")
+    .update({ superseded_at: now, superseded_reason: `The cover period was corrected: ${input.reason}`.slice(0, 500) })
+    .eq("organization_id", org).eq("id", old.id).is("superseded_at", null);
+  const created = await db.from("client_instructions").insert({
+    organization_id: org, opportunity_id: view.opportunity.id, client_id: view.client.id,
+    comparison_id: oldRow["comparison_id"] ?? null, insurer_response_id: oldRow["insurer_response_id"],
+    response_revision_id: oldRow["response_revision_id"], source: input.source,
+    evidence_email_message_id: input.evidenceEmailMessageId ?? null, evidence_document_id: input.evidenceDocumentId ?? null,
+    evidence_note: input.evidenceNote ?? null, client_conditions: oldRow["client_conditions"] ?? null,
+    requested_period_months: input.months, requested_period_days: input.days,
+    instructed_at: input.correctedAt, recorded_by: env.userId,
+    outside_comparison: Boolean(oldRow["outside_comparison"]), exception_reason: oldRow["exception_reason"] ?? null,
+    exception_by: oldRow["exception_by"] ?? null, revises_instruction_id: old.id,
+  }).select("id").maybeSingle();
+  const newInstructionId = (created.data as { id: string } | null)?.id ?? null;
+  if (newInstructionId === null) return blocked("The correction could not be recorded. Try again.");
+  await db.from("placements").update({ client_instruction_id: newInstructionId, updated_at: now }).eq("organization_id", org).eq("id", placementId);
+
+  const basis = await db.from("placement_basis_versions").insert({
+    organization_id: org, placement_id: placementId, version: b.version + 1, client_instruction_id: newInstructionId,
+    insurer_id: view.insurer.id, class_of_business: b.classOfBusiness, subject: b.subject,
+    effective_at: b.effectiveAt, expiry_at: b.expiryAt, premium_amount: b.premiumAmount, premium_currency: b.premiumCurrency,
+    premium_basis: b.premiumBasis, client_conditions: b.clientConditions,
+    period_months: input.months, period_days: input.days,
+    ...frozenEnd(b.effectiveAt, b.expiryAt, input.months, input.days),
+    origin: "period_corrected", created_by: env.userId,
+  }).select("id").maybeSingle();
+  const basisId = (basis.data as { id: string } | null)?.id ?? null;
+  for (const t of b.terms) {
+    await db.from("placement_basis_terms").insert({
+      organization_id: org, placement_id: placementId, basis_version_id: basisId, quote_term_revision_id: null,
+      term_type: t.termType, label: t.label, value: t.value, amount: t.amount, currency: t.currency, unclear: t.unclear,
+    });
+  }
+  if (view.insurerResponse !== null && view.insurerResponse.outcome.startsWith("confirmed")) await runCoverMatch(env, placementId, null);
+  await env.audit({
+    action: "placement.cover_period_corrected", objectType: "placement", objectId: placementId, result: "success",
+    previousState: { periodMonths: b.periodMonths, periodDays: b.periodDays, basisVersion: b.version },
+    newState: { periodMonths: input.months, periodDays: input.days, basisVersion: b.version + 1, instructionId: newInstructionId },
+  });
+  await load(db, ctx, org, placementId, { sync: true });
+  return done();
+}
+
+/** Columns for a basis version: the derived end and its calculation, or nulls. */
+function frozenEnd(effectiveAt: string | null, expiryAt: string | null, months: number | null, days: number | null) {
+  const { derivedExpiryAt, derivation } = derivedEnd(effectiveAt, expiryAt, months, days);
+  return { derived_expiry_at: derivedExpiryAt, derivation };
 }
 
 /* ---- Helpers ----------------------------------------------------------------------------------- */

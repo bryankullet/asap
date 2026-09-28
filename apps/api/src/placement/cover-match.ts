@@ -213,6 +213,26 @@ export function verifyCoverMatch(basis: BasisSide, confirmation: ConfirmationSid
 }
 
 /**
+ * The end an explicit accepted period gives, and the words that show how — or nulls when there is
+ * no period, no start, or an explicit end date already (which always wins). Frozen with the basis.
+ */
+export function derivedEnd(
+  effectiveAt: string | null,
+  expiryAt: string | null,
+  months: number | null,
+  days: number | null,
+): { derivedExpiryAt: string | null; derivation: string | null } {
+  const m = months ?? 0;
+  const d = days ?? 0;
+  if (expiryAt !== null || effectiveAt === null || m + d === 0) return { derivedExpiryAt: null, derivation: null };
+  const end = endOfPeriod(effectiveAt, m, d);
+  return {
+    derivedExpiryAt: end,
+    derivation: `Cover begins ${day(effectiveAt)} + ${periodWords(m, d)} = ${day(end)}, from the cover period in the client's accepted instruction.`,
+  };
+}
+
+/**
  * The end of cover. An accepted end date is compared as a date. With none, an explicit accepted
  * period gives the exact end, shown with its calculation. With neither, whatever end the insurer
  * states is a term the client never accepted — material, and theirs to accept. No annual term is
@@ -225,8 +245,9 @@ function coverEnd(basis: BasisSide, confirmation: ConfirmationSide): MatchItem {
   const days = basis.periodDays ?? 0;
   if (months + days === 0 || basis.effectiveAt === null) return plain;
 
-  const derived = endOfPeriod(basis.effectiveAt, months, days);
-  const calculation = `Cover begins ${day(basis.effectiveAt)} + ${periodWords(months, days)} = ${day(derived)}, from the cover period in the client's accepted instruction.`;
+  const { derivedExpiryAt, derivation } = derivedEnd(basis.effectiveAt, null, months, days);
+  const derived = derivedExpiryAt!;
+  const calculation = derivation!;
   if (confirmation.expiryAt === null) {
     return { ...plain, acceptedValue: derived, classification: "missing_from_confirmation", material: true, calculation };
   }

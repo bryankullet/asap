@@ -75,7 +75,7 @@ function body(stage: Stage = "instructed", over: Record<string, unknown> = {}) {
     basis: {
       version: 1, origin: "instruction", classOfBusiness: "Commercial motor", subject: null,
       effectiveAt: "2026-10-01T00:00:00.000Z", expiryAt: null, premiumBasis: null, clientConditions: null,
-      periodMonths: null, periodDays: null,
+      periodMonths: null, periodDays: null, derivedExpiryAt: null, derivation: null,
       premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30",
       terms: [{ termType: "excess", label: "Own damage", value: "5% min KES 30,000", amount: null, currency: null, unclear: false }],
     },
@@ -123,6 +123,7 @@ function body(stage: Stage = "instructed", over: Record<string, unknown> = {}) {
       ? { state: "ready", reasons: [], deferredChecks: [DEFERRED], workItemId: null }
       : { state: "blocked", reasons: [{ code: stage === "changed" ? "unaccepted_differences" : "not_confirmed", message: stage === "changed" ? "The confirmed terms differ from what the client accepted in 1 place, and the client has not accepted them." : "The insurer has not confirmed cover." }], deferredChecks: [DEFERRED], workItemId: null },
     preparedActions: [],
+    issuance: null,
     ...over,
   };
 }

@@ -1,4 +1,9 @@
 import {
+  applyPreviewRequestSchema,
+  applyPreviewSchema,
+  issuanceActionResponseSchema,
+  issuanceActionSchema,
+  issuanceResponseSchema,
   confirmPreparedActionResponseSchema,
   placementActionResponseSchema,
   placementActionSchema,
@@ -13,6 +18,7 @@ import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
+import { executeIssuanceAction, loadIssuance, previewApply } from "../placement/issuance.js";
 import { confirmPreparedAction, discardPreparedAction, prepareAction } from "../placement/prepared.js";
 import { executePlacementAction, executeRecordInstruction, load, type Env } from "../placement/service.js";
 import { parseBody } from "./_parse.js";
@@ -60,6 +66,31 @@ export function placementRoutes(deps: { logger: Logger }) {
     const result = await executePlacementAction(env, id, input);
     const placement = result.outcome === "blocked" ? null : await load(env.db, env.ctx, env.organizationId, id);
     return c.json(placementActionResponseSchema.parse({ ...result, placement }));
+  });
+
+  /* ---- Policy issuance (4B-5) ---------------------------------------------------------------- */
+
+  app.get("/placements/:id/issuance", async (c) => {
+    const env = await envOf(c, deps.logger);
+    return c.json(issuanceResponseSchema.parse(await loadIssuance(env, c.req.param("id"))));
+  });
+
+  app.post("/placements/:id/issuance/actions", async (c) => {
+    const env = await envOf(c, deps.logger);
+    const id = c.req.param("id");
+    const input = await parseBody(c, issuanceActionSchema);
+    const result = await executeIssuanceAction(env, id, input);
+    const issuance = result.outcome === "blocked" ? null : await loadIssuance(env, id);
+    return c.json(issuanceActionResponseSchema.parse({
+      outcome: result.outcome, reason: result.reason, issuance,
+      receipt: result.receipt === null ? null : { message: result.receipt, at: new Date().toISOString() },
+    }));
+  });
+
+  app.post("/placements/:id/issuance/preview", async (c) => {
+    const env = await envOf(c, deps.logger);
+    const input = await parseBody(c, applyPreviewRequestSchema);
+    return c.json(applyPreviewSchema.parse(await previewApply(env, c.req.param("id"), input)));
   });
 
   /* ---- Prepared actions: prepared here or by Ask, run only when a person confirms ------------ */

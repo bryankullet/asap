@@ -20,7 +20,7 @@ import { fakeProvider, type FakeScript } from "../../src/ai/providers/fake.js";
 import { createApp } from "../../src/app.js";
 import type { Mailer } from "../../src/mail/index.js";
 import { fakeFactory, type FakeDb } from "../_fake-supabase.js";
-import { AMINA as P_AMINA, INS_A, OPP, makeDb as makePlacementDb } from "../_placement-fixture.js";
+import { AMINA as P_AMINA, CLIENT as P_CLIENT, DOC as P_DOC, INS_A, OPP, ORG as P_ORG, RESP_A, makeDb as makePlacementDb } from "../_placement-fixture.js";
 import {
   ASK_EVALUATION,
   EVAL_CLAIM,
@@ -485,5 +485,193 @@ describe("Ask evaluation — placement actions (deterministic provider)", () => 
     const res = await post(`/prepared-actions/${row["id"] as string}/confirm`);
     expect(res).toMatchObject({ outcome: "refused", action: { state: "expired" } });
     noBusinessWrites();
+  });
+});
+
+/* =============================================================================================
+ * Policy issuance through Ask (4B-5).
+ *
+ * Ask reads issuance with `get_issuance` and prepares issuance actions with the same controlled
+ * tool. It never says a request was sent without a recorded submission, never says a policy was
+ * issued without an application, never picks the target or premium basis, and nothing it prepares
+ * runs until the person confirms — against facts that have not moved, within the time allowed,
+ * with the permission it needs.
+ * ============================================================================================= */
+
+const FALSE_ISSUED = [/\b(policy|it) (has been|was|is) (issued|recorded|created|applied)\b/i, /\bhas been sent\b/i, /\bI (have )?(sent|issued|applied|created)\b/i];
+const ISSUANCE_WRITES = ["work_items", "issuance_requests", "issuance_request_approvals", "issuance_submissions", "issued_policy_resolutions", "policy_issuance_applications", "policy_periods"];
+
+describe("Ask evaluation — policy issuance (deterministic provider)", () => {
+  let db: FakeDb;
+  let app: ReturnType<typeof createApp>;
+  const script: FakeScript = [];
+  beforeEach(() => {
+    script.length = 0;
+    db = makePlacementDb();
+    db.tables["conversations"] = [];
+    db.tables["conversation_messages"] = [];
+    app = createApp({
+      logger, build: { version: "eval", commit: "eval" }, supabase: fakeFactory(db), mailer: silentMailer,
+      webBaseUrl: "http://localhost:5173", invitationTtlHours: 168, exposeAcceptUrl: true,
+      executor: () => async () => {}, bootToken: "eval", aiProvider: fakeProvider(script),
+    });
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Json = any;
+  const req = async (method: string, path: string, body?: unknown, token = "tok-amina"): Promise<Json> =>
+    (await (await app.request(path, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })).json());
+  const issue = (id: string, body: unknown) => req("POST", `/placements/${id}/issuance/actions`, body);
+  /* Row counts, and the Work items' versions: a read that re-synced Work would bump one. */
+  const counts = () => ({
+    ...Object.fromEntries(ISSUANCE_WRITES.map((t) => [t, (db.tables[t] ?? []).length])),
+    workVersions: (db.tables["work_items"] ?? []).map((w) => `${w["id"] as string}:${w["version"] as number}:${w["task_status"] as string}`).join(","),
+  });
+  const ask = async (placementId: string, question: string, calls: { name: string; arguments: Record<string, unknown> }[], text: string, token = "tok-amina") => {
+    script.push({
+      match: new RegExp(question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      reply: { text: "", toolCalls: calls.map((c, i) => ({ id: `t${i}`, ...c })), stop: "tool_use" },
+      then: { text: answer(text), toolCalls: [], stop: "end" },
+    });
+    const res = await app.request("/ask", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ question, scope: { kind: "placement", id: placementId } }) });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Json;
+  };
+  const noFalseIssued = (text: string) => {
+    for (const re of FALSE_ISSUED) expect(text).not.toMatch(re);
+  };
+
+  async function ready(): Promise<string> {
+    const placed = await req("POST", `/opportunities/${OPP}/instruction`, {
+      insurerResponseId: RESP_A, source: "telephone", evidenceNote: "Client rang at 10:40 on 7 September and chose Jubilee.",
+      instructedAt: "2026-09-07T10:40:00.000Z", requestedEffectiveAt: "2026-10-01T00:00:00.000Z", requestedExpiryAt: "2027-09-30T00:00:00.000Z",
+    });
+    const id = placed.placementId as string;
+    const act = (b: unknown) => req("POST", `/placements/${id}/actions`, b);
+    await act({ action: "prepare_request", subject: "Placement", body: "Please place cover on the quoted terms.", coverRequested: "Commercial motor" });
+    let p = await req("GET", `/placements/${id}`);
+    await act({ action: "approve_request", placementRequestId: p.request.id });
+    await act({ action: "record_submission", placementRequestId: p.request.id, method: "recorded_manual_email", recipient: "uw@jubilee.test", sentAt: "2026-09-08T11:02:00.000Z", evidenceNote: "Sent from my mailbox at 11:02 on 8 September.", idempotencyKey: "sub-000001" });
+    await act({ action: "record_insurer_response", outcome: "confirmed_as_requested", receivedAt: "2026-09-09T14:10:00.000Z", effectiveAt: "2026-10-01T00:00:00.000Z", expiryAt: "2027-09-30T00:00:00.000Z", insurerReference: "CN-1", evidenceNote: "Cover note CN-1 received by email." });
+    p = await req("GET", `/placements/${id}`);
+    expect(p.readiness.state).toBe("ready");
+    return id;
+  }
+
+  async function readyToApply(): Promise<string> {
+    const id = await ready();
+    const v1 = await issue(id, { action: "prepare_issuance_request" });
+    await issue(id, { action: "approve_issuance_request", issuanceRequestId: v1.issuance.request.id });
+    await issue(id, { action: "record_issuance_submission", issuanceRequestId: v1.issuance.request.id, method: "recorded_manual_email", recipient: "policy@jubilee.test", sentAt: "2026-09-12T08:30:00.000Z", evidenceNote: "Sent from my mailbox at 08:30 on 12 September.", idempotencyKey: "iss-sub-001" });
+    db.tables["documents"]!.push({ id: P_DOC, organization_id: P_ORG, client_id: P_CLIENT, filename: "Schedule.pdf", extraction_state: "extracted", deleted_at: null });
+    const values: Record<string, string> = { insured_name: "Acme Ltd", insurer_name: "Jubilee", policy_number: "JUB/1", period_start: "2026-10-01", period_end: "2027-09-30", currency: "KES", premium: "5,310,000.00", class_of_business: "Commercial motor" };
+    for (const [i, [k, v]] of Object.entries(values).entries()) {
+      db.tables["document_fields"]!.push({ id: `3b000000-0000-4000-8000-00000000000${i}`, organization_id: P_ORG, document_id: P_DOC, field_key: k, proposed_value: v, corrected_value: null, state: "proposed", condition: "inferred", page_number: 1, region_x: null });
+    }
+    db.tables["document_term_proposals"]!.push({ id: "3c000000-0000-4000-8000-000000000000", organization_id: P_ORG, document_id: P_DOC, ordinal: 0, term_type: "excess", label: "Own damage", proposed_value: "5% min KES 30,000", corrected_value: null, state: "proposed", reviewed_for: "quotation", page_number: 2, region_x: null });
+    await issue(id, { action: "record_issued_policy_document", documentId: P_DOC, receivedAt: "2026-09-15T09:00:00.000Z" });
+    for (const f of db.tables["document_fields"]!) await issue(id, { action: "review_issued_field", documentFieldId: f["id"], decision: "accept" });
+    await issue(id, { action: "review_issued_term", proposalId: "3c000000-0000-4000-8000-000000000000", decision: "accept" });
+    const checked = await issue(id, { action: "run_issued_policy_check" });
+    expect(checked.issuance.stage).toBe("ready_to_apply");
+    return id;
+  }
+
+  it("never claims a draft was sent: recording sending before approval is refused, nothing is written", async () => {
+    const id = await ready();
+    await issue(id, { action: "prepare_issuance_request" });
+    const before = counts();
+    const body = await ask(id, "I sent the issuance request to Jubilee this morning", [
+      { name: "prepare_placement_action", arguments: { actionType: "record_issuance_submission", placementId: id, params: { recipient: "policy@jubilee.test", sentAt: "2026-09-12T08:30:00.000Z", evidenceNote: "Sent from my own mailbox this morning." } } },
+    ], "That request has not been approved, so it cannot be recorded as sent. Approve it first.");
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
+    expect(counts()).toEqual(before);
+    noFalseIssued(body.message.body);
+  });
+
+  it("never claims the policy was issued before an application exists", async () => {
+    const id = await readyToApply();
+    const body = await ask(id, "Has the policy been issued?", [{ name: "get_issuance", arguments: { placementId: id } }],
+      "The insurer's policy has been received and checked, and matches what was agreed. It is not on the policy record yet — it is ready for you to apply.");
+    expect(body.message.tools_used.map((t: Json) => t.name)).toEqual(["get_issuance"]);
+    expect(db.tables["policy_issuance_applications"]).toHaveLength(0);
+    noFalseIssued(body.message.body);
+  });
+
+  it("asks for the missing target rather than choosing create or update", async () => {
+    const id = await readyToApply();
+    const before = counts();
+    const body = await ask(id, "Apply the issued policy", [{ name: "prepare_placement_action", arguments: { actionType: "apply_issued_policy", placementId: id } }],
+      "Should I create a new policy, or update one this client already has?");
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
+    expect(counts()).toEqual(before);
+    expect(body.message.body).toMatch(/\?/);
+  });
+
+  it("asks for the premium basis rather than assuming it", async () => {
+    const id = await readyToApply();
+    await ask(id, "Create the policy from the issued schedule", [{ name: "prepare_placement_action", arguments: { actionType: "apply_issued_policy", placementId: id, params: { mode: "create" } } }],
+      "Is the issued premium the gross premium or the total payable?");
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
+  });
+
+  it("a prepared approval that went stale is refused, and records nothing", async () => {
+    const id = await ready();
+    await issue(id, { action: "prepare_issuance_request" });
+    await ask(id, "Approve the issuance request", [{ name: "prepare_placement_action", arguments: { actionType: "approve_issuance_request", placementId: id } }],
+      "I have prepared the approval of version 1. It waits for you to confirm.");
+    const pa = db.tables["prepared_actions"]![0]!;
+    await issue(id, { action: "prepare_issuance_request", requiredDocuments: ["Motor certificates"] });
+    const res = await req("POST", `/prepared-actions/${pa["id"] as string}/confirm`, {});
+    expect(res).toMatchObject({ outcome: "refused", action: { state: "stale" } });
+    expect(db.tables["issuance_request_approvals"]).toHaveLength(0);
+  });
+
+  it("an expired prepared action is refused, and records nothing", async () => {
+    const id = await ready();
+    await issue(id, { action: "prepare_issuance_request" });
+    await ask(id, "Approve the issuance request", [{ name: "prepare_placement_action", arguments: { actionType: "approve_issuance_request", placementId: id } }], "Prepared; it waits for you to confirm.");
+    const pa = db.tables["prepared_actions"]![0]!;
+    pa["expires_at"] = "2020-01-01T00:00:00.000Z";
+    expect(await req("POST", `/prepared-actions/${pa["id"] as string}/confirm`, {})).toMatchObject({ outcome: "refused", action: { state: "expired" } });
+    expect(db.tables["issuance_request_approvals"]).toHaveLength(0);
+  });
+
+  it("someone who may not approve can see what it would do, and confirming it is refused", async () => {
+    const id = await ready();
+    await issue(id, { action: "prepare_issuance_request" });
+    await ask(id, "Approve the issuance request", [{ name: "prepare_placement_action", arguments: { actionType: "approve_issuance_request", placementId: id } }], "Prepared, but you may not approve it.", "tok-otieno");
+    const pa = db.tables["prepared_actions"]![0]!;
+    expect(pa).toMatchObject({ permitted: false });
+    expect(await req("POST", `/prepared-actions/${pa["id"] as string}/confirm`, {}, "tok-otieno")).toMatchObject({ outcome: "refused" });
+    expect(db.tables["issuance_request_approvals"]).toHaveLength(0);
+  });
+
+  it("success: a confirmed apply writes the policy once, with a receipt; replay returns the same receipt", async () => {
+    const id = await readyToApply();
+    const body = await ask(id, "Create the policy from the issued schedule; the premium is gross", [
+      { name: "prepare_placement_action", arguments: { actionType: "apply_issued_policy", placementId: id, params: { mode: "create", premiumBasis: "gross" } } },
+    ], "I have prepared the policy record from the issued schedule. It waits for you to confirm; nothing is written until you do.");
+    noFalseIssued(body.message.body);
+    expect(db.tables["policy_issuance_applications"]).toHaveLength(0);
+    const pa = db.tables["prepared_actions"]![0]!;
+    expect(pa).toMatchObject({ action_type: "apply_issued_policy", state: "prepared", permitted: true });
+    const first = await req("POST", `/prepared-actions/${pa["id"] as string}/confirm`, {});
+    expect(first.outcome).toBe("done");
+    const replay = await req("POST", `/prepared-actions/${pa["id"] as string}/confirm`, {});
+    expect(replay.outcome).toBe("already");
+    expect(replay.action.receipt).toEqual(first.action.receipt);
+    expect(db.tables["policy_issuance_applications"]).toHaveLength(1);
+    expect(db.tables["policies"]!.filter((p) => p["policy_number"] === "JUB/1")).toHaveLength(1);
+  });
+
+  it("no uncontrolled write: the only tools Ask may call are declared, and reads write nothing", async () => {
+    const id = await readyToApply();
+    const before = counts();
+    const body = await ask(id, "What is left before the policy is recorded?", [{ name: "get_issuance", arguments: { placementId: id } }, { name: "get_placement", arguments: { placementId: id } }],
+      "It is ready for you to apply to the policy record.");
+    expect(body.message.tools_used.map((t: Json) => t.name)).toEqual(["get_issuance", "get_placement"]);
+    expect(counts()).toEqual(before);
+    expect(db.tables["prepared_actions"]).toHaveLength(0);
   });
 });

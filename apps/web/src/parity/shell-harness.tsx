@@ -14,6 +14,8 @@
  * is emitted into `dist/`, and `scripts/check-bundle.mjs` would see it if that changed.
  */
 
+import { issuancePreviewStub, issuanceStub } from "./issuance-stub.js";
+
 if (import.meta.env.PROD) throw new Error("the parity harness is a development tool");
 
 const json = (v: unknown) =>
@@ -107,8 +109,17 @@ const context = (r: ReturnType<typeof row>) => ({
   links: { work: r.source_type === "placement" ? `/placements/${r.source_id}` : `/r/${r.id}`, client: `/files/${CLIENT}`, policy: null, ask: r.title },
 });
 
-globalThis.fetch = (async (url: RequestInfo | URL) => {
+globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   const u = String(url);
+  /* Policy issuance (4B-5): before the placement stub, whose path it extends. */
+  if (u.includes("/issuance")) {
+    const q = new URLSearchParams(location.search);
+    const stage = q.get("stage") ?? "ready";
+    if (u.includes("/issuance/preview")) {
+      return json(issuancePreviewStub(stage, JSON.parse(String(init?.body ?? "{}")) as { mode?: string; premiumBasis?: string }));
+    }
+    return json(issuanceStub(stage, q.get("perms")));
+  }
   if (u.includes("/me")) {
     return json({
       user: {
@@ -890,7 +901,8 @@ function placementStage(stage: string, r: any): any {
   const r0: any = {
     ...r,
     conditions: r.conditions ?? [],
-    basis: { ...r.basis, periodMonths: r.basis.periodMonths ?? null, periodDays: r.basis.periodDays ?? null },
+    basis: { ...r.basis, periodMonths: r.basis.periodMonths ?? null, periodDays: r.basis.periodDays ?? null, derivedExpiryAt: r.basis.derivedExpiryAt ?? null, derivation: r.basis.derivation ?? null },
+    issuance: r.readiness?.state === "ready" ? { stage: "ready", since: null, applicationId: null, policyId: null } : null,
     coverMatch: r.coverMatch === null ? null : { ...r.coverMatch, items: r.coverMatch.items.map((i: Record<string, unknown>) => ({ calculation: null, ...i })) },
   };
   switch (stage) {

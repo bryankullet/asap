@@ -590,6 +590,8 @@ export const documentTermProposals = pgTable(
     reviewedAt: timestamptz("reviewed_at"),
     quoteTermId: uuid("quote_term_id").references(() => quoteTerms.id, { onDelete: "set null" }),
     previousRevisionId: uuid("previous_revision_id").references(() => quoteTermRevisions.id),
+    /* What the review was for: a quotation, or an issued policy (0058). */
+    reviewedFor: text("reviewed_for").notNull().default("quotation"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -621,7 +623,7 @@ export const documentTermProposals = pgTable(
     ),
     check(
       "document_term_proposals_applied_has_a_term",
-      sql`${t.state} not in ('accepted','corrected') or ${t.quoteTermId} is not null`,
+      sql`${t.state} not in ('accepted','corrected') or ${t.quoteTermId} is not null or ${t.reviewedFor} = 'issued_policy'`,
     ),
     check(
       "document_term_proposals_rejected_has_no_term",

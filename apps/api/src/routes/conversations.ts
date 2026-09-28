@@ -1,3 +1,5 @@
+import { loadIssuance } from "../placement/issuance.js";
+import type { Env } from "../placement/service.js";
 import {
   AiGatewayError,
   CONVERSATION_COLUMNS,
@@ -219,6 +221,13 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         ? `The broker is asking about ${org.name} as a whole.`
         : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : scope.kind === "placement" ? "the placement" : "the record"} "${scope.label}" (id ${scope.id}).`;
 
+    const askEnv = {
+      db,
+      ctx,
+      organizationId: org.id,
+      userId: user.id,
+      audit: (entry: Parameters<Env["audit"]>[0]) => recordAudit(db, logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }),
+    };
     let outcome;
     try {
       outcome = await runAsk({
@@ -230,17 +239,8 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         organizationId: org.id,
         logger,
         /* Prepares only. The person confirms on the placement; nothing runs from the model. */
-        prepare: (req) =>
-          prepareAction(
-            {
-              db,
-              ctx,
-              organizationId: org.id,
-              userId: user.id,
-              audit: (entry) => recordAudit(db, logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }),
-            },
-            req,
-          ),
+        prepare: (req) => prepareAction(askEnv, req),
+        issuance: (placementId) => loadIssuance(askEnv, placementId, { readOnly: true }),
       });
     } catch (err) {
       if (err instanceof AiGatewayError) {

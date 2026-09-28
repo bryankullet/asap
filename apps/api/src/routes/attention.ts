@@ -352,6 +352,11 @@ export function attentionRoutes() {
  * Where a Work item opens. An item that is about a placement opens the placement itself — the
  * reason, the evidence and the action are there — rather than a generic record page (4B-4A).
  */
-function workLink(item: { id: string; source_type?: string | null | undefined; source_id?: string | null | undefined }): string {
-  return item.source_type === "placement" && item.source_id ? `/placements/${item.source_id}` : `/r/${item.id}`;
+const ISSUANCE_REASONS = new Set(["approve_issuance_request", "submit_issuance_request", "obtain_issued_policy", "review_issued_policy", "resolve_issued_policy_differences", "apply_issued_policy"]);
+
+function workLink(item: { id: string; source_type?: string | null | undefined; source_id?: string | null | undefined; reason_code?: string | null | undefined }): string {
+  if (item.source_type === "placement" && item.source_id) {
+    return ISSUANCE_REASONS.has(item.reason_code ?? "") ? `/placements/${item.source_id}/issuance` : `/placements/${item.source_id}`;
+  }
+  return `/r/${item.id}`;
 }

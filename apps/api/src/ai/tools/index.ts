@@ -9,6 +9,7 @@ import {
   type AiToolDeclaration,
   type PrepareActionRequest,
   type PrepareActionResponse,
+  type IssuanceResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pgMoney } from "../../numeric.js";
@@ -44,6 +45,8 @@ export type ToolContext = {
    * the signed-in request, bound to that person; absent anywhere else, and then the tool says so.
    */
   prepare?: (request: PrepareActionRequest) => Promise<PrepareActionResponse>;
+  /** Reads policy issuance for one placement as the signed-in person (4B-5). Read-only. */
+  issuance?: (placementId: string) => Promise<IssuanceResponse>;
 };
 
 export type DeclaredTool = {
@@ -647,18 +650,55 @@ const getPlacement: DeclaredTool = {
   },
 };
 
+/**
+ * Policy issuance for one placement (4B-5): where it has got to, what blocks it, and the evidence
+ * frozen into the request. Read-only. "Sent" is true only when a submission with evidence exists;
+ * "issued" only when an application wrote the policy record.
+ */
+const getIssuance: DeclaredTool = {
+  declaration: {
+    name: "get_issuance",
+    description:
+      "Policy issuance for one placement: its stage (not_ready, ready, approval_required, submission_required, with_insurer, review_required, differences_to_resolve, ready_to_apply, applied), the blockers, the next action, the frozen request and its evidence, whether it was sent (only if `sent` is true), the issued-policy check and its differences, and the policy record written (only if `policyApplied` is true). Never say a policy was issued or recorded unless `policyApplied` is true, and never say a request was sent unless `sent` is true.",
+    inputSchema: { type: "object", properties: { placementId: { type: "string" } }, required: ["placementId"], additionalProperties: false },
+  },
+  async run(args, ctx) {
+    const input = z.object({ placementId: uuid }).parse(args);
+    if (ctx.issuance === undefined) return { state: "unavailable", reason: "Issuance cannot be read from here. Open the placement." };
+    const v = await ctx.issuance(input.placementId);
+    return {
+      stage: v.stage,
+      insurer: v.insurer.name,
+      client: v.client.name,
+      blockers: v.blockers,
+      nextAction: v.nextAction,
+      request: v.request === null ? null : {
+        version: v.request.version, digest: v.request.sha256.slice(0, 12), approved: v.request.approval !== null,
+        frozen: { inception: v.request.payload.inception, end: v.request.payload.end, endBasis: v.request.payload.endBasis, premiumAmount: v.request.payload.premiumAmount, premiumCurrency: v.request.payload.premiumCurrency, evidence: v.request.payload.evidence },
+      },
+      sent: v.request?.submission != null,
+      sentAt: v.request?.submission?.sentAt ?? null,
+      documentReceived: v.documents.length > 0,
+      differences: v.check?.items.filter((i) => i.material).map((i) => ({ label: i.label, classification: i.classificationWords, resolved: i.resolution !== null })) ?? [],
+      policyApplied: v.application !== null,
+      policy: v.application === null ? null : { policyNumber: v.application.policyNumber, periodStart: v.application.periodStart, periodEnd: v.application.periodEnd },
+      sending: v.sending,
+    };
+  },
+};
+
 /** Every tool the model may be told about. Nothing outside this list is reachable. */
 const preparePlacementAction: DeclaredTool = {
   declaration: {
     name: "prepare_placement_action",
     description:
-      "Prepare — never perform — one placement action for the broker to confirm on screen. Use it when the broker says things like 'The client chose Jubilee' (record_instruction, with opportunityId and insurerName), 'Prepare the placement request' (prepare_request), 'Ask Mary to approve this' (request_approval, approverName), 'Approve it' (approve_request), 'Record that I sent it outside ASAP' (record_submission), 'Jubilee confirmed cover' (record_insurer_response), 'The client accepted Jubilee's changes' (record_client_acceptance), or 'Prepare policy issuance' (prepare_issuance). Pass only facts the broker actually stated in `params` (dates as ISO 8601, `evidenceNote` in their words, `source` one of email, document, telephone, meeting, signed_acceptance, in_person). Never invent a date, a recipient or evidence. The result is `prepared` (tell the broker what will change and that it waits for them to confirm it on the placement), `clarify` (ask the broker exactly that one question), or `refused` (say why). Nothing is recorded, approved or sent until the broker confirms.",
+      "Prepare — never perform — one placement action for the broker to confirm on screen. Use it when the broker says things like 'The client chose Jubilee' (record_instruction, with opportunityId and insurerName), 'Prepare the placement request' (prepare_request), 'Ask Mary to approve this' (request_approval, approverName), 'Approve it' (approve_request), 'Record that I sent it outside ASAP' (record_submission), 'Jubilee confirmed cover' (record_insurer_response), 'The client accepted Jubilee's changes' (record_client_acceptance), 'Prepare policy issuance' (prepare_issuance), 'Prepare the issuance request' (prepare_issuance_request), 'Approve the issuance request' (approve_issuance_request), 'I sent the issuance request' (record_issuance_submission), 'The client accepted the insurer's excess' on an issued policy (resolve_issued_policy_difference, with label), 'Apply the issued policy' (apply_issued_policy, with mode create or update and, for update, policyNumber; premiumBasis gross or total_payable only if the broker said), or 'The cover period should have been N months' (correct_cover_period). Never choose create or update, a target policy or a premium basis for the broker — if they did not say, the result asks. Pass only facts the broker actually stated in `params` (dates as ISO 8601, `evidenceNote` in their words, `source` one of email, document, telephone, meeting, signed_acceptance, in_person). Never invent a date, a recipient or evidence. The result is `prepared` (tell the broker what will change and that it waits for them to confirm it on the placement), `clarify` (ask the broker exactly that one question), or `refused` (say why). Nothing is recorded, approved or sent until the broker confirms.",
     inputSchema: {
       type: "object",
       properties: {
         actionType: {
           type: "string",
-          enum: ["record_instruction", "prepare_request", "request_approval", "approve_request", "record_submission", "record_insurer_response", "record_client_acceptance", "prepare_issuance"],
+          enum: ["record_instruction", "prepare_request", "request_approval", "approve_request", "record_submission", "record_insurer_response", "record_client_acceptance", "prepare_issuance", "correct_cover_period", "prepare_issuance_request", "approve_issuance_request", "record_issuance_submission", "resolve_issued_policy_difference", "apply_issued_policy"],
         },
         placementId: { type: "string", description: "The placement's id, for every action except record_instruction." },
         opportunityId: { type: "string", description: "The quotation work's id, for record_instruction." },
@@ -690,6 +730,7 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getQuotationReading,
   getCompanyRules,
   getPlacement,
+  getIssuance,
   preparePlacementAction,
 ];
 

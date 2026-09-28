@@ -36,6 +36,7 @@ import { Search } from "./pages/Search.js";
 import { Shell } from "./shell/Shell.js";
 import { ClientSpace } from "./pages/ClientSpace.js";
 import { ComparisonSpace } from "./pages/ComparisonSpace.js";
+import { IssuanceSpace } from "./pages/IssuanceSpace.js";
 import { PlacementSpace } from "./pages/PlacementSpace.js";
 import { QuotationReading } from "./pages/QuotationReading.js";
 import { OpportunitySpace, QuoteSpace } from "./pages/OpportunitySpace.js";
@@ -239,6 +240,12 @@ const placement = createRoute({
   path: "/placements/$placementId",
   component: PlacementSpace,
 });
+/* Policy issuance for one placement. Its own address, so Work can open it and it survives refresh. */
+const issuance = createRoute({
+  getParentRoute: () => shell,
+  path: "/placements/$placementId/issuance",
+  component: IssuanceSpace,
+});
 /* Reviewing what ASAP read from a quotation. Its own address, so it can be linked and reopened. */
 const quotationReading = createRoute({
   getParentRoute: () => shell,
@@ -401,6 +408,7 @@ const routeTree = rootRoute.addChildren([
         comparison,
         quotationReading,
         placement,
+        issuance,
         quote,
         files,
         clientFile,

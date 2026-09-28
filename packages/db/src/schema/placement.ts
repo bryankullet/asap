@@ -436,6 +436,9 @@ export const placementBasisVersions = pgTable(
     outstandingRequirements: text("outstanding_requirements"),
     periodMonths: integer("period_months"),
     periodDays: integer("period_days"),
+    /* The end derived from an explicit period, and how, frozen with the basis (0058). */
+    derivedExpiryAt: timestamptz("derived_expiry_at"),
+    derivation: text("derivation"),
     origin: text("origin").notNull(),
     createdBy: uuid("created_by").notNull().references(() => users.id),
     createdAt: createdAt(),
@@ -443,7 +446,7 @@ export const placementBasisVersions = pgTable(
   (t) => [
     unique("placement_basis_versions_one_per_version").on(t.placementId, t.version),
     check("placement_basis_versions_version_check", sql`${t.version} >= 1`),
-    check("placement_basis_versions_origin_check", sql`${t.origin} in ('instruction','client_accepted_changes')`),
+    check("placement_basis_versions_origin_check", sql`${t.origin} in ('instruction','client_accepted_changes','period_corrected')`),
     index("placement_basis_versions_organization_id_idx").on(t.organizationId),
     index("placement_basis_versions_placement_id_idx").on(t.placementId),
     index("placement_basis_versions_client_instruction_id_idx").on(t.clientInstructionId),
