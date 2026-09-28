@@ -345,19 +345,19 @@ describe("defect 5 — a stale Ask error never sits beside a fresh answer", () =
 describe("defect 6 — a policy id does not probe /work-items first", () => {
   const POLICY = "50000000-0000-4000-8000-0000000000a1";
 
-  it("goes straight to the policy read when the link says the id is a policy", async () => {
+  it("goes straight to the Policy Space when the link says the id is a policy", async () => {
     calls.length = 0;
     const { Record } = await import("./pages/Record.js");
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    await renderInRouter(
+    const { router } = await renderInRouter(
       <QueryClientProvider client={qc}>
         <Record />
       </QueryClientProvider>,
       `/r/${POLICY}?kind=policy`,
     );
-    await waitFor(() => expect(screen.getByText(/MP-4471/)).toBeInTheDocument());
-    // Every policy open logged a 404 on /work-items/{policyId} before the fallback succeeded.
-    expect(calls).toContain(`policy:${POLICY}`);
+    // 4C-1: a policy has its own Space. The old link lands there, never on the legacy layout.
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/policies/${POLICY}`));
+    // Every policy open used to log a 404 on /work-items/{policyId} first; it still must not.
     expect(calls.some((c) => c.startsWith("workItem:"))).toBe(false);
   });
 

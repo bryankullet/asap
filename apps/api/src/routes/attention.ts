@@ -197,7 +197,7 @@ export function attentionRoutes() {
         links: {
           work: workLink(s.item),
           client: s.item.client_id ? `/files/${s.item.client_id}` : null,
-          policy: s.period ? `/r/${s.period.id}?kind=policy` : null,
+          policy: s.period ? (s.period.policyId ? `/policies/${s.period.policyId}?period=${s.period.id}` : null) : null,
           // The words a person would type to reach this item in Ask.
           ask: s.item.title,
         },
@@ -325,7 +325,7 @@ export function attentionRoutes() {
           links: {
             work: workLink(item),
             client: item.client_id ? `/files/${item.client_id}` : null,
-            policy: period ? `/r/${period.id}?kind=policy` : null,
+            policy: period ? (period.policyId ? `/policies/${period.policyId}?period=${period.id}` : null) : null,
             ask: item.title,
           },
           facts,

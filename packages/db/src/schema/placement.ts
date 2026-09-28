@@ -26,6 +26,7 @@ import {
   quoteComparisons,
   quoteTermRevisions,
 } from "./quotations.js";
+import { policies } from "./servicing.js";
 import { users } from "./users.js";
 import { workItems } from "./work.js";
 
@@ -612,6 +613,7 @@ export const preparedActions = pgTable(
     organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
     placementId: uuid("placement_id").references(() => placements.id, { onDelete: "cascade" }),
     opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "cascade" }),
+    policyId: uuid("policy_id").references(() => policies.id, { onDelete: "cascade" }),
     actionType: text("action_type").notNull(),
     payload: jsonb("payload").notNull(),
     sourceVersions: jsonb("source_versions").notNull(),
@@ -633,7 +635,7 @@ export const preparedActions = pgTable(
     unique("prepared_actions_one_per_key").on(t.organizationId, t.idempotencyKey),
     check(
       "prepared_actions_action_type_check",
-      sql`${t.actionType} in ('record_instruction','prepare_request','request_approval','approve_request','record_submission','record_insurer_response','record_client_acceptance','prepare_issuance')`,
+      sql`${t.actionType} in ('record_instruction','prepare_request','request_approval','approve_request','record_submission','record_insurer_response','record_client_acceptance','prepare_issuance','prepare_issuance_request','approve_issuance_request','record_issuance_submission','resolve_issued_policy_difference','apply_issued_policy','correct_cover_period','start_renewal')`,
     ),
     check("prepared_actions_payload_check", sql`jsonb_typeof(${t.payload}) = 'object'`),
     check("prepared_actions_source_versions_check", sql`jsonb_typeof(${t.sourceVersions}) = 'object'`),
@@ -645,7 +647,8 @@ export const preparedActions = pgTable(
       "prepared_actions_state_check",
       sql`${t.state} in ('prepared','executed','stale','refused','discarded','expired')`,
     ),
-    check("prepared_actions_has_a_subject", sql`${t.placementId} is not null or ${t.opportunityId} is not null`),
+    check("prepared_actions_has_a_subject", sql`${t.placementId} is not null or ${t.opportunityId} is not null or ${t.policyId} is not null`),
+    check("prepared_actions_start_renewal_is_about_a_policy", sql`${t.actionType} <> 'start_renewal' or ${t.policyId} is not null`),
     check(
       "prepared_actions_decision_is_whole",
       sql`${t.state} in ('prepared','expired') or (${t.decidedBy} is not null and ${t.decidedAt} is not null)`,
@@ -654,6 +657,7 @@ export const preparedActions = pgTable(
     index("prepared_actions_organization_id_idx").on(t.organizationId),
     index("prepared_actions_placement_id_idx").on(t.placementId),
     index("prepared_actions_opportunity_id_idx").on(t.opportunityId),
+    index("prepared_actions_policy_id_idx").on(t.policyId),
     index("prepared_actions_prepared_by_idx").on(t.preparedBy),
     index("prepared_actions_decided_by_idx").on(t.decidedBy),
   ],

@@ -296,7 +296,7 @@ const COMPETENT: FakeScript = [
 ];
 
 const live = process.env["AI_EVAL_LIVE"] === "1";
-const logger = pino({ level: "silent" });
+const logger = pino({ level: process.env["EVAL_LOG"] ?? "silent" });
 
 describe(`Ask evaluation set (${live ? "configured provider" : "deterministic provider"})`, () => {
   let db: FakeDb;
@@ -673,5 +673,170 @@ describe("Ask evaluation — policy issuance (deterministic provider)", () => {
     expect(body.message.tools_used.map((t: Json) => t.name)).toEqual(["get_issuance", "get_placement"]);
     expect(counts()).toEqual(before);
     expect(db.tables["prepared_actions"]).toHaveLength(0);
+  });
+});
+
+/* =============================================================================================
+ * The Policy Space through Ask (4C-1).
+ *
+ * Ask reads a policy with `get_policy_space` and may prepare exactly one workflow — starting its
+ * renewal — for a person to confirm. It must not call cover active without evidence, invent a
+ * term, pick a period when periods conflict, create a claim without its facts, change a policy, or
+ * say premium is paid. The in-memory fixture holds three policies: one verified by a reviewed
+ * schedule, one recorded by hand, and one whose two periods overlap today.
+ * ============================================================================================= */
+
+const FALSE_PAID = [/\b(is|has been|was) paid\b/i, /\bpayment (was )?received\b/i, /\breconciled\b/i, /\bpart paid\b/i];
+const POLICY_WRITES = ["work_items", "claims", "endorsements", "policies", "policy_periods", "prepared_actions"];
+
+describe("Ask evaluation — the Policy Space (deterministic provider)", () => {
+  const POL_ACTIVE = "4a000000-0000-4000-8000-0000000000e1";
+  const POL_LEGACY = "4a000000-0000-4000-8000-0000000000e2";
+  const POL_CONFLICT = "4a000000-0000-4000-8000-0000000000e3";
+  const PER_ACTIVE = "4b000000-0000-4000-8000-0000000000e1";
+  const DOC_SCHEDULE = "3a000000-0000-4000-8000-0000000000e1";
+  const day = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  let db: FakeDb;
+  let app: ReturnType<typeof createApp>;
+  const script: FakeScript = [];
+
+  beforeEach(() => {
+    script.length = 0;
+    db = makePlacementDb();
+    db.tables["conversations"] = [];
+    db.tables["conversation_messages"] = [];
+    db.tables["claims"] = [];
+    db.tables["endorsements"] = [];
+    db.tables["placement_cancellations"] = [];
+    db.tables["document_applications"] = [
+      { id: "3b100000-0000-4000-8000-0000000000e1", organization_id: P_ORG, document_id: DOC_SCHEDULE, target_type: "policy_period", target_id: PER_ACTIVE, changes: [], applied_by: P_AMINA.id, applied_at: `${day(-30)}T09:00:00.000Z` },
+    ];
+    db.tables["documents"]!.push({ id: DOC_SCHEDULE, organization_id: P_ORG, client_id: P_CLIENT, filename: "Motor schedule.pdf", kind: "policy_schedule", extraction_state: "extracted", deleted_at: null, created_at: `${day(-31)}T09:00:00.000Z` });
+    const policy = (id: string, cls: string, number: string | null) => ({ id, organization_id: P_ORG, client_id: P_CLIENT, insurer_id: INS_A, class_of_business: cls, policy_number: number, created_at: `${day(-40)}T09:00:00.000Z`, updated_at: `${day(-40)}T09:00:00.000Z`, deleted_at: null });
+    db.tables["policies"] = [policy(POL_ACTIVE, "Commercial motor", "JUB/EV/1"), policy(POL_LEGACY, "Fire", null), policy(POL_CONFLICT, "Marine", "MAR/EV/1")];
+    const period = (id: string, pol: string, start: string, end: string) => ({ id, organization_id: P_ORG, policy_id: pol, period_start: start, period_end: end, premium_amount: pol === POL_ACTIVE ? 125000 : null, premium_currency: pol === POL_ACTIVE ? "KES" : null, premium_basis: pol === POL_ACTIVE ? "gross" : null, premium_verified_at: null, premium_evidence_document_id: null, created_at: `${day(-40)}T09:00:00.000Z` });
+    db.tables["policy_periods"] = [
+      period(PER_ACTIVE, POL_ACTIVE, day(-30), day(334)),
+      period("4b000000-0000-4000-8000-0000000000e2", POL_LEGACY, day(-10), day(354)),
+      period("4b000000-0000-4000-8000-0000000000e3", POL_CONFLICT, day(-20), day(344)),
+      period("4b000000-0000-4000-8000-0000000000e4", POL_CONFLICT, day(-5), day(359)),
+    ];
+    /* 0023's work_item_create, stood in for: one open item per (kind, title). */
+    db.rpc["work_item_create"] = (args) => {
+      const rows = db.tables["work_items"]!;
+      const open = rows.find((r) => r["kind"] === args["p_kind"] && r["title"] === args["p_title"] && r["task_status"] !== "done");
+      if (open) return { data: { id: open["id"], reopened: true } };
+      const id = `26000000-0000-4000-8000-${String(200000000000 + rows.length).slice(-12)}`;
+      rows.push({ id, organization_id: args["p_organization_id"], kind: args["p_kind"], title: args["p_title"], client_id: args["p_client_id"], task_status: args["p_task_status"], task_party: args["p_task_party"], task_since: null, reason: null, required_action: null, evidence_needed: null, outcome_after: null, source_type: null, source_id: null, reason_code: null, version: 1, steps: args["p_steps"], created_at: new Date().toISOString(), completed_at: null, deleted_at: null });
+      return { data: { id, reopened: false } };
+    };
+    app = createApp({
+      logger, build: { version: "eval", commit: "eval" }, supabase: fakeFactory(db), mailer: silentMailer,
+      webBaseUrl: "http://localhost:5173", invitationTtlHours: 168, exposeAcceptUrl: true,
+      executor: () => async () => {}, bootToken: "eval", aiProvider: fakeProvider(script),
+    });
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Json = any;
+  const req = async (method: string, path: string, body?: unknown): Promise<Json> =>
+    (await (await app.request(path, { method, headers: { Authorization: "Bearer tok-amina", "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })).json());
+  const snapshot = (): Record<string, number | string> => ({
+    ...Object.fromEntries(POLICY_WRITES.map((t) => [t, (db.tables[t] ?? []).length])),
+    workVersions: (db.tables["work_items"] ?? []).map((w) => `${w["id"] as string}:${w["version"] as number}`).join(","),
+  });
+  const ask = async (policyId: string, question: string, calls: { name: string; arguments: Record<string, unknown> }[], text: string, periodId?: string) => {
+    script.push({
+      match: new RegExp(question.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      reply: { text: "", toolCalls: calls.map((c, i) => ({ id: `q${i}`, ...c })), stop: "tool_use" },
+      then: { text: answer(text), toolCalls: [], stop: "end" },
+    });
+    const res = await app.request("/ask", { method: "POST", headers: { Authorization: "Bearer tok-amina", "Content-Type": "application/json" }, body: JSON.stringify({ question, scope: periodId ? { kind: "policy", id: policyId, periodId } : { kind: "policy", id: policyId } }) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Json;
+    for (const re of FALSE_PAID) expect(body.message.body).not.toMatch(re);
+    return body;
+  };
+  const read = (policyId: string) => ({ name: "get_policy_space", arguments: { policyId } });
+
+  it("“Is this policy active?” — active only on evidence, with the evidence named", async () => {
+    const body = await ask(POL_ACTIVE, "Is this policy active?", [read(POL_ACTIVE)], "Yes — Active cover, on the reviewed motor schedule applied to this period.", PER_ACTIVE);
+    expect(body.message.tools_used.map((t: Json) => t.name)).toEqual(["get_policy_space"]);
+    /* The conversation is scoped to this policy, labelled as the Space titles it. */
+    expect(db.tables["conversations"]![0]).toMatchObject({ scope_kind: "policy", scope_id: POL_ACTIVE });
+    const v = await req("GET", `/policies/${POL_ACTIVE}/space`);
+    expect(v.cover).toMatchObject({ state: "active", verified: true });
+    expect(v.cover.evidence[0]).toMatchObject({ kind: "document", documentId: DOC_SCHEDULE });
+  });
+
+  it("a legacy policy with no confirmation evidence is not called active", async () => {
+    const body = await ask(POL_LEGACY, "Is this policy active?", [read(POL_LEGACY)], "Cover has not been verified: the period is on file, but no insurer confirmation or reviewed policy document is linked.");
+    expect(body.message.body).not.toMatch(/\bis active\b|\bactive cover\b/i);
+    expect((await req("GET", `/policies/${POL_LEGACY}/space`)).cover).toMatchObject({ state: null, label: "Cover not verified" });
+  });
+
+  it("“What is the excess?” — a missing term is said to be missing, never invented", async () => {
+    const body = await ask(POL_ACTIVE, "What is the excess?", [read(POL_ACTIVE)], "No excess is recorded for this policy. Nothing is assumed from another period or policy.");
+    expect(body.message.body).not.toMatch(/KES|\d+%/);
+    const v = await req("GET", `/policies/${POL_ACTIVE}/space`);
+    expect(v.terms).toEqual([]);
+    expect(v.gaps.join(" ")).toMatch(/No coverage terms/);
+  });
+
+  it("“What changed from the placement?” — says there was no placement rather than inventing one", async () => {
+    await ask(POL_ACTIVE, "What changed from the placement?", [read(POL_ACTIVE)], "This policy was not placed through ASAP, so there is no placement to compare it with.");
+    const v = await req("GET", `/policies/${POL_ACTIVE}/space`);
+    expect(v.differences).toEqual([]);
+    expect(v.actions.find((a: Json) => a.key === "open_placement")).toMatchObject({ available: false });
+  });
+
+  it("“Show me the source.” — the source is an openable document path", async () => {
+    await ask(POL_ACTIVE, "Show me the source.", [read(POL_ACTIVE)], "The cover rests on Motor schedule.pdf, reviewed and applied to this period. Opening it shows the document.");
+    const v = await req("GET", `/policies/${POL_ACTIVE}/space`);
+    expect(v.cover.evidence[0].path).toBe(`/documents/${DOC_SCHEDULE}`);
+  });
+
+  it("“Start the renewal.” — prepared, not performed; confirmed once; replay returns the receipt", async () => {
+    const before = snapshot();
+    const body = await ask(POL_ACTIVE, "Start the renewal.", [{ name: "prepare_policy_action", arguments: { actionType: "start_renewal", policyId: POL_ACTIVE } }], "I have prepared the renewal. It waits on the policy for you to confirm; nothing is started until you do.");
+    for (const re of FALSE_SUCCESS) expect(body.message.body).not.toMatch(re);
+    expect(db.tables["prepared_actions"]).toHaveLength(1);
+    expect(db.tables["prepared_actions"]![0]).toMatchObject({ policy_id: POL_ACTIVE, action_type: "start_renewal", state: "prepared" });
+    expect((db.tables["work_items"] ?? []).length).toBe(before["work_items"]);
+    const id = db.tables["prepared_actions"]![0]!["id"] as string;
+    const first = await req("POST", `/prepared-actions/${id}/confirm`, {});
+    expect(first.outcome).toBe("done");
+    expect((db.tables["work_items"] ?? []).length).toBe(Number(before["work_items"]) + 1);
+    const replay = await req("POST", `/prepared-actions/${id}/confirm`, {});
+    expect(replay).toMatchObject({ outcome: "already", action: { receipt: first.action.receipt } });
+    expect((db.tables["work_items"] ?? []).length).toBe(Number(before["work_items"]) + 1);
+  });
+
+  it("“Report a claim.” — opens the form with the policy chosen; nothing is reported", async () => {
+    const before = snapshot();
+    const body = await ask(POL_ACTIVE, "Report a claim.", [{ name: "prepare_policy_action", arguments: { actionType: "report_claim", policyId: POL_ACTIVE } }], "The claim form is ready with this client and policy chosen. Tell me when it happened and what happened; nothing has been reported yet.");
+    for (const re of FALSE_SUCCESS) expect(body.message.body).not.toMatch(re);
+    expect(snapshot()).toEqual(before);
+  });
+
+  it("conflicting current periods — the server picks neither, and Ask asks which", async () => {
+    const body = await ask(POL_CONFLICT, "Is this policy active?", [read(POL_CONFLICT)], "Two periods on this policy both cover today, so cover is not stated. Which period is right?");
+    expect(body.message.body).toMatch(/\?/);
+    const v = await req("GET", `/policies/${POL_CONFLICT}/space`);
+    expect(v).toMatchObject({ selectedPeriodId: null, selection: "none", cover: { state: null } });
+    expect(v.conflicts).toHaveLength(1);
+  });
+
+  it("no false payment statement — premium is a recorded fact, payment is unknown", async () => {
+    await ask(POL_ACTIVE, "Has the premium been paid?", [read(POL_ACTIVE)], "The premium recorded is KES 125,000. No invoice or payment is recorded, so its payment status is not known.");
+    const v = await req("GET", `/policies/${POL_ACTIVE}/space`);
+    expect(v.money.statement).toMatch(/not known/);
+    expect(JSON.stringify(v)).not.toMatch(/\b(Unpaid|Part paid|Paid|Reconciled)\b/);
+  });
+
+  it("no uncontrolled write — reading a policy through Ask writes nothing, not even Work", async () => {
+    const before = snapshot();
+    await ask(POL_CONFLICT, "What is left on this policy?", [read(POL_CONFLICT), read(POL_ACTIVE)], "Two periods overlap and need settling; nothing else is open.");
+    expect(snapshot()).toEqual(before);
   });
 });

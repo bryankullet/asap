@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { ErrorState, LoadingList, MissingData } from "../components/states.js";
 import { ActionPanel } from "../features/work/ActionPanel.js";
 import { api, describeApiError } from "../lib/api.js";
@@ -28,6 +28,11 @@ export function Record() {
   };
   const isPolicy = kind === "policy";
   const isRun = kind === "run";
+  /* A policy has its own Space now (4C-1); old links land there rather than on a legacy layout. */
+  const go = useNavigate();
+  useEffect(() => {
+    if (isPolicy && recordId) void go({ to: "/policies/$policyId", params: { policyId: recordId }, replace: true });
+  }, [isPolicy, recordId]);
   const full = useQuery({
     queryKey: ["work_item_full", recordId],
     queryFn: () => api.workItem(recordId),

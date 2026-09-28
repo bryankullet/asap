@@ -179,10 +179,12 @@ export async function runAsk(opts: {
   /** Bound to the signed-in person; prepares a placement action for them to confirm (4B-4A). */
   prepare?: ToolContext["prepare"];
   issuance?: ToolContext["issuance"];
+  policy?: ToolContext["policy"];
+  preparePolicy?: ToolContext["preparePolicy"];
 }): Promise<AskOutcome> {
   const { provider, db, organizationId, logger } = opts;
   const servedBy = `${provider.id}:${provider.model}`;
-  const ctx: ToolContext = { db, organizationId, ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }), ...(opts.issuance === undefined ? {} : { issuance: opts.issuance }) };
+  const ctx: ToolContext = { db, organizationId, ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }), ...(opts.issuance === undefined ? {} : { issuance: opts.issuance }), ...(opts.policy === undefined ? {} : { policy: opts.policy }), ...(opts.preparePolicy === undefined ? {} : { preparePolicy: opts.preparePolicy }) };
 
   const messages: AiMessage[] = [];
   for (const turn of opts.history) {

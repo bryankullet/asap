@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect } from "react";
 import type { SpaceFrameAction } from "@asap/schema";
 import { documentListSpace, documentSpace } from "../live/ingestion-space.js";
@@ -91,6 +91,8 @@ export function Documents() {
  */
 export function DocumentViewer() {
   const { documentId = "" } = useParams({ strict: false }) as { documentId?: string };
+  /* Opened from a citation: the page and the value to mark (4C-1). */
+  const search = useSearch({ strict: false }) as { page?: number; field?: string };
   const qc = useQueryClient();
   const navigate = useNavigate();
   const tabs = useWorkspaceTabs(`/documents/${documentId}`);
@@ -137,6 +139,7 @@ export function DocumentViewer() {
       busy: review.isPending || retry.isPending,
     },
     documentId,
+    { fieldId: search.field, page: search.page },
   );
 
   return (

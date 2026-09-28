@@ -127,6 +127,7 @@ export async function loadRecordContext(
         const policy = policies.find((x) => x.id === p.policy_id);
         periods.set(p.id, {
           id: p.id,
+          policyId: p.policy_id,
           classOfBusiness: policy?.class_of_business ?? "This policy",
           insurerName: insurers.find((i) => i.id === policy?.insurer_id)?.name ?? "the insurer",
           policyNumber: policy?.policy_number ?? null,

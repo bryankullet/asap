@@ -67,6 +67,7 @@ import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import type { Executor, RunFacts } from "../runs/executor.js";
 import { parseBody } from "./_parse.js";
+import { renewalTitle } from "../policy/space.js";
 import { loadRecordContext } from "../attention/record-context.js";
 
 export type WorkDeps = {
@@ -223,21 +224,38 @@ export function workRoutes(deps: WorkDeps) {
       };
     }
 
+    /*
+     * A claim or a renewal started from a policy names that policy — one of this client's, read
+     * under the caller's session. A policy id that is not the client's is refused, never borrowed.
+     */
+    let named: Awaited<ReturnType<typeof clientPolicies>>[number] | null = null;
+    if (input.policyId && input.kind !== "endorsement") {
+      named = (await clientPolicies(db, client.id)).find((p) => p.policy.id === input.policyId) ?? null;
+      if (!named) return sendError(c, new HttpError(404, "not_found", "That policy is not this client's."));
+    }
+
     let steps;
     let title: string;
     if (input.kind === "claim") {
       const policies = await clientPolicies(db, client.id);
       steps = claimSteps({
         clientName: client.name,
-        insurerName: policies.length === 1 ? policies[0]!.insurerName : null,
+        insurerName: named ? named.insurerName : policies.length === 1 ? policies[0]!.insurerName : null,
       });
-      title = `${client.name} — claim, incident ${input.incidentOn}`;
+      /*
+       * A claim's identity is its title. Started from a policy, the policy is part of it: two
+       * policies' claims on the same day are two claims, and a repeated click is still one.
+       */
+      title = named
+        ? `${client.name} — claim, ${named.policy.class_of_business}${named.policy.policy_number ? ` ${named.policy.policy_number}` : ""}, incident ${input.incidentOn}`
+        : `${client.name} — claim, incident ${input.incidentOn}`;
     } else if (input.kind === "endorsement") {
       steps = endorsementSteps({ insurerName: policy!.insurerName });
       title = `${client.name} — policy change, ${policy!.className}${policy!.number ? ` ${policy!.number}` : ""}`;
     } else {
       steps = renewalSteps({ clientName: client.name, insurers: input.insurers });
-      title = `${client.name} — renewal`;
+      /* Keyed by the policy when started from one, so starting it twice opens the same renewal. */
+      title = named ? renewalTitle(client.name, named.policy.class_of_business, named.policy.policy_number) : `${client.name} — renewal`;
     }
     const task = deriveTask(steps);
     const { data, error } = await db.rpc("work_item_create", {
@@ -249,8 +267,8 @@ export function workRoutes(deps: WorkDeps) {
       p_task_status: task.status,
       p_task_party: task.party,
       p_client_id: client.id,
-      p_insurer_id: policy?.insurerId ?? null,
-      p_class_of_business: policy?.className ?? null,
+      p_insurer_id: policy?.insurerId ?? named?.policy.insurer_id ?? null,
+      p_class_of_business: policy?.className ?? named?.policy.class_of_business ?? null,
     });
     if (error) return sendError(c, mapDatabaseError(error));
     const { id, reopened } = data as { id: string; reopened: boolean };
@@ -260,7 +278,7 @@ export function workRoutes(deps: WorkDeps) {
       const r = await db.rpc("claim_create", {
         p_work_item_id: id,
         p_client_id: client.id,
-        p_policy_id: null,
+        p_policy_id: named?.policy.id ?? null,
         p_incident_on: input.incidentOn,
         p_summary: input.incidentSummary,
         p_source: input.source ?? "ask",
@@ -817,7 +835,7 @@ export function workRoutes(deps: WorkDeps) {
         kind: "policy",
         title: r.policy_number,
         subtitle: r.class_of_business,
-        to: `/r/${r.id}?kind=policy`,
+        to: `/policies/${r.id}`,
         clientName: clientOf(r.client_id),
       });
     }

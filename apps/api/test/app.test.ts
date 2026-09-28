@@ -201,6 +201,16 @@ describe("authentication", () => {
     const res = await app.request("/me", { headers: auth("nope") });
     expect(res.status).toBe(401);
   });
+  /* 4C-1: every Policy Space route is behind the session guard. `/creation-context` was mounted
+   * outside it at first and crashed instead of refusing; the connected test caught it. */
+  it.each([
+    ["GET", "/creation-context?client=10000000-0000-4000-8000-00000000000a"],
+    ["GET", "/policies/10000000-0000-4000-8000-00000000000a/space"],
+    ["POST", "/policies/10000000-0000-4000-8000-00000000000a/renewal"],
+    ["POST", "/policies/10000000-0000-4000-8000-00000000000a/prepare"],
+  ])("refuses %s %s without a session", async (method, path) => {
+    expect((await app.request(path, { method })).status).toBe(401);
+  });
 });
 
 describe("GET /me", () => {

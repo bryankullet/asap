@@ -24,6 +24,7 @@ import {
   toPreparedView,
   type Env,
 } from "./service.js";
+import { currentPolicyFingerprint, startRenewal } from "../policy/actions.js";
 import { executeIssuanceAction, issuanceFingerprint, loadIssuance, previewApply } from "./issuance.js";
 
 const ISSUANCE_TYPES: PreparedActionType[] = [
@@ -543,6 +544,8 @@ async function prepareIssuance(env: Env, placementId: string, req: PrepareAction
 
 function permittedFor(env: Env, type: PreparedActionType): boolean {
   switch (type) {
+    case "start_renewal":
+      return hasPermission(env.ctx, "policy", "edit");
     case "approve_issuance_request":
     case "apply_issued_policy":
       return hasPermission(env.ctx, "placement", "approve");
@@ -726,10 +729,13 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
 
   const type = row["action_type"] as PreparedActionType;
   const placementId = (row["placement_id"] as string | null) ?? null;
+  const policyId = (row["policy_id"] as string | null) ?? null;
 
   /* The facts it was built from must be the facts now. */
   let current: string;
-  if (placementId === null) {
+  if (policyId !== null) {
+    current = await currentPolicyFingerprint(env, policyId);
+  } else if (placementId === null) {
     const opportunityId = row["opportunity_id"] as string;
     const view = await loadComparisonView(env.db, env.ctx, env.organizationId, opportunityId);
     current = instructionFingerprint(view.comparison, await liveInstructionId(env, opportunityId)).fingerprint;
@@ -739,7 +745,7 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
     current = fingerprintOf(await load(env.db, env.ctx, env.organizationId, placementId)).fingerprint;
   }
   if (current !== row["fingerprint"]) {
-    return refuse("stale", "The placement changed after this was prepared, so it was not run. Look at it as it stands and prepare it again.");
+    return refuse("stale", `The ${policyId !== null ? "policy" : "placement"} changed after this was prepared, so it was not run. Look at it as it stands and prepare it again.`);
   }
   if (!permittedFor(env, type)) {
     return refuse("refused", "You may not do this. Someone with the permission must confirm it.");
@@ -748,7 +754,11 @@ export async function confirmPreparedAction(env: Env, id: string): Promise<Confi
   /* The same validated path the screen uses. Its own checks run again, in full. */
   let outcome: { outcome: "done" | "already" | "blocked"; reason: string | null };
   /* A payload that no longer parses as the contract is refused, never coerced into something. */
-  if (type === "record_instruction") {
+  if (type === "start_renewal") {
+    const p = row["payload"] as { action?: string; policyId?: string } | null;
+    if (policyId === null || p?.action !== "start_renewal" || p.policyId !== policyId) return refuse("refused", "This prepared action is not a valid renewal start, so it was not run.");
+    outcome = await startRenewal(env, policyId);
+  } else if (type === "record_instruction") {
     const parsed = recordInstructionRequestSchema.safeParse(row["payload"]);
     if (!parsed.success) return refuse("refused", "This prepared action is not a valid instruction, so it was not run.");
     outcome = await executeRecordInstruction(env, row["opportunity_id"] as string, parsed.data);

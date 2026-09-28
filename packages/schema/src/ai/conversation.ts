@@ -18,7 +18,8 @@ import { UiIntent } from "../intent.js";
  * the work item behind it would name the task rather than the thing being quoted. */
 /* `placement` is one attempt to put one client's cover on risk: "has Jubilee confirmed?" and "is
  * the client covered now?" mean this placement, not the quotation work that led to it. */
-export const AskScopeKind = z.enum(["brokerage", "client", "record", "opportunity", "placement"]);
+/* `policy` is one real policy, read with the period the broker is viewing. */
+export const AskScopeKind = z.enum(["brokerage", "client", "record", "opportunity", "placement", "policy"]);
 export type AskScopeKind = z.infer<typeof AskScopeKind>;
 
 export const askScopeSchema = z.object({
@@ -97,7 +98,8 @@ export const askRequestSchema = z.object({
   /** Continue a conversation, or start one when null. */
   conversationId: uuidSchema.nullable().default(null),
   scope: z
-    .object({ kind: AskScopeKind, id: uuidSchema.nullable() })
+    /* `periodId`: in a Policy Space, the period being viewed — so "this period" means that one. */
+    .object({ kind: AskScopeKind, id: uuidSchema.nullable(), periodId: uuidSchema.optional() })
     .default({ kind: "brokerage", id: null }),
 });
 export type AskRequest = z.infer<typeof askRequestSchema>;

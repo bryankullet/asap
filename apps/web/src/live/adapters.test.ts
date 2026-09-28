@@ -133,6 +133,7 @@ const workRow = (over: Partial<WorkListResponse["items"][number]> = {}): WorkLis
   signals: [{ id: "cover_uncertain", because: "No confirmation is recorded.", points: 24 }],
   period: {
     id: "40000000-0000-4000-8000-000000000001",
+    policyId: null,
     classOfBusiness: "Commercial Motor",
     insurerName: "Meridian General",
     policyNumber: "ASAP-MTR-2026-00418",

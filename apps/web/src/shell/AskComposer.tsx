@@ -95,8 +95,17 @@ export function AskComposer() {
           clientId?: string;
           opportunityId?: string;
           placementId?: string;
+          policyId?: string;
         };
         if (params.recordId) return { kind: "record" as const, id: params.recordId };
+        /*
+         * A policy scopes to itself and to the period being read, so "is this active?" and "what is
+         * the excess?" are asked of the period on screen — never of one Ask picked.
+         */
+        if (params.policyId) {
+          const period = (state.location.search as { period?: string }).period;
+          return period ? { kind: "policy" as const, id: params.policyId, periodId: period } : { kind: "policy" as const, id: params.policyId };
+        }
         /*
          * A placement scopes to itself, so "has Jubilee confirmed?" and "is the client covered
          * now?" are asked about this attempt, not the quotation work that led to it.

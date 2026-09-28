@@ -1,4 +1,6 @@
 import { loadIssuance } from "../placement/issuance.js";
+import { preparePolicyAction } from "../policy/actions.js";
+import { loadPolicySpace } from "../policy/space.js";
 import type { Env } from "../placement/service.js";
 import {
   AiGatewayError,
@@ -68,6 +70,22 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         .maybeSingle();
       const title = (opp.data as { title: string } | null)?.title ?? "Placement";
       return { kind: "placement", id: row.id, label: placementTitle(title) };
+    }
+    if (kind === "policy") {
+      /* A policy scopes to itself, labelled as the Space titles it: "is this active?" means this one. */
+      const { data, error } = await db
+        .from("policies")
+        .select("id, class_of_business, policy_number, client_id")
+        .eq("organization_id", orgId)
+        .eq("id", id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) throw mapDatabaseError(error);
+      const row = data as { id: string; class_of_business: string; policy_number: string | null; client_id: string } | null;
+      if (row === null) return null;
+      const cl = await db.from("clients").select("name").eq("organization_id", orgId).eq("id", row.client_id).maybeSingle();
+      const clientName = (cl.data as { name: string } | null)?.name ?? "the client";
+      return { kind: "policy", id: row.id, label: `${row.class_of_business} — ${clientName}${row.policy_number ? ` · ${row.policy_number}` : ""}`.slice(0, 200) };
     }
     if (kind === "opportunity") {
       const { data, error } = await db
@@ -219,7 +237,9 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     const scopeHint =
       scope.kind === "brokerage"
         ? `The broker is asking about ${org.name} as a whole.`
-        : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : scope.kind === "placement" ? "the placement" : "the record"} "${scope.label}" (id ${scope.id}).`;
+        : scope.kind === "policy"
+          ? `The broker is looking at the policy "${scope.label}" (id ${scope.id})${request.scope.periodId ? `, viewing period id ${request.scope.periodId}` : ""}. Read it with get_policy_space before answering.`
+          : `The broker is looking at ${scope.kind === "client" ? "the client" : scope.kind === "opportunity" ? "the quotation work" : scope.kind === "placement" ? "the placement" : "the record"} "${scope.label}" (id ${scope.id}).`;
 
     const askEnv = {
       db,
@@ -241,6 +261,9 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         /* Prepares only. The person confirms on the placement; nothing runs from the model. */
         prepare: (req) => prepareAction(askEnv, req),
         issuance: (placementId) => loadIssuance(askEnv, placementId, { readOnly: true }),
+        /* Read-only: asking about a policy never brings its Work into line or writes anything. */
+        policy: (policyId, periodId) => loadPolicySpace(askEnv, policyId, { readOnly: true, periodId: periodId ?? null }),
+        preparePolicy: (policyId, actionType) => preparePolicyAction(askEnv, policyId, actionType),
       });
     } catch (err) {
       if (err instanceof AiGatewayError) {

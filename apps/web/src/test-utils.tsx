@@ -101,8 +101,9 @@ export async function renderInRouter(ui: ReactNode, initialPath = "/today") {
     path: "/email/$threadId",
     component: page,
   });
+  const policy = createRoute({ getParentRoute: () => root, path: "/policies/$policyId", component: () => <div data-testid="routed">policy space</div> });
   const router = createRouter({
-    routeTree: root.addChildren([...routes, creation, record, file, agreement, document, conversation, client, opportunity, quote, comparison, quotationReading, placement]),
+    routeTree: root.addChildren([...routes, creation, record, file, agreement, document, conversation, client, opportunity, quote, comparison, quotationReading, placement, policy]),
     history: createMemoryHistory({ initialEntries: [initialPath] }),
   });
   // Test-only router; the app's typed router registration does not apply here.

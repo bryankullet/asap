@@ -303,6 +303,8 @@ export const PreparedActionType = z.enum([
   "resolve_issued_policy_difference",
   "apply_issued_policy",
   "correct_cover_period",
+  /* 4C-1: the one workflow action a Policy Space may prepare. */
+  "start_renewal",
 ]);
 export type PreparedActionType = z.infer<typeof PreparedActionType>;
 
@@ -315,6 +317,7 @@ export const preparedActionSchema = z.object({
   actionType: PreparedActionType,
   placementId: uuidSchema.nullable(),
   opportunityId: uuidSchema.nullable(),
+  policyId: uuidSchema.nullable().default(null),
   summary: z.string().max(300),
   changes: z.array(z.string().max(400)),
   blockers: z.array(z.string().max(400)),

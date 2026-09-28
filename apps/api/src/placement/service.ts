@@ -1645,6 +1645,7 @@ export function toPreparedView(r: Record<string, unknown>, people: Map<string, s
     actionType: r["action_type"] as PreparedActionView["actionType"],
     placementId: (r["placement_id"] as string | null) ?? null,
     opportunityId: (r["opportunity_id"] as string | null) ?? null,
+    policyId: (r["policy_id"] as string | null) ?? null,
     summary: ((r["changes"] as string[] | null) ?? [])[0] ?? "A prepared action",
     changes: ((r["changes"] as string[] | null) ?? []).slice(1),
     blockers: (r["blockers"] as string[] | null) ?? [],

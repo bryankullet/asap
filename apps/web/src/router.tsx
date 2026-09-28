@@ -37,6 +37,7 @@ import { Shell } from "./shell/Shell.js";
 import { ClientSpace } from "./pages/ClientSpace.js";
 import { ComparisonSpace } from "./pages/ComparisonSpace.js";
 import { IssuanceSpace } from "./pages/IssuanceSpace.js";
+import { PolicySpace } from "./pages/PolicySpace.js";
 import { PlacementSpace } from "./pages/PlacementSpace.js";
 import { QuotationReading } from "./pages/QuotationReading.js";
 import { OpportunitySpace, QuoteSpace } from "./pages/OpportunitySpace.js";
@@ -246,6 +247,13 @@ const issuance = createRoute({
   path: "/placements/$placementId/issuance",
   component: IssuanceSpace,
 });
+/* One policy and its periods. `?period=` names the period being read, so it survives refresh. */
+const policySpace = createRoute({
+  getParentRoute: () => shell,
+  path: "/policies/$policyId",
+  component: PolicySpace,
+  validateSearch: z.object({ period: z.string().uuid().optional().catch(undefined) }),
+});
 /* Reviewing what ASAP read from a quotation. Its own address, so it can be linked and reopened. */
 const quotationReading = createRoute({
   getParentRoute: () => shell,
@@ -337,6 +345,12 @@ const startWork = createRoute({
   getParentRoute: () => shell,
   path: "/new/$kind",
   component: StartWork,
+  /* A request to preselect, answered by the server from records the person can see (4C-1). */
+  validateSearch: z.object({
+    policy: z.string().uuid().optional().catch(undefined),
+    period: z.string().uuid().optional().catch(undefined),
+    client: z.string().uuid().optional().catch(undefined),
+  }),
 });
 const importBook = createRoute({
   getParentRoute: () => shell,
@@ -359,6 +373,11 @@ const documentViewer = createRoute({
   getParentRoute: () => shell,
   path: "/documents/$documentId",
   component: DocumentViewer,
+  /* A citation opens the document at its page, with the cited value's region marked (4C-1). */
+  validateSearch: z.object({
+    page: z.coerce.number().int().min(1).optional().catch(undefined),
+    field: z.string().uuid().optional().catch(undefined),
+  }),
 });
 const audit = createRoute({
   getParentRoute: () => shell,
@@ -409,6 +428,7 @@ const routeTree = rootRoute.addChildren([
         quotationReading,
         placement,
         issuance,
+        policySpace,
         quote,
         files,
         clientFile,

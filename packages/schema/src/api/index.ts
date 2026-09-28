@@ -13,3 +13,4 @@ export * from "./compliance.js";
 export * from "./servicing.js";
 export * from "./contacts.js";
 export * from "./imports.js";
+export * from "./policy-space.js";

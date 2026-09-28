@@ -177,6 +177,9 @@ export function issuanceSpace(
         row("l-doc", "The insurer's policy document", doc?.filename ?? "Policy document", { related: null }),
         row("l-check", "The issued-policy check", d.check === null || d.check.materialDifferences === 0 ? "It matched what was agreed." : `${d.check.materialDifferences} ${d.check.materialDifferences === 1 ? "difference" : "differences"} from what was agreed, each resolved with evidence before applying.`),
         row("l-request", `Issuance request version ${r?.version ?? ""}`, r?.submission ? `Sent ${day(r.submission.sentAt)} to ${r.submission.recipient}` : ""),
+        row("l-policy", `Policy ${a.policyNumber ?? "(no number)"}`, "The policy record this wrote, with its periods, cover and evidence.", {
+          actions: [open("Open the policy", { spaceKind: "policy", recordType: "policy", recordId: a.policyId, workflowId: null, path: `/policies/${a.policyId}?period=${a.policyPeriodId}`, title: `Policy ${a.policyNumber ?? ""}`.trim(), label: "POLICY" })],
+        }),
         row("l-placement", "The placement", "The client's instruction, the accepted terms and the cover confirmation.", { related: placementRef, actions: [open("Open", placementRef)] }),
       ],
     });

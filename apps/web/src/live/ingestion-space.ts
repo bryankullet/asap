@@ -761,6 +761,8 @@ export function documentSpace(
     busy: boolean;
   },
   documentId: string,
+  /** Opened from a cited value (`?field=`, `?page=`): that value's region is drawn first. */
+  focus: { fieldId?: string | undefined; page?: number | undefined } = {},
 ): SpaceFrame {
   const self: SpaceRef = {
     spaceKind: "document",
@@ -815,6 +817,25 @@ export function documentSpace(
       ["AWAITING A DECISION", String(status.awaiting)],
     ]),
   ];
+
+  /*
+   * Opened from a citation: the value it cites, at its page, with exactly the recorded region
+   * marked. A citation whose value has no placement says so rather than drawing a guess.
+   */
+  const cited = focus.fieldId ? detail.fields.find((f) => f.id === focus.fieldId) : undefined;
+  if (cited && cited.page !== null && cited.region !== null) {
+    blocks.push({
+      id: "cited", type: "evidence_region", label: "WHERE THIS VALUE WAS READ", evidence: [], actions: [], state: "ready", stateNote: null,
+      what: `${cited.fieldKey.replace(/_/g, " ")} — ${cited.correctedValue ?? cited.proposedValue ?? "nothing readable"}`.slice(0, 200),
+      pageNumber: cited.page,
+      pageWidth: detail.pages.find((p) => p.pageNumber === cited.page)?.width ?? null,
+      pageHeight: detail.pages.find((p) => p.pageNumber === cited.page)?.height ?? null,
+      region: cited.region,
+      fileUrl: detail.fileUrl,
+    });
+  } else if (focus.fieldId || focus.page) {
+    blocks.push(note("cited", "waiting", "The cited place is not marked", cited ? "This value was read without an exact placement, so no region is drawn." : focus.page ? `The citation points at page ${focus.page}.` : "The cited value is not on this document."));
+  }
 
   /*
    * What reading did, in its own words. This block is the one that must never overstate: an

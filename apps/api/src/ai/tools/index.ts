@@ -10,6 +10,7 @@ import {
   type PrepareActionRequest,
   type PrepareActionResponse,
   type IssuanceResponse,
+  type PolicySpaceResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pgMoney } from "../../numeric.js";
@@ -47,6 +48,10 @@ export type ToolContext = {
   prepare?: (request: PrepareActionRequest) => Promise<PrepareActionResponse>;
   /** Reads policy issuance for one placement as the signed-in person (4B-5). Read-only. */
   issuance?: (placementId: string) => Promise<IssuanceResponse>;
+  /** Reads one policy's Space as the signed-in person (4C-1). Read-only. */
+  policy?: (policyId: string, periodId?: string) => Promise<PolicySpaceResponse>;
+  /** Prepares — never performs — a policy workflow action for the person to confirm (4C-1). */
+  preparePolicy?: (policyId: string, actionType: string) => Promise<PrepareActionResponse>;
 };
 
 export type DeclaredTool = {
@@ -688,6 +693,85 @@ const getIssuance: DeclaredTool = {
 };
 
 /** Every tool the model may be told about. Nothing outside this list is reachable. */
+/**
+ * One policy as its Space reads it (4C-1): cover state with the reason and evidence behind it, the
+ * period being read, every period, what is covered and where each value came from, differences
+ * between placement, confirmation and issued policy, open Work, related Spaces. Read-only.
+ */
+const getPolicySpace: DeclaredTool = {
+  declaration: {
+    name: "get_policy_space",
+    description:
+      "One policy, as the server reads it: `cover` (state, label, reason, evidence — only say cover is active when cover.state is 'active'; a null state means cover is NOT verified or periods conflict), `period` (the period read; null when periods overlap and none was chosen — then say so and ask which), `periods`, `facts` and `terms` (each with its source: confirmed, extracted_accepted, corrected, manually_recorded, missing, conflicting, unverified — never state a missing value), `differences` between placement, confirmation and issued policy, open `work`, `related` Spaces with paths, and `money` (payment status is NOT known — never say premium is paid). Pass policyId, and periodId to read a named period.",
+    inputSchema: {
+      type: "object",
+      properties: { policyId: { type: "string" }, periodId: { type: "string", description: "A period to read, when the broker named one." } },
+      required: ["policyId"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const input = z.object({ policyId: uuid, periodId: uuid.optional() }).parse(args);
+    if (ctx.policy === undefined) return { state: "unavailable", reason: "Policies cannot be read from here. Open the policy." };
+    const v = await ctx.policy(input.policyId, input.periodId);
+    const period = v.periods.find((p) => p.id === v.selectedPeriodId) ?? null;
+    return {
+      title: v.title,
+      client: v.client.name,
+      insurer: v.insurer.name,
+      cover: { state: v.cover.state, label: v.cover.label, reason: v.cover.reason, evidence: v.cover.evidence.map((e) => ({ label: e.label, path: e.path })) },
+      period: period === null ? null : { id: period.id, start: period.start, end: period.end, cover: { state: period.cover.state, label: period.cover.label, reason: period.cover.reason } },
+      periods: v.periods.map((p) => ({ id: p.id, start: p.start, end: p.end, when: p.when, cover: p.cover.label, overlapsWith: p.overlapsWith })),
+      conflicts: v.conflicts.map((c) => c.message),
+      facts: v.facts.map((f) => ({ label: f.label, value: f.value, source: f.source, evidence: f.evidence ? { label: f.evidence.label, path: f.evidence.path, page: f.evidence.page } : null })),
+      terms: v.terms.map((t) => ({ type: t.termType, label: t.label, agreed: t.agreed, confirmed: t.confirmed, issued: t.issued, final: t.final, source: t.source, difference: t.difference, evidence: t.evidence ? { path: t.evidence.path, page: t.evidence.page } : null })),
+      differences: v.differences,
+      work: v.work.map((w) => ({ title: w.title, taskStatus: w.taskStatus, party: w.taskParty, since: w.taskSince, action: w.requiredAction, path: w.path })),
+      related: v.related.map((r) => ({ kind: r.kind, title: r.title, path: r.path })),
+      actions: v.actions.map((a) => ({ key: a.key, available: a.available, reason: a.reason, path: a.path })),
+      gaps: v.gaps,
+      money: v.money,
+    };
+  },
+};
+
+/**
+ * The one workflow a policy may prepare (4C-1): starting its renewal, confirmed by a person. A
+ * claim or an endorsement needs facts only a person can give, so this returns the form to open —
+ * with the client and policy preselected — and writes nothing.
+ */
+const preparePolicyActionTool: DeclaredTool = {
+  declaration: {
+    name: "prepare_policy_action",
+    description:
+      "From a policy: 'Start the renewal' (start_renewal) prepares — never performs — a renewal for the broker to confirm on the policy. 'Report a claim' (report_claim) and 'Request an endorsement' (request_endorsement) return the form to open, with the client and policy preselected; they create nothing — the broker must give the incident or the change asked for. The result is `prepared` (say it waits for their confirmation), `open_form` (say which form, and that nothing was reported or requested yet), or `refused` (say why).",
+    inputSchema: {
+      type: "object",
+      properties: { actionType: { type: "string", enum: ["start_renewal", "report_claim", "request_endorsement"] }, policyId: { type: "string" } },
+      required: ["actionType", "policyId"],
+      additionalProperties: false,
+    },
+  },
+  async run(args, ctx) {
+    const input = z.object({ actionType: z.enum(["start_renewal", "report_claim", "request_endorsement"]), policyId: uuid }).parse(args);
+    if (input.actionType !== "start_renewal") {
+      if (ctx.policy === undefined) return { state: "refused", reason: "Open the policy to report a claim or request a change." };
+      const v = await ctx.policy(input.policyId);
+      const key = input.actionType === "report_claim" ? "report_claim" : "request_endorsement";
+      const a = v.actions.find((x) => x.key === key)!;
+      if (!a.available) return { state: "refused", reason: a.reason };
+      return {
+        state: "open_form",
+        path: a.path,
+        missing: input.actionType === "report_claim" ? ["when the incident happened", "what happened"] : ["the change asked for", "who asked"],
+        note: "Nothing has been reported or requested. The form opens with the client and policy chosen; the broker supplies the facts and submits it.",
+      };
+    }
+    if (ctx.preparePolicy === undefined) return { state: "refused", reason: "Actions cannot be prepared from here. Open the policy and do it there." };
+    return await ctx.preparePolicy(input.policyId, input.actionType);
+  },
+};
+
 const preparePlacementAction: DeclaredTool = {
   declaration: {
     name: "prepare_placement_action",
@@ -731,6 +815,8 @@ export const DECLARED_TOOLS: readonly DeclaredTool[] = [
   getCompanyRules,
   getPlacement,
   getIssuance,
+  getPolicySpace,
+  preparePolicyActionTool,
   preparePlacementAction,
 ];
 

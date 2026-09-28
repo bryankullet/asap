@@ -15,6 +15,7 @@
  */
 
 import { issuancePreviewStub, issuanceStub } from "./issuance-stub.js";
+import { policyStub } from "./policy-stub.js";
 
 if (import.meta.env.PROD) throw new Error("the parity harness is a development tool");
 
@@ -111,6 +112,12 @@ const context = (r: ReturnType<typeof row>) => ({
 
 globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
   const u = String(url);
+  /* The Policy Space (4C-1): a 404 or a 403 is the real answer for those two states. */
+  if (u.includes("/policies/") && u.includes("/space")) {
+    const id = /\/policies\/([0-9a-f-]{36})/.exec(u)?.[1];
+    const r = policyStub(new URLSearchParams(location.search).get("stage") ?? "active", id);
+    return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
+  }
   /* Policy issuance (4B-5): before the placement stub, whose path it extends. */
   if (u.includes("/issuance")) {
     const q = new URLSearchParams(location.search);

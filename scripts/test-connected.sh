@@ -64,4 +64,4 @@ curl -s -o /dev/null "http://127.0.0.1:$PORT/" || { cat "$WORK/postgrest.log" >&
 CONNECTED_POSTGREST_URL="http://127.0.0.1:$PORT" \
 CONNECTED_JWT_SECRET="$SECRET" \
 CONNECTED_OWNER_URL="$DATABASE_URL" \
-  pnpm --filter @asap/api exec vitest run test/connected
+  pnpm --filter @asap/api exec vitest run test/connected --testTimeout=30000

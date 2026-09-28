@@ -686,7 +686,8 @@ describe("Discover carries the context a card needs", () => {
       periodEnd: "2026-10-14",
     });
     expect(typeof renewal.period.daysToEnd).toBe("number");
-    expect(renewal.links.policy).toBe(`/r/${PERIOD}?kind=policy`);
+    /* 4C-1: the policy's own Space, at this period — no longer a period id passed as a policy. */
+    expect(renewal.links.policy).toBe(`/policies/${POLICY}?period=${PERIOD}`);
 
     // An incomplete client file blocking a placement is its own named signal.
     const placement = body.items.find(

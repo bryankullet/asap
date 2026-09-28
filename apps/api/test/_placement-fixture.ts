@@ -40,10 +40,10 @@ export const iso = "2026-09-05T09:00:00.000Z";
 export const LATER = "2027-06-30";
 
 export const PERMS: Record<string, [string, string][]> = {
-  [ADMIN_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "approve"], ["placement", "send_external"], ["space", "create"]],
-  [MANAGER_ROLE]: [["placement", "approve"]],
-  [PLACEMENT_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "send_external"], ["space", "create"]],
-  [READONLY_ROLE]: [["placement", "view"]],
+  [ADMIN_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "approve"], ["placement", "send_external"], ["space", "create"], ["policy", "view"], ["policy", "edit"], ["claim", "create"]],
+  [MANAGER_ROLE]: [["placement", "approve"], ["policy", "view"]],
+  [PLACEMENT_ROLE]: [["placement", "create"], ["placement", "edit"], ["placement", "send_external"], ["space", "create"], ["policy", "view"]],
+  [READONLY_ROLE]: [["placement", "view"], ["policy", "view"]],
 };
 
 export function membership(userId: string, roleId: string, org = ORG) {

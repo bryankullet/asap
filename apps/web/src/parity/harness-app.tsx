@@ -22,6 +22,7 @@ import { ClientSpace } from "../pages/ClientSpace.js";
 import { ComparisonSpace } from "../pages/ComparisonSpace.js";
 import { IssuanceSpace } from "../pages/IssuanceSpace.js";
 import { PlacementSpace } from "../pages/PlacementSpace.js";
+import { PolicySpace } from "../pages/PolicySpace.js";
 import { QuotationReading } from "../pages/QuotationReading.js";
 import { OpportunitySpace, QuoteSpace } from "../pages/OpportunitySpace.js";
 
@@ -75,6 +76,12 @@ const comparison = createRoute({ getParentRoute: () => root, path: "/opportuniti
 const quotationReading = createRoute({ getParentRoute: () => root, path: "/documents/$documentId/quotation", component: QuotationReading });
 const placement = createRoute({ getParentRoute: () => root, path: "/placements/$placementId", component: PlacementSpace });
 const issuance = createRoute({ getParentRoute: () => root, path: "/placements/$placementId/issuance", component: IssuanceSpace });
+const policy = createRoute({
+  getParentRoute: () => root,
+  path: "/policies/$policyId",
+  component: PolicySpace,
+  validateSearch: (s: Record<string, unknown>) => ({ period: s["period"] as string | undefined }),
+});
 const onboarding = createRoute({ getParentRoute: () => root, path: "/onboarding", component: Onboarding });
 const routes = ["/automations", "/ask", "/import", "/email", "/clients", "/documents", "/files"].map(
   (path) => createRoute({ getParentRoute: () => root, path, component: () => <div /> }),
@@ -86,7 +93,7 @@ const record = createRoute({
 });
 const initial = new URLSearchParams(location.search).get("at") ?? "/today";
 const router = createRouter({
-  routeTree: root.addChildren([onboarding, clientSpace, opportunity, quoteTerms, comparison, quotationReading, placement, issuance, ...boards, search, ...extra, ...routes, record]),
+  routeTree: root.addChildren([onboarding, clientSpace, opportunity, quoteTerms, comparison, quotationReading, placement, issuance, policy, ...boards, search, ...extra, ...routes, record]),
   history: createMemoryHistory({ initialEntries: [initial] }),
 });
 

@@ -2,6 +2,7 @@ import type {
   CreateClientResponse,
   CreatePolicyResponse,
   CreateWorkItemResponse,
+  CreationContext,
   SpaceFrame,
   SpaceFrameBlock,
   SpaceRef,
@@ -184,9 +185,18 @@ export function createSpace(
     busy: boolean;
     error: string | null;
     outcome: CreateClientResponse | CreatePolicyResponse | CreateWorkItemResponse | null;
+    /**
+     * What the form may preselect, read by the server from records the caller can see
+     * (`GET /creation-context`). Never taken from the URL itself: an id from another brokerage is
+     * simply not found, and the form then asks for the client as usual.
+     */
+    context?: CreationContext | null;
+    contextRefused?: boolean;
   },
 ): SpaceFrame {
-  const def = KINDS[kind];
+  const base = KINDS[kind];
+  const context = kind === "claim" || kind === "endorsement" || kind === "renewal" ? (state.context ?? null) : null;
+  const def = context === null ? base : { ...base, fields: base.fields.filter((f) => f.name !== "clientName") };
   const self: SpaceRef = {
     spaceKind: "route",
     recordType: "creation",
@@ -229,7 +239,19 @@ export function createSpace(
     stateNote: null,
   };
 
-  const blocks: SpaceFrameBlock[] = [form, ...outcomeBlocks(state.outcome)];
+  const chosen: SpaceFrameBlock[] = context === null
+    ? state.contextRefused === true
+      ? [note("context-refused", "Nothing was preselected", "That policy or client is not one you can see, so the form asks which client this is for.")]
+      : []
+    : [{
+        id: "context", type: "facts", label: "FOR", evidence: [], actions: [], state: "ready", stateNote: null,
+        facts: [
+          { key: "Client", value: context.client.name, missing: false, evidence: [] },
+          ...(context.policy ? [{ key: "Policy", value: context.policy.label, missing: false, evidence: [] }] : []),
+          ...(context.period ? [{ key: "Period", value: `${context.period.start} to ${context.period.end}`, missing: false, evidence: [] }] : []),
+        ],
+      }];
+  const blocks: SpaceFrameBlock[] = [...chosen, form, ...outcomeBlocks(state.outcome)];
 
   if (state.error !== null) {
     blocks.push({

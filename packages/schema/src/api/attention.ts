@@ -144,6 +144,8 @@ export type AttentionRunFailure = z.infer<typeof attentionRunFailureSchema>;
 /** The client-policy-year this item belongs to, when policy context matters (Architecture §3A). */
 export const attentionPeriodSchema = z.object({
   id: uuidSchema,
+  /** The policy the period belongs to, so a link opens its Policy Space at this period. */
+  policyId: uuidSchema.nullable().default(null),
   classOfBusiness: z.string(),
   insurerName: z.string(),
   policyNumber: z.string().nullable(),

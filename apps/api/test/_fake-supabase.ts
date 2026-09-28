@@ -42,6 +42,48 @@ export type FakeDb = {
   >;
 };
 
+/** Split a PostgREST filter list at commas that are not inside parentheses. */
+function topLevel(spec: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of spec) {
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (ch === "," && depth === 0) {
+      out.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur !== "") out.push(cur);
+  return out;
+}
+
+/**
+ * One `or()` clause: `col.eq.v`, `col.ilike.%v%`, `col.in.(a,b)`, or `and(clause,clause)`. An
+ * operator this does not know throws rather than quietly matching everything — a search that
+ * silently returned the whole book would pass a test it should fail.
+ */
+function clauseOf(clause: string): (r: Record<string, unknown>) => boolean {
+  if (clause.startsWith("and(") && clause.endsWith(")")) {
+    const parts = topLevel(clause.slice(4, -1)).map(clauseOf);
+    return (r) => parts.every((f) => f(r));
+  }
+  const [col, op, ...rest] = clause.split(".");
+  const value = rest.join(".");
+  if (col === undefined || op === undefined) throw new Error(`fake supabase: bad or() clause ${clause}`);
+  if (op === "ilike") {
+    const needle = value.replace(/^%|%$/g, "").toLowerCase();
+    return (r) => String(r[col] ?? "").toLowerCase().includes(needle);
+  }
+  if (op === "eq") return (r) => String(r[col] ?? "") === value;
+  if (op === "in") {
+    const set = value.replace(/^\(|\)$/g, "").split(",");
+    return (r) => set.includes(String(r[col] ?? ""));
+  }
+  throw new Error(`fake supabase: or() does not support ${op}`);
+}
+
 class Query {
   private filters: ((row: Record<string, unknown>) => boolean)[] = [];
   private single = false;
@@ -94,20 +136,7 @@ class Query {
    * the whole book would pass a test it should fail.
    */
   or(spec: string) {
-    const clauses = spec.split(",").map((clause) => {
-      const [col, op, ...rest] = clause.split(".");
-      const value = rest.join(".");
-      if (col === undefined || op === undefined) throw new Error(`fake supabase: bad or() clause ${clause}`);
-      if (op === "ilike") {
-        const needle = value.replace(/^%|%$/g, "").toLowerCase();
-        return (r: Record<string, unknown>) =>
-          String(r[col] ?? "")
-            .toLowerCase()
-            .includes(needle);
-      }
-      if (op === "eq") return (r: Record<string, unknown>) => String(r[col] ?? "") === value;
-      throw new Error(`fake supabase: or() does not support ${op}`);
-    });
+    const clauses = topLevel(spec).map(clauseOf);
     this.filters.push((r) => clauses.some((f) => f(r)));
     return this;
   }

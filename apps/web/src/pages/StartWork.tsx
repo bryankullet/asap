@@ -1,5 +1,5 @@
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type {
   CreateClientResponse,
@@ -31,6 +31,19 @@ export function StartWork() {
     ? (raw as CreateKind)
     : "client";
   const tabs = useWorkspaceTabs(`/new/${kind}`);
+  /*
+   * `?policy=`, `?period=` and `?client=` ask to preselect. They are only a question: the server
+   * answers from records this person can see, and anything else is not found — so a link cannot
+   * select another brokerage's client or policy, and the person still gives every fact.
+   */
+  const search = useSearch({ strict: false }) as { policy?: string; period?: string; client?: string };
+  const wantsContext = (kind === "claim" || kind === "endorsement" || kind === "renewal") && (search.policy !== undefined || search.client !== undefined);
+  const context = useQuery({
+    queryKey: ["creation-context", search.policy ?? null, search.period ?? null, search.client ?? null],
+    queryFn: () => api.creationContext({ policy: search.policy, period: search.period, client: search.client }),
+    enabled: wantsContext,
+    retry: false,
+  });
 
   const [outcome, setOutcome] = useState<
     CreateClientResponse | CreatePolicyResponse | CreateWorkItemResponse | null
@@ -72,11 +85,7 @@ export function StartWork() {
     onSuccess: (res) => {
       setOutcome(res);
       if (res.outcome === "recorded") {
-        void navigate({
-          to: "/r/$recordId",
-          params: { recordId: res.policy.policy.id },
-          search: { kind: "policy" },
-        });
+        void navigate({ to: "/policies/$policyId", params: { policyId: res.policy.policy.id } });
       }
     },
   });
@@ -100,7 +109,8 @@ export function StartWork() {
   function submit(values: Record<string, string>, clientId?: string, confirmNew = false) {
     setLast(values);
     const named = (k: string) => (values[k] ?? "").trim();
-    const base = clientId ? { clientId } : { clientName: named("clientName") };
+    const ctx = context.data ?? null;
+    const base = clientId ? { clientId } : ctx ? { clientId: ctx.client.id, ...(ctx.policy ? { policyId: ctx.policy.id } : {}) } : { clientName: named("clientName") };
 
     if (kind === "client") {
       createClient.mutate({
@@ -151,7 +161,11 @@ export function StartWork() {
     });
   }
 
-  const space = createSpace(kind, { busy, error, outcome });
+  const space = createSpace(kind, {
+    busy, error, outcome,
+    context: wantsContext ? (context.data ?? null) : null,
+    contextRefused: wantsContext && context.isError,
+  });
 
   return (
     <SpaceFrameView

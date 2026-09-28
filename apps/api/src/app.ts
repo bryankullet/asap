@@ -19,6 +19,7 @@ import { clientRoutes } from "./routes/clients.js";
 import { comparisonRoutes } from "./routes/comparisons.js";
 import { opportunityRoutes } from "./routes/opportunities.js";
 import { placementRoutes } from "./routes/placement.js";
+import { policyRoutes } from "./routes/policy.js";
 import { quotationReadingRoutes } from "./routes/quotation-reading.js";
 import { ruleRoutes } from "./routes/rules.js";
 import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
@@ -218,6 +219,8 @@ export function createApp(deps: AppDeps) {
     "/placements/*",
     /* What Ask or a screen prepared, confirmed by a person (4B-4A). */
     "/prepared-actions/*",
+    /* What a creation form may preselect (4C-1). Found unguarded by the connected test. */
+    "/creation-context",
   ]) {
     app.use(path, guard);
   }
@@ -254,6 +257,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", ruleRoutes({ logger }));
   app.route("/", quotationReadingRoutes({ logger }));
   app.route("/", placementRoutes({ logger }));
+  app.route("/", policyRoutes({ logger }));
   app.route(
     "/",
     workRoutes({

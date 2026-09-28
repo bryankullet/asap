@@ -36,7 +36,7 @@ export const conversations = pgTable(
     check("conversations_title_check", sql`length(btrim(${t.title})) > 0`),
     check(
       "conversations_scope_kind_check",
-      sql`${t.scopeKind} in ('brokerage','client','record','opportunity','placement')`,
+      sql`${t.scopeKind} in ('brokerage','client','record','opportunity','placement','policy')`,
     ),
     check(
       "conversations_scope_id_matches_kind",
