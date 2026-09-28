@@ -45,9 +45,12 @@ try {
       const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
       const consoleErrors = [];
       page.on("console", (m) => {
-        // The blocked font CDN is an artefact of this sandbox, not of the page.
-        if (m.type() === "error" && !/CERT|404|font/i.test(m.text())) consoleErrors.push(m.text().slice(0, 200));
+        // Every console error counts. The production app loads nothing from a third party, so there
+        // is no sandbox artefact to excuse (4B-5 Part B); a filter here would hide a real failure.
+        if (m.type() === "error") consoleErrors.push(`${m.text().slice(0, 160)} @ ${m.location().url ?? ""}`.slice(0, 240));
       });
+      page.on("requestfailed", (r) => consoleErrors.push(`request failed: ${r.url().slice(0, 200)}`));
+      page.on("response", (r) => { if (r.status() >= 400) consoleErrors.push(`${r.status()}: ${r.url().slice(0, 200)}`); });
       page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.slice(0, 200)}`));
       await page.goto(state.url, { waitUntil: "load" });
       await page.waitForTimeout(2600);
