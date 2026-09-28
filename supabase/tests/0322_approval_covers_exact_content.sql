@@ -15,12 +15,21 @@
 begin;
 select plan(19);
 
+/*
+ * Writes here are the API's, on the person's behalf: quotation records are written through the
+ * API only (0057), so the session carries the server-held key. 0330 proves a browser session
+ * without it is refused.
+ */
 create or replace function pg_temp.login(p_user uuid) returns void language plpgsql as $$
 begin
   perform set_config('request.jwt.claims',
     json_build_object('sub', p_user, 'role', 'authenticated')::text, true);
+  perform set_config('request.headers', '{"x-asap-api-key":"pgtap-internal-key-0123456789abcdef"}', true);
   perform set_config('role', 'authenticated', true);
 end $$;
+
+insert into app.api_keys (key_hash, label)
+values (encode(extensions.digest('pgtap-internal-key-0123456789abcdef', 'sha256'), 'hex'), 'pgtap-0322');
 
 -- ---------------------------------------------------------------------------------------------
 -- Shape.

@@ -1813,3 +1813,22 @@ migrations, with signed JWTs and RLS. The one stand-in is Supabase Auth's token 
 excluded from the ordinary test run and required before a placement stage is declared ready. Money
 read from the database passes through `pgMoney`, because PostgREST returns `numeric` as JSON
 numbers while the database's own digests use the fixed-scale text.
+
+## D-104 — Quotation and opportunity records are written through the API only
+
+The sixteen tables of 0048–0053 carried INSERT and UPDATE grants to `authenticated`, so a browser
+session (anon key + the person's JWT) could write them directly and skip permissions, validation,
+frozen digests, approvals, idempotency, evidence and audit. Migration 0057 puts the same API-only
+gate as the placement tables (D-102) on all sixteen, for insert, update and delete, named to fire
+before any other trigger. The browser keeps SELECT under RLS. Classification:
+
+- **Mutable only through an API action:** requirement_templates, opportunities,
+  opportunity_requirements, opportunity_insurers, quote_requests, insurer_responses, quote_terms,
+  quote_comparisons, company_rules, document_term_proposals.
+- **Append-only through an API action:** quote_request_approvals, quote_comparison_inputs,
+  quote_comparison_terms, company_rule_versions.
+- **Engine-owned (written by triggers inside an API write):** insurer_response_revisions,
+  quote_term_revisions.
+
+The internal extraction dispatcher (service role, behind the internal key) and the worker role are
+not browser sessions and are unaffected. Proven by pgTAP 0330 and the connected quotation-gate test.
