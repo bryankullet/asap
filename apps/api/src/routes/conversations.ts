@@ -7,6 +7,7 @@ import {
   CONVERSATION_COLUMNS,
   CONVERSATION_MESSAGE_COLUMNS,
   askRequestSchema,
+  saveTurnsRequestSchema,
   askResponseV2Schema,
   conversationMessageSchema,
   conversationSchema,
@@ -122,6 +123,13 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     return row ? { kind: "record", id: row.id, label: row.title } : null;
   }
 
+  /*
+   * Whether a model is configured for this deployment — no vendor, no key, no endpoint. Lets the
+   * interface say "answered from your records" apart from "a model can answer", instead of
+   * calling Ask available when only the records half is.
+   */
+  app.get("/ask/status", (c) => c.json({ modelConfigured: deps.provider != null }));
+
   app.get("/conversations", async (c) => {
     const { db, user } = c.get("auth");
     const ctx = await resolveContext(db, user.id);
@@ -153,6 +161,65 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
       .limit(200);
     if (error) return sendError(c, mapDatabaseError(error));
     return c.json({ messages: conversationMessageSchema.array().parse(data ?? []) });
+  });
+
+  /*
+   * Turns Ask answered in the app from records it had already read, appended to the caller's
+   * own conversation (RLS: only the creator can see or add to it). ASAP turns written this way are
+   * marked `served_by: in-app records reader`, so a transcript never passes them off as a model's.
+   */
+  app.post("/conversations/turns", async (c) => {
+    const { db, user } = c.get("auth");
+    const parsed = saveTurnsRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new HttpError(400, "validation_failed", "At least one turn is required.");
+    const input = parsed.data;
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+
+    let conversationId = input.conversationId;
+    let nextSeq = 1;
+    if (conversationId) {
+      const { data, error } = await db
+        .from("conversations")
+        .select("id")
+        .eq("organization_id", org.id)
+        .eq("id", conversationId)
+        .eq("created_by", user.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (error) return sendError(c, mapDatabaseError(error));
+      if (!data) throw new HttpError(404, "not_found", "That conversation is not available.");
+      const last = await db
+        .from("conversation_messages")
+        .select("seq")
+        .eq("conversation_id", conversationId)
+        .order("seq", { ascending: false })
+        .limit(1);
+      if (last.error) return sendError(c, mapDatabaseError(last.error));
+      nextSeq = ((last.data ?? [])[0] as { seq: number } | undefined)?.seq ?? 0;
+      nextSeq += 1;
+    } else {
+      const firstQuestion = input.turns.find((t) => t.role === "person")?.body ?? "Ask ASAP";
+      const { data, error } = await db
+        .from("conversations")
+        .insert({ organization_id: org.id, created_by: user.id, title: firstQuestion.slice(0, 120), scope_kind: "brokerage", scope_id: null })
+        .select("id")
+        .single();
+      if (error) return sendError(c, mapDatabaseError(error));
+      conversationId = (data as { id: string }).id;
+    }
+
+    const rows = input.turns.map((t, i) => ({
+      conversation_id: conversationId,
+      organization_id: org.id,
+      seq: nextSeq + i,
+      role: t.role,
+      body: t.body,
+      served_by: t.role === "asap" ? "in-app records reader" : null,
+    }));
+    const { error } = await db.from("conversation_messages").insert(rows);
+    if (error) return sendError(c, mapDatabaseError(error));
+    return c.json({ conversationId });
   });
 
   app.post("/ask", async (c) => {

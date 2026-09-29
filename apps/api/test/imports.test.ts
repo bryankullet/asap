@@ -211,6 +211,31 @@ describe("POST /imports — reading the file", () => {
     expect(mara.matchedClientId).toBe(EXISTING);
   });
 
+  it("never files a row under a client whose name merely appears inside it", async () => {
+    db.tables["clients"]!.push({ id: "20000000-0000-4000-8000-0000000000aa", organization_id: ORG, name: "A", kind: "corporate", deleted_at: null });
+    const body = await readJson(
+      await preview({ filename: "book.csv", content: "Client,Policy No,Insurer,Start,Expiry\nRapid Test Motors,POL-RAPID-001,CIC General Insurance,2026-10-01,2027-09-30", premiumBasis: "gross" }),
+    );
+    expect(body.rows[0].outcome).toBe("create");
+    expect(body.rows[0].matchedClientId).toBeNull();
+  });
+
+  it("asks a person when a client is only a partial match, naming who it could be", async () => {
+    const body = await readJson(
+      await preview({ filename: "book.csv", content: "Client,Policy No,Insurer,Start,Expiry\nMara Foods Kisumu,POL-9,Britam,2026-10-01,2027-09-30", premiumBasis: "gross" }),
+    );
+    expect(body.rows[0].outcome).toBe("needs_review");
+    expect(body.rows[0].candidates).toEqual([{ id: EXISTING, name: "Mara Foods Limited" }]);
+    expect(body.rows[0].problem).toMatch(/Mara Foods Limited/);
+  });
+
+  it("reads period_start and period_end as the cover period", async () => {
+    const body = await readJson(
+      await preview({ filename: "book.csv", content: "client_name,policy_number,insurer,period_start,period_end\nSimba Traders,POL-1,Britam,2026-10-01,2027-09-30", premiumBasis: "gross" }),
+    );
+    expect(body.rows[0]).toMatchObject({ outcome: "create", periodStart: "2026-10-01", periodEnd: "2027-09-30" });
+  });
+
   it("refuses to read premiums until the brokerage says what they are", async () => {
     const body = await readJson(await preview({ filename: "book.csv", content: BOOK }));
     expect(body.blocking.join(" ")).toMatch(/gross premium or the total the client pays/);
@@ -273,6 +298,33 @@ describe("POST /imports/:id/commit — writing what was approved", () => {
     expect(created).toBe(1);
     expect(commit.batch.policiesCreated).toBe(3);
     expect(commit.failures).toEqual([]);
+  });
+
+  it("files a partial-match row only where a person decided, under one of its own candidates", async () => {
+    const content = "Client,Policy No,Insurer,Start,Expiry\nMara Foods Kisumu,POL-9,Britam,2026-10-01,2027-09-30";
+    const p = await readJson(await preview({ filename: "decide.csv", content, premiumBasis: "gross" }));
+    const res = await build().request(`/imports/${p.batch.id}/commit`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ resolutions: [{ lineNumber: 2, clientId: EXISTING }] }),
+    });
+    const commit = await readJson(res);
+    expect(commit.batch.clientsCreated).toBe(0);
+    expect(commit.batch.policiesCreated).toBe(1);
+    expect(commit.failures).toEqual([]);
+  });
+
+  it("refuses a decision that names a client the row could not be", async () => {
+    const content = "Client,Policy No,Insurer,Start,Expiry\nMara Foods Kisumu,POL-9,Britam,2026-10-01,2027-09-30";
+    const p = await readJson(await preview({ filename: "wrong.csv", content, premiumBasis: "gross" }));
+    const res = await build().request(`/imports/${p.batch.id}/commit`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ resolutions: [{ lineNumber: 2, clientId: "20000000-0000-4000-8000-0000000000ff" }] }),
+    });
+    const commit = await readJson(res);
+    expect(commit.batch.policiesCreated).toBe(0);
+    expect(commit.failures[0].problem).toMatch(/not one it could be/);
   });
 
   it("records the premium with the basis the file was declared to have", async () => {

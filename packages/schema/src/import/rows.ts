@@ -204,6 +204,11 @@ export function interpretRow(
   if (policyNumber && (!start.value || !end.value)) {
     problems.push("This row has a policy number but no usable cover period.");
   }
+  // …and its insurer. Without one the policy cannot be recorded, and a row that committed while
+  // silently leaving its policy behind read as a success it was not.
+  if (policyNumber && !get("insurer_name")) {
+    problems.push("This row has a policy number but no insurer, so its policy cannot be recorded.");
+  }
 
   const emailRaw = get("contact_email");
   const emailLooksRight = emailRaw === "" || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw);

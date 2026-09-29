@@ -34,8 +34,11 @@ export type ClientMatch =
   | { outcome: "none" };
 
 /**
- * One exact normalised match wins. Otherwise every client whose normalised name contains the
- * typed name, or is contained by it, is plausible: one → match, several → ask, none → none.
+ * One exact normalised match wins. A partial match is never a sure one: it only proposes the
+ * client for a person to confirm ("many", even when there is a single candidate). A name is only
+ * a partial match when one name's words appear, whole and in order, inside the other's, and the
+ * shorter name has at least three characters — so a client called "A" is not "Rapid Test Motors",
+ * which is exactly how an import once filed a policy under the wrong client.
  */
 export function matchClientName(typed: string, clients: readonly ClientCandidate[]): ClientMatch {
   const q = normaliseClientName(typed);
@@ -43,11 +46,11 @@ export function matchClientName(typed: string, clients: readonly ClientCandidate
   const exact = clients.filter((c) => normaliseClientName(c.name) === q);
   if (exact.length === 1) return { outcome: "one", client: exact[0]! };
   if (exact.length > 1) return { outcome: "many", candidates: exact };
+  const wholeWords = (short: string, long: string) => short.length >= 3 && (" " + long + " ").includes(" " + short + " ");
   const plausible = clients.filter((c) => {
     const n = normaliseClientName(c.name);
-    return n.includes(q) || q.includes(n);
+    return wholeWords(q, n) || wholeWords(n, q);
   });
-  if (plausible.length === 1) return { outcome: "one", client: plausible[0]! };
-  if (plausible.length > 1) return { outcome: "many", candidates: plausible };
+  if (plausible.length > 0) return { outcome: "many", candidates: plausible };
   return { outcome: "none" };
 }

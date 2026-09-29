@@ -36,6 +36,7 @@ const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-400
 const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
 const createAutomation = vi.fn(async () => ({}));
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
+const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
 vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } } }));
 vi.mock("../lib/api.js", () => ({
@@ -80,6 +81,11 @@ vi.mock("../lib/api.js", () => ({
     }),
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
     opportunity: async () => null,
+    askStatus: async () => ({ modelConfigured: false }),
+    conversations: async () => ({ conversations: [] }),
+    conversationMessages: async () => ({ messages: [] }),
+    saveTurns,
+    document: async () => null,
   },
 }));
 
@@ -152,15 +158,21 @@ describe("live mode", () => {
     expect(text(A.ai.workspace({ ws: "import" }))).toMatch(/gross/);
     await A.records.act("import.basis", { basis: "gross" });
     expect(previewImport).toHaveBeenLastCalledWith(expect.objectContaining({ premiumBasis: "gross" }));
-    const done = (await A.records.act("import.commit", {})) as { ok: boolean; text: string };
-    expect(done.text).toMatch(/Imported 1 client/);
+    await A.records.act("import.commit", {});
+    // The imported policy is not readable back in this test's fixtures, so success is not claimed.
+    expect(commitImport).toHaveBeenCalledWith("80000000-0000-4000-8000-000000000001", { resolutions: [] });
+    expect(text(A.ai.workspace({ ws: "import" }))).toMatch(/cannot be read back|Imported book\.csv/);
 
     // Quotation work and a claim, through the API.
     expect(A.ai.workspace({ ws: "quote", clientId: CLIENT }).title).toMatch(/quotation/);
     await A.records.act("opportunity.create", { clientId: CLIENT, title: "Motor fleet", cls: "Motor", coverStart: "", coverEnd: "" });
     expect(createOpportunity).toHaveBeenCalledWith(expect.not.objectContaining({ coverStart: "" }));
-    await A.records.act("claim.open", { clientId: CLIENT, incidentOn: "2026-09-20", incidentSummary: "Rear-ended at Westlands" });
-    expect(createWorkItem).toHaveBeenCalledWith(expect.objectContaining({ kind: "claim", incidentOn: "2026-09-20" }));
+    const noPolicy = (await A.records.act("claim.open", { clientId: CLIENT, incidentOn: "2026-09-20", incidentSummary: "Rear-ended at Westlands", policyId: "" })) as { ok: boolean };
+    expect(noPolicy.ok).toBe(false);
+    await A.records.act("claim.open", { clientId: CLIENT, incidentOn: "2026-09-20", incidentSummary: "Rear-ended at Westlands", policyId: POL_OK });
+    expect(createWorkItem).toHaveBeenCalledWith(expect.objectContaining({ kind: "claim", incidentOn: "2026-09-20", policyId: POL_OK }));
+    await A.records.act("claim.open", { clientId: CLIENT, incidentOn: "2026-09-21", incidentSummary: "Windscreen cracked", policyId: "unknown" });
+    expect(createWorkItem).toHaveBeenLastCalledWith(expect.objectContaining({ policyUnknown: true }));
 
     // An automation: a recognised trigger saves switched off; an unrecognised one saves nothing.
     const saved = (await A.records.act("automation.save", { name: "Renewal prep", trigger: "A policy is 30 days from expiry", conditions: "", actions: "Prepare renewal work", approval: "" })) as { ok: boolean };
@@ -168,6 +180,31 @@ describe("live mode", () => {
     expect(createAutomation).toHaveBeenCalledWith(expect.objectContaining({ triggerEvent: "renewal.approaching", enabled: false, approval: "always" }));
     const vague = (await A.records.act("automation.save", { name: "Something", trigger: "whenever", conditions: "", actions: "", approval: "" })) as { ok: boolean };
     expect(vague.ok).toBe(false);
+    // Conditions ASAP cannot apply are refused rather than stored and ignored.
+    const conditional = (await A.records.act("automation.save", { name: "Renewal prep", trigger: "A renewal is near", conditions: "Only motor", actions: "Prepare", approval: "" })) as { ok: boolean };
+    expect(conditional.ok).toBe(false);
+  });
+
+  it("refuses what is not a real value instead of replacing it", async () => {
+    const A = await live();
+    const banana = (await A.records.act("client.create", { name: "Simba Traders", kind: "banana" })) as { ok: boolean; error: string };
+    expect(banana.ok).toBe(false);
+    expect(banana.error).toMatch(/company or a person/);
+    const short = (await A.records.act("opportunity.create", { clientId: CLIENT, title: "x", cls: "Motor" })) as { ok: boolean };
+    expect(short.ok).toBe(false);
+    const unproven = (await A.records.act("opp.action", { id: "o", action: "supply_requirement", requirementId: "r", note: "ok" })) as { ok: boolean };
+    expect(unproven.ok).toBe(false);
+  });
+
+  it("answers typed-in-a-hurry record questions, saves the transcript on the server, and never claims a workspace opened", async () => {
+    const A = await live();
+    const typo = await A.ai.route("wht clints do i hav?", {});
+    expect(typo.lead).toBe("You have 1 client.");
+    const server = (await A.ai.route("Summarise the market mood", { ref: { ws: "today" } })) as { ref: unknown; keepWorkspace?: boolean };
+    expect(server.ref).toBeNull();
+    expect(server.keepWorkspace).toBe(true);
+    await A.records.act("conversation.save", { id: "cnv_main", messages: [{ role: "user", text: "wht clints do i hav?" }, { role: "ai", lead: "You have 1 client.", text: "" }] });
+    expect(saveTurns).toHaveBeenCalledWith({ conversationId: null, turns: [{ role: "person", body: "wht clints do i hav?" }, { role: "asap", body: "You have 1 client." }] });
   });
 
   it("answers the client list from the records and sends what it cannot match to the server", async () => {

@@ -177,6 +177,7 @@ export function createApp(deps: AppDeps) {
     "/onboarding/*",
     "/invitations/:token/accept",
     "/ask",
+    "/ask/*",
     "/attention",
     "/pins",
     "/automations",

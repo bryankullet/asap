@@ -325,3 +325,42 @@ describe("POST /ask", () => {
     expect(JSON.stringify(body)).not.toContain(BETA_ITEM);
   });
 });
+
+describe("GET /ask/status and POST /conversations/turns", () => {
+  let db: FakeDb;
+  beforeEach(() => {
+    db = makeDb();
+    // As Postgres does: a new conversation is not deleted.
+    db.defaults = { ...(db.defaults ?? {}), conversations: { deleted_at: null } };
+  });
+
+  it("says whether a model is configured, and nothing about which", async () => {
+    expect(await readJson(await build(db, null).request("/ask/status", { headers: auth }))).toEqual({ modelConfigured: false });
+    expect(await readJson(await build(db, GROUNDED).request("/ask/status", { headers: auth }))).toEqual({ modelConfigured: true });
+  });
+
+  it("keeps turns answered from records in the person's own server conversation, marked as such", async () => {
+    const app = build(db, null);
+    const save = (body: unknown) =>
+      app.request("/conversations/turns", { method: "POST", headers: { ...auth, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const first = await readJson(await save({ turns: [{ role: "person", body: "What clients do I have?" }, { role: "asap", body: "You have 1 client." }] }));
+    expect(first.conversationId).toBeTruthy();
+    const second = await save({ conversationId: first.conversationId, turns: [{ role: "person", body: "Show my work" }] });
+    expect(second.status).toBe(200);
+    const rows = db.tables["conversation_messages"] as Record<string, unknown>[];
+    expect(rows.map((r) => [r["seq"], r["role"], r["served_by"]])).toEqual([
+      [1, "person", null],
+      [2, "asap", "in-app records reader"],
+      [3, "person", null],
+    ]);
+  });
+
+  it("will not add to a conversation that is not the caller's", async () => {
+    const res = await build(db, null).request("/conversations/turns", {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationId: "99999999-0000-4000-8000-000000000001", turns: [{ role: "person", body: "hi" }] }),
+    });
+    expect(res.status).toBe(404);
+  });
+});

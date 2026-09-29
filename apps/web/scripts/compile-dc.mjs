@@ -91,8 +91,11 @@ const PATCHES = [
    "                const ref = { ws: 'work', clientId: ws.ref.clientId,\n                  filter: f.filter ? f.filter : f.label === 'Mine'"],
   // A form block may declare its own fields and action; without them it is the automation builder.
   ["      if (o.isBuilder) {\n        const d = this.state.builder;",
-   "      if (o.isBuilder && b.fields) {\n        const d = this.state.builder;\n        const ns = b.formId || 'form';\n        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? '');\n        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x),\n          onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));\n        o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';\n        o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });\n      } else if (o.isBuilder) {\n        const d = this.state.builder;\n        o.saveLabel = 'Save automation'; o.saveNote = 'Saved automations start paused. Test mode writes nothing.';"],
+   "      if (o.isBuilder && b.fields) {\n        const d = this.state.builder;\n        const ns = b.formId || 'form';\n        const opts = (x) => (x.options || []).map(v => (typeof v === 'string' ? { value: v, label: v } : v));\n        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? (x.options ? (opts(x)[0] || {}).value ?? '' : ''));\n        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options, options: opts(x),\n          onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));\n        o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';\n        o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });\n      } else if (o.isBuilder) {\n        const d = this.state.builder;\n        o.saveLabel = 'Save automation'; o.saveNote = 'Saved automations start paused. Test mode writes nothing.';"],
   // An upload may name the action its file goes to (live import reads a book this way).
+  // The picker is emptied once its files are read, so a file chosen in one workspace does not stay
+  // selected in the next one that happens to reuse the same control.
+  ["    const files = [...(ev.target.files || [])];", "    const files = [...(ev.target.files || [])];\n    try { ev.target.value = ''; } catch { /* some browsers refuse; the files are already copied */ }"],
   ["    if (block.stage) { this.setState", "    if (block.action) { if (out[0] && !out[0].error) this.act(block.action, { ...(block.payload || {}), name: out[0].name }); return; }\n    if (block.stage) { this.setState"],
   // A write may say where its result lives (the new client, the new quotation); open it there.
   ["      if (opts.nav) this.openRef(opts.nav);\n      else this.setState({ tick: this.state.tick + 1 });",
@@ -100,12 +103,25 @@ const PATCHES = [
   // A declared form names itself (the automation builder is introduced by its workspace instead).
   ["hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && b.t !== 'builder' };",
    "hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && (b.t !== 'builder' || !!b.fields) };"],
+  // An answer given without opening anything (the server's reply, a refusal) says nothing about a
+  // workspace and leaves the current one in place: "Workspace opened beside this answer" was a
+  // false receipt when nothing had opened.
+  ["      if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';",
+   "      if (r.keepWorkspace) msg.panelNote = '';\n      else if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';"],
+  ["      if (r.nothing || !r.ref) {\n        this.openRef({ ws: 'nothing' });",
+   "      if (r.keepWorkspace) {\n        /* the answer stands on its own; the open workspace stays */\n      } else if (r.nothing || !r.ref) {\n        this.openRef({ ws: 'nothing' });"],
+  // A write through the server takes a few seconds; say so at once rather than looking inert.
+  ["    const actionId = opts.actionId || (action + ':' + JSON.stringify(payload));\n    this.setState({ busy: true });",
+   "    const actionId = opts.actionId || (action + ':' + JSON.stringify(payload));\n    this.setState({ busy: true });\n    if (this.A.savingNote && !/^(conversation|draft)\\./.test(action)) this.flash(this.A.savingNote);"],
 ];
 const TEMPLATE_PATCHES = [
   // The form block's button and note come from the block, so one form serves every live form.
   ['>Save automation</button>', '>{{ b.saveLabel }}</button>'],
   ['>Saved automations start paused. Test mode writes nothing.</small>', '>{{ b.saveNote }}</small>'],
-  ['<input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}"', '<input type="{{ f.type }}" value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}"'],
+  // A form field is a text/date input, or a dropdown when its vocabulary is closed (a client is a
+  // company or a person — never whatever was typed).
+  ['<input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px" />',
+   '<sc-if value="{{ f.isSelect }}"><select value="{{ f.value }}" onChange="{{ f.onChange }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px;background:#fff"><sc-for list="{{ f.options }}" as="o"><option value="{{ o.value }}">{{ o.label }}</option></sc-for></select></sc-if><sc-if value="{{ f.isInput }}"><input type="{{ f.type }}" value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px" /></sc-if>'],
 ];
 for (const [from, to] of TEMPLATE_PATCHES) {
   if (!tpl.includes(from)) throw new Error("approved markup changed; patch no longer applies:\n" + from);

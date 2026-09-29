@@ -58,18 +58,18 @@ export const REQUIRED_IMPORT_COLUMNS: readonly ImportColumn[] = ["client_name"];
  */
 export const IMPORT_COLUMN_SYNONYMS: Readonly<Record<ImportColumn, readonly string[]>> = {
   client_name: ["client", "client name", "insured", "insured name", "customer", "name", "account"],
-  client_kind: ["kind", "client type", "type", "category"],
+  client_kind: ["client kind", "kind", "client type", "type", "category"],
   contact_name: ["contact", "contact name", "contact person", "attention", "attn"],
-  contact_email: ["email", "e-mail", "contact email", "email address"],
-  contact_phone: ["phone", "telephone", "mobile", "contact phone", "tel"],
+  contact_email: ["contact email", "email", "e-mail", "email address"],
+  contact_phone: ["contact phone", "phone", "telephone", "mobile", "tel"],
   contact_role: ["contact role", "designation", "position", "title"],
   policy_number: ["policy number", "policy no", "policy", "policy ref", "certificate number"],
-  insurer_name: ["insurer", "underwriter", "company", "insurance company"],
+  insurer_name: ["insurer", "insurer name", "underwriter", "company", "insurance company"],
   class_of_business: ["class", "class of business", "product", "cover", "policy class", "lob"],
-  period_start: ["start", "start date", "inception", "inception date", "from", "effective date"],
-  period_end: ["end", "end date", "expiry", "expiry date", "to", "renewal date"],
-  premium_amount: ["premium", "gross premium", "premium amount", "total premium", "amount"],
-  premium_currency: ["currency", "ccy"],
+  period_start: ["period start", "start", "start date", "inception", "inception date", "from", "effective date", "cover start", "policy start", "period from"],
+  period_end: ["period end", "end", "end date", "expiry", "expiry date", "to", "renewal date", "cover end", "policy end", "period to"],
+  premium_amount: ["premium", "premium amount", "gross premium", "total premium", "amount"],
+  premium_currency: ["currency", "premium currency", "ccy"],
   commission_rate: ["commission rate", "comm rate", "commission %", "rate"],
   commission_amount: ["commission", "commission amount", "comm", "brokerage"],
 };
@@ -205,6 +205,15 @@ export type ImportPreviewResponse = z.infer<typeof importPreviewResponseSchema>;
 export const importCommitRequestSchema = z.object({
   /** Rows a person chose to leave out of an otherwise good file. */
   skipLineNumbers: z.array(z.number().int().min(1)).max(IMPORT_ROW_LIMIT).default([]),
+  /**
+   * A person's decision for a row whose client was only a possible match: one of the row's own
+   * candidates (`clientId`), or `null` to create a new client under the name in the file. A row
+   * that needs a decision and has none is left out, never guessed.
+   */
+  resolutions: z
+    .array(z.object({ lineNumber: z.number().int().min(1), clientId: uuidSchema.nullable() }))
+    .max(IMPORT_ROW_LIMIT)
+    .default([]),
 });
 export type ImportCommitRequest = z.input<typeof importCommitRequestSchema>;
 

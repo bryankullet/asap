@@ -142,3 +142,21 @@ export const askResponseV2Schema = z.object({
   suggestions: z.array(z.string().max(120)).max(4).default([]),
 });
 export type AskResponseV2 = z.infer<typeof askResponseV2Schema>;
+
+/**
+ * `POST /conversations/turns` — turns Ask answered in the app itself, from the records it had
+ * already read (the client list, Today, opening a workspace), appended to the person's own server
+ * conversation so the transcript lives with the brokerage, not in a browser. A transcript of
+ * asking, never a store of business facts (rule 14): nothing here is read back as a value.
+ */
+export const saveTurnsRequestSchema = z.object({
+  conversationId: uuidSchema.nullable().default(null),
+  turns: z
+    .array(z.object({ role: z.enum(["person", "asap"]), body: z.string().trim().min(1).max(4000) }))
+    .min(1)
+    .max(6),
+});
+export type SaveTurnsRequest = z.input<typeof saveTurnsRequestSchema>;
+export const saveTurnsResponseSchema = z.object({ conversationId: uuidSchema });
+export const conversationListResponseSchema = z.object({ conversations: z.array(conversationSchema) });
+export const conversationMessagesResponseSchema = z.object({ messages: z.array(conversationMessageSchema) });

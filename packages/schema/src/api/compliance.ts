@@ -42,7 +42,8 @@ export type ClientFileResponse = z.infer<typeof clientFileResponseSchema>;
 
 /** H05 create path. Duplicate review: plausible existing clients are returned first; `confirmNew` creates anyway. */
 export const createClientRequestSchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  /* A client's legal or trading name; one character identifies no one and matched everything. */
+  name: z.string().trim().min(2, "Give the client's name").max(200),
   kind: ClientKind,
   confirmNew: z.boolean().default(false),
 });

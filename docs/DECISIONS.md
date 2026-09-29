@@ -1959,3 +1959,27 @@ which reports honestly when no model is configured. The conversation is kept in 
 brokerage and person (a convenience, never a record). Assignment goes through the work-item `assign`
 verb. Still not connected: comparison, placement, issuance, servicing/TOR, endorsements, money,
 reconciliation, commission, renewal, reports.
+
+## D-117 — Nothing is reported done that cannot be read back
+
+The second live retest found receipts for records nobody could see. Root causes and rules:
+
+- **Every client record failed.** `GET /clients/:id/space` selected `endorsements.client_id`, which
+  does not exist (endorsements belong to a policy, 0028). The fake database in the tests carried
+  the same invented column. Endorsements are now found through the client's policies, and the
+  fixture matches the real table. Live mode says when a client's record could not be read instead of
+  showing it empty.
+- **A partial name is never a sure match.** `matchClientName` filed "Rapid Test Motors" under a
+  client called "A" because one name contained the other. Partial matches now require whole words
+  of at least three characters and always come back as candidates for a person to choose; the
+  import commit accepts a person's decision per row, checked against that row's own candidates.
+- **Receipts follow read-back.** An import or upload reports success only once what it wrote can be
+  read back; otherwise it says what is missing.
+- **Values are real or refused.** Closed choices are dropdowns; the server refuses one-letter
+  names, titles, classes and requirements; a requirement is supplied only with a note of what
+  proves it; a claim names its policy or says the policy is unknown (`policyUnknown`); an
+  automation with conditions ASAP cannot apply is not saved.
+- **Ask transcripts live on the server** (`POST /conversations/turns`, rule 14): turns answered in
+  the app from records are appended to the person's own conversation, marked `served_by: in-app
+  records reader`. `GET /ask/status` says whether a model is configured, so Connections separates
+  record questions from the model.

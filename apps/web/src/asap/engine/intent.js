@@ -229,11 +229,15 @@ const rows = (label, list) => ({ t: 'rows', label, rows: list });
 const sv = (v) => (v == null ? 'not recorded' : 'v' + v);
 const note = (toneName, title, text) => ({ t: 'note', tone: toneName, title, text });
 
+// The state a person reads: the task-status words (D-075), never a bare "Active" or "Waiting".
 function partyState(w) {
-  if (w.state === 'Completed') return 'Completed';
+  if (w.state === 'Completed') return 'Done';
   if (w.parties && w.parties.length) return 'With ' + w.parties.map(p => p.name + ' since ' + fmtDate(p.since)).join(', ');
-  return w.state;
+  if (w.statusLabel) return w.statusLabel;
+  return w.state === 'Active' ? 'In progress' : w.state;
 }
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const PRIORITY = { high: 'High priority', medium: 'Normal priority', low: 'Low priority' };
 
 const WS = {};
 
@@ -243,7 +247,7 @@ WS.today = () => {
     blocks: [rows('Prioritised from live records', open.map(w => ({
       title: w.title, note: (sel.client(w.clientId)?.name || 'Brokerage') + ' · ' + w.kind + ' · ' + partyState(w) +
         (w.dueAt ? ' · due ' + fmtDate(w.dueAt) : ''),
-      badge: w.priority === 'high' ? 'High' : w.priority === 'medium' ? 'At risk' : 'Watch',
+      badge: PRIORITY[w.priority] || 'Normal priority',
       badgeTone: w.priority === 'high' ? tone.bad : w.priority === 'medium' ? tone.warn : tone.ok,
       why: w.reason, action: { a: 'open', ref: refForWork(w) }
     })))] };
@@ -254,7 +258,9 @@ function refForWork(w) {
   if (w.invoiceId) return { ws: 'money', clientId: w.clientId };
   if (w.servicingId) return { ws: 'servicing', clientId: w.clientId, servicingId: w.servicingId };
   if (w.placementId) return { ws: 'placement', clientId: w.clientId };
-  if (w.opportunityId || w.quoteId) return { ws: 'quote', clientId: w.clientId };
+  if (w.opportunityId || w.quoteId) return { ws: 'quote', clientId: w.clientId, opportunityId: w.opportunityId };
+  // Over live records every work item has its own workspace; the demo keeps the approved route.
+  if (S.isLive()) return { ws: 'workitem', workItemId: w.id, clientId: w.clientId };
   if (w.kind === 'Renewal') return { ws: 'renewal', clientId: w.clientId };
   return { ws: 'work', clientId: w.clientId, workItemId: w.id };
 }
@@ -274,16 +280,20 @@ WS.work = (r) => {
   let list = sel.work({ clientId: r.clientId, assigneeId: f.assigneeId, state: f.state });
   if (view === 'mine') list = list.filter(w => w.assigneeId === S.session().userId && w.state !== 'Completed');
   if (view === 'others') list = list.filter(w => /^With /.test(w.state) || w.state === 'Waiting');
-  if (view === 'progress') list = list.filter(w => w.state === 'Active');
+  if (view === 'progress') list = list.filter(w => (w.taskStatus ? w.taskStatus === 'in_progress' : w.state === 'Active') && !(w.parties && w.parties.length));
   if (view === 'done') list = list.filter(w => w.state === 'Completed');
   if (view === 'recent') list = [...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20);
   return { kind: 'Work', title: (r.clientId ? sel.client(r.clientId).name + ' — ' : '') + (view ? WORK_VIEWS[view].title : 'Work'),
-    statusLabel: list.length + ' items', status: 'live',
+    statusLabel: plural(list.length, 'item', 'items'), status: 'live',
     filters: Object.entries(WORK_VIEWS).map(([k, v]) => ({ label: v.label, filter: { view: k } })),
-    blocks: [rows('Owner, party and state come from the records', list.map(w => ({
+    blocks: [
+      // "Assign" on a row opens Work at that item: show who holds it and let a person hand it over.
+      ...(r.workItemId && byId('workItems', r.workItemId)
+        ? [{ t: 'assign', label: 'Hand over “' + byId('workItems', r.workItemId).title + '”', workItemId: r.workItemId }] : []),
+      rows('Owner, party and state come from the records', list.map(w => ({
       title: w.title,
       note: w.kind + ' · ' + (sel.user(w.assigneeId)?.name || 'unassigned') + ' · ' + partyState(w) + (w.dueAt ? ' · due ' + fmtDate(w.dueAt) : ''),
-      badge: w.state === 'Completed' ? 'Done' : /^With /.test(w.state) ? 'External' : 'Active',
+      badge: w.state === 'Completed' ? 'Done' : /^With /.test(w.state) ? 'With others' : partyState(w),
       badgeTone: w.state === 'Completed' ? tone.ok : /^With /.test(w.state) ? tone.warn : tone.ok,
       action: { a: 'open', ref: refForWork(w) },
       secondary: { a: 'assign', workItemId: w.id, label: 'Assign' }
@@ -337,6 +347,13 @@ WS.client = (r) => {
         note: (e.direction === 'out' ? 'Sent to ' + (e.party || e.to) : 'From ' + e.from) + ' · ' + fmtDate(e.at),
         badge: e.direction === 'out' ? 'Sent' : 'Received', badgeTone: tone.ok,
         action: { a: 'open', ref: { ws: 'communication', clientId: c.id, emailId: e.id } } }))),
+      // Over live records the client's documents are listed with their reading state and open for
+      // review; the demo keeps the approved layout, where documents open from Ask and evidence.
+      ...(S.isLive() ? [rows('Documents', sel.documents(c.id).length ? sel.documents(c.id).map(d => ({ title: d.name,
+        note: (d.kind || '').replace(/_/g, ' ') + ' · filed ' + fmtDate(d.createdAt) + (d.readingState ? ' · ' + d.readingState : ''),
+        badge: d.readingState || 'Filed', badgeTone: d.readingState === 'Could not be read' ? tone.bad : tone.ok,
+        action: { a: 'open', ref: { ws: 'document', documentId: d.id } } }))
+        : [{ title: 'No documents yet', note: 'Add one below — it is stored privately and read by ASAP.', badge: 'Empty', badgeTone: tone.warn }])] : []),
       { t: 'upload', label: 'Add a document to this client', clientId: c.id }
     ] };
 };

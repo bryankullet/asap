@@ -1,10 +1,11 @@
 /**
  * Live workspaces the approved engine has no live source for, built from this brokerage's API data
- * in the engine's own block vocabulary (facts, rows, note, gate, upload, builder) so they render in
- * the approved interface exactly as its other workspaces do.
+ * in the engine's own block vocabulary (facts, rows, note, gate, upload, builder, assign) so they
+ * render in the approved interface exactly as its other workspaces do.
  *
  * Every value shown comes from an API response. Nothing here is example content.
  */
+import { IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
 import * as S from "./engine/store.js";
 
 const ok = "ok";
@@ -18,8 +19,10 @@ const gate = (label, detail, action, payload, extra = {}) => ({ t: "gate", kind:
 const nav = (label, detail, ref) => ({ t: "gate", kind: "approve", label, detail, nav: ref });
 const form = (formId, label, fields, action, payload, saveLabel, saveNote = "") => ({ t: "builder", label, formId, fields, action, payload, saveLabel, saveNote });
 
+export const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
 const date = (iso) => (iso ? S.fmtDate(iso) : "not recorded");
 const money = (amount, currency) => (amount == null ? "not recorded" : (currency || "") + " " + Number(amount).toLocaleString("en-KE"));
+const words = (s) => (s || "").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 function clientPicker(label, makeRef) {
   const clients = S.sel.clients();
@@ -38,20 +41,18 @@ function clientsSpace() {
   const clients = S.sel.clients();
   return {
     kind: "Clients",
-    title: clients.length ? clients.length + " client" + (clients.length === 1 ? "" : "s") : "No clients yet",
+    title: clients.length ? plural(clients.length, "client", "clients") : "No clients yet",
     status: "live",
     statusLabel: clients.length + " on file",
     blocks: clients.length
       ? [
           rows(
             "Your clients",
-            clients.map((c) => ({
-              title: c.name,
-              note: S.sel.policies(c.id).length + " polic" + (S.sel.policies(c.id).length === 1 ? "y" : "ies") + " · " + S.sel.work({ clientId: c.id }).filter((w) => w.state !== "Completed").length + " open work",
-              badge: "Open",
-              badgeTone: ok,
-              action: { a: "open", ref: { ws: "client", clientId: c.id } },
-            })),
+            clients.map((c) => {
+              const pols = S.sel.policies(c.id).length;
+              const open = S.sel.work({ clientId: c.id }).filter((w) => w.state !== "Completed").length;
+              return { title: c.name, note: plural(pols, "policy", "policies") + " · " + plural(open, "open item", "open items"), badge: "Open", badgeTone: ok, action: { a: "open", ref: { ws: "client", clientId: c.id } } };
+            }),
           ),
           nav("Add a client", "Start with the client's name.", { ws: "newclient" }),
         ]
@@ -73,7 +74,7 @@ function newClientSpace(state) {
         "Client",
         [
           { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents" },
-          { key: "kind", label: "COMPANY OR PERSON", placeholder: "Company", value: "Company" },
+          { key: "kind", label: "COMPANY OR PERSON", options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
         ],
         "client.create",
         {},
@@ -93,65 +94,112 @@ function newClientSpace(state) {
 
 /* ---------------------------------------------------------------- import */
 
+/** The headers the server reads, one per meaning: the first spelling is the one to use. */
+export const IMPORT_HEADERS = Object.entries(IMPORT_COLUMN_SYNONYMS).map(([meaning, spellings]) => ({ meaning, header: spellings[0], also: spellings.slice(1) }));
+
 function importSpace(state) {
   const p = state.importPreview;
   const blocks = [
-    note("amber", "Nothing is saved until you confirm", "ASAP reads the file on its own server, shows every row it would create and waits. Rows it is unsure about are shown, never hidden."),
+    note("amber", "Nothing is saved until you confirm", "ASAP reads the file on its own server, shows what every row would do and waits. A client that is only a possible match is never assumed — you choose."),
     { t: "upload", label: "Choose a spreadsheet, CSV or PDF of clients and policies", action: "import.preview" },
   ];
+  if (!p)
+    blocks.push(
+      rows(
+        "Column headings ASAP reads",
+        IMPORT_HEADERS.map((h) => ({ title: h.header, note: h.meaning === "client_name" ? "Required · also read: " + h.also.slice(0, 4).join(", ") : "Also read: " + h.also.slice(0, 4).join(", "), badge: h.meaning === "client_name" ? "Required" : "Optional", badgeTone: h.meaning === "client_name" ? bad : ok })),
+      ),
+      gate("Download a template", "A CSV with every heading ASAP reads, ready to fill in.", "import.template", {}),
+    );
   if (p) {
     const sum = p.summary;
+    const choices = state.importResolutions;
+    const resolved = p.rows.filter((r) => r.outcome === "needs_review" && choices.has(r.lineNumber)).length;
+    const writable = sum.rows - sum.invalid - sum.needsReview + resolved;
     blocks.push(
       facts([
         ["File", p.batch.filename + " · read as " + p.source + (p.sheetName ? " (" + p.sheetName + ")" : "")],
-        ["Rows", String(sum.rows)],
-        ["Clients to create", String(sum.clientsToCreate)],
-        ["Contacts to create", String(sum.contactsToCreate)],
-        ["Policies to create", String(sum.policiesToCreate)],
-        ["Need a decision / invalid", sum.needsReview + " / " + sum.invalid],
+        ["Rows read", String(sum.rows)],
+        ["New clients", String(sum.clientsToCreate)],
+        ["New contacts", String(sum.contactsToCreate)],
+        ["New policies", String(sum.policiesToCreate)],
+        ["Your decision needed / invalid", sum.needsReview + " / " + sum.invalid],
       ]),
     );
     if (p.blocking.length) blocks.push(note("red", "Before this can be imported", p.blocking.join(" ")));
-    if (p.blocking.some((b) => /premium/i.test(b)) || (p.columns.some((c) => c.meaning === "premium") && !p.batch.premiumBasis)) {
+    const unmapped = p.columns.filter((c) => !c.meaning).map((c) => c.header);
+    if (unmapped.length) blocks.push(note("amber", "Headings ASAP did not recognise", unmapped.join(", ") + " — these columns are ignored. Rename them to a heading from the list if they matter."));
+    if (p.blocking.some((b) => /premium/i.test(b)) || (p.columns.some((c) => c.meaning === "premium_amount") && !p.batch.premiumBasis)) {
       blocks.push(gate("Premiums in this file are gross", "Premium before levies and taxes.", "import.basis", { basis: "gross" }));
       blocks.push(gate("Premiums in this file are total payable", "Premium including levies and taxes.", "import.basis", { basis: "total_payable" }));
     }
+    const nameOf = (id) => S.sel.client(id)?.name || "an existing client";
     blocks.push(
       rows(
         "What each row would do",
-        p.rows.slice(0, 60).map((r) => ({
-          title: "Line " + r.lineNumber + " · " + (r.clientName || "no client name"),
-          note: [r.policyNumber, r.insurerName, r.classOfBusiness, r.periodStart && r.periodEnd ? r.periodStart + " – " + r.periodEnd : null, r.problem].filter(Boolean).join(" · ") || "—",
-          badge: r.outcome.replace(/_/g, " "),
-          badgeTone: r.outcome === "invalid" ? bad : r.outcome === "needs_review" ? warn : ok,
-        })),
+        p.rows.slice(0, 60).map((r) => {
+          const choice = choices.get(r.lineNumber);
+          const doing =
+            r.outcome === "match" && r.matchedClientId
+              ? "Adds to existing client " + nameOf(r.matchedClientId) + " (same name)"
+              : r.outcome === "match"
+                ? "Adds to the client created by an earlier line"
+                : r.outcome === "create"
+                  ? "Creates client “" + r.clientName + "”"
+                  : r.outcome === "needs_review"
+                    ? choice === undefined
+                      ? "Your decision: could be " + r.candidates.map((c) => c.name).join(" or ")
+                      : choice === null
+                        ? "You chose: create a new client “" + r.clientName + "”"
+                        : "You chose: add to " + (r.candidates.find((c) => c.id === choice)?.name || "the chosen client")
+                    : r.problem || "Cannot be imported";
+          return {
+            title: "Line " + r.lineNumber + " · " + (r.clientName || "no client name"),
+            note: doing + ([r.policyNumber, r.insurerName, r.periodStart && r.periodEnd ? r.periodStart + " – " + r.periodEnd : null].filter(Boolean).length ? " · " + [r.policyNumber, r.insurerName, r.periodStart && r.periodEnd ? r.periodStart + " – " + r.periodEnd : null].filter(Boolean).join(" · ") : ""),
+            badge: r.outcome === "needs_review" ? (choice === undefined ? "Choose" : "Decided") : words(r.outcome),
+            badgeTone: r.outcome === "invalid" ? bad : r.outcome === "needs_review" && choice === undefined ? warn : ok,
+          };
+        }),
       ),
     );
-    if (p.rows.length > 60) blocks.push(note("amber", "Showing the first 60 rows", p.rows.length + " rows were read; all of them are imported on confirm."));
+    for (const r of p.rows.filter((x) => x.outcome === "needs_review")) {
+      blocks.push(
+        rows(
+          "Line " + r.lineNumber + " — which client is “" + r.clientName + "”?",
+          [
+            ...r.candidates.map((c) => ({ title: c.name, note: "An existing client whose name overlaps", badge: choices.get(r.lineNumber) === c.id ? "Chosen" : "Possible", badgeTone: choices.get(r.lineNumber) === c.id ? ok : warn, secondary: { a: "act", action: "import.resolve", payload: { lineNumber: r.lineNumber, clientId: c.id }, label: "It is this client" } })),
+            { title: "A different client", note: "Create a new client called “" + r.clientName + "”", badge: choices.get(r.lineNumber) === null ? "Chosen" : "Possible", badgeTone: choices.get(r.lineNumber) === null ? ok : warn, secondary: { a: "act", action: "import.resolve", payload: { lineNumber: r.lineNumber, clientId: null }, label: "Create new" } },
+          ],
+        ),
+      );
+    }
+    if (p.rows.length > 60) blocks.push(note("amber", "Showing the first 60 rows", plural(p.rows.length, "row was", "rows were") + " read; every writable one is imported on confirm."));
     blocks.push(
       gate(
-        "Import " + (sum.rows - sum.invalid - sum.needsReview) + " row(s)",
-        "Creates the clients, contacts, policies and periods above. Rows that are invalid or need a decision are left out. Repeating this cannot import twice.",
+        "Import " + plural(writable, "row", "rows"),
+        "Creates the clients, contacts, policies and periods above. Invalid rows, and rows still waiting for your decision, are left out. Repeating this cannot import twice.",
         "import.commit",
         {},
-        p.blocking.length ? { requires: "Resolve what is listed above first." } : {},
+        p.blocking.length ? { requires: "Resolve what is listed above first." } : writable === 0 ? { requires: "No row can be imported yet." } : {},
       ),
     );
     blocks.push(gate("Discard this file", "Nothing from it is saved.", "import.clear", {}));
   }
   if (state.importResult) {
     const r = state.importResult;
+    const b = r.batch;
+    const made = [b.clientsCreated ? plural(b.clientsCreated, "client", "clients") : null, b.contactsCreated ? plural(b.contactsCreated, "contact", "contacts") : null, b.policiesCreated ? plural(b.policiesCreated, "policy", "policies") : null].filter(Boolean);
     blocks.push(
       note(
-        r.failures.length ? "amber" : "green",
-        "Imported " + r.batch.filename,
-        [r.batch.clientsCreated + " clients", r.batch.contactsCreated + " contacts", r.batch.policiesCreated + " policies", r.batch.periodsCreated + " periods"].join(", ") +
-          " created." +
-          (r.failures.length ? " " + r.failures.length + " row(s) could not be written: " + r.failures.slice(0, 5).map((f) => "line " + f.lineNumber + " — " + f.problem).join("; ") : ""),
+        r.failures.length || r.unverified ? "amber" : "green",
+        "Imported " + b.filename,
+        (made.length ? "Created " + made.join(", ") + "." : "Nothing new was created.") +
+          (r.unverified ? " " + r.unverified : "") +
+          (r.failures.length ? " " + plural(r.failures.length, "row", "rows") + " could not be written: " + r.failures.slice(0, 5).map((f) => "line " + f.lineNumber + " — " + f.problem).join("; ") : ""),
       ),
     );
   }
-  return { kind: "Import", title: "Bring your book into ASAP", status: "draft", statusLabel: p ? p.summary.rows + " rows read" : "Nothing read yet", blocks };
+  return { kind: "Import", title: "Bring your book into ASAP", status: "draft", statusLabel: p ? plural(p.summary.rows, "row read", "rows read") : "Nothing read yet", blocks };
 }
 
 /* ---------------------------------------------------------------- quotation */
@@ -169,13 +217,13 @@ function quoteSpace(ref, state) {
     blocks: [
       ...(list.length
         ? [rows("Quotation work for this client", list.map((o) => ({ title: o.title, note: o.cls + " · started " + date(o.createdAt), badge: o.status, badgeTone: o.status === "Open" ? ok : warn, action: { a: "open", ref: { ws: "quote", opportunityId: o.id } } })))]
-        : [note("green", "No quotation work yet", "Start it here: name the cover wanted and the class of business. Insurers, requirements and replies are added next.")]),
+        : [note("green", "No quotation work yet", "Start it here: describe the cover wanted and its class of business. Insurers, requirements and replies are added next.")]),
       form(
         "quote:" + client.id,
         "Start quotation work",
         [
           { key: "title", label: "WHAT COVER IS WANTED", placeholder: "Motor fleet — five vehicles" },
-          { key: "cls", label: "CLASS OF BUSINESS", placeholder: "Motor" },
+          { key: "cls", label: "CLASS OF BUSINESS", placeholder: "Motor commercial" },
           { key: "coverStart", label: "COVER FROM (OPTIONAL)", type: "date" },
           { key: "coverEnd", label: "COVER TO (OPTIONAL)", type: "date" },
         ],
@@ -195,6 +243,7 @@ function opportunitySpace(id, state) {
   const live = d.insurers.filter((i) => !i.removedAt);
   const quoted = live.filter((i) => i.response?.outcome === "quoted");
   const addable = d.availableInsurers.filter((a) => !live.some((i) => i.insurerId === a.id));
+  const outstanding = d.requirements.filter((r) => !r.suppliedAt);
   const act = (action, extra) => ({ id, action, ...extra });
   const blocks = [
     facts([
@@ -210,13 +259,28 @@ function opportunitySpace(id, state) {
       d.requirements.length
         ? d.requirements.map((r) => ({
             title: r.label,
-            note: r.suppliedAt ? "Supplied " + date(r.suppliedAt) + (r.suppliedByName ? " by " + r.suppliedByName : "") : "Outstanding",
+            note: r.suppliedAt ? "Supplied " + date(r.suppliedAt) + (r.suppliedByName ? " by " + r.suppliedByName : "") + (r.evidence?.label ? " · " + r.evidence.label : "") : "Outstanding",
             badge: r.suppliedAt ? "Supplied" : "Missing",
             badgeTone: r.suppliedAt ? ok : bad,
-            secondary: !r.suppliedAt && d.permissions.canEdit ? { a: "act", action: "opp.action", payload: act("supply_requirement", { requirementId: r.id, note: "Marked supplied in ASAP" }), label: "Mark supplied" } : null,
           }))
         : [{ title: "No requirements recorded", note: "Add what the insurers will need.", badge: "Empty", badgeTone: warn }],
     ),
+    ...(d.permissions.canEdit && outstanding.length
+      ? [
+          form(
+            "supply:" + id,
+            "Mark a requirement supplied",
+            [
+              { key: "requirementId", label: "REQUIREMENT", options: outstanding.map((r) => ({ value: r.id, label: r.label })) },
+              { key: "note", label: "WHAT PROVES IT", placeholder: "Logbooks received by email from the client on 12 Sep" },
+            ],
+            "opp.action",
+            act("supply_requirement"),
+            "Mark supplied",
+            "Recorded with your name and what you wrote as its evidence.",
+          ),
+        ]
+      : []),
     ...(d.permissions.canEdit ? [form("req:" + id, "Add a requirement", [{ key: "label", label: "REQUIREMENT", placeholder: "Logbooks for all vehicles" }], "opp.action", act("add_requirement"), "Add requirement")] : []),
     rows(
       "Insurers approached",
@@ -225,16 +289,15 @@ function opportunitySpace(id, state) {
             title: i.insurerName,
             note: i.response
               ? i.response.outcome === "quoted"
-                ? "Quoted " + money(i.response.premiumAmount, i.response.premiumCurrency) + (i.response.validUntil ? " · valid to " + date(i.response.validUntil) : "") + " · " + i.response.terms.length + " term(s)"
+                ? "Quoted " + money(i.response.premiumAmount, i.response.premiumCurrency) + (i.response.validUntil ? " · valid to " + date(i.response.validUntil) : "") + " · " + plural(i.response.terms.length, "term", "terms")
                 : i.response.outcome === "declined"
                   ? "Declined" + (i.response.declineReason ? " — " + i.response.declineReason : "")
-                  : "No response recorded as final"
+                  : "Recorded as no response"
               : i.request
                 ? "Request prepared " + date(i.request.preparedAt) + (i.request.approvedAt ? " · approved" : " · awaiting approval") + (i.request.sentAt ? " · sent " + date(i.request.sentAt) : " · not sent")
                 : "Added " + date(i.addedAt) + " · no request yet",
-            badge: i.response ? i.response.outcome.replace(/_/g, " ") : i.request?.sentAt ? "With insurer" : "Not asked",
-            badgeTone: i.response?.outcome === "quoted" ? ok : i.response ? warn : warn,
-            secondary: !i.response && d.permissions.canRecordResponse ? { a: "act", action: "opp.action", payload: act("record_response", { opportunityInsurerId: i.id, outcome: "declined" }), label: "Record declined" } : null,
+            badge: i.response ? words(i.response.outcome) : i.request?.sentAt ? "With insurer" : "Not asked",
+            badgeTone: i.response?.outcome === "quoted" ? ok : warn,
           }))
         : [{ title: "No insurers yet", note: addable.length ? "Add them from the list below." : "Insurers appear here once they are on file — importing your book adds them.", badge: "Empty", badgeTone: warn }],
     ),
@@ -246,22 +309,24 @@ function opportunitySpace(id, state) {
       .map((i) =>
         form(
           "resp:" + i.id,
-          "Record " + i.insurerName + "’s quote",
+          "Record " + i.insurerName + "’s answer",
           [
-            { key: "premiumAmount", label: "PREMIUM (NUMBERS ONLY)", placeholder: "485000" },
-            { key: "premiumCurrency", label: "CURRENCY", value: "KES" },
+            { key: "outcome", label: "ANSWER", options: [{ value: "quoted", label: "Quoted" }, { value: "declined", label: "Declined" }] },
+            { key: "premiumAmount", label: "PREMIUM, IF QUOTED (NUMBERS ONLY)", placeholder: "485000" },
+            { key: "premiumCurrency", label: "CURRENCY", options: ["KES", "USD", "EUR", "GBP"] },
             { key: "validUntil", label: "VALID UNTIL (OPTIONAL)", type: "date" },
+            { key: "declineReason", label: "REASON, IF DECLINED", placeholder: "Outside their appetite for this class" },
             { key: "sourceNote", label: "WHERE IT CAME FROM", placeholder: "Email from the underwriter, 12 Sep" },
           ],
           "opp.action",
-          act("record_response", { opportunityInsurerId: i.id, outcome: "quoted" }),
-          "Record quote",
+          act("record_response", { opportunityInsurerId: i.id }),
+          "Record answer",
           "Recorded as the insurer's answer, with your name. Terms and excesses are added from the quotation document.",
         ),
       ),
     note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "Requests are not sent from ASAP yet", d.sending.reason || "Every request needs your approval before it leaves."),
   ];
-  if (quoted.length >= 2) blocks.push(note("green", quoted.length + " quotes to compare", "Comparing them side by side is not connected in this view yet; each quote's premium and terms are listed above."));
+  if (quoted.length >= 2) blocks.push(note("green", plural(quoted.length, "quote", "quotes") + " to compare", "Comparing them side by side is not connected in this view yet; each quote's premium and terms are listed above."));
   return { kind: "Quotation work", title: d.client.name + " — " + o.title, status: o.closedAt ? "draft" : "live", statusLabel: quoted.length + " of " + live.length + " quoted", recordRef: { ws: "quote", opportunityId: id }, blocks };
 }
 
@@ -271,6 +336,12 @@ function newClaimSpace(ref) {
   const client = ref.clientId ? S.sel.client(ref.clientId) : null;
   if (!client) return { kind: "Claim", title: "Which client is the claim for?", status: "draft", statusLabel: "Choose a client", blocks: clientPicker("Report a claim for", (c) => ({ ws: "claim", clientId: c.id })) };
   const existing = S.sel.claims(client.id);
+  const years = S.sel.policyYears(client.id);
+  const active = years.filter((y) => y.status === "active");
+  const policyOptions = years.map((y) => {
+    const pol = S.byId("policies", y.policyId);
+    return { value: y.policyId, label: (pol?.number || "Number not recorded") + " · " + (pol?.cls || "") + " · " + date(y.from) + " – " + date(y.to) + " · " + (y.status === "active" ? "Active cover" : y.status) };
+  });
   return {
     kind: "Claim",
     title: client.name + " — report a claim",
@@ -278,10 +349,12 @@ function newClaimSpace(ref) {
     statusLabel: existing.length + " on file",
     blocks: [
       note("amber", "What reporting a claim does", "It opens the claim as a draft with its Work item. It never means the loss is covered or accepted — that takes the insurer's written decision."),
+      ...(active.length ? [] : [note("red", years.length ? "No active cover found for this client" : "No policy found for this client", years.length ? "None of this client's policies shows verified active cover today. Choose the policy the loss falls under, or report it with the policy marked unknown." : "Import or record the client's policy first, or report the loss with the policy marked unknown — the claim then says so everywhere it appears.")]),
       form(
         "claim:" + client.id,
         "The loss, as the client reported it",
         [
+          { key: "policyId", label: "POLICY THE LOSS FALLS UNDER", options: [...policyOptions, { value: "unknown", label: "Policy not known yet — report without one" }] },
           { key: "incidentOn", label: "DATE OF LOSS", type: "date" },
           { key: "incidentSummary", label: "WHAT HAPPENED", placeholder: "Vehicle KDA 123A hit from behind at Westlands" },
         ],
@@ -297,37 +370,130 @@ function newClaimSpace(ref) {
   };
 }
 
+/* ---------------------------------------------------------------- work items */
+
+function workItemSpace(ref) {
+  const w = S.byId("workItems", ref.workItemId);
+  if (!w) return { kind: "Work", title: "This item is no longer open", status: "draft", statusLabel: "Unavailable", blocks: [note("amber", "Not found", "It may have been completed or moved. Your Work list shows everything open.")] };
+  const client = w.clientId ? S.sel.client(w.clientId) : null;
+  const owner = w.assigneeId ? S.sel.user(w.assigneeId) : null;
+  const claim = S.all("claims").find((c) => c.workItemId === w.id);
+  return {
+    kind: w.kind,
+    title: w.title,
+    status: w.state === "Completed" ? "draft" : "live",
+    statusLabel: w.state === "Completed" ? "Done" : w.statusLabel || "In progress",
+    blocks: [
+      facts([
+        ["Client", client ? client.name : "Brokerage-wide"],
+        ["Kind", w.kind],
+        ["Where it stands", w.statusLabel || (w.state === "Completed" ? "Done" : "In progress")],
+        ["Owner", owner ? owner.name : "unassigned"],
+        ["Next step", w.nextStep || "not recorded"],
+        ["Priority", { high: "High priority", medium: "Normal priority", low: "Low priority" }[w.priority] || "Normal priority"],
+      ]),
+      ...(w.reason ? [note("green", "Why it is here", w.reason)] : []),
+      ...(claim ? [nav("Open the claim", claim.title, { ws: "claim", clientId: w.clientId, claimId: claim.id })] : []),
+      ...(w.opportunityId ? [nav("Open the quotation", "Requirements, insurers and replies.", { ws: "quote", opportunityId: w.opportunityId })] : []),
+      ...(client ? [nav("Open " + client.name, "The client's policies, documents and other work.", { ws: "client", clientId: client.id })] : []),
+      ...(w.state !== "Completed" ? [{ t: "assign", label: "Who holds it", workItemId: w.id }] : []),
+    ],
+  };
+}
+
+/* ---------------------------------------------------------------- documents */
+
+function documentSpace(ref, state) {
+  const d = ref.documentId ? state.documents.get(ref.documentId) : null;
+  if (!d) return null; // the engine's own document workspace, over what was hydrated
+  const doc = d.document;
+  const fields = d.fields || [];
+  const open = fields.filter((f) => f.state === "proposed");
+  const client = doc.clientId ? S.sel.client(doc.clientId) : null;
+  const reading = { not_started: "Not read yet", queued: "Waiting to be read", working: "Being read now", extracted: "Read", failed: "Could not be read", not_applicable: "This kind of file is not read" }[doc.extractionState] || words(doc.extractionState);
+  return {
+    kind: "Document",
+    title: doc.filename,
+    status: doc.extractionState === "extracted" ? "live" : "draft",
+    statusLabel: reading,
+    recordRef: { ws: "document", documentId: doc.id },
+    blocks: [
+      facts([
+        ["Client", client ? client.name : "Not filed under a client"],
+        ["Kind", words(doc.kind)],
+        ["Pages", doc.pageCount == null ? "not counted yet" : String(doc.pageCount)],
+        ["Reading", reading + (doc.extractionError ? " — " + doc.extractionError : "")],
+        ["Filed", date(doc.createdAt)],
+      ]),
+      ...(doc.extractionState === "extracted"
+        ? [
+            rows(
+              "What ASAP read",
+              fields.length
+                ? fields.map((f) => ({
+                    title: words(f.fieldKey),
+                    note: (f.correctedValue ?? f.proposedValue ?? "nothing read") + (f.page ? " · page " + f.page : " · page not placed"),
+                    badge: f.state === "proposed" ? "Proposed" : words(f.state),
+                    badgeTone: f.state === "proposed" ? warn : f.state === "rejected" ? bad : ok,
+                  }))
+                : [{ title: "Nothing to review", note: "ASAP found no fields it reads in this document.", badge: "Read", badgeTone: ok }],
+            ),
+            ...(open.length
+              ? [
+                  form(
+                    "review:" + doc.id,
+                    "Confirm what ASAP read",
+                    open.map((f) => ({ key: f.id, label: words(f.fieldKey).toUpperCase() + (f.page ? " (PAGE " + f.page + ")" : ""), value: f.proposedValue ?? "" })),
+                    "doc.review",
+                    { documentId: doc.id },
+                    "Confirm these values",
+                    "Unchanged values are accepted; edited ones are saved as your correction beside what was read. Nothing is applied to a record from here.",
+                  ),
+                ]
+              : []),
+          ]
+        : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
+    ],
+  };
+}
+
 /* ---------------------------------------------------------------- settings and connections */
 
 function settingsSpace(state) {
   const org = state.me.active_organization;
-  const members = state.members;
+  const members = state.members.length
+    ? state.members.map((m) => ({ name: m.user.display_name || m.user.full_name || m.user.email, role: m.role.name + (m.is_owner && !/owner/i.test(m.role.name) ? " · owner" : ""), email: m.user.email, status: m.status, id: m.user.id }))
+    : S.sel.users().map((u) => ({ name: u.name, role: S.ROLES[u.role], email: u.email || "", status: "active", id: u.id }));
+  // The permissions the server resolved, grouped by what they are about, in words.
+  const grouped = new Map();
+  for (const p of state.me.permissions) {
+    const [obj, verb] = p.split(":");
+    if (!grouped.has(obj)) grouped.set(obj, []);
+    grouped.get(obj).push(words(verb).toLowerCase());
+  }
   return {
     kind: "Company settings",
     title: org.name,
     status: "live",
-    statusLabel: members.length + " member" + (members.length === 1 ? "" : "s"),
+    statusLabel: plural(members.length, "member", "members"),
     blocks: [
       facts([
         ["Brokerage", org.name],
         ["Country", org.country || "not recorded"],
         ["Currency", org.currency || "not recorded"],
         ["Time zone", org.timezone || "not recorded"],
-        ["Your permissions", String(state.me.permissions.length)],
       ]),
       rows(
         "Team and roles",
-        members.map((m) => ({
-          title: m.user.display_name || m.user.full_name || m.user.email,
-          note: m.role.name + (m.is_owner ? " · owner" : "") + " · " + m.user.email,
-          badge: m.status,
-          badgeTone: m.status === "active" ? ok : warn,
-          action: { a: "open", ref: { ws: "team", userId: m.user.id } },
-        })),
+        members.map((m) => ({ title: m.name, note: m.role + (m.email ? " · " + m.email : ""), badge: words(m.status), badgeTone: m.status === "active" ? ok : warn, action: { a: "open", ref: { ws: "team", userId: m.id } } })),
+      ),
+      rows(
+        "What you may do here",
+        [...grouped.entries()].sort().map(([obj, verbs]) => ({ title: words(obj), note: verbs.join(", "), badge: plural(verbs.length, "permission", "permissions"), badgeTone: ok })),
       ),
       rows(
         "Recent audit",
-        S.sel.audit().slice(0, 10).map((a) => ({ title: a.text, note: date(a.at) + " · " + (a.actorName || "system"), badge: a.kind, badgeTone: ok })),
+        S.sel.audit().slice(0, 10).map((a) => ({ title: a.text, note: date(a.at) + " · " + (a.actorName || "system"), badge: words(a.kind), badgeTone: ok })),
       ),
       note("amber", "Changing roles and inviting people", "Roles and invitations are managed by the brokerage's owner; changing them from this view is not connected yet."),
     ],
@@ -336,24 +502,34 @@ function settingsSpace(state) {
 
 function connectionsSpace(state) {
   const mb = state.mailboxes;
-  const box = mb?.mailboxes?.[0] ?? null;
+  const boxes = mb?.mailboxes ?? [];
   const providers = mb?.providers ?? [];
-  const mailNote = box
-    ? box.emailAddress + " · " + box.status.replace(/_/g, " ") + (box.statusReason ? " — " + box.statusReason : "") + (box.lastSyncedAt ? " · last read " + date(box.lastSyncedAt) : "")
-    : providers.length
-      ? providers.map((p) => p.label + (p.available ? " can be connected" : " is not available: " + (p.unavailableReason || "not configured"))).join(" · ")
-      : "No mailbox is connected.";
+  const model = state.modelConfigured;
+  const mailRows = providers.length
+    ? providers.map((p) => {
+        const box = boxes.find((b) => b.provider === p.id);
+        return box
+          ? { title: p.label, note: box.emailAddress + " · " + words(box.status) + (box.statusReason ? " — " + box.statusReason : "") + (box.lastSyncedAt ? " · last read " + date(box.lastSyncedAt) : ""), badge: words(box.status), badgeTone: box.status === "connected" ? ok : warn }
+          : { title: p.label, note: p.available ? "Can be connected; no mailbox is connected yet." : "Not available on this deployment — " + (p.unavailableReason || "not configured") + ".", badge: p.available ? "Not connected" : "Not configured", badgeTone: warn };
+      })
+    : [{ title: "Email", note: "No mailbox is connected.", badge: "Not connected", badgeTone: warn }];
   return {
     kind: "Connections",
     title: "Connected email and data",
     status: "live",
-    statusLabel: box && box.status === "connected" ? "Mailbox connected" : "No mailbox connected",
+    statusLabel: boxes.some((b) => b.status === "connected") ? "Mailbox connected" : "No mailbox connected",
     blocks: [
-      rows("What is connected", [
-        { title: "Email", note: mailNote, badge: box ? box.status.replace(/_/g, " ") : "not connected", badgeTone: box?.status === "connected" ? ok : warn },
-        { title: "Records import", note: "Spreadsheets, CSV and PDF books are read on ASAP's own server.", badge: "available", badgeTone: ok, action: { a: "open", ref: { ws: "import" } } },
-        { title: "Documents", note: "Stored privately for this brokerage and read by ASAP's own extraction service.", badge: "available", badgeTone: ok },
-        { title: "Ask ASAP", note: "Answers from your records. Questions it cannot match are sent to ASAP's server, which says when no model is configured.", badge: "available", badgeTone: ok },
+      rows("Email", mailRows),
+      rows("Records and questions", [
+        { title: "Records import", note: "Spreadsheets, CSV and PDF books are read on ASAP's own server.", badge: "Available", badgeTone: ok, action: { a: "open", ref: { ws: "import" } } },
+        { title: "Documents", note: "Stored privately for this brokerage and read by ASAP's own extraction service.", badge: "Available", badgeTone: ok },
+        { title: "Questions about your records", note: "Clients, work, policies and documents are answered in the app from the records it has read.", badge: "Available", badgeTone: ok },
+        {
+          title: "AI model",
+          note: model === true ? "Configured on the server. Questions the app cannot answer from records go to it." : model === false ? "Not configured on this deployment. Questions beyond your records are answered with that message, never guessed." : "Could not be checked just now.",
+          badge: model === true ? "Configured" : model === false ? "Not configured" : "Unknown",
+          badgeTone: model === true ? ok : warn,
+        },
       ]),
       note("green", "Read from the server", "Each status above comes from your brokerage's records on the server, not from this browser."),
     ],
@@ -374,6 +550,10 @@ export function liveSpace(ref, state) {
       return quoteSpace(ref, state);
     case "claim":
       return ref.claimId ? null : newClaimSpace(ref);
+    case "workitem":
+      return workItemSpace(ref);
+    case "document":
+      return documentSpace(ref, state);
     case "settings":
       return settingsSpace(state);
     case "connections":

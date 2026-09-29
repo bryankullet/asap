@@ -419,9 +419,10 @@ export function opportunityRoutes(deps: { logger: Logger }) {
         if (
           input.documentId === undefined &&
           input.emailMessageId === undefined &&
-          (input.note ?? "").trim() === ""
+          (input.note ?? "").trim().length < 10
         ) {
-          return blocked("Say what proves this: a document, an email, or a note.");
+          // A note is evidence only if it says something: "ok" or "x" proves nothing.
+          return blocked("Say what proves this: a document, an email, or a note of at least ten characters.");
         }
         const updated = await db
           .from("opportunity_requirements")

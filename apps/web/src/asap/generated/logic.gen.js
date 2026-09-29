@@ -92,6 +92,7 @@ class Component extends DCLogic {
     if (!action) return;
     const actionId = opts.actionId || (action + ':' + JSON.stringify(payload));
     this.setState({ busy: true });
+    if (this.A.savingNote && !/^(conversation|draft)\./.test(action)) this.flash(this.A.savingNote);
     setTimeout(async () => {
       const res = await this.A.records.act(action, payload, actionId);
       this.setState({ busy: false });
@@ -124,12 +125,15 @@ class Component extends DCLogic {
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
-      if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';
+      if (r.keepWorkspace) msg.panelNote = '';
+      else if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';
       else msg.panelNote = 'Workspace opened beside this answer';
       const next = [...thread, msg];
       this.saveThread(next);
       this.setState({ thread: next, thinking: false, lastPlan: r.plan || null });
-      if (r.nothing || !r.ref) {
+      if (r.keepWorkspace) {
+        /* the answer stands on its own; the open workspace stays */
+      } else if (r.nothing || !r.ref) {
         this.openRef({ ws: 'nothing' });
       } else {
         this.openRef(r.ref);
@@ -168,6 +172,7 @@ class Component extends DCLogic {
   // ---------------- uploads
   pickFiles = async (block, ev) => {
     const files = [...(ev.target.files || [])];
+    try { ev.target.value = ''; } catch { /* some browsers refuse; the files are already copied */ }
     if (!files.length) return;
     const prog = files.map(f => ({ name: f.name, pct: 10, state: 'Reading' }));
     this.setState({ progress: prog });
@@ -274,8 +279,9 @@ class Component extends DCLogic {
       if (o.isBuilder && b.fields) {
         const d = this.state.builder;
         const ns = b.formId || 'form';
-        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? '');
-        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x),
+        const opts = (x) => (x.options || []).map(v => (typeof v === 'string' ? { value: v, label: v } : v));
+        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? (x.options ? (opts(x)[0] || {}).value ?? '' : ''));
+        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options, options: opts(x),
           onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));
         o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';
         o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });

@@ -277,7 +277,10 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         } else if (match.outcome === "many") {
           outcome = "needs_review";
           rowCandidates = match.candidates.slice(0, 5).map((x) => ({ id: x.id, name: x.name }));
-          problem = "More than one client here could be this one. Nothing was written for this row.";
+          problem =
+            "This could be an existing client (" +
+            rowCandidates.map((x) => x.name).join(", ") +
+            "). Choose one, or create a new client — nothing is written for this row until you do.";
         } else {
           outcome = "create";
           // Counting it as seen means the next line naming this client attaches rather than
@@ -410,6 +413,10 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
     if (rowsR.error) return sendError(c, mapDatabaseError(rowsR.error));
 
     const skip = new Set(input.skipLineNumbers);
+    const resolved = new Map(input.resolutions.map((x) => [x.lineNumber, x.clientId]));
+    // A chosen client must be one of that row's own candidates, re-derived now against the
+    // brokerage's clients — a decision cannot file a row under an arbitrary client.
+    let clientsNow: ClientCandidate[] | null = null;
     const failures: { lineNumber: number; problem: string }[] = [];
     let clientsCreated = 0;
     let contactsCreated = 0;
@@ -422,6 +429,27 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
     const createdByName = new Map<string, string>();
 
     for (const row of (rowsR.data ?? []) as StoredRow[]) {
+      if (row.outcome === "needs_review" && resolved.has(row.line_number) && !skip.has(row.line_number)) {
+        const choice = resolved.get(row.line_number) ?? null;
+        if (choice) {
+          if (!clientsNow) {
+            const cr = await db.from("clients").select("id, name, kind").eq("organization_id", org.id).is("deleted_at", null);
+            if (cr.error) return sendError(c, mapDatabaseError(cr.error));
+            clientsNow = (cr.data ?? []) as ClientCandidate[];
+          }
+          const m = matchClientName((row.raw as unknown as InterpretedRow).clientName, clientsNow);
+          const allowed = m.outcome === "one" ? [m.client.id] : m.outcome === "many" ? m.candidates.map((x) => x.id) : [];
+          if (!allowed.includes(choice)) {
+            failures.push({ lineNumber: row.line_number, problem: "The client chosen for this row is not one it could be. Nothing was written for it." });
+            continue;
+          }
+          row.outcome = "match";
+          row.matched_client_id = choice;
+        } else {
+          row.outcome = "create";
+          row.matched_client_id = null;
+        }
+      }
       if (row.outcome !== "create" && row.outcome !== "match") {
         rowsSkipped++;
         continue;

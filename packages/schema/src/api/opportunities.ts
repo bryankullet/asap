@@ -178,8 +178,9 @@ export type OpportunityListResponse = z.infer<typeof opportunityListResponseSche
 
 export const createOpportunityRequestSchema = z.object({
   clientId: uuidSchema,
-  title: z.string().trim().min(1).max(300),
-  classOfBusiness: z.string().trim().min(1).max(100),
+  /* Enough to tell one piece of work from another: a single letter is not a description. */
+  title: z.string().trim().min(3, "Describe the cover wanted in at least three characters").max(300),
+  classOfBusiness: z.string().trim().min(3, "Name the class of business").max(100),
   riskSummary: z.string().trim().max(4000).optional(),
   coverStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   coverEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -205,7 +206,7 @@ export const opportunityActionSchema = z.discriminatedUnion("action", [
     opportunityInsurerId: uuidSchema,
     reason: z.string().trim().min(1).max(300),
   }),
-  z.object({ action: z.literal("add_requirement"), label: z.string().trim().min(1).max(200) }),
+  z.object({ action: z.literal("add_requirement"), label: z.string().trim().min(3, "Name the requirement in at least three characters").max(200) }),
   z.object({
     action: z.literal("supply_requirement"),
     requirementId: uuidSchema,

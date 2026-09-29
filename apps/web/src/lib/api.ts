@@ -67,6 +67,10 @@ import {
   endorsementDetailSchema,
   askResponseSchema,
   askResponseV2Schema,
+  conversationListResponseSchema,
+  conversationMessagesResponseSchema,
+  saveTurnsResponseSchema,
+  type SaveTurnsRequest,
   type AskRequest,
   createWorkItemResponseSchema,
   markDraftCopiedResponseSchema,
@@ -201,6 +205,13 @@ export const api = {
    * provider — is server-side; the browser sends words and a scope id and receives a state.
    */
   askQuestion: (body: AskRequest) => request("POST", "/ask", askResponseV2Schema, body),
+  /** Whether a model is configured on the server (no vendor, no key). */
+  askStatus: () => request("GET", "/ask/status", z.object({ modelConfigured: z.boolean() })),
+  /** The caller's own Ask conversations, newest first, and one conversation's turns. */
+  conversations: () => request("GET", "/conversations", conversationListResponseSchema),
+  conversationMessages: (id: string) => request("GET", `/conversations/${id}/messages`, conversationMessagesResponseSchema),
+  /** Append turns answered in the app from the records to the caller's server conversation. */
+  saveTurns: (body: SaveTurnsRequest) => request("POST", "/conversations/turns", saveTurnsResponseSchema, body),
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */

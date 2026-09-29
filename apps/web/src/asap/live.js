@@ -12,7 +12,7 @@ import { api, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
-import { liveSpace } from "./live-spaces.js";
+import { IMPORT_HEADERS, liveSpace, plural } from "./live-spaces.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -66,8 +66,11 @@ const workState = (it) => {
   }
   return "Active";
 };
+/** The words a person reads for where an item stands (D-075). */
+const STATUS_LABEL = { needs_you: "Your work", in_progress: "In progress", done: "Done" };
 
-const KIND = { renewal: "Renewal", claim: "Claim", endorsement: "Servicing", quotation: "Quotation", placement: "Placement", onboarding: "Onboarding" };
+const KIND = { renewal: "Renewal", claim: "Claim", endorsement: "Servicing", quotation: "Quotation", placement: "Placement", onboarding: "Onboarding", new_business: "New business" };
+const kindWords = (k) => KIND[k] ?? k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /** Everything the engine reads, from the API. */
 async function hydrate(me) {
@@ -128,6 +131,8 @@ async function hydrate(me) {
 
   // Each client's own record: contacts, policies and periods, claims, documents, threads.
   const spaces = await pool(db.clients, 6, (c) => api.clientSpace(c.id));
+  // A client whose record could not be read is said to be unreadable, never shown as empty.
+  db.meta.unreadableClients = db.clients.filter((_, i) => !spaces[i]).map((c) => c.id);
   const policyIds = [];
   spaces.forEach((sp, i) => {
     if (!sp) return;
@@ -191,7 +196,16 @@ async function hydrate(me) {
       });
     }
     for (const d of sp.documents) {
-      db.documents.push({ id: d.id, clientId, name: d.filename, kind: d.kind, currentVersion: 1, createdAt: d.createdAt, source: "upload" });
+      db.documents.push({
+        id: d.id,
+        clientId,
+        name: d.filename,
+        kind: d.kind,
+        currentVersion: 1,
+        createdAt: d.createdAt,
+        source: "upload",
+        readingState: { not_started: "Not read yet", queued: "Waiting to be read", working: "Being read now", extracted: "Read", failed: "Could not be read", not_applicable: "Not read" }[d.extractionState] ?? null,
+      });
       db.documentVersions.push({
         id: d.id + ":v1",
         documentId: d.id,
@@ -235,14 +249,19 @@ async function hydrate(me) {
       db.workItems.push({
         id: it.id,
         clientId: it.client_id,
-        kind: KIND[it.kind] ?? it.kind.replace(/^\w/, (c) => c.toUpperCase()),
+        kind: kindWords(it.kind),
+        taskStatus: it.task_status,
+        statusLabel: it.task_status === "with_party" ? null : STATUS_LABEL[it.task_status] ?? null,
+        nextStep: row.nowStep?.label ?? null,
+        opportunityId: it.source_type === "opportunity" ? it.source_id : null,
         title: it.title,
         state: workState(it),
         parties: it.task_status === "with_party" && it.task_party ? [{ name: it.task_party, since: it.task_since }] : [],
         assigneeId: it.owner_id,
         dueAt: it.task_next_check,
         priority: row.priority ?? "medium",
-        reason: row.reason || it.reason || "",
+        // What needs doing and why — the step and what it needs — rather than how the item began.
+        reason: [it.required_action, it.evidence_needed ? "Needs: " + it.evidence_needed : null, row.nowStep ? "Next step: " + row.nowStep.label : null].filter(Boolean).join(" · ") || row.reason || it.reason || "",
         createdAt: it.created_at ?? it.task_since ?? d0(),
         policyYearId: it.policy_period_id,
         // What an assignment through the API needs: the version seen and a step to act on.
@@ -276,7 +295,8 @@ async function hydrate(me) {
       at: e.occurredAt,
       actorId: null,
       actorName: e.actorName,
-      text: e.action + (e.result === "success" ? "" : " — " + e.result + (e.failureReason ? ": " + e.failureReason : "")),
+      // "client.created" → "Client created": the writer's vocabulary, read as words.
+      text: e.action.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase()) + (e.result === "success" ? "" : " — " + e.result + (e.failureReason ? ": " + e.failureReason : "")),
       clientId: null,
       entity: e.objectId,
       evidenceIds: [],
@@ -284,7 +304,9 @@ async function hydrate(me) {
     });
   }
 
-  db.conversations.push({ id: "cnv_main", messages: loadThread(me), contextId: null });
+  // The person's latest Ask conversation, from the server (rule 14: a transcript, never records).
+  const convo = await loadConversation();
+  db.conversations.push({ id: "cnv_main", messages: convo.messages, contextId: null });
 
   // Each open quotation in full, so its workspace can show requirements, insurers and replies.
   const details = await pool(
@@ -295,28 +317,42 @@ async function hydrate(me) {
   const opportunityDetails = new Map();
   details.forEach((d) => d && opportunityDetails.set(d.opportunity.id, d));
 
-  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails } };
+  // A claim's work item opens the claim.
+  for (const c of db.claims) {
+    const w = db.workItems.find((x) => x.id === c.workItemId);
+    if (w) w.claimId = c.id;
+  }
+
+  // Each document's reading state and the values read from it, so it can be reviewed.
+  const docDetails = await pool(db.documents.slice(0, 60), 6, (d) => api.document(d.id));
+  const documents = new Map();
+  docDetails.forEach((d) => {
+    if (!d) return;
+    documents.set(d.document.id, d);
+    const v = db.documentVersions.find((x) => x.documentId === d.document.id);
+    if (v && d.pages.length) v.lines = d.pages.slice(0, 2).flatMap((pg) => pg.text.split(/\n/).filter(Boolean).slice(0, 6));
+  });
+
+  const modelConfigured = await api.askStatus().then((r) => r.modelConfigured).catch(() => null);
+
+  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, modelConfigured, conversationId: convo.id } };
 }
 
-/*
- * The Ask conversation is kept in this browser, per brokerage and person, so a refresh keeps it.
- * It is a convenience for the person asking, never a record (§45 rule 14): records live on the
- * server and every answer is re-read from them.
- */
-const threadKey = (me) => "asap.thread." + me.active_organization.id + "." + me.user.id;
-function loadThread(me) {
+/** The newest server conversation, as the interface's thread. Empty when there is none. */
+async function loadConversation() {
   try {
-    const v = JSON.parse(localStorage.getItem(threadKey(me)) || "[]");
-    return Array.isArray(v) ? v.slice(-40) : [];
+    const list = await api.conversations();
+    const latest = list.conversations[0];
+    if (!latest) return { id: null, messages: [] };
+    const turns = await api.conversationMessages(latest.id);
+    const messages = turns.messages.slice(-40).map((m) => {
+      if (m.role === "person") return { role: "user", text: m.body };
+      const [lead, ...rest] = m.body.split(/(?<=[.?!])\s/);
+      return { role: "ai", lead, text: rest.join(" "), chips: [] };
+    });
+    return { id: latest.id, messages };
   } catch {
-    return [];
-  }
-}
-function saveThread(me, messages) {
-  try {
-    localStorage.setItem(threadKey(me), JSON.stringify(messages.slice(-40)));
-  } catch {
-    /* storage full or blocked: the conversation lasts until reload */
+    return { id: null, messages: [] };
   }
 }
 
@@ -407,6 +443,37 @@ function notConnectedWorkspace(ref) {
   };
 }
 
+const note = (tone, title, text) => ({ t: "note", tone, title, text });
+
+/*
+ * Typing is fast and brokers do not proofread questions. Words close to the vocabulary Ask
+ * answers from records are corrected before matching, so "wht clints do i hav" reaches the
+ * client list rather than a model.
+ */
+const VOCABULARY = ["what", "which", "show", "list", "many", "clients", "client", "have", "today", "attention", "needs", "work", "automations", "policies", "policy", "claim", "claims", "quote", "quotation", "import", "records", "renewal", "search", "document", "documents", "covered", "cover"];
+function distance(a, b) {
+  const m = a.length, n = b.length;
+  const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[m][n];
+}
+function correctTypos(text, protectedWords) {
+  return text.replace(/[A-Za-z]{3,}/g, (w) => {
+    const lw = w.toLowerCase();
+    // A client's own name is never "corrected" into a vocabulary word ("Claire" is not "claims").
+    if (VOCABULARY.includes(lw) || protectedWords.has(lw)) return w;
+    let best = null;
+    for (const v of VOCABULARY) {
+      const dist = distance(lw, v);
+      const allowed = v.length >= 6 ? 2 : 1;
+      if (dist <= allowed && (!best || dist < best.dist)) best = { v, dist };
+    }
+    return best ? best.v : w;
+  });
+}
+
 // Suggestions the engine writes around its demo records; never offered over real ones.
 const DEMO_WORDS = /\b(Acme|KDN|KDA|Karibu|Bluewave|GreenCare|Mara|APA|CIC|Jubilee)\b/;
 const LIVE_CHIPS = ["What needs attention today?", "Show my work", "What clients do I have?"];
@@ -430,16 +497,20 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   let loaded = await hydrate(me);
   let db = loaded.db;
   const pendingFiles = new Map();
-  let conversationId = null;
+  let conversationId = loaded.extras.conversationId;
+  // How many thread messages the server already holds; new ones are appended after these.
+  let savedCount = (db.conversations.find((c) => c.id === "cnv_main")?.messages || []).length;
+  // Set when the server's Ask stored the last question and its answer itself.
+  let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, duplicate: null, importPreview: null, importFile: null, importResult: null };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   const refresh = async () => {
     const thread = db.conversations.find((c) => c.id === "cnv_main");
     loaded = await hydrate(me);
     db = loaded.db;
     if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities });
+    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, modelConfigured: loaded.extras.modelConfigured });
     S.useBackend({ db, dispatch });
   };
 
@@ -467,8 +538,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         premiumBasis: basis ?? state.importPreview?.batch.premiumBasis ?? null,
       });
       state.importResult = null;
+      state.importResolutions = new Map();
       const p = state.importPreview;
-      return ok("Read " + p.summary.rows + " row(s) from " + file.name + (p.blocking.length ? " — see what is needed before importing" : " — ready to import"));
+      const waiting = p.summary.needsReview;
+      return ok("Read " + plural(p.summary.rows, "row", "rows") + " from " + file.name + (p.blocking.length ? " — see what is needed before importing" : waiting ? " — " + plural(waiting, "row needs", "rows need") + " your decision" : " — ready to import"));
     } catch (e) {
       return fail(e);
     }
@@ -480,7 +553,25 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "conversation.save": (p) => {
       const c = db.conversations.find((x) => x.id === p.id);
       if (c) Object.assign(c, { messages: p.messages, contextId: p.contextId });
-      saveThread(me, p.messages || []);
+      const messages = p.messages || [];
+      if (messages.length < savedCount) savedCount = 0;
+      const fresh = messages.slice(savedCount);
+      savedCount = messages.length;
+      if (serverStoredLast) {
+        serverStoredLast = false;
+      } else if (fresh.length) {
+        const turns = fresh
+          .map((m) => (m.role === "user" ? { role: "person", body: m.text } : { role: "asap", body: [m.lead, m.text].filter(Boolean).join(" ") }))
+          .filter((t) => t.body && t.body.trim() && !t.body.startsWith("Good morning. Tell me what you need."))
+          .slice(-6);
+        if (turns.length)
+          void api
+            .saveTurns({ conversationId, turns })
+            .then((r) => (conversationId = r.conversationId))
+            .catch(() => {
+              /* the answer stays on screen; the transcript misses this turn and says nothing wrong */
+            });
+      }
       return ok("Saved");
     },
     "draft.save": (p) => {
@@ -492,7 +583,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "client.create": async (p) => {
       const name = (p.name || "").trim();
       if (!name) return { ok: false, error: "Type the client's name first." };
-      const kind = /person|individual/i.test(p.kind || "") ? "individual" : "corporate";
+      // A closed choice, never coerced: anything but company or person is refused, not defaulted.
+      const kind = { corporate: "corporate", company: "corporate", individual: "individual", person: "individual" }[(p.kind || "").trim().toLowerCase()];
+      if (!kind) return { ok: false, error: "Choose whether the client is a company or a person." };
+      if (name.length < 2) return { ok: false, error: "Give the client's name." };
       try {
         const res = await api.createClient({ name, kind, confirmNew: p.confirmNew === "yes" });
         if (res.outcome === "possible_duplicates") {
@@ -518,15 +612,38 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const p = state.importPreview;
       if (!p) return { ok: false, error: "Read a file first." };
       try {
-        const res = await api.commitImport(p.batch.id, {});
-        state.importResult = res;
+        const resolutions = [...state.importResolutions.entries()].map(([lineNumber, clientId]) => ({ lineNumber, clientId }));
+        const res = await api.commitImport(p.batch.id, { resolutions });
+        const expected = p.rows.filter((r) => (r.outcome === "create" || r.outcome === "match" || state.importResolutions.has(r.lineNumber)) && r.policyNumber).map((r) => r.policyNumber);
         state.importPreview = null;
         state.importFile = null;
+        state.importResolutions = new Map();
         await refresh();
-        return ok("Imported " + res.batch.clientsCreated + " client(s) and " + res.batch.policiesCreated + " polic(ies) from " + res.batch.filename);
+        // Success is claimed only for what can be read back: every imported policy must now be on file.
+        const onFile = new Set(db.policies.map((x) => x.number));
+        const missing = expected.filter((n) => !onFile.has(n));
+        state.importResult = { ...res, unverified: missing.length ? "These policies were reported written but cannot be read back yet: " + missing.join(", ") + ". Refresh records; if they are still missing, tell your administrator." : "" };
+        const b = res.batch;
+        const parts = [b.policiesCreated ? plural(b.policiesCreated, "policy", "policies") : null, b.clientsCreated ? plural(b.clientsCreated, "new client", "new clients") : "no new clients"].filter(Boolean);
+        if (missing.length) return { ok: false, error: "Imported, but " + plural(missing.length, "policy is", "policies are") + " not readable yet: " + missing.join(", ") + "." };
+        return ok("Imported " + parts.join("; ") + " from " + b.filename);
       } catch (e) {
         return fail(e);
       }
+    },
+    "import.resolve": (p) => {
+      state.importResolutions.set(p.lineNumber, p.clientId ?? null);
+      return ok(p.clientId ? "Line " + p.lineNumber + " will be added to the client you chose" : "Line " + p.lineNumber + " will create a new client");
+    },
+    "import.template": () => {
+      const header = IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(",");
+      const blob = new Blob([header + "\n"], { type: "text/csv" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "asap-import-template.csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      return ok("Template downloaded — one row per policy; only client_name is required");
     },
     "import.clear": () => {
       state.importPreview = null;
@@ -560,15 +677,21 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           ok: false,
           error: "Say what starts it in the trigger — for example a renewal approaching, a quote or document received, a payment, cover confirmed, a claim registered, or something overdue. Nothing was saved.",
         };
-      const name = (p.name || "").trim() || "Untitled automation";
-      const description = [p.actions, p.conditions ? "Conditions as written: " + p.conditions : ""].filter(Boolean).join(" · ").slice(0, 500);
+      // Conditions ASAP cannot yet apply are refused, not stored as words: an automation that could
+      // be switched on while silently ignoring its conditions would fire where it was told not to.
+      if ((p.conditions || "").trim())
+        return { ok: false, error: "Conditions written in words cannot be applied yet, so nothing was saved. Leave conditions empty to save an automation that prepares work on every trigger — it still starts switched off and every result needs a person's approval." };
+      const name = (p.name || "").trim();
+      if (name.length < 3) return { ok: false, error: "Give the automation a name." };
+      const description = (p.actions || "").slice(0, 500);
       return write(
         () => api.createAutomation({ name, description, triggerEvent: trigger, conditions: [], skill: (p.actions || "prepare work").slice(0, 80), preparedVerb: "prepare", approval: "always", enabled: false }),
-        name + " saved, switched off. It prepares work only; a person approves anything that leaves. Conditions are kept as written and not yet applied as filters.",
+        name + " saved, switched off. It prepares work on every " + trigger.replace(".", " ") + " event; a person approves anything that leaves.",
       );
     },
     "opportunity.create": async (p) => {
-      if (!p.title || !(p.cls || "").trim()) return { ok: false, error: "Name the cover wanted and its class of business." };
+      if ((p.title || "").trim().length < 3) return { ok: false, error: "Describe the cover wanted in at least three characters." };
+      if ((p.cls || "").trim().length < 3) return { ok: false, error: "Name the class of business, for example Motor commercial." };
       try {
         const res = await api.createOpportunity(present({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls, coverStart: p.coverStart, coverEnd: p.coverEnd, requestKey: crypto.randomUUID() }));
         await refresh();
@@ -581,8 +704,18 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "opp.action": async (p) => {
       const { id, ...body } = p;
       const clean = present(body);
-      if (clean.action === "add_requirement" && !clean.label) return { ok: false, error: "Name the requirement first." };
-      if (clean.action === "record_response" && clean.outcome === "quoted" && !/^\d+(\.\d{1,2})?$/.test(clean.premiumAmount || "")) return { ok: false, error: "Enter the premium as a number, for example 485000." };
+      if (clean.action === "add_requirement" && (clean.label || "").length < 3) return { ok: false, error: "Name the requirement in at least three characters." };
+      if (clean.action === "supply_requirement" && (clean.note || "").length < 10) return { ok: false, error: "Say what proves it — for example where and when the document arrived (at least ten characters)." };
+      if (clean.action === "record_response") {
+        if (clean.outcome === "quoted") {
+          if (!/^\d+(\.\d{1,2})?$/.test(clean.premiumAmount || "")) return { ok: false, error: "Enter the premium as a number, for example 485000." };
+          delete clean.declineReason;
+        } else {
+          delete clean.premiumAmount;
+          delete clean.premiumCurrency;
+          delete clean.validUntil;
+        }
+      }
       try {
         const res = await api.opportunityAction(id, clean);
         if (res.outcome === "blocked") return { ok: false, error: res.reason || "The server refused that. Nothing was changed." };
@@ -596,8 +729,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     },
     "claim.open": async (p) => {
       if (!p.incidentOn || !p.incidentSummary) return { ok: false, error: "Give the date of the loss and what happened." };
+      if (!p.policyId) return { ok: false, error: "Choose the policy the loss falls under, or say the policy is not known yet." };
+      const policy = p.policyId === "unknown" ? { policyUnknown: true } : { policyId: p.policyId };
       try {
-        const res = await api.createWorkItem({ kind: "claim", clientId: p.clientId, incidentOn: p.incidentOn, incidentSummary: p.incidentSummary, source: "manual" });
+        const res = await api.createWorkItem({ kind: "claim", clientId: p.clientId, incidentOn: p.incidentOn, incidentSummary: p.incidentSummary, source: "manual", ...policy });
         if (res.outcome !== "opened") return { ok: false, error: "The server could not open the claim for this client. Nothing was changed." };
         await refresh();
         const claim = db.claims.find((c) => c.workItemId === res.item.id);
@@ -606,10 +741,32 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return fail(e);
       }
     },
+    "doc.review": async (p) => {
+      const d = state.documents.get(p.documentId);
+      if (!d) return { ok: false, error: "That document is no longer on file." };
+      const open = d.fields.filter((f) => f.state === "proposed");
+      try {
+        let corrected = 0;
+        for (const f of open) {
+          const typed = (p[f.id] ?? "").trim();
+          if (typed && typed !== (f.proposedValue ?? "")) {
+            await api.reviewDocumentField(d.document.id, f.id, { decision: "correct", value: typed });
+            corrected++;
+          } else if (typed) {
+            await api.reviewDocumentField(d.document.id, f.id, { decision: "accept", value: null });
+          }
+        }
+        await refresh();
+        return ok(plural(open.length, "value", "values") + " confirmed" + (corrected ? ", " + corrected + " corrected by you" : ""));
+      } catch (e) {
+        return fail(e);
+      }
+    },
     "work.assign": async (p) => {
       const w = db.workItems.find((x) => x.id === p.workItemId);
       const u = db.users.find((x) => x.id === p.userId);
       if (!w || !u) return { ok: false, error: "Choose who this goes to." };
+      if (w.assigneeId === u.id) return { ok: false, error: w.title + " is already with " + u.name + ". Nothing was changed." };
       if (!w.stepId) return { ok: false, error: "This item has no steps to hand over yet. Nothing was changed." };
       try {
         const res = await api.act(w.id, { stepId: w.stepId, verb: "assign", version: w.version, assigneeId: u.id });
@@ -645,7 +802,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         }
         pendingFiles.delete(p.name);
         await refresh();
-        return ok(asked.outcome === "already_on_file" ? file.name + " is already on file" : file.name + " uploaded — ASAP is reading it");
+        // The receipt is given only once the document can be read back, and it opens there.
+        if (!db.documents.some((x) => x.id === asked.document.id))
+          return { ok: false, error: file.name + " was stored but is not readable yet. Refresh records; if it is still missing, tell your administrator." };
+        return ok(asked.outcome === "already_on_file" ? file.name + " is already on file" : file.name + " filed — ASAP is reading it", { nav: { ws: "document", documentId: asked.document.id } });
       } catch (e) {
         return fail(e);
       }
@@ -661,7 +821,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return { ok: false, error: what + " is not connected to your brokerage's records yet. Nothing was changed." };
     }
     // Only writes that created or changed a record are remembered as done; reads and refusals are not.
-    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear"]);
+    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template"]);
     const settle = (res) => {
       if (res.ok && !REPEATABLE.has(type)) db.meta.ledger[key] = { ...res, actionId: key };
       return res;
@@ -672,6 +832,19 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
 
   function liveWorkspace(ref) {
     if (ref && NOT_CONNECTED_WS[ref.ws]) return notConnectedWorkspace(ref);
+    if (ref?.ws === "client" && (db.meta.unreadableClients || []).includes(ref.clientId)) {
+      const c = db.clients.find((x) => x.id === ref.clientId);
+      return {
+        kind: "Client",
+        title: c ? c.name : "Client",
+        status: "draft",
+        statusLabel: "Could not be read",
+        ref,
+        blocks: [
+          note("red", "This client's record could not be read", "The server did not return this client's policies, documents and work, so none are shown — that does not mean there are none. Refresh records; if it persists, tell your administrator."),
+        ],
+      };
+    }
     const own = liveSpace(ref, state);
     if (own) {
       own.ref = ref;
@@ -685,27 +858,30 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const scope = ctx.clientId ? { kind: "client", id: ctx.clientId } : { kind: "brokerage", id: null };
       const res = await api.askQuestion({ question: text, conversationId, scope });
       conversationId = res.conversationId ?? conversationId;
+      // The server stored the question and its answer when it actually answered.
+      serverStoredLast = res.state === "answered" || res.state === "abstained" || res.state === "clarify";
       if (res.state === "not_configured")
-        return { lead: "No model is configured on the server yet.", text: "I answer from your records directly where I can. Questions beyond that need the server's model, which is not configured for this deployment.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+        return { lead: "No model is configured on the server yet.", text: "I answer from your records directly where I can. Questions beyond that need the server's model, which is not configured for this deployment.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
       if (res.state === "unavailable")
-        return { lead: "The server could not answer just now.", text: "Nothing was changed. Try again in a moment.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+        return { lead: "The server could not answer just now.", text: "Nothing was changed. Try again in a moment.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
       if (res.state === "clarify" && res.clarify)
-        return { lead: res.clarify.question, text: "Choose one:", clarify: { question: res.clarify.question, options: res.clarify.options.map((o) => ({ label: o.label, text: o.label })) }, ref: ctx.ref || { ws: "today" } };
+        return { lead: res.clarify.question, text: "Choose one:", clarify: { question: res.clarify.question, options: res.clarify.options.map((o) => ({ label: o.label, text: o.label })) }, ref: null, keepWorkspace: true };
       const body = res.message?.body || "I could not find that in your records.";
       const cites = (res.message?.citations || []).map((c) => c.label).slice(0, 4);
       return {
         lead: res.state === "abstained" ? "I could not find that in your records." : body.split(/(?<=\.)\s/)[0],
         text: (res.state === "abstained" ? body : body.split(/(?<=\.)\s/).slice(1).join(" ")) + (cites.length ? " Sources: " + cites.join("; ") + "." : ""),
-        ref: ctx.ref || { ws: "today" },
+        ref: null, keepWorkspace: true,
         chips: res.suggestions.length ? res.suggestions : LIVE_CHIPS,
       };
     } catch (e) {
-      return { lead: "I could not reach the server.", text: describeApiError(e) + " Nothing was changed.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+      return { lead: "I could not reach the server.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
     }
   }
 
   async function liveRoute(text, ctx) {
-    const t = text.trim();
+    const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
+    const t = correctTypos(text.trim(), names);
     // Questions about the client list, answered from the records — including when there are none.
     if (/\b(what|which|list|show|how many)\b.*\bclients?\b/i.test(t) && !/\b(add|create)\b/i.test(t)) {
       const n = db.clients.length;
@@ -722,7 +898,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return { lead: client ? "Reporting a claim for " + client.name + "." : "Which client is the claim for?", text: "The claim opens as a draft; it never means the loss is covered.", ref: { ws: "claim", clientId: client?.id } };
     }
     const r = interpret(t, ctx) || {};
-    if (r.nothing) return askServer(t, ctx);
+    if (r.nothing) return askServer(text.trim(), ctx);
     if (Array.isArray(r.chips) && r.chips.some((c) => DEMO_WORDS.test(typeof c === "string" ? c : c.label ?? ""))) r.chips = LIVE_CHIPS;
     if (r.ref && NOT_CONNECTED_WS[r.ref.ws]) {
       return { ...r, lead: NOT_CONNECTED_WS[r.ref.ws] + " is not connected to your records yet.", text: "I opened the workspace so you can see that nothing is shown there yet.", plan: null, chips: LIVE_CHIPS };
@@ -739,8 +915,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
 
   return {
     greetingChips: LIVE_CHIPS,
+    savingNote: "Saving to your brokerage's records…",
     suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
-    historyNote: "Kept in this browser for this brokerage, so it survives a refresh. Your records live on the server.",
+    historyNote: "Kept with your brokerage on the server, so it follows you to any browser. It is a transcript of asking, never a record.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },
     records: {
       demo: false,

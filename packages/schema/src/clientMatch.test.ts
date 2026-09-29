@@ -26,6 +26,17 @@ describe("client name matching", () => {
     if (r.outcome === "many") expect(r.candidates.map((c) => c.id)).toEqual(["a", "b"]);
   });
 
+  it("a partial name proposes a client to confirm, never a sure match", () => {
+    const r = matchClientName("Jane", clients);
+    expect(r).toEqual({ outcome: "many", candidates: [clients[2]] });
+  });
+
+  it("a short name is not a match for every name containing its letters", () => {
+    const withA = [...clients, { id: "x", name: "A", kind: "corporate" as const }];
+    expect(matchClientName("Rapid Test Motors", withA)).toEqual({ outcome: "none" });
+    expect(matchClientName("Acm", clients)).toEqual({ outcome: "none" });
+  });
+
   it("returns none for an unknown name, never a creation", () => {
     expect(matchClientName("Otieno", clients)).toEqual({ outcome: "none" });
     expect(matchClientName("   ", clients)).toEqual({ outcome: "none" });

@@ -27,6 +27,8 @@ export const createWorkItemRequestSchema = z
     source: z.enum(["email", "manual", "ask"]).optional(),
     /** endorsement: the policy (or the client's only policy), the request in its own words, who asked. */
     policyId: uuidSchema.optional(),
+    /** claim: set, deliberately, when the loss is reported before its policy is known. */
+    policyUnknown: z.boolean().optional(),
     requestText: z.string().trim().min(1).max(4000).optional(),
     requestedBy: z.enum(["policyholder", "other"]).optional(),
     requestedByName: z.string().trim().max(200).optional(),
@@ -42,6 +44,14 @@ export const createWorkItemRequestSchema = z
   .refine((v) => v.kind !== "claim" || (v.incidentOn && v.incidentSummary), {
     message: "a claim needs incidentOn and incidentSummary",
     path: ["incidentOn"],
+  })
+  /*
+   * A claim names the policy it is made under, or says in so many words that the policy is not
+   * known. Reporting a claim against no policy by default read as cover that was never checked.
+   */
+  .refine((v) => v.kind !== "claim" || v.policyId !== undefined || v.policyUnknown === true, {
+    message: "a claim needs the policy it is made under, or policyUnknown: true",
+    path: ["policyId"],
   })
   .refine((v) => v.kind !== "endorsement" || v.requestText, {
     message: "an endorsement needs requestText",

@@ -52,7 +52,7 @@ export function clientRoutes() {
       created_at: string;
     };
 
-    const [contactsQ, policiesQ, workQ, claimsQ, endorsementsQ, documentsQ, threadsQ, mailboxQ, fileQ] =
+    const [contactsQ, policiesQ, workQ, claimsQ, documentsQ, threadsQ, mailboxQ, fileQ] =
       await Promise.all([
         db
           .from("client_contacts")
@@ -81,13 +81,6 @@ export function clientRoutes() {
           .order("incident_on", { ascending: false })
           .limit(50),
         db
-          .from("endorsements")
-          .select("id, work_item_id, kind, status, effective_on, policy_id, client_id")
-          .eq("organization_id", org.id)
-          .eq("client_id", id)
-          .order("created_at", { ascending: false })
-          .limit(50),
-        db
           .from("documents")
           .select("id, filename, kind, extraction_state, created_at")
           .eq("organization_id", org.id)
@@ -110,9 +103,26 @@ export function clientRoutes() {
           .eq("client_id", id),
       ]);
 
-    for (const q of [contactsQ, policiesQ, workQ, claimsQ, endorsementsQ, documentsQ, threadsQ, fileQ]) {
+    for (const q of [contactsQ, policiesQ, workQ, claimsQ, documentsQ, threadsQ, fileQ]) {
       if (q.error) return sendError(c, mapDatabaseError(q.error));
     }
+    /*
+     * Endorsements belong to a policy, not directly to a client — `endorsements` has no
+     * `client_id` (0028). Asking for one made every client's record fail on a real database, so
+     * a client's policies, documents and work all looked absent. They are found through the
+     * client's own policies instead.
+     */
+    const clientPolicyIds = ((policiesQ.data ?? []) as { id: string }[]).map((p) => p.id);
+    const endorsementsQ = clientPolicyIds.length
+      ? await db
+          .from("endorsements")
+          .select("id, work_item_id, kind, status, effective_on, policy_id")
+          .eq("organization_id", org.id)
+          .in("policy_id", clientPolicyIds)
+          .order("created_at", { ascending: false })
+          .limit(50)
+      : { data: [], error: null };
+    if (endorsementsQ.error) return sendError(c, mapDatabaseError(endorsementsQ.error));
 
     const policyRows = (policiesQ.data ?? []) as {
       id: string;
