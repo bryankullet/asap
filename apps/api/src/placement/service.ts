@@ -1927,8 +1927,8 @@ export async function approversOf(db: SupabaseClient, org: string): Promise<{ us
       .filter((g) => g.permission?.object_type === "placement" && g.permission.verb === "approve")
       .map((g) => g.role_id),
   );
-  const members = await db.from("organization_memberships").select("user_id, status, role").eq("organization_id", org).eq("status", "active");
-  const people = ((members.data ?? []) as { user_id: string; role: { id: string } | null }[]).filter((m) => m.role !== null && approving.has(m.role.id));
+  const members = await db.from("organization_memberships").select("user_id, status, role_id").eq("organization_id", org).eq("status", "active");
+  const people = ((members.data ?? []) as { user_id: string; role_id: string | null }[]).filter((m) => m.role_id !== null && approving.has(m.role_id));
   const who = await names(db, people.map((m) => m.user_id));
   return people.map((m) => ({ userId: m.user_id, name: who.get(m.user_id) ?? "A colleague" }));
 }

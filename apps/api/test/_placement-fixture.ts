@@ -55,6 +55,7 @@ export function membership(userId: string, roleId: string, org = ORG) {
     status: "active",
     joined_at: iso,
     organization: { id: org, name: "Acme Brokers", country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
+    role_id: roleId,
     role: { id: roleId, key: "r", name: "R", description: null, is_system: true },
   };
 }

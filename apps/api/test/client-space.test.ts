@@ -95,7 +95,7 @@ function makeDb(): FakeDb {
         { id: "27000000-0000-4000-8000-00000000000a", organization_id: ORG, client_id: ACME, work_item_id: "26000000-0000-4000-8000-00000000000b", status: "registered", incident_on: "2026-08-01", incident_summary: "Windscreen broken", insurer_reference: "JUB-99", policy_id: "23000000-0000-4000-8000-00000000000a" },
       ],
       endorsements: [
-        { id: "28000000-0000-4000-8000-00000000000a", organization_id: ORG, work_item_id: "26000000-0000-4000-8000-00000000000a", kind: "add_vehicle", status: "applied", effective_on: "2026-07-01", policy_id: "23000000-0000-4000-8000-00000000000a", created_at: iso },
+        { id: "28000000-0000-4000-8000-00000000000a", organization_id: ORG, work_item_id: "26000000-0000-4000-8000-00000000000a", kind: "add_vehicle", applied_version_id: "29000000-0000-4000-8000-00000000000a", effective_on: "2026-07-01", policy_id: "23000000-0000-4000-8000-00000000000a", created_at: iso },
       ],
       documents: [
         { id: "25000000-0000-4000-8000-00000000000a", organization_id: ORG, client_id: ACME, filename: "schedule.pdf", kind: "policy_schedule", extraction_state: "extracted", created_at: iso, deleted_at: null },

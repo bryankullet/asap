@@ -116,7 +116,7 @@ export function clientRoutes() {
     const endorsementsQ = clientPolicyIds.length
       ? await db
           .from("endorsements")
-          .select("id, work_item_id, kind, status, effective_on, policy_id")
+          .select("id, work_item_id, kind, effective_on, policy_id, applied_version_id")
           .eq("organization_id", org.id)
           .in("policy_id", clientPolicyIds)
           .order("created_at", { ascending: false })
@@ -256,7 +256,9 @@ export function clientRoutes() {
         id: r["id"] as string,
         workItemId: r["work_item_id"] as string,
         kind: r["kind"] as string,
-        status: r["status"] as string,
+        // Endorsements store no status (0028): one is applied when it names the policy version it
+        // created, and open until then.
+        status: r["applied_version_id"] ? "applied" : "open",
         effectiveOn: (r["effective_on"] as string | null) ?? null,
         policyId: (r["policy_id"] as string | null) ?? null,
       })),
