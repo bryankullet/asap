@@ -266,7 +266,8 @@ describe("live mode", () => {
 
   it("opens a policy found by Search on the policy itself", async () => {
     const a = await live();
-    const { sel } = await import("./engine/store.js");
+    // @ts-expect-error -- the approved engine is untyped JavaScript
+    const { sel } = (await import("./engine/store.js")) as { sel: { search(q: string): { kind: string; target: unknown }[] } };
     const hit = sel.search("TH-MTR-001").find((h: { kind: string }) => h.kind === "Policy") as { target: { ws: string } };
     expect(hit.target).toMatchObject({ ws: "policy", clientId: CLIENT, policyYearId: PER_OK });
     expect(a.ai.workspace(hit.target).title).toMatch(/TH-MTR-001/);
