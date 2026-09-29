@@ -99,6 +99,17 @@ const PATCHES = [
    "      const named = (ref) => { let w = null; try { w = ref.ws === 'nothing' ? null : this.A.ai.workspace(ref); } catch { w = null; } return w && w.title ? w : null; };\n      out.history = this.state.recent.map(r => ({ r, w: named(r.ref) })).filter(x => x.w).map(({ r, w }) => ({ title: w.title, note: (w.kind || 'Opened') + ' · ' + new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), go: () => this.openRef(r.ref) }));"],
   // A link to related work is not a step; only the work's own next step is called that.
   ["b.nav ? 'Next step' : 'A human must approve this'", "b.nav ? (b.heading || 'Related') : 'A human must approve this'"],
+  // A file picked in one workspace belongs to that workspace: its progress never shows in another
+  // workspace's uploader (a CSV chosen on Import is not a client document ready to file).
+  ["    this.setState({ progress: prog });", "    this.setState({ progress: prog, progressFor: JSON.stringify((this.activeTab() || {}).ref || null) });"],
+  ["o.hasProgress = this.state.progress.length > 0;", "o.hasProgress = this.state.progress.length > 0 && this.state.progressFor === JSON.stringify((this.activeTab() || {}).ref || null);"],
+  // A row may open a stored source file (a short-lived signed link from the API) in a new tab.
+  ["    if (a.a === 'unstage') {", "    if (a.a === 'link') { if (a.url) window.open(a.url, '_blank', 'noopener'); else this.flash('The file could not be opened just now. Refresh records and try again.'); return; }\n    if (a.a === 'unstage') {"],
+  // A reload reopens the workspace that was in front, not Today. Only the reference is kept, in
+  // this tab's session; the records themselves are always read again.
+  ["    if (!ref) return;\n    const ident = ", "    if (!ref) return;\n    try { sessionStorage.setItem('asap.openRef', JSON.stringify(ref)); } catch { /* storage blocked: a reload opens Today */ }\n    const ident = "],
+  ["go: () => this.setState({ activeId: t.id, contextRef: t.ref }),", "go: () => { try { sessionStorage.setItem('asap.openRef', JSON.stringify(t.ref)); } catch { /* storage blocked */ } this.setState({ activeId: t.id, contextRef: t.ref }); },"],
+  ["    const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];\n    this.setState({ ready: true, tabs, activeId: 't1',", "    const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];\n    let reopen = null;\n    try { reopen = JSON.parse(sessionStorage.getItem('asap.openRef') || 'null'); } catch { reopen = null; }\n    let back = null;\n    try { back = reopen && reopen.ws && reopen.ws !== 'today' && reopen.ws !== 'nothing' ? A.ai.workspace(reopen) : null; } catch { back = null; }\n    if (back) tabs.push({ id: 't2', ref: reopen, pinned: false });\n    this.setState({ ready: true, tabs, activeId: back ? 't2' : 't1', contextRef: back ? reopen : undefined,"],
   // An upload may name the action its file goes to (live import reads a book this way).
   // The picker is emptied once its files are read, so a file chosen in one workspace does not stay
   // selected in the next one that happens to reuse the same control.

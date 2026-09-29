@@ -14,6 +14,29 @@ const PER_OK = "50000000-0000-4000-8000-000000000001";
 const PER_UNVERIFIED = "50000000-0000-4000-8000-000000000002";
 const WORK = "60000000-0000-4000-8000-000000000001";
 const AUTO = "70000000-0000-4000-8000-000000000001";
+const DOC = "b0000000-0000-4000-8000-000000000001";
+const FIELD = "b1000000-0000-4000-8000-000000000001";
+
+// The document's one read value; the review mock flips it to accepted, as the server would.
+let fieldState = "proposed";
+const docDetail = () => ({
+  document: { id: DOC, kind: "policy_schedule", filename: "schedule.pdf", mimeType: "application/pdf", byteSize: 1000, pageCount: 1, extractionState: "extracted", extractionError: null, clientId: CLIENT, workItemId: null, createdAt: "2026-09-02" },
+  pages: [{ pageNumber: 1, width: 600, height: 800, text: "MOTOR SCHEDULE\nPolicy number: TH-MTR-001\nInsured: Tausi Hauliers Ltd" }],
+  fields: [{ id: FIELD, fieldKey: "policy_number", proposedValue: "TH-MTR-001", correctedValue: null, state: fieldState, condition: "inferred", page: 1, region: { x: 60, y: 80, width: 200, height: 20 }, reviewedBy: null, reviewedAt: null }],
+  fileUrl: "https://storage.example.test/signed/schedule.pdf?token=t",
+  fileUrlExpiresAt: "2026-09-29T12:00:00Z",
+});
+const reviewDocumentField = vi.fn(async () => {
+  fieldState = "accepted";
+  return {};
+});
+const applyTargets = vi.fn(async () => ({ suggestions: [{ targetType: "policy", targetId: POL_OK, label: "TH-MTR-001 · Motor", reason: "Filed under this client and the number matches", condition: "known" }], whyNoTarget: null, applicableFields: { policy: ["policy_number"], policy_period: [], client: [] } }));
+const applyPreview = vi.fn(async () => ({
+  target: { targetType: "policy", targetId: POL_OK, label: "TH-MTR-001 · Motor", reason: "r", condition: "known" },
+  fields: [{ documentFieldId: FIELD, fieldKey: "policy_number", currentValue: null, proposedValue: "TH-MTR-001", page: 1, region: null, condition: "inferred", state: "accepted", unchanged: false, blockedBecause: null }],
+  missing: [],
+}));
+const applyToRecord = vi.fn(async () => ({ applicationId: "b2000000-0000-4000-8000-000000000001" }));
 
 const setAutomationEnabled = vi.fn(async () => ({}));
 const createClient = vi.fn(async (input: { name: string; confirmNew?: boolean }) =>
@@ -40,6 +63,7 @@ const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-
 
 vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } } }));
 vi.mock("../lib/api.js", () => ({
+  ApiRequestError: class ApiRequestError extends Error {},
   describeApiError: (e: unknown) => (e instanceof Error ? e.message : "failed"),
   api: {
     members: async () => ({
@@ -69,7 +93,7 @@ vi.mock("../lib/api.js", () => ({
         { id: POL_OK, policyNumber: "TH-MTR-001", classOfBusiness: "Motor", insurerName: "First Insurer", periods: [{ id: PER_OK, periodStart: "2026-01-01", periodEnd: "2026-12-31", premiumAmount: "1200000.00", premiumCurrency: "KES", premiumBasis: "gross", commissionAmount: null, premiumSource: "document", premiumVerifiedAt: "2026-01-02", premiumEvidenceDocumentId: null, current: true }] },
         { id: POL_UNVERIFIED, policyNumber: null, classOfBusiness: "Fire", insurerName: null, periods: [{ id: PER_UNVERIFIED, periodStart: "2026-02-01", periodEnd: "2027-01-31", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] },
       ],
-      work: [], claims: [], endorsements: [], documents: [], threads: [], fileMissing: [], mailboxConnected: false,
+      work: [], claims: [], endorsements: [], documents: [{ id: DOC, filename: "schedule.pdf", kind: "policy_schedule", createdAt: "2026-09-02", extractionState: "extracted" }], threads: [], fileMissing: [], mailboxConnected: false,
       permissions: { canEditContacts: true, canUploadDocuments: true, canStartWork: true },
     }),
     policySpace: async (id: string) => ({
@@ -85,7 +109,8 @@ vi.mock("../lib/api.js", () => ({
     conversations: async () => ({ conversations: [] }),
     conversationMessages: async () => ({ messages: [] }),
     saveTurns,
-    document: async () => null,
+    document: async (id: string) => (id === DOC ? docDetail() : null),
+    reviewDocumentField, applyTargets, applyPreview, applyToRecord,
   },
 }));
 
@@ -237,5 +262,39 @@ describe("live mode", () => {
     const refused = (await A.records.act("payment.match", { invoiceId: "x" }, "t2")) as { ok: boolean; error: string };
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/not connected/);
+  });
+
+  it("opens a policy found by Search on the policy itself", async () => {
+    const a = await live();
+    const { sel } = await import("./engine/store.js");
+    const hit = sel.search("TH-MTR-001").find((h: { kind: string }) => h.kind === "Policy") as { target: { ws: string } };
+    expect(hit.target).toMatchObject({ ws: "policy", clientId: CLIENT, policyYearId: PER_OK });
+    expect(a.ai.workspace(hit.target).title).toMatch(/TH-MTR-001/);
+    // A reference by the policy's own id opens it too, never Today.
+    expect(a.ai.workspace({ ws: "policy", policyId: POL_OK }).title).toMatch(/TH-MTR-001/);
+  });
+
+  it("shows where a value was read, links the source file, confirms at once, then previews and applies", async () => {
+    fieldState = "proposed";
+    const a = await live();
+    const ws = a.ai.workspace({ ws: "document", documentId: DOC });
+    expect(text(ws)).toContain('"a":"link","url":"https://storage.example.test/signed/schedule.pdf?token=t"');
+    expect(text(ws)).toContain("show where");
+
+    const where = a.ai.workspace({ ws: "document", documentId: DOC, fieldId: FIELD });
+    expect(text(where)).toContain("|TH-MTR-001|");
+    expect(text(where)).toContain("schedule.pdf?token=t#page=1");
+
+    const reviewed = (await a.records.act("doc.review", { documentId: DOC, [FIELD]: "TH-MTR-001" })) as { ok: boolean; text: string };
+    expect(reviewed).toMatchObject({ ok: true, text: "1 value confirmed" });
+    const after = a.ai.workspace({ ws: "document", documentId: DOC });
+    expect(text(after)).toContain("Accepted");
+    expect(text(after)).toContain("Apply confirmed values to a record");
+
+    await a.records.act("doc.applyPreview", { documentId: DOC, target: "policy:" + POL_OK });
+    expect(text(a.ai.workspace({ ws: "document", documentId: DOC }))).toContain("nothing recorded → TH-MTR-001");
+    const applied = (await a.records.act("doc.apply", { documentId: DOC })) as { ok: boolean };
+    expect(applied.ok).toBe(true);
+    expect(applyToRecord).toHaveBeenCalledWith(DOC, expect.objectContaining({ targetType: "policy", targetId: POL_OK, fields: [expect.objectContaining({ fieldKey: "policy_number", from: null, to: "TH-MTR-001" })] }));
   });
 });

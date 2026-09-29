@@ -353,12 +353,18 @@ async function hydrate(me) {
     if (v && d.pages.length) v.lines = d.pages.slice(0, 2).flatMap((pg) => pg.text.split(/\n/).filter(Boolean).slice(0, 6));
   });
 
+  // Where each fully reviewed document could be applied, so the choice is ready when it opens.
+  const applyTargets = new Map();
+  const reviewed = [...documents.values()].filter((d) => d.fields.length && d.fields.every((f) => f.state !== "proposed") && d.fields.some((f) => f.state === "accepted" || f.state === "corrected"));
+  const targets = await pool(reviewed, 4, (d) => api.applyTargets(d.document.id));
+  reviewed.forEach((d, i) => targets[i] && applyTargets.set(d.document.id, targets[i]));
+
   // Documents count as working only when every client's documents and every document read back.
   const docsDegraded = (db.meta.unreadableClients || []).length > 0 || docDetails.some((d) => !d) || [...documents.values()].some((d) => d.document.extractionState === "failed");
   db.meta.docsDegraded = docsDegraded;
   const modelConfigured = await api.askStatus().then((r) => r.modelConfigured).catch(() => null);
 
-  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, modelConfigured, conversationId: convo.id } };
+  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -526,14 +532,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   const refresh = async () => {
     const thread = db.conversations.find((c) => c.id === "cnv_main");
     loaded = await hydrate(me);
     db = loaded.db;
     if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, modelConfigured: loaded.extras.modelConfigured });
+    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, modelConfigured: loaded.extras.modelConfigured });
     S.useBackend({ db, dispatch });
   };
 
@@ -780,6 +786,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const open = d.fields.filter((f) => f.state === "proposed");
       try {
         let corrected = 0;
+        let accepted = 0;
         for (const f of open) {
           const typed = (p[f.id] ?? "").trim();
           if (typed && typed !== (f.proposedValue ?? "")) {
@@ -787,10 +794,53 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
             corrected++;
           } else if (typed) {
             await api.reviewDocumentField(d.document.id, f.id, { decision: "accept", value: null });
+            accepted++;
           }
         }
+        // Re-read this one document, not every record, so the page changes as soon as it is saved.
+        const fresh = await api.document(d.document.id);
+        state.documents.set(fresh.document.id, fresh);
+        const targets = await api.applyTargets(fresh.document.id).catch(() => null);
+        if (targets) state.applyTargets.set(fresh.document.id, targets);
+        state.applyPreviews.delete(fresh.document.id);
+        const skipped = open.length - accepted - corrected;
+        const text = plural(accepted + corrected, "value", "values") + " confirmed" + (corrected ? ", " + corrected + " as your correction" : "") + (skipped ? "; " + plural(skipped, "empty value was", "empty values were") + " left for later" : "");
+        state.docNotice = { documentId: fresh.document.id, title: text, text: "Saved against your name. Next, choose the record to apply them to below — nothing on a record changes until you apply." };
+        return ok(text);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "doc.applyPreview": async (p) => {
+      const [targetType, targetId] = String(p.target || "").split(":");
+      if (!targetType || !targetId) return { ok: false, error: "Choose the record to apply to." };
+      try {
+        const preview = await api.applyPreview(p.documentId, targetType, targetId);
+        state.applyPreviews.set(p.documentId, preview);
+        state.docNotice = null;
+        return { ok: true, text: "Preview ready — nothing has been written", at: d0() };
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "doc.apply": async (p) => {
+      const preview = state.applyPreviews.get(p.documentId);
+      if (!preview) return { ok: false, error: "Preview the change first. Nothing was written." };
+      const usable = preview.fields.filter((f) => !f.blockedBecause && !f.unchanged && f.proposedValue);
+      if (!usable.length) return { ok: false, error: "There is nothing to apply. Nothing was written." };
+      if (usable.some((f) => f.fieldKey === "premium") && !p.premiumBasis) return { ok: false, error: "Say whether the premium is gross or total payable. Nothing was written." };
+      try {
+        await api.applyToRecord(p.documentId, {
+          targetType: preview.target.targetType,
+          targetId: preview.target.targetId,
+          idempotencyKey: crypto.randomUUID(),
+          fields: usable.map((f) => ({ documentFieldId: f.documentFieldId, fieldKey: f.fieldKey, from: f.currentValue, to: f.proposedValue, ...(f.fieldKey === "premium" ? { premiumBasis: p.premiumBasis } : {}) })),
+        });
+        state.applyPreviews.delete(p.documentId);
         await refresh();
-        return ok(plural(open.length, "value", "values") + " confirmed" + (corrected ? ", " + corrected + " corrected by you" : ""));
+        const text = plural(usable.length, "value", "values") + " applied to " + preview.target.label;
+        state.docNotice = { documentId: p.documentId, title: text, text: "Written with an audit entry against your name. The record now shows these values, with this document as their evidence." };
+        return ok(text);
       } catch (e) {
         return fail(e);
       }
@@ -854,7 +904,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return { ok: false, error: what + " is not connected to your brokerage's records yet. Nothing was changed." };
     }
     // Only writes that created or changed a record are remembered as done; reads and refusals are not.
-    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template"]);
+    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template", "doc.applyPreview"]);
     const settle = (res) => {
       if (res.ok && !REPEATABLE.has(type)) db.meta.ledger[key] = { ...res, actionId: key };
       return res;

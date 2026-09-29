@@ -750,7 +750,7 @@ export const sel = {
     const out = [];
     const add = (kind, title, note, target) => out.push({ kind, title, note, target });
     all('clients').forEach(c => { if (c.name.toLowerCase().includes(t)) add('Client', c.name, 'Client record', { ws: 'client', clientId: c.id }); });
-    all('policies').forEach(p => { if ((p.number + ' ' + p.title).toLowerCase().includes(t)) add('Policy', p.number + ' · ' + p.title, byId('clients', p.clientId).name, { ws: 'policy', policyId: p.id }); });
+    all('policies').forEach(p => { if ((p.number + ' ' + p.title).toLowerCase().includes(t)) { const y = where('policyYears', x => x.policyId === p.id).sort((a, b) => (a.from < b.from ? 1 : -1))[0]; add('Policy', p.number + ' · ' + p.title, byId('clients', p.clientId)?.name || 'Client', y ? { ws: 'policy', clientId: p.clientId, policyYearId: y.id } : { ws: 'client', clientId: p.clientId }); } });
     all('policyItems').forEach(i => { if (i.reg.toLowerCase().includes(t) || i.make.toLowerCase().includes(t)) add('Vehicle', i.reg + ' · ' + i.make, byId('clients', i.clientId).name, { ws: 'coverage', reg: i.reg }); });
     all('claims').forEach(c => { if (((c.ref || '') + ' ' + c.title + ' ' + (c.reg || '')).toLowerCase().includes(t)) add('Claim', c.title, c.ref || 'No insurer reference yet', { ws: 'claim', claimId: c.id }); });
     all('documents').forEach(d => {

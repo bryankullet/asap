@@ -10,6 +10,7 @@ vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => 
 describe("the approved interface", () => {
   it("boots, answers Ask and opens the workspace it names", async () => {
     localStorage.clear();
+    sessionStorage.clear();
     const { default: Component } = await import("./generated/logic.gen.js");
     const { renderTemplate } = await import("./generated/template.gen.js");
     const { loadDemoAdapters } = await import("./demo.js");
@@ -36,6 +37,7 @@ describe("the approved interface", () => {
 
   it("draws the automation form with fields a person can type into", async () => {
     localStorage.clear();
+    sessionStorage.clear();
     const { default: Component } = await import("./generated/logic.gen.js");
     const { renderTemplate } = await import("./generated/template.gen.js");
     const { loadDemoAdapters } = await import("./demo.js");

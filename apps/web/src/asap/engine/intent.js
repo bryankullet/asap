@@ -360,7 +360,9 @@ WS.client = (r) => {
 };
 
 WS.policy = (r) => {
-  const year = r.policyYearId ? byId('policyYears', r.policyYearId) : sel.activeYear(r.clientId);
+  // A policy may be opened by its own id (Search does this): take its latest period.
+  const ofPolicy = r.policyId && !r.policyYearId ? where('policyYears', y => y.policyId === r.policyId).sort((a, b) => (a.from < b.from ? 1 : -1))[0] : null;
+  const year = ofPolicy || (r.policyYearId ? byId('policyYears', r.policyYearId) : sel.activeYear(r.clientId));
   if (!year) return WS.client(r);
   const pol = byId('policies', year.policyId);
   const items = sel.items(year.id);

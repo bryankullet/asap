@@ -418,15 +418,21 @@ function documentSpace(ref, state) {
   const doc = d.document;
   const fields = d.fields || [];
   const open = fields.filter((f) => f.state === "proposed");
+  const settled = fields.filter((f) => f.state === "accepted" || f.state === "corrected");
   const client = doc.clientId ? S.sel.client(doc.clientId) : null;
   const reading = { not_started: "Not read yet", queued: "Waiting to be read", working: "Being read now", extracted: "Read", failed: "Could not be read", not_applicable: "This kind of file is not read" }[doc.extractionState] || words(doc.extractionState);
+  const valueOf = (f) => f.correctedValue ?? f.proposedValue;
+  const focus = ref.fieldId ? fields.find((f) => f.id === ref.fieldId) : null;
+  const fileLink = (page) => (d.fileUrl ? d.fileUrl + (page ? "#page=" + page : "") : null);
+  const base = { ws: "document", documentId: doc.id };
   return {
     kind: "Document",
     title: doc.filename,
     status: doc.extractionState === "extracted" ? "live" : "draft",
     statusLabel: reading,
-    recordRef: { ws: "document", documentId: doc.id },
+    recordRef: base,
     blocks: [
+      ...(state.docNotice?.documentId === doc.id ? [note("green", state.docNotice.title, state.docNotice.text)] : []),
       facts([
         ["Client", client ? client.name : "Not filed under a client"],
         ["Kind", words(doc.kind)],
@@ -434,6 +440,12 @@ function documentSpace(ref, state) {
         ["Reading", reading + (doc.extractionError ? " — " + doc.extractionError : "")],
         ["Filed", date(doc.createdAt)],
       ]),
+      rows("Source file", [
+        d.fileUrl
+          ? { title: doc.filename, note: "Opens the stored file in a new tab. The link is private and short-lived; refresh records for a new one.", badge: "Open file", badgeTone: ok, action: { a: "link", url: fileLink(null) } }
+          : { title: doc.filename, note: "The stored file could not be opened just now. Its text and the values read from it are shown here; refresh records to try again.", badge: "Unavailable", badgeTone: warn },
+      ]),
+      ...(focus ? evidenceBlocks(d, focus, fileLink, base) : []),
       ...(doc.extractionState === "extracted"
         ? [
             rows(
@@ -441,9 +453,10 @@ function documentSpace(ref, state) {
               fields.length
                 ? fields.map((f) => ({
                     title: words(f.fieldKey),
-                    note: (f.correctedValue ?? f.proposedValue ?? "nothing read") + (f.page ? " · page " + f.page : " · page not placed"),
+                    note: (valueOf(f) ?? "nothing read") + (f.page ? " · page " + f.page + " — show where" : " · page not placed"),
                     badge: f.state === "proposed" ? "Proposed" : words(f.state),
                     badgeTone: f.state === "proposed" ? warn : f.state === "rejected" ? bad : ok,
+                    ...(f.page ? { action: { a: "open", ref: { ...base, fieldId: f.id } } } : {}),
                   }))
                 : [{ title: "Nothing to review", note: "ASAP found no fields it reads in this document.", badge: "Read", badgeTone: ok }],
             ),
@@ -456,14 +469,100 @@ function documentSpace(ref, state) {
                     "doc.review",
                     { documentId: doc.id },
                     "Confirm these values",
-                    "Unchanged values are accepted; edited ones are saved as your correction beside what was read. Nothing is applied to a record from here.",
+                    "Unchanged values are accepted; edited ones are saved as your correction beside what was read. Applying them to a record is the next step, after this.",
                   ),
                 ]
               : []),
+            ...(!open.length && settled.length ? applyBlocks(d, state) : []),
           ]
         : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
     ],
   };
+}
+
+/** The page a value was read from, with the value marked where it stands, and the file itself. */
+function evidenceBlocks(d, f, fileLink, base) {
+  const page = d.pages.find((p) => p.pageNumber === f.page);
+  const value = (f.correctedValue ?? f.proposedValue ?? "").trim();
+  const lines = page ? page.text.split(/\n/).map((l) => l.replace(/\|/g, "¦")).filter((l) => l.trim()) : [];
+  let found = false;
+  const marked = lines.map((l) => {
+    const at = value ? l.toLowerCase().indexOf(value.toLowerCase()) : -1;
+    if (at < 0) return l;
+    found = true;
+    return l.slice(0, at) + "|" + l.slice(at, at + value.length) + "|" + l.slice(at + value.length);
+  });
+  // Keep the page readable: the lines around the mark, not a wall of text.
+  const hit = marked.findIndex((l) => l.includes("|"));
+  const shown = hit < 0 ? marked.slice(0, 18) : marked.slice(Math.max(0, hit - 6), hit + 10);
+  const r = f.region;
+  const where = r && page ? " Marked area: " + Math.round((r.x / page.width) * 100) + "% across, " + Math.round((r.y / page.height) * 100) + "% down the page." : "";
+  return [
+    { t: "doc", name: words(f.fieldKey) + " — page " + f.page, kind: "What ASAP read: " + (value || "nothing"), title: "PAGE " + f.page, lines: shown.length ? shown : ["This page has no text ASAP could read."] },
+    note(found ? "green" : "amber", found ? "Highlighted where it was read" : "Not found word for word on this page", (found ? "The highlighted words on page " + f.page + " are the value ASAP read." : "The value does not appear verbatim in the page text — it may be split across lines or reformatted. Open the file at page " + f.page + " to check it yourself.") + where),
+    rows("Check it in the file", [
+      d.fileUrl
+        ? { title: "Open the file at page " + f.page, note: "The original, as stored — not ASAP's reading of it.", badge: "Open", badgeTone: ok, action: { a: "link", url: fileLink(f.page) } }
+        : { title: "The file could not be opened just now", note: "Refresh records to try again.", badge: "Unavailable", badgeTone: warn },
+      { title: "Back to every value", note: "Close this page view.", badge: "Back", badgeTone: ok, action: { a: "open", ref: base } },
+    ]),
+  ];
+}
+
+const PREMIUM_BASIS = [
+  { value: "gross", label: "Gross premium (before levies)" },
+  { value: "total_payable", label: "Total payable (including levies)" },
+];
+
+/** Choosing a record, seeing exactly what would change, then applying — in that order. */
+function applyBlocks(d, state) {
+  const doc = d.document;
+  const t = state.applyTargets.get(doc.id);
+  const preview = state.applyPreviews.get(doc.id);
+  if (!t) return [note("amber", "Apply to a record", "ASAP could not work out which records this document may belong to just now. Refresh records to try again.")];
+  const out = [];
+  if (!t.suggestions.length) out.push(note("amber", "No record to apply to", t.whyNoTarget || "ASAP found no record this document is about."));
+  else
+    out.push(
+      form(
+        "applyTarget:" + doc.id,
+        "Apply confirmed values to a record",
+        [{ key: "target", label: "RECORD", options: t.suggestions.map((x) => ({ value: x.targetType + ":" + x.targetId, label: x.label + " — " + x.reason })) }],
+        "doc.applyPreview",
+        { documentId: doc.id },
+        preview ? "Preview again" : "Preview the change",
+        "Nothing is written until you apply. The preview shows what the record holds now beside what would replace it.",
+      ),
+    );
+  if (preview) {
+    const usable = preview.fields.filter((f) => !f.blockedBecause && !f.unchanged && f.proposedValue);
+    out.push(
+      rows(
+        "What would change on " + preview.target.label,
+        preview.fields.map((f) => ({
+          title: words(f.fieldKey),
+          note: (f.currentValue ?? "nothing recorded") + " → " + (f.proposedValue ?? "nothing read") + (f.blockedBecause ? " · " + f.blockedBecause : f.unchanged ? " · already recorded" : ""),
+          badge: f.blockedBecause ? "Cannot apply" : f.unchanged ? "Unchanged" : "Will change",
+          badgeTone: f.blockedBecause ? bad : f.unchanged ? ok : warn,
+        })).concat(preview.missing.map((m) => ({ title: words(m), note: "This record takes it, but the document did not give it.", badge: "Not in document", badgeTone: warn }))),
+      ),
+    );
+    if (usable.length) {
+      const needsBasis = usable.some((f) => f.fieldKey === "premium");
+      out.push(
+        form(
+          "apply:" + doc.id,
+          "Apply " + plural(usable.length, "value", "values"),
+          needsBasis ? [{ key: "premiumBasis", label: "WHAT THE PREMIUM FIGURE IS", options: PREMIUM_BASIS }] : [],
+          "doc.apply",
+          { documentId: doc.id },
+          "Apply " + plural(usable.length, "value", "values") + " to the record",
+          "Written with an audit entry against your name. If the record changed since this preview, nothing is written and you are asked to preview again.",
+        ),
+      );
+    } else out.push(note("green", "Nothing to apply", "The record already holds these values, or none of them can go on it."));
+  }
+  return out;
 }
 
 /* ---------------------------------------------------------------- settings and connections */

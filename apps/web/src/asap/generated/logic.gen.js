@@ -46,7 +46,12 @@ class Component extends DCLogic {
     A.persistence.init();
     const conv = A.records.sel.conversation('cnv_main');
     const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];
-    this.setState({ ready: true, tabs, activeId: 't1',
+    let reopen = null;
+    try { reopen = JSON.parse(sessionStorage.getItem('asap.openRef') || 'null'); } catch { reopen = null; }
+    let back = null;
+    try { back = reopen && reopen.ws && reopen.ws !== 'today' && reopen.ws !== 'nothing' ? A.ai.workspace(reopen) : null; } catch { back = null; }
+    if (back) tabs.push({ id: 't2', ref: reopen, pinned: false });
+    this.setState({ ready: true, tabs, activeId: back ? 't2' : 't1', contextRef: back ? reopen : undefined,
       thread: (conv && conv.messages && conv.messages.length) ? conv.messages : [{
         role: 'ai', lead: 'Good morning. Tell me what you need.',
         text: 'I read your records, prepare the next step and show my evidence. I never send, place, change cover or move money without your click.',
@@ -72,6 +77,7 @@ class Component extends DCLogic {
   activeTab() { return this.state.tabs.find(t => t.id === this.state.activeId) || this.state.tabs[0]; }
   openRef = (ref, opts = {}) => {
     if (!ref) return;
+    try { sessionStorage.setItem('asap.openRef', JSON.stringify(ref)); } catch { /* storage blocked: a reload opens Today */ }
     const ident = (r) => JSON.stringify(Object.keys(r).filter(k => !['query', 'date'].includes(k) && r[k] != null && r[k] !== '').sort().map(k => [k, r[k]]));
     const key = JSON.stringify(ref);
     const existing = this.state.tabs.find(t => ident(t.ref) === ident(ref));
@@ -175,7 +181,7 @@ class Component extends DCLogic {
     try { ev.target.value = ''; } catch { /* some browsers refuse; the files are already copied */ }
     if (!files.length) return;
     const prog = files.map(f => ({ name: f.name, pct: 10, state: 'Reading' }));
-    this.setState({ progress: prog });
+    this.setState({ progress: prog, progressFor: JSON.stringify((this.activeTab() || {}).ref || null) });
     const out = [];
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
@@ -261,7 +267,7 @@ class Component extends DCLogic {
       if (o.isUpload) {
         o.label2 = b.label; o.multiple = !!b.multiple;
         o.onPick = (e) => this.pickFiles(b, e);
-        o.hasProgress = this.state.progress.length > 0;
+        o.hasProgress = this.state.progress.length > 0 && this.state.progressFor === JSON.stringify((this.activeTab() || {}).ref || null);
         o.progress = this.state.progress.map(p => ({ name: p.name, state: p.state, width: p.pct + '%',
           color: /Failed/.test(p.state) ? '#a43b32' : '#1f6c49' }));
       }
@@ -332,6 +338,7 @@ class Component extends DCLogic {
       this.flash('Requirement marked supplied and recorded.');
       return this.bump();
     }
+    if (a.a === 'link') { if (a.url) window.open(a.url, '_blank', 'noopener'); else this.flash('The file could not be opened just now. Refresh records and try again.'); return; }
     if (a.a === 'unstage') { const staged = [...this.state.staged]; staged.splice(a.index, 1); return this.setState({ staged }); }
     if (a.a === 'retry') { return this.flash('Pick the file again — the read failed and nothing was saved.'); }
   }
@@ -506,7 +513,7 @@ class Component extends DCLogic {
         const on = t.id === this.state.activeId;
         return { kind: w.kind, title: w.title, pinColor: t.pinned ? '#1f6c49' : '#c2ccc4',
           bg: on ? '#f2f7f3' : '#fff', fg: on ? '#18231c' : '#4c564e', line: on ? '#bcd4c3' : '#e5e9e5',
-          go: () => this.setState({ activeId: t.id, contextRef: t.ref }),
+          go: () => { try { sessionStorage.setItem('asap.openRef', JSON.stringify(t.ref)); } catch { /* storage blocked */ } this.setState({ activeId: t.id, contextRef: t.ref }); },
           pin: () => this.setState({ tabs: this.state.tabs.map(x => x.id === t.id ? { ...x, pinned: !x.pinned } : x) }),
           close: () => this.closeTab(t.id),
           more: () => this.flash(w.kind + ' · ' + w.title + (t.pinned ? ' · pinned' : '') + ' — pin keeps it through navigation; close removes the tab, never the record.') };
