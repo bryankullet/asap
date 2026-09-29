@@ -51,7 +51,7 @@ function clientsSpace() {
             clients.map((c) => {
               const pols = S.sel.policies(c.id).length;
               const open = S.sel.work({ clientId: c.id }).filter((w) => w.state !== "Completed").length;
-              return { title: c.name, note: plural(pols, "policy", "policies") + " · " + plural(open, "open item", "open items"), badge: "Open", badgeTone: ok, action: { a: "open", ref: { ws: "client", clientId: c.id } } };
+              return { title: c.name, note: plural(pols, "policy", "policies") + " · " + plural(open, "open item", "open items"), badge: c.legacyInvalid ? "Legacy — needs correction" : "Open", badgeTone: c.legacyInvalid ? bad : ok, action: { a: "open", ref: { ws: "client", clientId: c.id } } };
             }),
           ),
           nav("Add a client", "Start with the client's name.", { ws: "newclient" }),
@@ -103,6 +103,7 @@ function importSpace(state) {
     note("amber", "Nothing is saved until you confirm", "ASAP reads the file on its own server, shows what every row would do and waits. A client that is only a possible match is never assumed — you choose."),
     { t: "upload", label: "Choose a spreadsheet, CSV or PDF of clients and policies", action: "import.preview" },
   ];
+  if (state.importError && !p) blocks.push(note("red", state.importError.title, state.importError.text));
   if (!p)
     blocks.push(
       rows(
@@ -236,6 +237,12 @@ function quoteSpace(ref, state) {
   };
 }
 
+// Records saved before today's validation (a one-letter title, a supply with no real evidence)
+// are shown as they are but named for what they are, so nobody takes them as sound.
+const LEGACY = "Legacy record — invalid, needs correction";
+const tooShort = (v, n = 3) => (v || "").trim().length < n;
+const weakSupply = (r) => r.suppliedAt && (/^marked supplied in asap$/i.test((r.evidence?.label || r.evidenceNote || "").trim()) || tooShort(r.evidence?.label || r.evidenceNote, 10));
+
 function opportunitySpace(id, state) {
   const d = state.opportunities.get(id);
   if (!d) return { kind: "Quotation work", title: "This quotation could not be read", status: "draft", statusLabel: "Unavailable", blocks: [note("red", "Not available", "Refresh records from your profile and try again. Nothing was changed.")] };
@@ -245,7 +252,9 @@ function opportunitySpace(id, state) {
   const addable = d.availableInsurers.filter((a) => !live.some((i) => i.insurerId === a.id));
   const outstanding = d.requirements.filter((r) => !r.suppliedAt);
   const act = (action, extra) => ({ id, action, ...extra });
+  const legacy = tooShort(o.title) || tooShort(o.classOfBusiness) || tooShort(d.client.name, 2) || d.requirements.some((r) => tooShort(r.label) || weakSupply(r));
   const blocks = [
+    ...(legacy ? [note("red", LEGACY, "Some of this quotation was saved before ASAP checked its details — a title, class or requirement too short to mean anything, or a requirement marked supplied without evidence. Correct it before relying on it.")] : []),
     facts([
       ["Client", d.client.name],
       ["Cover", o.title],
@@ -260,8 +269,8 @@ function opportunitySpace(id, state) {
         ? d.requirements.map((r) => ({
             title: r.label,
             note: r.suppliedAt ? "Supplied " + date(r.suppliedAt) + (r.suppliedByName ? " by " + r.suppliedByName : "") + (r.evidence?.label ? " · " + r.evidence.label : "") : "Outstanding",
-            badge: r.suppliedAt ? "Supplied" : "Missing",
-            badgeTone: r.suppliedAt ? ok : bad,
+            badge: tooShort(r.label) || weakSupply(r) ? "Legacy — needs correction" : r.suppliedAt ? "Supplied" : "Missing",
+            badgeTone: tooShort(r.label) || weakSupply(r) ? bad : r.suppliedAt ? ok : bad,
           }))
         : [{ title: "No requirements recorded", note: "Add what the insurers will need.", badge: "Empty", badgeTone: warn }],
     ),
@@ -389,7 +398,7 @@ function workItemSpace(ref) {
         ["Kind", w.kind],
         ["Where it stands", w.statusLabel || (w.state === "Completed" ? "Done" : "In progress")],
         ["Owner", owner ? owner.name : "unassigned"],
-        ["Next step", w.nextStep || "not recorded"],
+        ["Next step", w.nextStep || (w.state === "Completed" ? "None — done" : "Decide the first step and record it")],
         ["Priority", { high: "High priority", medium: "Normal priority", low: "Low priority" }[w.priority] || "Normal priority"],
       ]),
       ...(w.reason ? [note("green", "Why it is here", w.reason)] : []),
@@ -510,7 +519,7 @@ function connectionsSpace(state) {
         const box = boxes.find((b) => b.provider === p.id);
         return box
           ? { title: p.label, note: box.emailAddress + " · " + words(box.status) + (box.statusReason ? " — " + box.statusReason : "") + (box.lastSyncedAt ? " · last read " + date(box.lastSyncedAt) : ""), badge: words(box.status), badgeTone: box.status === "connected" ? ok : warn }
-          : { title: p.label, note: p.available ? "Can be connected; no mailbox is connected yet." : "Not available on this deployment — " + (p.unavailableReason || "not configured") + ".", badge: p.available ? "Not connected" : "Not configured", badgeTone: warn };
+          : { title: p.label, note: p.available ? "Can be connected; no mailbox is connected yet." : "Not available on this deployment — " + (p.unavailableReason || "not configured").replace(/[.\s]+$/, "") + ".", badge: p.available ? "Not connected" : "Not configured", badgeTone: warn };
       })
     : [{ title: "Email", note: "No mailbox is connected.", badge: "Not connected", badgeTone: warn }];
   return {
@@ -522,7 +531,9 @@ function connectionsSpace(state) {
       rows("Email", mailRows),
       rows("Records and questions", [
         { title: "Records import", note: "Spreadsheets, CSV and PDF books are read on ASAP's own server.", badge: "Available", badgeTone: ok, action: { a: "open", ref: { ws: "import" } } },
-        { title: "Documents", note: "Stored privately for this brokerage and read by ASAP's own extraction service.", badge: "Available", badgeTone: ok },
+        S.getDb().meta?.docsDegraded
+          ? { title: "Documents", note: "Some documents or client files could not be read back just now, so they may be missing from where you expect them. Nothing was lost; refresh records to retry.", badge: "Degraded", badgeTone: warn }
+          : { title: "Documents", note: "Stored privately for this brokerage and read by ASAP's own extraction service.", badge: "Available", badgeTone: ok },
         { title: "Questions about your records", note: "Clients, work, policies and documents are answered in the app from the records it has read.", badge: "Available", badgeTone: ok },
         {
           title: "AI model",

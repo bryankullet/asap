@@ -8,7 +8,7 @@
  *
  * Actions the API cannot perform yet are refused in words, never simulated.
  */
-import { api, describeApiError } from "../lib/api.js";
+import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
@@ -70,6 +70,23 @@ const workState = (it) => {
 const STATUS_LABEL = { needs_you: "Your work", in_progress: "In progress", done: "Done" };
 
 const KIND = { renewal: "Renewal", claim: "Claim", endorsement: "Servicing", quotation: "Quotation", placement: "Placement", onboarding: "Onboarding", new_business: "New business" };
+// When the server has no current step, name the obvious first move for the kind of work rather
+// than showing a blank — worded as a suggestion, never as a recorded step.
+const FIRST_MOVE = {
+  quotation: "Collect the requirements and approach insurers",
+  opportunity: "Collect the requirements and approach insurers",
+  claim: "Collect the claim documents and notify the insurer",
+  renewal: "Prepare the renewal terms for the client",
+  endorsement: "Confirm the change with the insurer",
+  placement: "Send the placement request for approval",
+};
+const nextMove = (it, row) => {
+  if (row.nowStep?.label) return row.nowStep.label;
+  if (it.required_action) return it.required_action;
+  if (it.task_status === "done") return null;
+  if (it.task_status === "with_party" && it.task_party) return "Chase " + it.task_party + " for a reply";
+  return FIRST_MOVE[it.kind] ?? "Decide the first step and record it";
+};
 const kindWords = (k) => KIND[k] ?? k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /** Everything the engine reads, from the API. */
@@ -125,7 +142,7 @@ async function hydrate(me) {
     for (const row of list.items) {
       if (seen.has(row.client.id) || row.client.deleted_at) continue;
       seen.add(row.client.id);
-      db.clients.push({ id: row.client.id, name: row.client.name, short: shortName(row.client.name), brokerageId: org.id, createdAt: row.client.created_at });
+      db.clients.push({ id: row.client.id, name: row.client.name, legacyInvalid: row.client.name.trim().length < 2, short: shortName(row.client.name), brokerageId: org.id, createdAt: row.client.created_at });
     }
   }
 
@@ -252,7 +269,7 @@ async function hydrate(me) {
         kind: kindWords(it.kind),
         taskStatus: it.task_status,
         statusLabel: it.task_status === "with_party" ? null : STATUS_LABEL[it.task_status] ?? null,
-        nextStep: row.nowStep?.label ?? null,
+        nextStep: nextMove(it, row),
         opportunityId: it.source_type === "opportunity" ? it.source_id : null,
         title: it.title,
         state: workState(it),
@@ -261,7 +278,8 @@ async function hydrate(me) {
         dueAt: it.task_next_check,
         priority: row.priority ?? "medium",
         // What needs doing and why — the step and what it needs — rather than how the item began.
-        reason: [it.required_action, it.evidence_needed ? "Needs: " + it.evidence_needed : null, row.nowStep ? "Next step: " + row.nowStep.label : null].filter(Boolean).join(" · ") || row.reason || it.reason || "",
+        // Never how the item began ("created from import") — that is provenance, not a reason.
+        reason: [nextMove(it, row) ? "Next: " + nextMove(it, row) : null, it.evidence_needed ? "Needs: " + it.evidence_needed : null, it.task_status === "with_party" && it.task_party ? "With " + it.task_party + (it.task_since ? " since " + new Date(it.task_since).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "") : null, it.task_next_check ? "Due " + new Date(it.task_next_check).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null].filter(Boolean).join(" · "),
         createdAt: it.created_at ?? it.task_since ?? d0(),
         policyYearId: it.policy_period_id,
         // What an assignment through the API needs: the version seen and a step to act on.
@@ -278,10 +296,12 @@ async function hydrate(me) {
       on: a.enabled,
       ownerId: a.created_by,
       trigger: a.trigger_event.replace(/\./g, " "),
-      conditions: a.conditions.length ? a.conditions.map((c) => [c.fact, c.operator, c.value].filter(Boolean).join(" ")).join("; ") : "None",
-      actions: a.description || a.skill,
+      conditions: a.conditions.length ? a.conditions.map((c) => [c.fact, c.operator, c.value].filter(Boolean).join(" ")).join("; ") : /conditions?\s*(as written|:)/i.test(a.description || "") ? "Written in words, never applied — cannot be enabled" : "None",
+      actions: (a.description || a.skill).replace(/\s*·\s*conditions? as written:.*$/i, ""),
       approval: a.approval === "always" ? "A person approves before anything leaves" : "No approval step",
       runs: 0,
+      // Saved before conditions were refused: the words were kept but never applied.
+      legacyConditions: /conditions?\s*(as written|:)/i.test(a.description || ""),
     });
   }
 
@@ -333,6 +353,9 @@ async function hydrate(me) {
     if (v && d.pages.length) v.lines = d.pages.slice(0, 2).flatMap((pg) => pg.text.split(/\n/).filter(Boolean).slice(0, 6));
   });
 
+  // Documents count as working only when every client's documents and every document read back.
+  const docsDegraded = (db.meta.unreadableClients || []).length > 0 || docDetails.some((d) => !d) || [...documents.values()].some((d) => d.document.extractionState === "failed");
+  db.meta.docsDegraded = docsDegraded;
   const modelConfigured = await api.askStatus().then((r) => r.modelConfigured).catch(() => null);
 
   return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, modelConfigured, conversationId: convo.id } };
@@ -538,12 +561,19 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         premiumBasis: basis ?? state.importPreview?.batch.premiumBasis ?? null,
       });
       state.importResult = null;
+      state.importError = null;
       state.importResolutions = new Map();
       const p = state.importPreview;
       const waiting = p.summary.needsReview;
       return ok("Read " + plural(p.summary.rows, "row", "rows") + " from " + file.name + (p.blocking.length ? " — see what is needed before importing" : waiting ? " — " + plural(waiting, "row needs", "rows need") + " your decision" : " — ready to import"));
     } catch (e) {
-      return fail(e);
+      // Kept on the page, not only in a passing toast: a refused file is something to read.
+      const dup = e instanceof ApiRequestError && e.code === "already_imported";
+      state.importPreview = null;
+      state.importError = dup
+        ? { title: file.name + " was already imported", text: "This exact file has been imported before, so nothing was read a second time and nothing changed. To add new rows, save them in a new file." }
+        : { title: file.name + " could not be read", text: describeApiError(e) };
+      return { ok: false, error: state.importError.title + ". " + state.importError.text };
     }
   };
 
@@ -648,11 +678,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "import.clear": () => {
       state.importPreview = null;
       state.importFile = null;
+      state.importError = null;
       return ok("File discarded — nothing from it was saved");
     },
     "automation.toggle": async (p) => {
       const a = db.automations.find((x) => x.id === p.id);
       if (!a) return { ok: false, error: "That automation is no longer on file." };
+      if (!a.on && a.legacyConditions)
+        return { ok: false, error: "Cannot enable — conditions are not supported. This automation was saved with conditions in words that ASAP cannot apply, so switching it on would fire where it was told not to. Save a new one without conditions." };
       return write(() => api.setAutomationEnabled(a.id, !a.on), a.name + (a.on ? " is paused" : " is on"));
     },
     "automation.save": async (p) => {

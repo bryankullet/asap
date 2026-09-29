@@ -327,6 +327,7 @@ WS.client = (r) => {
   return { kind: 'Client', title: c.name, statusLabel: year ? 'Active cover' : 'No active cover', status: year ? 'live' : 'draft',
     recordRef: { ws: 'client', clientId: c.id },
     blocks: [
+      ...(c.legacyInvalid ? [{ t: 'note', tone: 'red', title: 'Legacy record — invalid, needs correction', text: 'This client was saved before ASAP required a real name. Correct the name before relying on this record.' }] : []),
       { t: 'facts', items: [
         ['Main contact', contacts[0] ? contacts[0].name + ' · ' + contacts[0].role : 'none recorded'],
         ['Current cover', year ? byId('policies', year.policyId).number : 'none'],

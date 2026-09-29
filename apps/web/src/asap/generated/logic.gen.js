@@ -288,7 +288,7 @@ class Component extends DCLogic {
       } else if (o.isBuilder) {
         const d = this.state.builder;
         o.saveLabel = 'Save automation'; o.saveNote = 'Saved automations start paused. Test mode writes nothing.';
-        const f = (key, label, placeholder) => ({ label, value: d[key] || '', placeholder,
+        const f = (key, label, placeholder) => ({ label, value: d[key] || '', placeholder, isInput: true, isSelect: false, type: 'text',
           onChange: (e) => this.setState({ builder: { ...this.state.builder, [key]: e.target.value } }) });
         o.fields = [f('name', 'NAME', 'Prepare renewals 30 days before expiry'),
           f('trigger', 'TRIGGER', 'A policy is 30 days from expiry'),
@@ -299,7 +299,7 @@ class Component extends DCLogic {
       }
       if (o.isGate) {
         const blocked = (b.permission && !R.can(b.permission)) || !!b.requires;
-        o.gateHeading = b.kind === 'send' ? 'A human must send this' : b.nav ? 'Next step' : 'A human must approve this';
+        o.gateHeading = b.kind === 'send' ? 'A human must send this' : b.nav ? (b.heading || 'Related') : 'A human must approve this';
         o.detail = b.detail; o.label2 = b.label;
         o.disabled = this.state.busy;
         o.blocked = !!blocked;
@@ -422,7 +422,8 @@ class Component extends DCLogic {
     }
     if (s.type === 'recent') {
       out.isHistory = true;
-      out.history = this.state.recent.map(r => ({ title: (r.ref.ws || '').replace(/^\w/, c => c.toUpperCase()), note: JSON.stringify(r.ref).slice(0, 70), go: () => this.openRef(r.ref) }));
+      const named = (ref) => { let w = null; try { w = ref.ws === 'nothing' ? null : this.A.ai.workspace(ref); } catch { w = null; } return w && w.title ? w : null; };
+      out.history = this.state.recent.map(r => ({ r, w: named(r.ref) })).filter(x => x.w).map(({ r, w }) => ({ title: w.title, note: (w.kind || 'Opened') + ' · ' + new Date(r.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), go: () => this.openRef(r.ref) }));
       if (!out.history.length) out.history = [{ title: 'Nothing opened yet', note: 'Workspaces you open appear here.', go: () => this.closeSheet() }];
     }
     if (s.type === 'profile') {
