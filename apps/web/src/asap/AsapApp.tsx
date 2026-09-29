@@ -53,6 +53,15 @@ export function AsapApp() {
     document.title = mode === "demo" ? "ASAP — demo" : "ASAP";
   }, [mode]);
 
+  // The workspace is open, so onboarding's "opening your workspace" hand-off is finished.
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem("asap.brokerage.created");
+    } catch {
+      /* storage blocked */
+    }
+  }, []);
+
   const loadAdapters = useCallback(async () => {
     try {
       if (mode === "demo") return await loadDemoAdapters({ switchToLive: () => choose("live") });

@@ -19,6 +19,12 @@ export function Onboarding() {
   const [requestKey] = useState(() => crypto.randomUUID());
   const [name, setName] = useState("");
   const [accepted, setAccepted] = useState(false);
+  /*
+   * Set the moment the brokerage exists. From then on this screen says it is opening the workspace
+   * and never shows the empty form again — re-reading the account can remount it, and a blank form
+   * after a successful create reads as a failure.
+   */
+  const [created, setCreated] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
@@ -31,13 +37,36 @@ export function Onboarding() {
         request_key: requestKey,
       }),
     onSuccess: async () => {
+      setCreated(true);
+      try {
+        sessionStorage.setItem("asap.brokerage.created", "1");
+      } catch {
+        /* storage blocked: the in-memory flag still holds for this mount */
+      }
       await invalidate();
       void navigate({ to: "/", replace: true });
     },
   });
 
   const canSubmit = name.trim().length >= 2 && accepted && !create.isPending;
+  let justCreated = created;
+  try {
+    justCreated ||= sessionStorage.getItem("asap.brokerage.created") === "1";
+  } catch {
+    /* storage blocked */
+  }
   const field = { width: "100%", border: "1px solid #d7ded8", borderRadius: 11, padding: "10px 11px", outline: 0, fontSize: 14 } as const;
+
+  if (justCreated)
+    return (
+      <div role="status" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: '"DM Sans", system-ui, sans-serif' }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 10.5, letterSpacing: ".12em", fontWeight: 700, color: "#1f6c49" }}>BROKERAGE CREATED</div>
+          <h1 style={{ fontFamily: "Manrope, sans-serif", fontWeight: 700, fontSize: 22, margin: "6px 0 6px" }}>Opening your workspace…</h1>
+          <p style={{ color: "#4c564e", fontSize: 14, margin: 0 }}>Reading your brokerage's records for the first time.</p>
+        </div>
+      </div>
+    );
 
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: '"DM Sans", system-ui, sans-serif' }}>

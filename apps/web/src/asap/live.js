@@ -12,6 +12,7 @@ import { api, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
+import { liveSpace } from "./live-spaces.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -244,6 +245,9 @@ async function hydrate(me) {
         reason: row.reason || it.reason || "",
         createdAt: it.created_at ?? it.task_since ?? d0(),
         policyYearId: it.policy_period_id,
+        // What an assignment through the API needs: the version seen and a step to act on.
+        version: it.version,
+        stepId: row.nowStep?.id ?? it.steps[0]?.id ?? null,
       });
     }
   }
@@ -280,8 +284,40 @@ async function hydrate(me) {
     });
   }
 
-  db.conversations.push({ id: "cnv_main", messages: [], contextId: null });
-  return db;
+  db.conversations.push({ id: "cnv_main", messages: loadThread(me), contextId: null });
+
+  // Each open quotation in full, so its workspace can show requirements, insurers and replies.
+  const details = await pool(
+    opportunities.opportunities.filter((o) => !o.closedAt).slice(0, 40),
+    6,
+    (o) => api.opportunity(o.id),
+  );
+  const opportunityDetails = new Map();
+  details.forEach((d) => d && opportunityDetails.set(d.opportunity.id, d));
+
+  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails } };
+}
+
+/*
+ * The Ask conversation is kept in this browser, per brokerage and person, so a refresh keeps it.
+ * It is a convenience for the person asking, never a record (§45 rule 14): records live on the
+ * server and every answer is re-read from them.
+ */
+const threadKey = (me) => "asap.thread." + me.active_organization.id + "." + me.user.id;
+function loadThread(me) {
+  try {
+    const v = JSON.parse(localStorage.getItem(threadKey(me)) || "[]");
+    return Array.isArray(v) ? v.slice(-40) : [];
+  } catch {
+    return [];
+  }
+}
+function saveThread(me, messages) {
+  try {
+    localStorage.setItem(threadKey(me), JSON.stringify(messages.slice(-40)));
+  } catch {
+    /* storage full or blocked: the conversation lasts until reload */
+  }
 }
 
 function d0() {
@@ -294,7 +330,7 @@ async function sha256Hex(buf) {
 }
 
 const NOT_CONNECTED = {
-  "records.import": "Importing a book from here",
+  "records.import": "Importing from the staging list",
   "quote.prepare": "Preparing a quote request from here",
   "email.send": "Sending email",
   "quote.reply": "Recording an insurer reply from here",
@@ -306,16 +342,14 @@ const NOT_CONNECTED = {
   "servicing.create": "Starting servicing from here",
   "tor.request": "Requesting time on risk",
   "cover.change": "Changing cover or the schedule",
-  "claim.register": "Registering a claim from here",
+  "claim.register": "Registering a claim by vehicle",
   "claim.document": "Recording claim documents from here",
   "claim.update": "Updating a claim from here",
   "payment.match": "Matching payments",
   "reconcile.run": "Running a reconciliation",
   "reconcile.resolve": "Resolving reconciliation lines",
   "renewal.create": "Creating a renewal year from here",
-  "work.assign": "Reassigning work",
   "document.version": "Adding a document version",
-  "automation.save": "Building an automation from here",
   "automation.run": "Running an automation by hand",
   "user.role": "Changing roles from here",
   "connection.set": "Changing connections from here",
@@ -327,7 +361,6 @@ const NOT_CONNECTED = {
  * over real records would be invented values — so live mode shows what is missing instead.
  */
 const NOT_CONNECTED_WS = {
-  quote: "Quotation work",
   compare: "Quote comparison",
   placement: "Placement",
   issue: "Policy issue",
@@ -339,10 +372,11 @@ const NOT_CONNECTED_WS = {
   renewal: "Renewal",
   report: "Reports",
   investigation: "Investigations",
-  import: "Records import",
   onboarding: "Setup",
-  settings: "Company settings",
 };
+
+/** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
+const LIVE_WS = new Set(["clients", "newclient", "import", "quote", "settings", "connections"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -358,7 +392,7 @@ function notConnectedWorkspace(ref) {
         title: "Nothing is shown rather than something invented",
         text:
           name +
-          " is not yet connected to your brokerage's records in this view, so no values are displayed here. Today, Work, clients, policies, documents, claims and automations read your real records.",
+          " is not yet connected to your brokerage's records in this view, so no values are displayed here. Clients, import, quotation work, claims, documents, automations and settings read and write your real records.",
       },
       {
         t: "rows",
@@ -366,59 +400,87 @@ function notConnectedWorkspace(ref) {
         rows: [
           { title: "Today", note: "What needs attention now", badge: "Open", badgeTone: "ok", action: { a: "open", ref: { ws: "today" } } },
           { title: "Work", note: "Everything open in your brokerage", badge: "Open", badgeTone: "ok", action: { a: "open", ref: { ws: "work" } } },
-          { title: "Search", note: "Clients, policies and documents", badge: "Open", badgeTone: "ok", action: { a: "open", ref: { ws: "search" } } },
+          { title: "Clients", note: "Every client on file", badge: "Open", badgeTone: "ok", action: { a: "open", ref: { ws: "clients" } } },
         ],
       },
     ],
   };
 }
 
-function liveWorkspace(ref) {
-  if (ref && NOT_CONNECTED_WS[ref.ws]) return notConnectedWorkspace(ref);
-  return buildWorkspace(ref);
-}
-
 // Suggestions the engine writes around its demo records; never offered over real ones.
 const DEMO_WORDS = /\b(Acme|KDN|KDA|Karibu|Bluewave|GreenCare|Mara|APA|CIC|Jubilee)\b/;
+const LIVE_CHIPS = ["What needs attention today?", "Show my work", "What clients do I have?"];
 
-function liveRoute(text, ctx) {
-  const r = interpret(text, ctx) || {};
-  if (Array.isArray(r.chips) && r.chips.some((c) => DEMO_WORDS.test(typeof c === "string" ? c : c.label ?? ""))) {
-    r.chips = ["What needs attention today?", "Show my work", "Search every record"];
-  }
-  if (r.ref && NOT_CONNECTED_WS[r.ref.ws]) {
-    return {
-      ...r,
-      lead: NOT_CONNECTED_WS[r.ref.ws] + " is not connected to your records yet.",
-      text: "I opened the workspace so you can see that nothing is shown there yet. I can open Today, Work, a client, a policy or a document from your real records.",
-      plan: null,
-      chips: ["What needs attention today?", "Show my work"],
-    };
-  }
-  return r;
+async function sha256File(file) {
+  return sha256Hex(await file.arrayBuffer());
 }
+
+async function base64File(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** Strip empty form values, so an optional field left blank is absent rather than "". */
+const present = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== "" && v != null));
 
 /** Build the adapters the approved interface talks to, over this brokerage's records. */
 export async function loadLiveAdapters({ me, switchToDemo }) {
-  let db = await hydrate(me);
+  let loaded = await hydrate(me);
+  let db = loaded.db;
   const pendingFiles = new Map();
-  let ui = null;
+  let conversationId = null;
+  /** Live-only state the live workspaces read. */
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, duplicate: null, importPreview: null, importFile: null, importResult: null };
 
   const refresh = async () => {
-    db = await hydrate(me);
+    const thread = db.conversations.find((c) => c.id === "cnv_main");
+    loaded = await hydrate(me);
+    db = loaded.db;
+    if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
+    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities });
     S.useBackend({ db, dispatch });
-    ui?.();
   };
 
   const ok = (text, extra = {}) => ({ ok: true, text, at: d0(), ...extra });
   const fail = (err) => ({ ok: false, error: describeApiError(err) });
+  /** Run a write, re-read the records, and report — or report the failure with nothing changed. */
+  const write = async (fn, text) => {
+    try {
+      const out = await fn();
+      await refresh();
+      return typeof text === "function" ? text(out) : ok(text);
+    } catch (e) {
+      return fail(e);
+    }
+  };
+
+  const previewImport = async (basis) => {
+    const file = state.importFile;
+    if (!file) return { ok: false, error: "Choose the file again — it is no longer selected." };
+    try {
+      state.importPreview = await api.previewImport({
+        filename: file.name,
+        content: await base64File(file),
+        mimeType: file.type || "application/octet-stream",
+        premiumBasis: basis ?? state.importPreview?.batch.premiumBasis ?? null,
+      });
+      state.importResult = null;
+      const p = state.importPreview;
+      return ok("Read " + p.summary.rows + " row(s) from " + file.name + (p.blocking.length ? " — see what is needed before importing" : " — ready to import"));
+    } catch (e) {
+      return fail(e);
+    }
+  };
 
   /** Writes the API can perform. Everything else is refused honestly. */
   const LIVE = {
-    // The conversation and message drafts stay in this browser session; they are not records.
+    // The conversation stays in this browser for this brokerage and person; it is not a record.
     "conversation.save": (p) => {
       const c = db.conversations.find((x) => x.id === p.id);
       if (c) Object.assign(c, { messages: p.messages, contextId: p.contextId });
+      saveThread(me, p.messages || []);
       return ok("Saved");
     },
     "draft.save": (p) => {
@@ -427,38 +489,142 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       else db.drafts.push({ ...p, id: p.id || "drf_" + Date.now().toString(36), createdAt: d0() });
       return ok("Draft saved in this session");
     },
-    "automation.toggle": async (p) => {
-      const a = db.automations.find((x) => x.id === p.id);
-      if (!a) return { ok: false, error: "That automation is no longer on file." };
+    "client.create": async (p) => {
+      const name = (p.name || "").trim();
+      if (!name) return { ok: false, error: "Type the client's name first." };
+      const kind = /person|individual/i.test(p.kind || "") ? "individual" : "corporate";
       try {
-        await api.setAutomationEnabled(a.id, !a.on);
+        const res = await api.createClient({ name, kind, confirmNew: p.confirmNew === "yes" });
+        if (res.outcome === "possible_duplicates") {
+          state.duplicate = { name, kind, candidates: res.candidates };
+          return { ok: false, error: "A similar client is already on file — check the matches before creating another." };
+        }
+        state.duplicate = null;
         await refresh();
-        return ok(a.name + (a.on ? " is paused" : " is on"));
+        return ok(name + " added as a client", { nav: { ws: "client", clientId: res.file.client.id } });
       } catch (e) {
         return fail(e);
       }
     },
-    "opportunity.create": async (p) => {
+    "import.preview": async (p) => {
+      const file = pendingFiles.get(p.name);
+      if (!file) return { ok: false, error: "The file is no longer selected. Choose it again." };
+      pendingFiles.delete(p.name);
+      state.importFile = file;
+      return previewImport(null);
+    },
+    "import.basis": (p) => previewImport(p.basis),
+    "import.commit": async () => {
+      const p = state.importPreview;
+      if (!p) return { ok: false, error: "Read a file first." };
       try {
-        await api.createOpportunity({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls || "Commercial motor", requestKey: crypto.randomUUID() });
+        const res = await api.commitImport(p.batch.id, {});
+        state.importResult = res;
+        state.importPreview = null;
+        state.importFile = null;
+        await refresh();
+        return ok("Imported " + res.batch.clientsCreated + " client(s) and " + res.batch.policiesCreated + " polic(ies) from " + res.batch.filename);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "import.clear": () => {
+      state.importPreview = null;
+      state.importFile = null;
+      return ok("File discarded — nothing from it was saved");
+    },
+    "automation.toggle": async (p) => {
+      const a = db.automations.find((x) => x.id === p.id);
+      if (!a) return { ok: false, error: "That automation is no longer on file." };
+      return write(() => api.setAutomationEnabled(a.id, !a.on), a.name + (a.on ? " is paused" : " is on"));
+    },
+    "automation.save": async (p) => {
+      const words = [p.trigger, p.name].join(" ").toLowerCase();
+      const trigger = /renew|expir/.test(words)
+        ? "renewal.approaching"
+        : /quote|quotation/.test(words)
+          ? "quote.received"
+          : /document|file|upload/.test(words)
+            ? "document.received"
+            : /pay|premium received|receipt/.test(words)
+              ? "payment.received"
+              : /cover.*confirm|confirmation/.test(words)
+                ? "cover.confirmed"
+                : /claim/.test(words)
+                  ? "claim.registered"
+                  : /overdue|late|no movement|follow/.test(words)
+                    ? "check.overdue"
+                    : null;
+      if (!trigger)
+        return {
+          ok: false,
+          error: "Say what starts it in the trigger — for example a renewal approaching, a quote or document received, a payment, cover confirmed, a claim registered, or something overdue. Nothing was saved.",
+        };
+      const name = (p.name || "").trim() || "Untitled automation";
+      const description = [p.actions, p.conditions ? "Conditions as written: " + p.conditions : ""].filter(Boolean).join(" · ").slice(0, 500);
+      return write(
+        () => api.createAutomation({ name, description, triggerEvent: trigger, conditions: [], skill: (p.actions || "prepare work").slice(0, 80), preparedVerb: "prepare", approval: "always", enabled: false }),
+        name + " saved, switched off. It prepares work only; a person approves anything that leaves. Conditions are kept as written and not yet applied as filters.",
+      );
+    },
+    "opportunity.create": async (p) => {
+      if (!p.title || !(p.cls || "").trim()) return { ok: false, error: "Name the cover wanted and its class of business." };
+      try {
+        const res = await api.createOpportunity(present({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls, coverStart: p.coverStart, coverEnd: p.coverEnd, requestKey: crypto.randomUUID() }));
         await refresh();
         const c = db.clients.find((x) => x.id === p.clientId);
-        return ok("Quotation work created" + (c ? " for " + c.name : ""));
+        return ok("Quotation work started" + (c ? " for " + c.name : ""), { nav: { ws: "quote", opportunityId: res.opportunityId } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "opp.action": async (p) => {
+      const { id, ...body } = p;
+      const clean = present(body);
+      if (clean.action === "add_requirement" && !clean.label) return { ok: false, error: "Name the requirement first." };
+      if (clean.action === "record_response" && clean.outcome === "quoted" && !/^\d+(\.\d{1,2})?$/.test(clean.premiumAmount || "")) return { ok: false, error: "Enter the premium as a number, for example 485000." };
+      try {
+        const res = await api.opportunityAction(id, clean);
+        if (res.outcome === "blocked") return { ok: false, error: res.reason || "The server refused that. Nothing was changed." };
+        await refresh();
+        return ok(
+          { add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", record_response: "Insurer's answer recorded" }[clean.action] ?? "Recorded",
+        );
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "claim.open": async (p) => {
+      if (!p.incidentOn || !p.incidentSummary) return { ok: false, error: "Give the date of the loss and what happened." };
+      try {
+        const res = await api.createWorkItem({ kind: "claim", clientId: p.clientId, incidentOn: p.incidentOn, incidentSummary: p.incidentSummary, source: "manual" });
+        if (res.outcome !== "opened") return { ok: false, error: "The server could not open the claim for this client. Nothing was changed." };
+        await refresh();
+        const claim = db.claims.find((c) => c.workItemId === res.item.id);
+        return ok(res.reopened ? "That claim was already open — opened it" : "Claim reported as a draft", { nav: claim ? { ws: "claim", clientId: p.clientId, claimId: claim.id } : { ws: "work" } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "work.assign": async (p) => {
+      const w = db.workItems.find((x) => x.id === p.workItemId);
+      const u = db.users.find((x) => x.id === p.userId);
+      if (!w || !u) return { ok: false, error: "Choose who this goes to." };
+      if (!w.stepId) return { ok: false, error: "This item has no steps to hand over yet. Nothing was changed." };
+      try {
+        const res = await api.act(w.id, { stepId: w.stepId, verb: "assign", version: w.version, assigneeId: u.id });
+        if (res && res.outcome && res.outcome !== "applied") return { ok: false, error: res.reason || "The item changed since you opened it. Refresh and try again." };
+        await refresh();
+        return ok(w.title + " → " + u.name + (p.dueAt ? " (the due date is not recorded by the server yet)" : ""));
       } catch (e) {
         return fail(e);
       }
     },
     "work.create": async (p) => {
-      // The API opens renewal, claim and endorsement work; other kinds are not records yet.
-      const kind = /renew/i.test(p.kind || "") ? "renewal" : /claim/i.test(p.kind || "") ? "claim" : null;
-      if (!kind) return { ok: false, error: "Only renewal and claim work can be opened from here so far." };
-      try {
-        await api.createWorkItem({ kind, clientId: p.clientId || undefined, source: "ask" });
-        await refresh();
-        return ok("Work created: " + p.title);
-      } catch (e) {
-        return fail(e);
-      }
+      // The API opens renewal and claim work from here; other kinds are not records yet.
+      const kind = /renew/i.test(p.kind || "") ? "renewal" : null;
+      if (!kind) return { ok: false, error: "Only renewal work can be opened this way; report a claim from + New → Claim." };
+      return write(() => api.createWorkItem({ kind, clientId: p.clientId || undefined, source: "ask" }), "Work created: " + p.title);
     },
     "document.upload": async (p) => {
       const file = pendingFiles.get(p.name);
@@ -469,7 +635,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           filename: file.name,
           mimeType: file.type || "application/octet-stream",
           byteSize: file.size,
-          contentSha256: await sha256Hex(bytes),
+          contentSha256: await sha256File(file),
           clientId: p.clientId || null,
         });
         if (asked.outcome === "ready") {
@@ -479,7 +645,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         }
         pendingFiles.delete(p.name);
         await refresh();
-        return ok(asked.outcome === "already_on_file" ? file.name + " is already on file" : file.name + " uploaded");
+        return ok(asked.outcome === "already_on_file" ? file.name + " is already on file" : file.name + " uploaded — ASAP is reading it");
       } catch (e) {
         return fail(e);
       }
@@ -494,20 +660,87 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const what = NOT_CONNECTED[type] ?? "This action";
       return { ok: false, error: what + " is not connected to your brokerage's records yet. Nothing was changed." };
     }
+    // Only writes that created or changed a record are remembered as done; reads and refusals are not.
+    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear"]);
     const settle = (res) => {
-      if (res.ok && type !== "conversation.save" && type !== "draft.save") db.meta.ledger[key] = { ...res, actionId: key };
+      if (res.ok && !REPEATABLE.has(type)) db.meta.ledger[key] = { ...res, actionId: key };
       return res;
     };
     const out = handler(payload);
     return out && typeof out.then === "function" ? out.then(settle) : settle(out);
   }
 
+  function liveWorkspace(ref) {
+    if (ref && NOT_CONNECTED_WS[ref.ws]) return notConnectedWorkspace(ref);
+    const own = liveSpace(ref, state);
+    if (own) {
+      own.ref = ref;
+      return own;
+    }
+    return buildWorkspace(ref);
+  }
+
+  async function askServer(text, ctx) {
+    try {
+      const scope = ctx.clientId ? { kind: "client", id: ctx.clientId } : { kind: "brokerage", id: null };
+      const res = await api.askQuestion({ question: text, conversationId, scope });
+      conversationId = res.conversationId ?? conversationId;
+      if (res.state === "not_configured")
+        return { lead: "No model is configured on the server yet.", text: "I answer from your records directly where I can. Questions beyond that need the server's model, which is not configured for this deployment.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+      if (res.state === "unavailable")
+        return { lead: "The server could not answer just now.", text: "Nothing was changed. Try again in a moment.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+      if (res.state === "clarify" && res.clarify)
+        return { lead: res.clarify.question, text: "Choose one:", clarify: { question: res.clarify.question, options: res.clarify.options.map((o) => ({ label: o.label, text: o.label })) }, ref: ctx.ref || { ws: "today" } };
+      const body = res.message?.body || "I could not find that in your records.";
+      const cites = (res.message?.citations || []).map((c) => c.label).slice(0, 4);
+      return {
+        lead: res.state === "abstained" ? "I could not find that in your records." : body.split(/(?<=\.)\s/)[0],
+        text: (res.state === "abstained" ? body : body.split(/(?<=\.)\s/).slice(1).join(" ")) + (cites.length ? " Sources: " + cites.join("; ") + "." : ""),
+        ref: ctx.ref || { ws: "today" },
+        chips: res.suggestions.length ? res.suggestions : LIVE_CHIPS,
+      };
+    } catch (e) {
+      return { lead: "I could not reach the server.", text: describeApiError(e) + " Nothing was changed.", ref: ctx.ref || { ws: "today" }, chips: LIVE_CHIPS };
+    }
+  }
+
+  async function liveRoute(text, ctx) {
+    const t = text.trim();
+    // Questions about the client list, answered from the records — including when there are none.
+    if (/\b(what|which|list|show|how many)\b.*\bclients?\b/i.test(t) && !/\b(add|create)\b/i.test(t)) {
+      const n = db.clients.length;
+      return n
+        ? { lead: "You have " + n + " client" + (n === 1 ? "" : "s") + ".", text: "They are listed in the workspace beside this answer.", ref: { ws: "clients" }, chips: LIVE_CHIPS }
+        : { lead: "You do not have any clients yet.", text: "Import your book, or add your first client by name — say “add Tausi Hauliers as a client”.", ref: { ws: "clients" }, chips: ["Import records", "Add a client"] };
+    }
+    const add = /\b(?:add|create)\s+(.+?)\s+as\s+an?\s+(?:new\s+)?client\b/i.exec(t);
+    if (add) return { lead: "Adding " + add[1] + " as a client.", text: "ASAP checks for a client with a similar name first.", ref: { ws: "newclient" }, plan: { action: "client.create", payload: { name: add[1], kind: "Company" }, actionId: "client.create:" + add[1].toLowerCase() } };
+    if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
+
+    if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) {
+      const client = S.sel.clientByName(t) || (ctx.clientId ? S.sel.client(ctx.clientId) : null);
+      return { lead: client ? "Reporting a claim for " + client.name + "." : "Which client is the claim for?", text: "The claim opens as a draft; it never means the loss is covered.", ref: { ws: "claim", clientId: client?.id } };
+    }
+    const r = interpret(t, ctx) || {};
+    if (r.nothing) return askServer(t, ctx);
+    if (Array.isArray(r.chips) && r.chips.some((c) => DEMO_WORDS.test(typeof c === "string" ? c : c.label ?? ""))) r.chips = LIVE_CHIPS;
+    if (r.ref && NOT_CONNECTED_WS[r.ref.ws]) {
+      return { ...r, lead: NOT_CONNECTED_WS[r.ref.ws] + " is not connected to your records yet.", text: "I opened the workspace so you can see that nothing is shown there yet.", plan: null, chips: LIVE_CHIPS };
+    }
+    if (r.ref && LIVE_WS.has(r.ref.ws)) {
+      // The engine's answer for these was written around its example records; the workspace speaks for itself.
+      return { ...r, lead: "Opening it from your records.", text: "The workspace beside this answer is read from your brokerage's records.", plan: null, chips: LIVE_CHIPS };
+    }
+    if (r.plan && !LIVE[r.plan.action]) r.plan = null;
+    return r;
+  }
+
   S.useBackend({ db, dispatch });
 
   return {
-    greetingChips: ["What needs attention today?", "Show my work", "Show automations"],
-    suggestions: [{ label: "What needs attention today?" }, { label: "Show my work" }, { label: "Show automations" }, { label: "Search every record" }],
-    onChange: (fn) => (ui = fn),
+    greetingChips: LIVE_CHIPS,
+    suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
+    historyNote: "Kept in this browser for this brokerage, so it survives a refresh. Your records live on the server.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },
     records: {
       demo: false,

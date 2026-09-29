@@ -16,6 +16,26 @@ const WORK = "60000000-0000-4000-8000-000000000001";
 const AUTO = "70000000-0000-4000-8000-000000000001";
 
 const setAutomationEnabled = vi.fn(async () => ({}));
+const createClient = vi.fn(async (input: { name: string; confirmNew?: boolean }) =>
+  input.confirmNew || input.name !== "Tausi Haulier"
+    ? { outcome: "created", file: { client: { id: "30000000-0000-4000-8000-0000000000ff" } } }
+    : { outcome: "possible_duplicates", name: input.name, candidates: [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] },
+);
+const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
+  batch: { id: "80000000-0000-4000-8000-000000000001", filename: "book.csv", rowCount: 2, premiumBasis: input.premiumBasis },
+  source: "csv",
+  sheetName: null,
+  rows: [{ id: "r1", lineNumber: 2, outcome: "create", problem: null, clientName: "Simba Traders", contactName: null, contactEmail: null, policyNumber: "ST-1", insurerName: "First Insurer", classOfBusiness: "Motor", periodStart: "2026-01-01", periodEnd: "2026-12-31" }],
+  summary: { rows: 1, clientsToCreate: 1, contactsToCreate: 0, policiesToCreate: 1, needsReview: 0, invalid: 0 },
+  columns: [{ header: "Premium", meaning: "premium" }],
+  blocking: input.premiumBasis ? [] : ["Say whether the premiums are gross or total payable."],
+  mappedByModel: [],
+}));
+const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clientsCreated: 1, contactsCreated: 0, policiesCreated: 1, periodsCreated: 1 }, failures: [] }));
+const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
+const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
+const createAutomation = vi.fn(async () => ({}));
+const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 
 vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } } }));
 vi.mock("../lib/api.js", () => ({
@@ -58,7 +78,8 @@ vi.mock("../lib/api.js", () => ({
           ? { state: "active", label: "Active cover", reason: "Insurer confirmation on file.", verified: true, evidence: [{ label: "Insurer confirmation, 20 Dec 2025", documentId: null, recordedAt: "2025-12-20" }], asOf: "2026-09-29" }
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
-    setAutomationEnabled,
+    setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
+    opportunity: async () => null,
   },
 }));
 
@@ -73,7 +94,8 @@ async function live() {
   const { loadLiveAdapters } = await import("./live.js");
   return (await loadLiveAdapters({ me, switchToDemo: () => {} })) as {
     records: { actor(): { name: string }; act(t: string, p: unknown, id?: string): unknown; demo: boolean; sel: { clients(): { name: string }[] } };
-    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[] }; route(t: string, c: unknown): { lead?: string; ref?: { ws: string } } };
+    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }> };
+    documents: { read(f: File): Promise<unknown> };
     greetingChips: string[];
   };
 }
@@ -106,13 +128,68 @@ describe("live mode", () => {
 
   it("shows what is not connected instead of example content", async () => {
     const A = await live();
-    for (const ws of ["quote", "compare", "money", "reconciliation", "commission", "renewal"]) {
+    for (const ws of ["compare", "money", "reconciliation", "commission", "renewal"]) {
       const w = A.ai.workspace({ ws, clientId: CLIENT });
       expect(w.statusLabel).toBe("Not connected");
       expect(text(w)).not.toMatch(/APA|CIC|Jubilee/);
     }
-    const r = A.ai.route("Get Tausi's quote ready", { clientId: CLIENT });
-    if (r.ref && ["quote", "compare"].includes(r.ref.ws)) expect(r.lead).toMatch(/not connected/);
+  });
+
+  it("starts from nothing: a client, a book import, quotation work, a claim and an automation", async () => {
+    const A = await live();
+    // A client, with the duplicate check.
+    const dup = (await A.records.act("client.create", { name: "Tausi Haulier", kind: "Company" })) as { ok: boolean; error: string };
+    expect(dup.ok).toBe(false);
+    expect(text(A.ai.workspace({ ws: "newclient" }))).toContain("Tausi Hauliers Ltd");
+    const made = (await A.records.act("client.create", { name: "Tausi Haulier", kind: "Company", confirmNew: "yes" })) as { ok: boolean };
+    expect(made.ok).toBe(true);
+    expect(createClient).toHaveBeenLastCalledWith({ name: "Tausi Haulier", kind: "corporate", confirmNew: true });
+
+    // A book: read on the server, the premium basis asked, then committed.
+    await A.documents.read(new File(["client,premium"], "book.csv", { type: "text/csv" }));
+    const read = (await A.records.act("import.preview", { name: "book.csv" })) as { ok: boolean };
+    expect(read.ok).toBe(true);
+    expect(text(A.ai.workspace({ ws: "import" }))).toMatch(/gross/);
+    await A.records.act("import.basis", { basis: "gross" });
+    expect(previewImport).toHaveBeenLastCalledWith(expect.objectContaining({ premiumBasis: "gross" }));
+    const done = (await A.records.act("import.commit", {})) as { ok: boolean; text: string };
+    expect(done.text).toMatch(/Imported 1 client/);
+
+    // Quotation work and a claim, through the API.
+    expect(A.ai.workspace({ ws: "quote", clientId: CLIENT }).title).toMatch(/quotation/);
+    await A.records.act("opportunity.create", { clientId: CLIENT, title: "Motor fleet", cls: "Motor", coverStart: "", coverEnd: "" });
+    expect(createOpportunity).toHaveBeenCalledWith(expect.not.objectContaining({ coverStart: "" }));
+    await A.records.act("claim.open", { clientId: CLIENT, incidentOn: "2026-09-20", incidentSummary: "Rear-ended at Westlands" });
+    expect(createWorkItem).toHaveBeenCalledWith(expect.objectContaining({ kind: "claim", incidentOn: "2026-09-20" }));
+
+    // An automation: a recognised trigger saves switched off; an unrecognised one saves nothing.
+    const saved = (await A.records.act("automation.save", { name: "Renewal prep", trigger: "A policy is 30 days from expiry", conditions: "", actions: "Prepare renewal work", approval: "" })) as { ok: boolean };
+    expect(saved.ok).toBe(true);
+    expect(createAutomation).toHaveBeenCalledWith(expect.objectContaining({ triggerEvent: "renewal.approaching", enabled: false, approval: "always" }));
+    const vague = (await A.records.act("automation.save", { name: "Something", trigger: "whenever", conditions: "", actions: "", approval: "" })) as { ok: boolean };
+    expect(vague.ok).toBe(false);
+  });
+
+  it("answers the client list from the records and sends what it cannot match to the server", async () => {
+    const A = await live();
+    const list = await A.ai.route("What clients do I have?", {});
+    expect(list.lead).toBe("You have 1 client.");
+    expect(list.ref?.ws).toBe("clients");
+    const other = await A.ai.route("Summarise the market mood", {});
+    expect(askQuestion).toHaveBeenCalled();
+    expect(other.lead).toMatch(/No model is configured/);
+    const add = await A.ai.route("add Simba Traders as a client", {});
+    expect(add.plan?.action).toBe("client.create");
+  });
+
+  it("uses the accepted Work views and shows no simulated connection controls", async () => {
+    const A = await live();
+    const work = A.ai.workspace({ ws: "work" });
+    expect(work.filters?.map((f) => f.label)).toEqual(["Your work", "With others", "In progress", "Done", "Recent"]);
+    expect(text(work)).not.toMatch(/"Waiting"|Needs you/);
+    const cons = text(A.ai.workspace({ ws: "connections" }));
+    expect(cons).not.toMatch(/Simulate|connection\.set/);
+    expect(text(A.ai.workspace({ ws: "settings" }))).toContain("Wanjiru Kamau");
   });
 
   it("writes through the API, and refuses what it cannot do without changing anything", async () => {

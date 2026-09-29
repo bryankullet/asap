@@ -72,8 +72,9 @@ class Component extends DCLogic {
   activeTab() { return this.state.tabs.find(t => t.id === this.state.activeId) || this.state.tabs[0]; }
   openRef = (ref, opts = {}) => {
     if (!ref) return;
+    const ident = (r) => JSON.stringify(Object.keys(r).filter(k => !['query', 'date'].includes(k) && r[k] != null && r[k] !== '').sort().map(k => [k, r[k]]));
     const key = JSON.stringify(ref);
-    const existing = this.state.tabs.find(t => JSON.stringify(t.ref) === key);
+    const existing = this.state.tabs.find(t => ident(t.ref) === ident(ref));
     if (existing) { this.setState({ activeId: existing.id, sheet: null, contextRef: ref }); return; }
     const id = 'tab' + (this.state.tabs.length + 1) + '_' + Date.now().toString(36);
     const tabs = [...this.state.tabs.filter(t => t.pinned || t.id !== this.state.activeId || opts.keep), { id, ref, pinned: false }];
@@ -105,6 +106,7 @@ class Component extends DCLogic {
       this.flash(receipt);
       this.bump();
       if (opts.nav) this.openRef(opts.nav);
+      else if (res.nav) this.openRef(res.nav);
       else this.setState({ tick: this.state.tick + 1 });
     }, 320);
   };
@@ -114,11 +116,11 @@ class Component extends DCLogic {
     if (!text || !text.trim()) return;
     const thread = [...this.state.thread, { role: 'user', text }];
     this.setState({ thread, thinking: true });
-    setTimeout(() => {
+    setTimeout(async () => {
       const tab = this.activeTab();
       const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref };
       if (!this.state.contextRef) { delete ctx.clientId; }
-      const r = this.A.ai.route(text, ctx) || {};
+      const r = (await this.A.ai.route(text, ctx)) || {};
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
@@ -146,7 +148,7 @@ class Component extends DCLogic {
   openProfile = () => this.setState({ sheet: { type: 'profile', kicker: 'ACCOUNT', title: this.A.records.actor().name } });
   openReset = () => this.setState({ sheet: { type: 'reset', kicker: 'RESET', title: 'Reset the demo records?' } });
   openSweep = () => this.setState({ sheet: { type: 'sweep', kicker: 'WORKSPACE SWEEP', title: 'Every workspace, opened from records', copy: 'Each row generates its workspace from the live record store.' } });
-  openHistory = () => this.setState({ sheet: { type: 'history', kicker: 'ASK HISTORY', title: 'Earlier in this conversation', copy: 'The conversation is stored with your records, so it survives a refresh.' } });
+  openHistory = () => this.setState({ sheet: { type: 'history', kicker: 'ASK HISTORY', title: 'Earlier in this conversation', copy: this.A.historyNote || 'The conversation is stored with your records, so it survives a refresh.' } });
   openRecent = () => this.setState({ sheet: { type: 'recent', kicker: 'RECENT', title: 'Recently opened' } });
 
   openMail = (b, workspaceRef) => {
@@ -182,6 +184,7 @@ class Component extends DCLogic {
       }
       this.setState({ progress: [...prog] });
     }
+    if (block.action) { if (out[0] && !out[0].error) this.act(block.action, { ...(block.payload || {}), name: out[0].name }); return; }
     if (block.stage) { this.setState({ staged: [...this.state.staged, ...out] }); this.flash(out.length + ' file(s) read. Review, then confirm the import.'); return; }
     const first = out[0];
     if (block.claimId) {
@@ -199,7 +202,7 @@ class Component extends DCLogic {
     const R = this.A.records;
     const ref = ws.ref || {};
     return (ws.blocks || []).filter(Boolean).map((b, i) => {
-      const o = { key: i, label: b.label, hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && b.t !== 'builder' };
+      const o = { key: i, label: b.label, hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && (b.t !== 'builder' || !!b.fields) };
       o.isFacts = b.t === 'facts'; o.isRows = b.t === 'rows'; o.isMissing = b.t === 'missing';
       o.isNote = b.t === 'note'; o.isCompare = b.t === 'compare'; o.isCalc = b.t === 'calc';
       o.isEmail = b.t === 'email'; o.isTimeline = b.t === 'timeline'; o.isUpload = b.t === 'upload';
@@ -268,8 +271,17 @@ class Component extends DCLogic {
         o.save = () => this.act('work.assign', { workItemId: b.workItemId, userId: o.assigneeId, dueAt: o.dueAt || null });
         o.permNote = R.can('work.assign') ? 'Assignment updates Work, Team and the assignee’s own list.' : 'Your role cannot assign work — ' + (R.approverFor('work.assign')?.name || 'an approver') + ' can.';
       }
-      if (o.isBuilder) {
+      if (o.isBuilder && b.fields) {
         const d = this.state.builder;
+        const ns = b.formId || 'form';
+        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? '');
+        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x),
+          onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));
+        o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';
+        o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });
+      } else if (o.isBuilder) {
+        const d = this.state.builder;
+        o.saveLabel = 'Save automation'; o.saveNote = 'Saved automations start paused. Test mode writes nothing.';
         const f = (key, label, placeholder) => ({ label, value: d[key] || '', placeholder,
           onChange: (e) => this.setState({ builder: { ...this.state.builder, [key]: e.target.value } }) });
         o.fields = [f('name', 'NAME', 'Prepare renewals 30 days before expiry'),
@@ -349,7 +361,8 @@ class Component extends DCLogic {
         { icon: '⤒', title: 'Import records', note: 'Spreadsheets, policy PDFs, images, email', go: () => this.openRef({ ws: 'import', clientId: acme?.id }) },
         { icon: '▱', title: 'Quotation work', note: 'New business from a client request', go: () => this.openRef({ ws: 'quote', clientId: acme?.id }) },
         { icon: '⚑', title: 'Claim', note: 'Register a loss against an active policy', go: () => this.openRef({ ws: 'claim', clientId: acme?.id }) },
-        { icon: '⌘', title: 'Automation', note: 'Teach ASAP what to prepare', go: () => this.openRef({ ws: 'automation' }) }
+        { icon: '⌘', title: 'Automation', note: 'Teach ASAP what to prepare', go: () => this.openRef({ ws: 'automation' }) },
+        ...(R.demo ? [] : [{ icon: '◎', title: 'Client', note: 'Add a client by name', go: () => this.openRef({ ws: 'newclient' }) }])
       ];
     }
     if (s.type === 'search') {
@@ -500,7 +513,7 @@ class Component extends DCLogic {
               this.setState({ filter: { ...this.state.filter, [ws.kind]: f.label } });
               if (ws.kind === 'Work') {
                 const ref = { ws: 'work', clientId: ws.ref.clientId,
-                  filter: f.label === 'Mine' ? { assigneeId: me.id } : (f.label === 'All' ? {} : { state: f.label }) };
+                  filter: f.filter ? f.filter : f.label === 'Mine' ? { assigneeId: me.id } : (f.label === 'All' ? {} : { state: f.label }) };
                 this.openRef(ref);
               } else this.flash(f.label + ' applied — the rows below come from the records, not a static list.');
             } };

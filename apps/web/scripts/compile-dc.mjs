@@ -72,7 +72,45 @@ const PATCHES = [
   // sheet already reads it.
   ["openRecent: () => this.openRecent(), toast: this.state.toast,",
    "openRecent: () => this.openRecent(), brokerageName: (this.A?.records.all('brokerages')[0] || {}).name || '', onSearchInput: (e) => this.setState({ search: e.target.value, sheet: this.state.sheet ? { ...this.state.sheet, query: e.target.value } : null }), toast: this.state.toast,"],
+  // A workspace's identity is its record, not the words that opened it: Ask adds the question and
+  // empty fields to the reference, which opened a second identical tab ("What needs attention
+  // today?" beside the Today already open). Compare by the fields that name a record.
+  ["    const key = JSON.stringify(ref);\n    const existing = this.state.tabs.find(t => JSON.stringify(t.ref) === key);",
+   "    const ident = (r) => JSON.stringify(Object.keys(r).filter(k => !['query', 'date'].includes(k) && r[k] != null && r[k] !== '').sort().map(k => [k, r[k]]));\n    const key = JSON.stringify(ref);\n    const existing = this.state.tabs.find(t => ident(t.ref) === ident(ref));"],
+  // Ask may answer from the server (live mode), so routing resolves asynchronously.
+  ["    setTimeout(() => {\n      const tab = this.activeTab();", "    setTimeout(async () => {\n      const tab = this.activeTab();"],
+  ["const r = this.A.ai.route(text, ctx) || {};", "const r = (await this.A.ai.route(text, ctx)) || {};"],
+  // Where the conversation is kept differs by mode; each mode says where.
+  ["copy: 'The conversation is stored with your records, so it survives a refresh.' } });",
+   "copy: this.A.historyNote || 'The conversation is stored with your records, so it survives a refresh.' } });"],
+  // Over live records, "+ New" also starts a client — the first record everything else hangs on.
+  ["        { icon: '⌘', title: 'Automation', note: 'Teach ASAP what to prepare', go: () => this.openRef({ ws: 'automation' }) }",
+   "        { icon: '⌘', title: 'Automation', note: 'Teach ASAP what to prepare', go: () => this.openRef({ ws: 'automation' }) },\n        ...(R.demo ? [] : [{ icon: '◎', title: 'Client', note: 'Add a client by name', go: () => this.openRef({ ws: 'newclient' }) }])"],
+  // Work filters may carry their own record filter (the D-075 views), which the engine resolves.
+  ["                const ref = { ws: 'work', clientId: ws.ref.clientId,\n                  filter: f.label === 'Mine'",
+   "                const ref = { ws: 'work', clientId: ws.ref.clientId,\n                  filter: f.filter ? f.filter : f.label === 'Mine'"],
+  // A form block may declare its own fields and action; without them it is the automation builder.
+  ["      if (o.isBuilder) {\n        const d = this.state.builder;",
+   "      if (o.isBuilder && b.fields) {\n        const d = this.state.builder;\n        const ns = b.formId || 'form';\n        const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? '');\n        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x),\n          onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));\n        o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';\n        o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });\n      } else if (o.isBuilder) {\n        const d = this.state.builder;\n        o.saveLabel = 'Save automation'; o.saveNote = 'Saved automations start paused. Test mode writes nothing.';"],
+  // An upload may name the action its file goes to (live import reads a book this way).
+  ["    if (block.stage) { this.setState", "    if (block.action) { if (out[0] && !out[0].error) this.act(block.action, { ...(block.payload || {}), name: out[0].name }); return; }\n    if (block.stage) { this.setState"],
+  // A write may say where its result lives (the new client, the new quotation); open it there.
+  ["      if (opts.nav) this.openRef(opts.nav);\n      else this.setState({ tick: this.state.tick + 1 });",
+   "      if (opts.nav) this.openRef(opts.nav);\n      else if (res.nav) this.openRef(res.nav);\n      else this.setState({ tick: this.state.tick + 1 });"],
+  // A declared form names itself (the automation builder is introduced by its workspace instead).
+  ["hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && b.t !== 'builder' };",
+   "hasLabel: !!b.label && b.t !== 'upload' && b.t !== 'gate' && (b.t !== 'builder' || !!b.fields) };"],
 ];
+const TEMPLATE_PATCHES = [
+  // The form block's button and note come from the block, so one form serves every live form.
+  ['>Save automation</button>', '>{{ b.saveLabel }}</button>'],
+  ['>Saved automations start paused. Test mode writes nothing.</small>', '>{{ b.saveNote }}</small>'],
+  ['<input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}"', '<input type="{{ f.type }}" value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}"'],
+];
+for (const [from, to] of TEMPLATE_PATCHES) {
+  if (!tpl.includes(from)) throw new Error("approved markup changed; patch no longer applies:\n" + from);
+  tpl = tpl.replace(from, to);
+}
 let logic = logicSrc;
 for (const [from, to] of PATCHES) {
   if (!logic.includes(from)) throw new Error("approved logic changed; patch no longer applies:\n" + from);

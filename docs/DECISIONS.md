@@ -1942,3 +1942,20 @@ Sign-in, sign-up, password reset, invitations and creating a brokerage remain ro
 address opens the application. The React shell, boards, Spaces and their styles are removed.
 Hydration reads each client's and each policy's record, so a very large book loads slowly; a bulk
 endpoint is the follow-up.
+
+## D-116 — Live mode reaches the first record, and says where it stops
+
+After the first live test (no path to a first client, fallbacks on Import/Quotation/Settings, a
+silent claim fallback, a no-op automation save, simulated connection controls, retired Work labels,
+duplicate tabs, a lost conversation), live mode gains workspaces built from the API in the engine's
+own blocks (`asap/live-spaces.js`): add a client (with the duplicate check), import a book (read and
+validated on the server, premium basis asked, then committed), quotation work (start, requirements,
+insurers, record quotes and declines), report a claim, company settings and connections from server
+data with no simulated controls. Automations save through `POST /automations` when the trigger names
+one of the server's triggers, switched off, approval always; conditions are kept as written, not
+applied. Work shows the D-075 views. A workspace's tab identity ignores the question that opened it.
+Ask answers the client list from the records and sends anything it cannot match to `POST /ask`,
+which reports honestly when no model is configured. The conversation is kept in this browser per
+brokerage and person (a convenience, never a record). Assignment goes through the work-item `assign`
+verb. Still not connected: comparison, placement, issuance, servicing/TOR, endorsements, money,
+reconciliation, commission, renewal, reports.

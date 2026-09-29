@@ -259,12 +259,27 @@ function refForWork(w) {
   return { ws: 'work', clientId: w.clientId, workItemId: w.id };
 }
 
+// Work's views are the task-status layer (D-075): Your work · With others · In progress · Done ·
+// Recent. "Needs you" and a bare "Waiting" are retired from every surface.
+const WORK_VIEWS = {
+  mine: { label: 'Your work', title: 'Your work' },
+  others: { label: 'With others', title: 'With others' },
+  progress: { label: 'In progress', title: 'In progress' },
+  done: { label: 'Done', title: 'Done' },
+  recent: { label: 'Recent', title: 'Recent' },
+};
 WS.work = (r) => {
   const f = r.filter || {};
-  const list = sel.work({ clientId: r.clientId, assigneeId: f.assigneeId, state: f.state });
-  return { kind: 'Work', title: r.clientId ? sel.client(r.clientId).name + ' — work' : 'All work',
+  const view = WORK_VIEWS[f.view] ? f.view : (f.assigneeId || f.state ? null : 'mine');
+  let list = sel.work({ clientId: r.clientId, assigneeId: f.assigneeId, state: f.state });
+  if (view === 'mine') list = list.filter(w => w.assigneeId === S.session().userId && w.state !== 'Completed');
+  if (view === 'others') list = list.filter(w => /^With /.test(w.state) || w.state === 'Waiting');
+  if (view === 'progress') list = list.filter(w => w.state === 'Active');
+  if (view === 'done') list = list.filter(w => w.state === 'Completed');
+  if (view === 'recent') list = [...list].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20);
+  return { kind: 'Work', title: (r.clientId ? sel.client(r.clientId).name + ' — ' : '') + (view ? WORK_VIEWS[view].title : 'Work'),
     statusLabel: list.length + ' items', status: 'live',
-    filters: [{ label: 'All' }, { label: 'Active' }, { label: 'Waiting' }, { label: 'Completed' }, { label: 'Mine' }],
+    filters: Object.entries(WORK_VIEWS).map(([k, v]) => ({ label: v.label, filter: { view: k } })),
     blocks: [rows('Owner, party and state come from the records', list.map(w => ({
       title: w.title,
       note: w.kind + ' · ' + (sel.user(w.assigneeId)?.name || 'unassigned') + ' · ' + partyState(w) + (w.dueAt ? ' · due ' + fmtDate(w.dueAt) : ''),
