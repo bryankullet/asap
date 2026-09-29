@@ -78,10 +78,11 @@ describe("every destination requires authentication", () => {
     });
   }
 
-  it("remembers where an unauthenticated visitor was going", { timeout: TIMEOUT }, async () => {
+  it("brings an unauthenticated visitor back to the application after sign-in", { timeout: TIMEOUT }, async () => {
+    // Every older address now opens the one application, so that is where sign-in returns.
     const { router } = await visit("/today");
     await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"));
-    expect(router.state.location.search).toMatchObject({ next: "/today" });
+    expect(router.state.location.search).toMatchObject({ next: "/" });
   });
 });
 

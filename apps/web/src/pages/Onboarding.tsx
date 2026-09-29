@@ -1,177 +1,83 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import type { SaveOnboardingRequest } from "@asap/schema";
-import { useDocumentUpload } from "../features/documents/upload.js";
-import { onboardingSpace } from "../live/onboarding-space.js";
 import { api, describeApiError } from "../lib/api.js";
 import { useInvalidateMe } from "../lib/me.js";
-import { SpaceFrameView } from "../space/SpaceFrame.js";
 
 /**
- * A person's first day (D-082).
+ * Creating the brokerage — the one step that must happen before the ASAP interface has anything
+ * to open over. Everything after it (importing a book, filing documents, connecting a mailbox)
+ * happens inside the interface itself.
  *
- * Four short steps through the one Space renderer, over the real APIs: the brokerage is created
- * by the same idempotent function the sign-up flow used, a file goes through the same upload as
- * the Documents Space, a spreadsheet goes to the same import, and connecting Gmail is the OAuth
- * flow built in 4A-3 — there is no onboarding-shaped copy of any of them.
- *
- * Where it got to is a server row, so a refresh returns a person to the step they were on. Where
- * it has not got to yet is honest: a deployment without Google credentials says Gmail connection
- * is not configured and offers Skip, and Skip is recorded as a decision rather than as navigation.
+ * Styled with the approved interface's own palette and type so the first screen a new brokerage
+ * sees is the same product as every screen after it.
  */
 export function Onboarding() {
-  const qc = useQueryClient();
   const navigate = useNavigate();
   const invalidate = useInvalidateMe();
-  const upload = useDocumentUpload();
-
-  /*
-   * One request key for the life of this screen. A second submit, a retry after a lost response,
-   * or a double click all carry the same key, and the database returns the same brokerage (0029).
-   */
+  /* One key for the life of this screen: a double submit or a retry is the same brokerage (0029). */
   const [requestKey] = useState(() => crypto.randomUUID());
-  /** The step before an organization exists. There is no row to keep it in yet. */
-  const [preStep, setPreStep] = useState(1);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [accepted, setAccepted] = useState(false);
 
-  const live = useQuery({
-    queryKey: ["onboarding"],
-    queryFn: () => api.onboarding(),
-    retry: false,
-  });
-
-  const save = useMutation({
-    mutationFn: (input: SaveOnboardingRequest) => api.saveOnboarding(input),
-    onSuccess: (res) => qc.setQueryData(["onboarding"], res),
-    onError: (e) => setFailure(describeApiError(e)),
-  });
-
-  const createCompany = useMutation({
-    mutationFn: (v: Record<string, string>) =>
+  const create = useMutation({
+    mutationFn: () =>
       api.createOrganization({
-        name: v["name"] ?? "",
-        country: v["country"] ?? "KE",
-        currency: v["currency"] ?? "KES",
-        timezone: v["timezone"] ?? "Africa/Nairobi",
+        name: name.trim(),
+        country: "KE",
+        currency: "KES",
+        timezone: "Africa/Nairobi",
         accepted_terms: true,
         request_key: requestKey,
       }),
     onSuccess: async () => {
-      // The session's active brokerage changed, so everything keyed on it has to be re-read.
       await invalidate();
-      await qc.invalidateQueries({ queryKey: ["onboarding"] });
-      save.mutate({ step: 2 });
+      void navigate({ to: "/", replace: true });
     },
-    onError: (e) => setFailure(describeApiError(e)),
   });
 
-  const finish = useMutation({
-    mutationFn: () => api.completeOnboarding(),
-    onSuccess: (res) => {
-      qc.setQueryData(["onboarding"], res);
-      void navigate({ to: "/today", replace: true });
-    },
-    onError: (e) => setFailure(describeApiError(e)),
-  });
-
-  const connectGmail = useMutation({
-    mutationFn: () => api.connectMailbox("gmail"),
-    onSuccess: (res) => {
-      if (res.outcome === "authorise") {
-        // Google's own page. Nothing is connected until it sends the person back.
-        window.location.assign(res.url);
-        return;
-      }
-      /* Never a fake success: what the server said, in its own words. */
-      setFailure(res.reason);
-    },
-    onError: (e) => setFailure(describeApiError(e)),
-  });
-
-  const busy =
-    save.isPending ||
-    createCompany.isPending ||
-    finish.isPending ||
-    connectGmail.isPending ||
-    upload.busy;
-
-  /*
-   * Before a brokerage exists there is no row to hold the step, so the first screen is driven
-   * locally — and there is nothing to lose to a refresh, because nothing has been created.
-   */
-  const state = live.data?.onboarding;
-  const shown =
-    state === undefined ? undefined : state.company === null ? { ...state, step: preStep } : state;
-
-  const space = onboardingSpace(shown, {
-    loading: live.isPending,
-    /* An onboarding read failing is a different thing to a step failing, and both are shown. */
-    error: live.isError ? describeApiError(live.error) : null,
-    busy,
-    upload: upload.progress,
-    uploaded: upload.uploaded,
-    uploadError: failure ?? upload.error,
-  });
+  const canSubmit = name.trim().length >= 2 && accepted && !create.isPending;
+  const field = { width: "100%", border: "1px solid #d7ded8", borderRadius: 11, padding: "10px 11px", outline: 0, fontSize: 14 } as const;
 
   return (
-    <SpaceFrameView
-      space={space}
-      onAct={(action) => {
-        if (action.verb === "open" && action.to) {
-          void navigate({ to: action.to.path });
-          return;
-        }
-        // One thing at a time, so a double click cannot write twice.
-        if (busy) return;
-        setFailure(null);
-
-        const step = action.stepId ?? "";
-        const values = (action as { values?: Record<string, string> }).values;
-        const files = (action as { files?: File[] }).files ?? [];
-
-        if (step === "company" && values) {
-          if (state?.company === null || state?.company === undefined) createCompany.mutate(values);
-          else save.mutate({ step: 2 });
-          return;
-        }
-        if (step === "pick" && files[0]) {
-          /* The real pipeline: hash, allocate, transfer, tell the API. Nothing onboarding-shaped. */
-          upload.send(files[0]);
-          save.mutate({ recordsChoice: "upload" });
-          return;
-        }
-        if (step === "records:import") {
-          // Recorded before leaving, so the choice survives the trip to the import screen.
-          save.mutate({ recordsChoice: "import" });
-          void navigate({ to: "/import" });
-          return;
-        }
-        if (step === "records:skip") {
-          save.mutate({ recordsChoice: "skip", step: 3 });
-          return;
-        }
-        if (step === "mailbox:connect") {
-          save.mutate({ mailboxChoice: "connect" });
-          connectGmail.mutate();
-          return;
-        }
-        if (step === "mailbox:skip") {
-          save.mutate({ mailboxChoice: "skip", step: 4 });
-          return;
-        }
-        if (step === "finish") {
-          finish.mutate();
-          return;
-        }
-        if (step.startsWith("go:")) {
-          const to = Number(step.slice(3));
-          if (!Number.isInteger(to) || to < 1 || to > 4) return;
-          /* Before a brokerage exists there is nowhere to save it; afterwards there always is. */
-          if (state?.company === null || state === undefined) setPreStep(to);
-          else save.mutate({ step: to });
-        }
-      }}
-    />
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: '"DM Sans", system-ui, sans-serif' }}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) create.mutate();
+        }}
+        style={{ width: "100%", maxWidth: 440, background: "#fff", border: "1px solid #e5e9e5", borderRadius: 16, padding: 22 }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "Manrope, sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 18 }}>
+          <span style={{ width: 30, height: 30, borderRadius: 10, background: "#18231c", color: "#fff", display: "grid", placeItems: "center", fontSize: 16.5 }}>A</span>
+          ASAP
+        </div>
+        <div style={{ fontSize: 10.5, letterSpacing: ".12em", fontWeight: 700, color: "#1f6c49" }}>SETUP</div>
+        <h1 style={{ fontFamily: "Manrope, sans-serif", fontWeight: 700, fontSize: 22, margin: "6px 0 6px" }}>Create your brokerage</h1>
+        <p style={{ color: "#4c564e", fontSize: 14, lineHeight: 1.55, margin: "0 0 16px" }}>
+          Your brokerage is a private workspace over your own clients, policies, documents and email. Nobody outside it can see them.
+        </p>
+        <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#4c564e", marginBottom: 6 }} htmlFor="brokerage-name">
+          Brokerage name
+        </label>
+        <input id="brokerage-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus style={field} />
+        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 14, fontSize: 13.5, color: "#4c564e", lineHeight: 1.5 }}>
+          <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} style={{ marginTop: 3 }} />
+          I accept the data-processing and security terms for this brokerage.
+        </label>
+        {create.isError && (
+          <div role="alert" style={{ marginTop: 14, background: "#fdeae7", color: "#a43b32", borderRadius: 11, padding: "10px 12px", fontSize: 13.5 }}>
+            {describeApiError(create.error)} Nothing was created — you can retry.
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          style={{ marginTop: 18, width: "100%", border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "11px 14px", fontSize: 14, fontWeight: 700 }}
+        >
+          {create.isPending ? "Creating…" : "Create brokerage"}
+        </button>
+      </form>
+    </div>
   );
 }

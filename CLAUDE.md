@@ -204,7 +204,7 @@ interactions and visual experience.
 
 ### The shape of the product
 
-**The approved interactive demo is the controlling source for the visible product** (D-064). It
+**The approved offline interface ships as the product** (D-115); see below. **The approved interactive demo is the controlling source for the visible product** (D-064). It
 decides the shell, navigation, layouts, scenarios, screen behaviour and interaction design. Where an
 older frontend decision conflicts with it, amend the decision — do not omit the screen.
 
@@ -239,7 +239,7 @@ first, so Activity can be ignored at no cost.
 
 **Work's main views are Your work · With others · In progress · Done · Recent** (D-075), and four
 of them are the task-status layer itself. "Needs you" and a bare "Waiting" are both retired from
-every visible surface; `vocabulary.test.ts` fails if either returns.
+every visible surface.
 
 **When an outside party holds the work, name them:** *With CIC since 12 Aug*, *With client since
 14 Aug*, *With assessor since 16 Aug*. `<TaskStatus>` refuses to render `with_party` without both
@@ -256,15 +256,15 @@ destination, unconditionally, and there is no flag that turns either off.
 `apps/web/src/routing/auth-entry.test.tsx` drives the real route tree and fails if any destination
 becomes reachable without signing in.
 
-**Every board reads the brokerage's own rows** (D-066): Today from `GET /attention`, Work from
-`GET /work?view=`, Jobs from `GET /runs`, Automations from `GET /automations`, Search from
-`GET /search`, Audit from `GET /audit`, Email from `GET /email/threads`. Each board renders a typed
-view model from `packages/schema/src/views/boards.ts`, produced by `apps/web/src/live/adapters.ts`.
-Add a board by adding a view model and an adapter, never by branching inside a card.
-
-The approved demo remains the *visual* authority (D-064) and lives in `apps/web/src/styles/shell.css`
-— it decides the shell, the screens and the interactions. It is a design reference, never data: no
-fictional client, policy, claim or message belongs in this codebase.
+**The approved offline interface is the application** (D-115, superseding the React boards of
+D-066). `apps/web/scripts/compile-dc.mjs` (`pnpm compile:ui <ASAP.dc.html>`) compiles its markup and
+logic into `apps/web/src/asap/generated/` at build time — never edit those files; change the approved
+source or the compiler's asserted patches. Its engine lives in `apps/web/src/asap/engine/`. **Live
+mode** (`asap/live.js`) hydrates that engine from the authenticated API and writes back through it;
+a workspace with no API behind it says "not connected yet" rather than drawing example content, and
+cover is active only where the server's cover check verified it. **Demo mode** (`asap/demo.js`) runs
+the approved fictional records in the browser only, signed-in and labelled — the one place fictional
+records live, at the owner's instruction (D-115 departs from D-069 here).
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 

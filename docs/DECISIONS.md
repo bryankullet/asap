@@ -1916,3 +1916,29 @@ reopened each other (found by the connected test on a re-run).
 brokerage and keeps it immutable), admits it as a subject, adds `start_renewal`, and adds `policy` to
 the Ask scope check. The Policy Space itself needed no schema change. Read-only Ask calls load the
 Space with `readOnly`, which also skips the placement's Work sync, so asking writes nothing.
+
+## D-115 — The approved offline interface is the application
+
+The owner directed that the approved offline ASAP interface (`ASAP.dc.html` with its store, intent
+and adapter modules) ship as the product, exactly as seen, replacing the React rebuild. It is not
+copied as a runtime prototype: `apps/web/scripts/compile-dc.mjs` translates its markup into a React
+render function and its logic into a module at build time, so nothing is evaluated in the browser (no
+Babel, no `new Function`). The only edits are listed and asserted in the compiler: injected adapters,
+async writes, demo-only controls kept out of live mode, the brokerage name, and one defect fixed (the
+search field bound a handler that did not exist).
+
+Two modes, both behind `RequireSession` and `RequireMembership`:
+
+- **Live** (default) hydrates the engine's record store from the authenticated API and writes back
+  through it. Cover reads as active only where `GET /policies/:id/space` says verified and active.
+  Values the API does not hold read as not recorded; workspaces with no API behind them yet (quote,
+  compare, placement, issue, servicing, endorsement, money, reconciliation, commission, renewal,
+  report, investigation, import, setup, settings) say "not connected yet" instead of drawing the
+  engine's example content, and their actions are refused in words with nothing changed.
+- **Demo** runs the approved fictional records in this browser only, labelled as a demo, reached
+  from the profile. This departs from D-069 at the owner's instruction; it is signed-in only.
+
+Sign-in, sign-up, password reset, invitations and creating a brokerage remain routes. Every other
+address opens the application. The React shell, boards, Spaces and their styles are removed.
+Hydration reads each client's and each policy's record, so a very large book loads slowly; a bulk
+endpoint is the follow-up.

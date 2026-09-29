@@ -13,22 +13,6 @@
 @import "@fontsource/manrope/800.css";
 @import "tailwindcss";
 @import "@asap/ui/styles.css";
-/*
- * The approved demo's visual system (D-064), imported after Tailwind so its preflight cannot
- * override the ported values. This file is the design authority for parity surfaces.
- */
-@import "./shell.css";
-/*
- * The permanent shell at the prototype's measured values, after shell.css so that where the two
- * describe the same frame this wins: the older file has no collapse state, no workspace header,
- * and Ask docked at the foot of the page.
- */
-@import "./prototype-shell.css";
-/*
- * The Space frame and its fourteen blocks: the composition of every authenticated screen. Loaded
- * last so that where it and the legacy card patterns describe the same thing, this wins.
- */
-@import "./space.css";
 @source "../../../../packages/ui/src";
 
 @layer base {
