@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * Live mode over a brokerage's records, with the API answered in the shapes its Zod contracts
@@ -71,6 +71,12 @@ const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clients
 const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
 const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
 const createAutomation = vi.fn(async () => ({}));
+// A second client whose name shares a word with the first, for switching and ambiguity (D-121).
+let twoClients = false;
+const CLIENT_B = "30000000-0000-4000-8000-0000000000b2";
+const POL_B = "40000000-0000-4000-8000-0000000000b2";
+const PER_B = "50000000-0000-4000-8000-0000000000b2";
+const clientB = () => ({ client: { id: CLIENT_B, organization_id: ORG, name: "Tausi Farms Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 });
 const OPP = "90000000-0000-4000-8000-000000000001";
 const APPROACH = "91000000-0000-4000-8000-000000000001";
 const INS_CIC = "92000000-0000-4000-8000-000000000001";
@@ -120,9 +126,15 @@ vi.mock("../lib/api.js", () => ({
     clientFiles: async (view: string) => ({
       view,
       counts: {},
-      items: view === "not_started" ? created.map((c) => ({ client: { id: c.id, organization_id: ORG, name: c.name, kind: "corporate", source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-30", updated_at: "2026-09-30", deleted_at: null }, effective_status: "not_started", blocking: [], in_state_since: "2026-09-30", documents_held: 0 })) : view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
+      items: view === "blocking" && twoClients ? [clientB()] : view === "not_started" ? created.map((c) => ({ client: { id: c.id, organization_id: ORG, name: c.name, kind: "corporate", source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-30", updated_at: "2026-09-30", deleted_at: null }, effective_status: "not_started", blocking: [], in_state_since: "2026-09-30", documents_held: 0 })) : view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
     }),
-    clientSpace: async () => ({
+    clientSpace: async (id: string) => id === CLIENT_B ? ({
+      client: { id: CLIENT_B, name: "Tausi Farms Ltd", kind: "corporate", fileStatus: "cleared", createdAt: "2026-09-01" },
+      contacts: [],
+      policies: [{ id: POL_B, policyNumber: "TF-FIRE-009", classOfBusiness: "Fire", insurerName: "Jubilee Insurance", periods: [{ id: PER_B, periodStart: "2026-03-01", periodEnd: "2027-02-28", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] }],
+      work: [], claims: [], endorsements: [], documents: [], threads: [], fileMissing: [], mailboxConnected: false,
+      permissions: { canEdit: true, canUploadDocuments: true, canStartWork: true },
+    }) : ({
       client: { id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate", fileStatus: "cleared", createdAt: "2026-09-01" },
       contacts: [{ id: "c1", fullName: "Otieno Were", roleLabel: "Finance", email: "otieno@example.test", phone: null, isPrimary: true }],
       policies: [
@@ -162,7 +174,7 @@ async function live() {
   const { loadLiveAdapters } = await import("./live.js");
   return (await loadLiveAdapters({ me, switchToDemo: () => {} })) as {
     records: { actor(): { name: string }; act(t: string, p: unknown, id?: string): unknown; demo: boolean; sel: { clients(): { name: string }[] } };
-    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }> };
+    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }>; context(): { organizationId: string; previousSubject: unknown; pendingClarification: unknown; pendingAction: unknown; latestReceipt: unknown } };
     documents: { read(f: File): Promise<unknown> };
     greetingChips: string[];
   };
@@ -460,5 +472,84 @@ describe("live mode", () => {
     expect(ws).toContain("Next: Request renewal terms from the insurer");
     expect(ws).toContain("Missing: Renewal terms.");
     expect(ws).not.toContain("Decide the first step");
+  });
+
+  describe("typed conversational context and resolution order (D-121)", () => {
+    beforeEach(() => {
+      twoClients = true;
+    });
+    afterEach(() => {
+      twoClients = false;
+    });
+    type Answer = { lead: string; ref?: { ws: string; clientId?: string; policyYearId?: string } | null; clarify?: { options: { label: string }[] } };
+    const policyA = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+    const policyB = { ws: "policy", clientId: CLIENT_B, policyYearId: PER_B };
+    const clientA = { ws: "client", clientId: CLIENT };
+    const clientBref = { ws: "client", clientId: CLIENT_B };
+    const route = async (A: Awaited<ReturnType<typeof live>>, q: string, ref: object, chip: object | null = null) =>
+      (await A.ai.route(q, { ...ref, ref, chip })) as Answer;
+
+    it("an explicit policy number wins over the Space in front, and never takes the vehicle path", async () => {
+      const A = await live();
+      const r = await route(A, "Is cover active on TH-MTR-001?", clientBref);
+      expect(r.lead).toBe("TH-MTR-001 has active cover.");
+      expect(r.ref).toMatchObject({ ws: "policy", policyYearId: PER_OK });
+      expect(JSON.stringify(r)).not.toContain('"ws":"coverage"');
+    });
+
+    it("'this policy' and 'this client' mean the Space in front", async () => {
+      const A = await live();
+      expect((await route(A, "Is cover active on this policy?", policyB)).lead).toMatch(/^TF-FIRE-009/);
+      expect((await route(A, "Which policies does this client have?", clientA)).lead).toBe("Tausi Hauliers Ltd has 2 policies.");
+    });
+
+    it("switching between two clients and two policies follows the Space, with no identity carried over", async () => {
+      const A = await live();
+      expect((await route(A, "When does this policy expire?", policyA)).lead).toMatch(/^TH-MTR-001 ends on /);
+      // Now the other client's policy is in front: the previous subject belongs to another client and is dropped.
+      expect((await route(A, "When does it expire?", policyB)).lead).toMatch(/^TF-FIRE-009 ends on /);
+      expect((await route(A, "Which policies does this client have?", clientBref)).lead).toBe("Tausi Farms Ltd has 1 policy.");
+      expect((await route(A, "Which policies does this client have?", clientA)).lead).toBe("Tausi Hauliers Ltd has 2 policies.");
+    });
+
+    it("a follow-up uses the subject just resolved; a corrected follow-up switches to what it names", async () => {
+      const A = await live();
+      await route(A, "Is cover active on TH-MTR-001?", clientA);
+      expect(A.ai.context().previousSubject).toMatchObject({ type: "policy", label: "TH-MTR-001" });
+      expect((await route(A, "When does it expire?", clientA)).lead).toMatch(/^TH-MTR-001 ends on /);
+      const corrected = await route(A, "No — I meant TF-FIRE-009. When does it expire?", clientA);
+      expect(corrected.lead).toMatch(/^TF-FIRE-009 ends on /);
+    });
+
+    it("an ambiguous client name asks which, and opens nothing", async () => {
+      const A = await live();
+      const r = await route(A, "Which policies does Tausi have?", {});
+      expect(r.lead).toBe("Which client do you mean?");
+      expect(r.ref).toBeNull();
+      expect(r.clarify?.options.map((o) => o.label).sort()).toEqual(["Tausi Farms Ltd", "Tausi Hauliers Ltd"]);
+      expect(A.ai.context().pendingClarification).not.toBeNull();
+    });
+
+    it("a missing vehicle identity is asked for, never answered about 'null'", async () => {
+      const A = await live();
+      const r = await route(A, "Is the vehicle covered?", clientA);
+      expect(JSON.stringify(r)).not.toMatch(/null is not|"ws":"coverage"/);
+    });
+
+    it("a client with several policies is asked which, not given the first", async () => {
+      const A = await live();
+      const r = await route(A, "Is cover active?", {}, { clientId: CLIENT });
+      expect(r.lead).toBe("Which policy?");
+    });
+
+    it("records the pending action and, once confirmed, the latest receipt", async () => {
+      const A = await live();
+      const add = (await A.ai.route("Add Kifaru Traders as a client", {})) as { pending: { action: string; payload: object; actionId: string } };
+      expect(A.ai.context().pendingAction).toMatchObject({ action: "client.create" });
+      await A.records.act(add.pending.action, add.pending.payload, add.pending.actionId);
+      expect(A.ai.context().pendingAction).toBeNull();
+      expect(A.ai.context().latestReceipt).toMatchObject({ text: "Kifaru Traders added as a client" });
+      expect(A.ai.context().organizationId).toBe(ORG);
+    });
   });
 });

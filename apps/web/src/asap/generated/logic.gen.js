@@ -168,7 +168,7 @@ class Component extends DCLogic {
     this.setState({ thread, thinking: true });
     setTimeout(async () => {
       const tab = this.activeTab();
-      const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref };
+      const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref, chip: this.state.contextRef || null };
       if (!this.state.contextRef) { delete ctx.clientId; }
       const r = (await this.A.ai.route(text, ctx)) || {};
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };

@@ -970,6 +970,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template", "doc.applyPreview"]);
     const settle = (res) => {
       if (res.ok && !REPEATABLE.has(type)) db.meta.ledger[key] = { ...res, actionId: key };
+      // The action a card was waiting on is done: it is no longer pending, and its receipt is the latest.
+      if (res.ok && convo.pendingAction && convo.pendingAction.actionId === key) {
+        convo.latestReceipt = { actionId: key, text: res.text, at: res.at };
+        convo.pendingAction = null;
+      }
       return res;
     };
     const out = handler(payload);
@@ -1066,42 +1071,147 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     }
   }
 
-  /**
-   * "Is cover active on this policy / on POL-…?" — answered from the server's cover check for
-   * that policy, never from the vehicle check. An explicit policy number wins; then the policy
-   * open in front; then the only policy of the client open in front. Anything else is one
-   * clarifying question — never a guessed client and never a workspace built on nothing.
-   * A vehicle registration in the question leaves it to the vehicle check.
+  /*
+   * The conversation's typed context (D-121). Business records stay on the server; this holds only
+   * references to them, for this session: what was last resolved, what is being asked or prepared,
+   * and the latest receipt. Never written to browser storage.
    */
-  function policyCoverAnswer(t, ctx) {
-    if (!/\bcover(ed|age)?\b|\bin force\b|\bon risk\b/i.test(t)) return null;
-    if (/\b[kK][a-zA-Z]{2}\s?\d{3}[a-zA-Z]?\b/.test(t)) return null; // a registration: the vehicle check
-    const byNumber = db.policies.find((p) => p.number && p.number !== "Number not recorded" && new RegExp("\\b" + p.number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(t));
-    const mentionsPolicy = /\b(polic(y|ies)|this|it)\b/i.test(t);
-    let year = null;
-    if (byNumber) {
-      year = db.policyYears.filter((y) => y.policyId === byNumber.id).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
-    } else if (mentionsPolicy && ctx.policyYearId) {
-      year = db.policyYears.find((y) => y.id === ctx.policyYearId) ?? null;
-    } else if (mentionsPolicy && ctx.policyId) {
-      year = db.policyYears.filter((y) => y.policyId === ctx.policyId).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
-    } else if (mentionsPolicy && ctx.clientId) {
-      const pols = db.policies.filter((p) => p.clientId === ctx.clientId);
-      if (pols.length === 1) year = db.policyYears.filter((y) => y.policyId === pols[0].id).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
-      else if (pols.length > 1)
-        return { lead: "Which policy?", text: "This client has more than one policy; I will not pick one.", clarify: { question: "Policy", options: pols.map((p) => ({ label: p.number, text: "Is cover active on " + p.number + "?" })) }, ref: null, keepWorkspace: true };
+  const convo = { previousSubject: null, pendingClarification: null, pendingAction: null, latestReceipt: null };
+
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const STOP = new Set(["the", "and", "ltd", "limited", "plc", "co", "company", "group", "insurance", "motors", "traders"]);
+  const latestYear = (policyId) => db.policyYears.filter((y) => y.policyId === policyId).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
+  const policySubject = (p) => ({ type: "policy", policyId: p.id, clientId: p.clientId, label: p.number });
+  const clientSubject = (c) => ({ type: "client", clientId: c.id, label: c.name });
+
+  /** 1. What the message itself names: a policy number, or a client by a whole word of its name. */
+  function explicitSubject(t) {
+    const pol = db.policies.find((p) => p.number && p.number !== "Number not recorded" && new RegExp("\\b" + esc(p.number) + "\\b", "i").test(t));
+    if (pol) return policySubject(pol);
+    const full = db.clients.filter((c) => c.name.length >= 3 && new RegExp("\\b" + esc(c.name) + "\\b", "i").test(t));
+    if (full.length === 1) return clientSubject(full[0]);
+    const hits = db.clients.filter((c) =>
+      c.name.split(/\s+/).some((w) => w.length >= 3 && !STOP.has(w.toLowerCase()) && new RegExp("\\b" + esc(w) + "\\b", "i").test(t)),
+    );
+    if (hits.length === 1) return clientSubject(hits[0]);
+    if (hits.length > 1) return { type: "ambiguous", candidates: hits.map(clientSubject) };
+    return null;
+  }
+
+  /** 5. What the Space in front is about. */
+  function activeSubject(ctx) {
+    const ref = ctx.ref || ctx;
+    if (ref.policyYearId) {
+      const y = db.policyYears.find((x) => x.id === ref.policyYearId);
+      const p = y && db.policies.find((x) => x.id === y.policyId);
+      if (p) return policySubject(p);
     }
-    if (!year) {
-      if (!mentionsPolicy && !byNumber) return null;
+    if (ref.policyId) {
+      const p = db.policies.find((x) => x.id === ref.policyId);
+      if (p) return policySubject(p);
+    }
+    const cid = ref.clientId || ctx.clientId;
+    const c = cid && db.clients.find((x) => x.id === cid);
+    return c ? clientSubject(c) : null;
+  }
+
+  /**
+   * Who or what a question is about, in the order D-121 sets: the message itself; an attached
+   * chip; the action being prepared; the subject just resolved (for "it", and only while the same
+   * client is in front); the Space in front ("this client", "this policy"); otherwise candidates,
+   * and a question. Never the first record that happens to match.
+   */
+  function resolveSubject(t, ctx) {
+    const explicit = explicitSubject(t);
+    if (explicit) return { ...explicit, source: "message" };
+    const chip = ctx.chip && ctx.chip.clientId ? db.clients.find((c) => c.id === ctx.chip.clientId) : null;
+    const active = activeSubject(ctx);
+    const demonstrative = /\bthis (client|policy|quotation|claim)\b/i.test(t);
+    if (chip && !(demonstrative && active && active.clientId === chip.id && active.type === "policy")) {
+      // A chip for the client in front defers to the policy in front when the message says "this policy".
+      if (!(active && active.type === "policy" && active.clientId === chip.id && /\bpolicy\b/i.test(t))) return { ...clientSubject(chip), source: "chip" };
+    }
+    if (convo.pendingAction?.subject) return { ...convo.pendingAction.subject, source: "pending" };
+    const prev = convo.previousSubject;
+    const sameClient = !active || !prev || prev.clientId === active.clientId;
+    if (prev && !demonstrative && sameClient) return { ...prev, source: "previous" };
+    if (active) return { ...active, source: "space" };
+    return null;
+  }
+
+  /** The subject as a policy: itself, or the client's only policy; several means ask which. */
+  function asPolicy(sub) {
+    if (!sub) return { none: true };
+    if (sub.type === "ambiguous") return { ambiguous: sub.candidates };
+    if (sub.type === "policy") return { policy: db.policies.find((p) => p.id === sub.policyId) };
+    const pols = db.policies.filter((p) => p.clientId === sub.clientId);
+    if (pols.length === 1) return { policy: pols[0] };
+    if (pols.length > 1) return { several: pols, client: db.clients.find((c) => c.id === sub.clientId) };
+    return { noPolicy: db.clients.find((c) => c.id === sub.clientId) };
+  }
+
+  const remember = (sub) => {
+    if (sub && sub.type !== "ambiguous") convo.previousSubject = { type: sub.type, policyId: sub.policyId, clientId: sub.clientId, label: sub.label };
+  };
+
+  function clarifyClient(cands, t) {
+    convo.pendingClarification = { question: "client", text: t };
+    return { lead: "Which client do you mean?", text: "More than one client matches. I will not pick one.", clarify: { question: "Client", options: cands.map((c) => ({ label: c.label, text: t.replace(/[?.!]*$/, "") + " — " + c.label })) }, ref: null, keepWorkspace: true };
+  }
+  function clarifyPolicy(pols, t) {
+    convo.pendingClarification = { question: "policy", text: t };
+    return { lead: "Which policy?", text: "This client has more than one policy; I will not pick one.", clarify: { question: "Policy", options: pols.map((p) => ({ label: p.number, text: t.replace(/[?.!]*$/, "") + " " + p.number + "?" })) }, ref: null, keepWorkspace: true };
+  }
+
+  /**
+   * Record questions about a policy or a client, answered from the records the server returned:
+   * cover (from the server's cover check, never the vehicle check), expiry, and a client's
+   * policies. A vehicle registration in the question leaves it to the vehicle check.
+   */
+  function recordQuestion(t, ctx) {
+    const cover = /\bcover(ed|age)?\b|\bin force\b|\bon risk\b/i.test(t);
+    const expiry = /\b(expire|expires|expiry|end date|renewal date|run(s)? out|when does .* end)\b/i.test(t);
+    const listPolicies = /\b(which|what) polic(y|ies)\b|\bpolicies does\b/i.test(t);
+    if (!cover && !expiry && !listPolicies) return null;
+    if (/\b[kK][a-zA-Z]{2}\s?\d{3}[a-zA-Z]?\b/.test(t)) return null; // a registration: the vehicle check
+    const sub = resolveSubject(t, ctx);
+    if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, t);
+
+    if (listPolicies) {
+      const client = sub && db.clients.find((c) => c.id === sub.clientId);
+      if (!client) return { lead: "Which client?", text: "Open the client, or name them. Nothing was opened.", ref: null, keepWorkspace: true };
+      const pols = db.policies.filter((p) => p.clientId === client.id);
+      remember(clientSubject(client));
+      return {
+        lead: pols.length ? client.name + " has " + plural(pols.length, "policy", "policies") + "." : client.name + " has no policies on file.",
+        text: pols.map((p) => { const y = latestYear(p.id); return p.number + " — " + (p.cls || "class not recorded") + (y ? ", " + y.insurer + ", " + S.fmtDate(y.from) + " – " + S.fmtDate(y.to) : ""); }).join(". ") || "Import their book, or add a policy from a document.",
+        ref: { ws: "client", clientId: client.id },
+        chips: LIVE_CHIPS,
+      };
+    }
+
+    if (!sub) {
+      if (cover && !/\b(polic(y|ies)|this|it)\b/i.test(t)) return null;
       return { lead: "Which policy do you mean?", text: "Name the policy number, or open the policy first. I will not guess which record you mean.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
     }
-    const pol = db.policies.find((p) => p.id === year.policyId);
+    const r = asPolicy(sub);
+    if (r.ambiguous) return clarifyClient(r.ambiguous, t);
+    if (r.several) return clarifyPolicy(r.several, t);
+    if (r.noPolicy) return { lead: r.noPolicy.name + " has no policy on file.", text: "Nothing was opened.", ref: { ws: "client", clientId: r.noPolicy.id }, chips: LIVE_CHIPS };
+    const pol = r.policy;
+    const year = latestYear(pol.id);
+    if (!year) return { lead: pol.number + " has no period of cover on file.", text: "Nothing was opened.", ref: null, keepWorkspace: true };
+    remember(policySubject(pol));
+    convo.pendingClarification = null;
     const client = db.clients.find((c) => c.id === year.clientId);
+    const ref = { ws: "policy", clientId: year.clientId, policyYearId: year.id };
+    if (expiry && !cover)
+      return { lead: pol.number + " ends on " + S.fmtDate(year.to) + ".", text: (client ? client.name + ", " : "") + year.insurer + ", period " + S.fmtDate(year.from) + " – " + S.fmtDate(year.to) + ".", ref, chips: LIVE_CHIPS };
     const active = year.status === "active";
     return {
-      lead: (pol?.number ?? "This policy") + (active ? " has active cover." : ": " + (year.coverLabel || "cover not verified") + "."),
+      lead: pol.number + (active ? " has active cover." : ": " + (year.coverLabel || "cover not verified") + "."),
       text: (year.coverReason ? year.coverReason + " " : "") + (client ? "Client " + client.name + ". " : "") + "Period " + S.fmtDate(year.from) + " – " + S.fmtDate(year.to) + ", " + year.insurer + ". ASAP reports what the insurer's records show; it does not decide cover.",
-      ref: { ws: "policy", clientId: year.clientId, policyYearId: year.id },
+      ref,
       chips: LIVE_CHIPS,
     };
   }
@@ -1255,7 +1365,19 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     };
   }
 
+  /** Every answer passes through here, so the context records what was prepared (D-121). */
   async function liveRoute(text, ctx) {
+    const r = await routeInner(text, ctx);
+    if (r && r.pending) {
+      const pay = r.pending.payload || {};
+      const sub = pay.clientId ? { type: "client", clientId: pay.clientId } : null;
+      convo.pendingAction = { actionId: r.pending.actionId, action: r.pending.action, subject: sub };
+    }
+    if (r && r.clarify) convo.pendingClarification = convo.pendingClarification ?? { question: r.clarify.question, text };
+    return r;
+  }
+
+  async function routeInner(text, ctx) {
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
     // Questions about the client list, answered from the records — including when there are none.
@@ -1280,8 +1402,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     }
     const quote = quotationFromAsk(t, ctx);
     if (quote) return quote;
-    const cover = policyCoverAnswer(t, ctx);
-    if (cover) return cover;
+    const record = recordQuestion(t, ctx);
+    if (record) return record;
     const r = interpret(t, ctx) || {};
     // The vehicle check needs a vehicle. Without a registration it asks, rather than opening a
     // cover workspace about nothing ("null is not on a confirmed schedule").
@@ -1355,6 +1477,6 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return { ok: false, error: "Sending email is not connected yet. Your draft is kept." };
       },
     },
-    ai: { latencyMs: 200, configured: () => false, route: liveRoute, workspace: liveWorkspace, parseDate, tools: Object.keys(LIVE) },
+    ai: { latencyMs: 200, configured: () => false, route: liveRoute, context: () => ({ organizationId: me.active_organization.id, userId: me.user.id, ...JSON.parse(JSON.stringify(convo)) }), workspace: liveWorkspace, parseDate, tools: Object.keys(LIVE) },
   };
 }

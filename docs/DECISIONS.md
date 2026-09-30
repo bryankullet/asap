@@ -2020,3 +2020,15 @@ on Work and Today rows, the opportunity and the document. Live mode shows it ver
 browser-side guess survives only as a fallback when a server sends none. Reason: four surfaces
 composing their own "next step" is how Work came to say "Decide the first step" beside a quotation
 that already had requirements and an insurer.
+
+## D-121 — Typed conversational context and one resolution order
+
+Live mode keeps, for the session and in memory only (never browser storage), the organization,
+user, previous resolved subject, pending clarification, pending action and latest receipt; the
+active Space and the context chip arrive typed with every question (`ctx.ref`, `ctx.chip`). One
+resolver answers "who or what is this about" in this order: an identifier in the message (policy
+number, a client's full name or a whole distinctive word of it); the attached chip; the pending
+action's subject; the previous subject; the Space in front; otherwise candidates and one question.
+Two refinements: "this client/policy" point at the Space in front, so they outrank the previous
+subject; and a previous subject belonging to a different client than the one in front is dropped,
+so identity never leaks between open Spaces. It never selects the first match.
