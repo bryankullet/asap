@@ -945,8 +945,18 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       serverStoredLast = res.state === "answered" || res.state === "abstained" || res.state === "clarify";
       if (res.state === "not_configured")
         return { lead: "No model is configured on the server yet.", text: "I answer from your records directly where I can. Questions beyond that need the server's model, which is not configured for this deployment.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
-      if (res.state === "unavailable")
-        return { lead: "The server could not answer just now.", text: "Nothing was changed. Try again in a moment.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
+      if (res.state === "unavailable") {
+        const WHY = {
+          auth_rejected: ["The model provider rejected this deployment's credentials.", "The server's AI key was refused. Whoever administers the deployment needs to check it; nothing was changed."],
+          model_unavailable: ["The configured model is not available.", "The provider says the model this deployment names does not exist or this key may not use it. Nothing was changed."],
+          billing: ["The model provider account has no usable credit.", "The provider refused the request for billing reasons. Nothing was changed."],
+          rate_limited: ["Too many questions at once — the provider asked us to slow down.", "Nothing was changed. Try again in a minute."],
+          timeout: ["The model did not reply in time.", "Nothing was changed. Try again, or ask a shorter question."],
+          invalid_output: ["The model's reply could not be used.", "Nothing was changed. Try asking again in different words."],
+        };
+        const [lead, why] = WHY[res.failure] ?? ["The model provider is temporarily unavailable.", "Nothing was changed. Try again in a moment."];
+        return { lead, text: why + (res.requestId ? " Reference: " + res.requestId + "." : ""), ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
+      }
       if (res.state === "clarify" && res.clarify)
         return { lead: res.clarify.question, text: "Choose one:", clarify: { question: res.clarify.question, options: res.clarify.options.map((o) => ({ label: o.label, text: o.label })) }, ref: null, keepWorkspace: true };
       const body = res.message?.body || "I could not find that in your records.";

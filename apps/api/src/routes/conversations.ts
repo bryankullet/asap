@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { loadIssuance } from "../placement/issuance.js";
 import { preparePolicyAction } from "../policy/actions.js";
 import { loadPolicySpace } from "../policy/space.js";
@@ -335,7 +336,9 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
     } catch (err) {
       if (err instanceof AiGatewayError) {
         // Honest failure. The question stays in the transcript — a person can see they asked it.
-        logger.warn({ failure: err.failure }, "ask could not be served");
+        // The detail carries the provider status, error type and request id — never its message.
+        const requestId = randomUUID();
+        logger.warn({ failure: err.failure, detail: err.detail ?? null, requestId, provider: provider.id, model: provider.model }, "ask could not be served");
         return c.json(
           askResponseV2Schema.parse({
             state: err.failure === "not_configured" ? "not_configured" : "unavailable",
@@ -346,11 +349,15 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
             planView: null,
             clarify: null,
             suggestions: [],
+            failure: err.failure,
+            requestId,
           }) satisfies AskResponseV2,
         );
       }
       throw err;
     }
+
+    logger.info({ provider: provider.id, model: provider.model, state: outcome.state }, "ask served");
 
     // Narrowed rather than a boolean, so the compiler enforces which fields each state carries.
     const answered = outcome.state === "answered" ? outcome : null;

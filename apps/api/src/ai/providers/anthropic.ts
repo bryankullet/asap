@@ -77,24 +77,17 @@ export function anthropicProvider(config: {
           signal: controller.signal,
         });
       } catch (e) {
+        const timedOut = e instanceof Error && e.name === "AbortError";
         throw new AiGatewayError(
-          "unavailable",
-          "The model could not be reached.",
+          timedOut ? "timeout" : "unavailable",
+          timedOut ? "The model did not reply in time." : "The model could not be reached.",
           e instanceof Error ? e.name : undefined,
         );
       } finally {
         clearTimeout(timer);
       }
 
-      if (!res.ok) {
-        // The status is enough for the caller to choose a state. The body is not logged: a
-        // provider error can echo the prompt, and the prompt carries brokerage data.
-        throw new AiGatewayError(
-          res.status === 429 || res.status >= 500 ? "unavailable" : "invalid_output",
-          "The model returned an error.",
-          `HTTP ${res.status}`,
-        );
-      }
+      if (!res.ok) throw await classifyFailure(res);
 
       const json = (await res.json()) as {
         content?: (
@@ -212,4 +205,33 @@ function toAnthropicMessages(messages: AiMessage[]): Record<string, unknown>[] {
   }
   flush();
   return out;
+}
+
+/**
+ * What went wrong, as a category a person can act on. Only the status, Anthropic's error *type*
+ * and its request id are kept: the message itself is read for one billing phrase and then
+ * dropped, because a provider error can echo the prompt, and the prompt carries brokerage data.
+ */
+export async function classifyFailure(res: Response): Promise<AiGatewayError> {
+  const providerRequestId = res.headers.get("request-id") ?? null;
+  let type = "";
+  let billing = false;
+  try {
+    const body = (await res.json()) as { error?: { type?: string; message?: string } };
+    type = body.error?.type ?? "";
+    billing = /credit balance|billing|purchase credits/i.test(body.error?.message ?? "");
+  } catch {
+    /* no JSON body: the status alone decides */
+  }
+  const detail = `HTTP ${res.status}${type ? " " + type : ""}${providerRequestId ? " request " + providerRequestId : ""}`;
+  if (res.status === 401 || res.status === 403 || type === "authentication_error" || type === "permission_error")
+    return new AiGatewayError("auth_rejected", "The model provider rejected the server's credentials.", detail);
+  if (billing) return new AiGatewayError("billing", "The model provider account has no usable credit.", detail);
+  if (res.status === 404 || type === "not_found_error")
+    return new AiGatewayError("model_unavailable", "The configured model is not available to this key.", detail);
+  if (res.status === 429 || type === "rate_limit_error")
+    return new AiGatewayError("rate_limited", "The model provider is rate limiting this deployment.", detail);
+  if (res.status >= 500 || type === "overloaded_error" || type === "api_error")
+    return new AiGatewayError("unavailable", "The model provider is temporarily unavailable.", detail);
+  return new AiGatewayError("invalid_output", "The model provider refused the request as malformed.", detail);
 }

@@ -17,6 +17,13 @@ import { fakeProvider } from "./providers/fake.js";
  */
 export function resolveProvider(env: ServerEnv, logger: Logger): AiProvider | null {
   const id = env.AI_DEFAULT_PROVIDER as AiProviderId;
+  const key = id === "anthropic" ? env.ANTHROPIC_API_KEY : id === "openai" ? env.OPENAI_API_KEY : "fake";
+  // One safe line, every boot: which provider and model, and whether a key arrived — never the key.
+  // The env parser trims and turns a blank value into "absent", so a trailing newline cannot hide one.
+  logger.info(
+    { provider: id, model: env.AI_MODEL ?? null, keyPresent: key !== undefined, configured: id === "fake" || (key !== undefined && env.AI_MODEL !== undefined) },
+    `AI gateway: provider=${id} model=${env.AI_MODEL ?? "none"} configured=${id === "fake" || (key !== undefined && env.AI_MODEL !== undefined)} keyPresent=${key !== undefined}`,
+  );
 
   if (id === "fake") {
     logger.info({ provider: "fake" }, "ai gateway: deterministic provider");

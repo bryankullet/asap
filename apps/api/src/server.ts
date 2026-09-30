@@ -16,6 +16,12 @@ import { gmailProvider } from "./mailbox/providers/gmail.js";
 const env = loadServerEnv();
 
 const logger = createLogger(env.LOG_LEVEL, env.APP_ENV === "local");
+// Names only, quoted so a stray space or a misspelling shows — never a value. This is how a
+// variable set on the wrong service, or under a slightly different name, becomes visible.
+logger.info(
+  { aiVariableNames: Object.keys(process.env).filter((k) => /AI_|ANTHROPIC|OPENAI/i.test(k)).sort().map((k) => JSON.stringify(k)) },
+  "AI gateway: variables present by name",
+);
 const build = resolveBuildInfo(env);
 
 const supabase = createSupabaseFactory({

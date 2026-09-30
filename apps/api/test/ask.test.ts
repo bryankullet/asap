@@ -1,3 +1,4 @@
+import { AiGatewayError } from "@asap/schema";
 /**
  * `POST /ask` — Ask ASAP end to end, against the deterministic provider.
  *
@@ -282,6 +283,31 @@ describe("POST /ask", () => {
     expect(body.message).toBeNull();
     // Nothing was persisted for a question that was never asked of a model.
     expect(db.tables["conversation_messages"]).toHaveLength(0);
+  });
+
+  it("reports a rejected credential as its own failure with a reference, never as unconfigured", async () => {
+    const app = createApp({
+      logger: pino({ level: "silent" }),
+      build: { version: "t", commit: "t" },
+      supabase: fakeFactory(db),
+      mailer: silentMailer,
+      webBaseUrl: "http://localhost:5173",
+      invitationTtlHours: 168,
+      exposeAcceptUrl: true,
+      executor: () => async () => {},
+      bootToken: "test-boot",
+      aiProvider: {
+        id: "anthropic",
+        model: "claude-opus-5",
+        complete: async () => {
+          throw new AiGatewayError("auth_rejected", "The model provider rejected the server's credentials.", "HTTP 401 authentication_error");
+        },
+      },
+    });
+    const body = await readJson(await ask(app, { question: "Explain in plain English what a claims loss ratio means." }));
+    expect(body.state).toBe("unavailable");
+    expect(body.failure).toBe("auth_rejected");
+    expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("refuses a scope the caller cannot read", async () => {

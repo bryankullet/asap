@@ -86,7 +86,12 @@ export type AiResponse = z.infer<typeof aiResponseSchema>;
  */
 export const AiFailure = z.enum([
   "not_configured", //   no provider credential on the server. The UI says so, honestly.
-  "unavailable", //      the provider could not be reached or errored.
+  "unavailable", //      the provider could not be reached or errored (5xx, overloaded, network).
+  "auth_rejected", //    the provider refused the server's credential (401/403).
+  "model_unavailable", // the configured model does not exist or this key may not use it.
+  "billing", //          the provider account has no credit or its billing is not set up.
+  "rate_limited", //     the provider asked us to slow down (429).
+  "timeout", //          no reply within AI_REQUEST_TIMEOUT_MS.
   "refused", //          the provider declined. Ask abstains; it does not try another way round.
   "invalid_output", //   the reply did not satisfy the schema after the allowed retries.
   "budget_exceeded", //  too many tool rounds for one question.

@@ -1,3 +1,4 @@
+import { AiFailure } from "./gateway.js";
 import { z } from "zod";
 import { uuidSchema } from "../api/common.js";
 import { SpaceView } from "../spaces/plan.js";
@@ -140,6 +141,14 @@ export const askResponseV2Schema = z.object({
     .nullable()
     .default(null),
   suggestions: z.array(z.string().max(120)).max(4).default([]),
+  /**
+   * Why the model could not answer, when it could not — so the screen can say "credentials
+   * rejected" rather than "not configured". A category only: never the provider's message, which
+   * can echo the prompt.
+   */
+  failure: AiFailure.nullable().default(null),
+  /** A server correlation id, shown with a failure so it can be matched to the API logs. */
+  requestId: z.string().max(80).nullable().default(null),
 });
 export type AskResponseV2 = z.infer<typeof askResponseV2Schema>;
 

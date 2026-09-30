@@ -337,3 +337,41 @@ describe("when it goes wrong", () => {
     ).rejects.toMatchObject({ failure: "unavailable" });
   });
 });
+
+describe("each failure keeps its own name", () => {
+  const ask = () =>
+    provider.complete({ system: "s", messages: [{ role: "user", content: "q" }], tools: [], responseSchema: null, maxOutputTokens: 64 });
+  const reply = (status: number, error: { type: string; message: string }, requestId = "req_test_1") =>
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ type: "error", error }), { status, headers: { "Content-Type": "application/json", "request-id": requestId } }),
+    );
+
+  it("a rejected key is an authentication failure, never 'not configured'", async () => {
+    reply(401, { type: "authentication_error", message: `invalid x-api-key ${KEY}` });
+    const err = (await ask().catch((e: unknown) => e)) as AiGatewayError;
+    expect(err.failure).toBe("auth_rejected");
+    expect(err.detail).toBe("HTTP 401 authentication_error request req_test_1");
+    expect(`${err.message} ${err.detail} ${JSON.stringify(err)}`).not.toContain(KEY);
+  });
+
+  it("an unknown or forbidden model is a model failure", async () => {
+    reply(404, { type: "not_found_error", message: "model: claude-nonexistent" });
+    await expect(ask()).rejects.toMatchObject({ failure: "model_unavailable" });
+  });
+
+  it("an account without credit is a billing failure", async () => {
+    reply(400, { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." });
+    await expect(ask()).rejects.toMatchObject({ failure: "billing" });
+  });
+
+  it("rate limits, overload and timeouts stay distinct", async () => {
+    reply(429, { type: "rate_limit_error", message: "slow down" });
+    await expect(ask()).rejects.toMatchObject({ failure: "rate_limited" });
+    vi.restoreAllMocks();
+    reply(529, { type: "overloaded_error", message: "busy" });
+    await expect(ask()).rejects.toMatchObject({ failure: "unavailable" });
+    vi.restoreAllMocks();
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    await expect(ask()).rejects.toMatchObject({ failure: "timeout" });
+  });
+});
