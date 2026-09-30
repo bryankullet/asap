@@ -15,7 +15,7 @@ class Component extends DCLogic {
     sheet: null, toast: '', busy: false, tick: 0, contextRef: null, selection: null, lastPlan: null,
     staged: [], progress: [], why: {}, filter: {}, assignDraft: {}, builder: {}, search: '', mail: null,
     sideCollapsed: typeof window !== 'undefined' && window.innerWidth < 1180,
-    sideTouched: false, askWidth: 400, dragging: false
+    sideTouched: false, askWidth: (() => { try { const v = Number(localStorage.getItem('asap.askWidth')); return v >= 360 && v <= 900 ? v : 560; } catch { return 560; } })(), dragging: false, mobileView: 'ask'
   };
 
   onResize = () => {
@@ -28,14 +28,16 @@ class Component extends DCLogic {
     e.preventDefault();
     this.setState({ dragging: true });
     const move = (ev) => {
-      const w = Math.min(760, Math.max(300, window.innerWidth - ev.clientX));
+      const left = (document.querySelector('.asap-ask') || { getBoundingClientRect: () => ({ left: 0 }) }).getBoundingClientRect().left;
+      const w = Math.min(900, Math.max(360, ev.clientX - left));
+      try { localStorage.setItem('asap.askWidth', String(w)); } catch { /* interface preference only */ }
       this.setState({ askWidth: w });
     };
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.setState({ dragging: false }); };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
-  resetWidth = () => this.setState({ askWidth: 400 });
+  resetWidth = () => { try { localStorage.removeItem('asap.askWidth'); } catch { /* ignore */ } this.setState({ askWidth: 560 }); };
   inputRef = React.createRef();
   searchRef = React.createRef();
   sheetCloseRef = React.createRef();
@@ -466,9 +468,10 @@ class Component extends DCLogic {
       openReset: () => this.openReset(), openSweep: () => this.openSweep(), openHistory: () => this.openHistory(),
       openRecent: () => this.openRecent(), brokerageName: (this.A?.records.all('brokerages')[0] || {}).name || '', onSearchInput: (e) => this.setState({ search: e.target.value, sheet: this.state.sheet ? { ...this.state.sheet, query: e.target.value } : null }), toast: this.state.toast, busy: this.state.busy,
       sheetOpen: !!this.state.sheet, thinking: this.state.thinking,
-      askOpen: this.state.askOpen, toggleAsk: () => this.setState({ askOpen: !this.state.askOpen }),
+      askOpen: this.state.askOpen, toggleAsk: () => (window.innerWidth <= 980 ? this.setState({ askOpen: true, mobileView: this.state.mobileView === 'ask' ? 'space' : 'ask' }) : this.setState({ askOpen: !this.state.askOpen })),
       askToggleLabel: this.state.askOpen ? 'Collapse Ask' : 'Open Ask ASAP',
-      bodyCols: this.state.askOpen ? 'minmax(0,1fr) ' + this.state.askWidth + 'px' : 'minmax(0,1fr)',
+      bodyCols: this.state.askOpen ? 'minmax(360px,' + this.state.askWidth + 'px) minmax(0,1fr)' : 'minmax(0,1fr)',
+      mobileView: this.state.mobileView, showSpace: () => this.setState({ mobileView: 'space' }), showAsk: () => this.setState({ mobileView: 'ask' }),
       sideWidth: this.state.sideCollapsed ? '68px' : '228px',
       labelDisplay: this.state.sideCollapsed ? 'none' : 'block',
       navJustify: this.state.sideCollapsed ? 'center' : 'flex-start',
@@ -512,7 +515,7 @@ class Component extends DCLogic {
       userOptions: R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] })),
       onSwitchUser: (e) => { R.setUser(e.target.value); this.flash('Signed in as ' + R.byId('users', e.target.value).name + ' — permissions change with the role.'); this.bump(); },
       navItems: nav.map(([w, icon, label, count]) => ({ icon, label, count,
-        go: () => this.openRef({ ws: w }),
+        go: () => { this.openRef({ ws: w }); if (window.innerWidth <= 980) this.setState({ mobileView: 'space' }); },
         bg: tab && tab.ref.ws === w ? '#fff' : 'transparent',
         fg: tab && tab.ref.ws === w ? '#18231c' : '#566058',
         shadow: tab && tab.ref.ws === w ? '0 1px 3px rgba(0,0,0,.05)' : 'none' })),

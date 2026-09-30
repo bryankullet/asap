@@ -433,6 +433,7 @@ function documentSpace(ref, state) {
     recordRef: base,
     blocks: [
       ...(state.docNotice?.documentId === doc.id ? [note("green", state.docNotice.title, state.docNotice.text)] : []),
+      ...identityWarning(fields, client),
       facts([
         ["Client", client ? client.name : "Not filed under a client"],
         ["Kind", words(doc.kind)],
@@ -478,6 +479,20 @@ function documentSpace(ref, state) {
         : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
     ],
   };
+}
+
+/** Names compared as a person would: case, punctuation and company suffixes do not matter. */
+const comparable = (v) => (v || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(limited|ltd|plc|llc|inc|co|company|the)\b/g, " ").replace(/\s+/g, " ").trim();
+
+/** A document that names a different insured than the client it is filed under is flagged first. */
+function identityWarning(fields, client) {
+  const f = fields.find((x) => x.fieldKey === "insured_name" && x.state !== "rejected");
+  const named = (f?.correctedValue ?? f?.proposedValue ?? "").trim();
+  if (!named || !client) return [];
+  const a = comparable(named);
+  const b = comparable(client.name);
+  if (!a || !b || a === b || a.includes(b) || b.includes(a)) return [];
+  return [note("red", "This document may belong to another client", "It names the insured as " + named + ", but it is filed under " + client.name + ". Nothing from it can be applied until that is resolved — file it under the right client, or correct the insured name.")];
 }
 
 /** The page a value was read from, with the value marked where it stands, and the file itself. */

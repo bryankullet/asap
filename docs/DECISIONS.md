@@ -1983,3 +1983,14 @@ The second live retest found receipts for records nobody could see. Root causes 
   the app from records are appended to the person's own conversation, marked `served_by: in-app
   records reader`. `GET /ask/status` says whether a model is configured, so Connections separates
   record questions from the model.
+
+## D-118 — Conversational shell: Ask in the centre, the Space on the right
+
+The owner directed ASAP's primary interaction to become conversational: Ask ASAP is the central,
+dominant surface; the live Space sits on its right; navigation stays Today · Work · Automations.
+This amends D-115's layout (the approved interface docked Ask on the right), not its substance: the
+approved markup and logic still compile into the app, and the change is made through the
+compiler's asserted patches. Chat and Space remain two views over the same records and the same
+action handlers. On tablets and phones Ask is the first screen and the Space opens full screen,
+with a way back that keeps the thread and the record. Mapping and open items:
+`docs/ui/CONVERSATIONAL-SHELL.md`.

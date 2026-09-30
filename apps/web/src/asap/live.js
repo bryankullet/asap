@@ -947,7 +947,37 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       own.ref = ref;
       return own;
     }
-    return buildWorkspace(ref);
+    return guardLive(buildWorkspace(ref));
+  }
+
+  /**
+   * The last check on anything the approved engine builds in live mode. No draft may carry an
+   * invented recipient (the engine's demo addresses end in "@insurer.demo") or a send control
+   * without a real, recorded address; and no user-facing text may show a bare "undefined" or
+   * "null". A draft that cannot be addressed says so instead of offering "Review and send".
+   */
+  function guardLive(ws) {
+    if (!ws || !Array.isArray(ws.blocks)) return ws;
+    const clean = (v) =>
+      typeof v === "string"
+        ? v.replace(/\b(undefined|null|NaN)\b/g, "not recorded")
+        : Array.isArray(v)
+          ? v.map(clean)
+          : v && typeof v === "object"
+            ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === "action" || k === "ref" || k === "payload" || k === "nav" ? x : clean(x)]))
+            : v;
+    const fake = (e) => !e || /@insurer\.demo$|@example\./i.test(String(e));
+    ws.blocks = ws.blocks.map((b) => {
+      if (b && b.t === "email") {
+        const to = [b.to, ...((b.send?.payload?.recipients ?? []).map((r) => r.email))];
+        if (to.some(fake) || !b.to)
+          return note("amber", (b.label || "Message") + " — not prepared", "No recipient address is on file for this, so ASAP will not prepare a message. Nothing has been sent. Add the insurer's contact first; any message will then wait for your approval.");
+      }
+      if (b && b.t === "gate" && b.action === "email.send") return null;
+      return clean(b);
+    }).filter(Boolean);
+    ws.title = clean(ws.title);
+    return ws;
   }
 
   async function askServer(text, ctx) {

@@ -114,6 +114,16 @@ const PATCHES = [
   // the person has scrolled up to read something; sending a question pins it again.
   ["  saveThread(thread) {", "  componentDidUpdate(_p, prev) {\n    const el = typeof document !== 'undefined' ? document.querySelector('.asap-thread') : null;\n    if (!el) return;\n    if (!el.dataset.watched) { el.dataset.watched = '1'; el.addEventListener('scroll', () => { this._pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }); }\n    const grew = !prev || prev.thread !== this.state.thread || prev.thinking !== this.state.thinking;\n    if (grew && this._pinned !== false) el.scrollTop = el.scrollHeight;\n  }\n  saveThread(thread) {"],
   ["    const thread = [...this.state.thread, { role: 'user', text }];", "    this._pinned = true;\n    const thread = [...this.state.thread, { role: 'user', text }];"],
+  // ---- Conversational shell (D-116): Ask in the centre, the Space on the right.
+  // Ask's width is the conversation's; the Space takes the rest. The handle sits on Ask's right edge.
+  ["      const w = Math.min(760, Math.max(300, window.innerWidth - ev.clientX));", "      const left = (document.querySelector('.asap-ask') || { getBoundingClientRect: () => ({ left: 0 }) }).getBoundingClientRect().left;\n      const w = Math.min(900, Math.max(360, ev.clientX - left));\n      try { localStorage.setItem('asap.askWidth', String(w)); } catch { /* interface preference only */ }"],
+  ["  resetWidth = () => this.setState({ askWidth: 400 });", "  resetWidth = () => { try { localStorage.removeItem('asap.askWidth'); } catch { /* ignore */ } this.setState({ askWidth: 560 }); };"],
+  ["    sideTouched: false, askWidth: 400, dragging: false", "    sideTouched: false, askWidth: (() => { try { const v = Number(localStorage.getItem('asap.askWidth')); return v >= 360 && v <= 900 ? v : 560; } catch { return 560; } })(), dragging: false, mobileView: 'ask'"],
+  ["      bodyCols: this.state.askOpen ? 'minmax(0,1fr) ' + this.state.askWidth + 'px' : 'minmax(0,1fr)',", "      bodyCols: this.state.askOpen ? 'minmax(360px,' + this.state.askWidth + 'px) minmax(0,1fr)' : 'minmax(0,1fr)',\n      mobileView: this.state.mobileView, showSpace: () => this.setState({ mobileView: 'space' }), showAsk: () => this.setState({ mobileView: 'ask' }),"],
+  // On a phone the Ask button switches between the conversation and the Space; it never collapses Ask.
+  ["toggleAsk: () => this.setState({ askOpen: !this.state.askOpen }),", "toggleAsk: () => (window.innerWidth <= 980 ? this.setState({ askOpen: true, mobileView: this.state.mobileView === 'ask' ? 'space' : 'ask' }) : this.setState({ askOpen: !this.state.askOpen })),"],
+  // On a phone, choosing Today, Work or Automations shows that Space.
+  ["        go: () => this.openRef({ ws: w }),", "        go: () => { this.openRef({ ws: w }); if (window.innerWidth <= 980) this.setState({ mobileView: 'space' }); },"],
   // An upload may name the action its file goes to (live import reads a book this way).
   // The picker is emptied once its files are read, so a file chosen in one workspace does not stay
   // selected in the next one that happens to reuse the same control.
@@ -137,6 +147,12 @@ const PATCHES = [
    "    const actionId = opts.actionId || (action + ':' + JSON.stringify(payload));\n    this.setState({ busy: true });\n    if (this.A.savingNote && !/^(conversation|draft)\\./.test(action)) this.flash(this.A.savingNote);"],
 ];
 const TEMPLATE_PATCHES = [
+  // Collapsing Ask is a desktop control; on a phone Ask and the Space take turns instead.
+  ['<button onClick="{{ toggleAsk }}" style="border:1px solid #e5e9e5;background:#fff;border-radius:10px;padding:7px 10px;font-size:13px;font-weight:600;color:#4c564e" style-hover="border-color:#c4cfc6">{{ askToggleLabel }}</button>', '<button class="asap-desktoponly" onClick="{{ toggleAsk }}" style="border:1px solid #e5e9e5;background:#fff;border-radius:10px;padding:7px 10px;font-size:13px;font-weight:600;color:#4c564e" style-hover="border-color:#c4cfc6">{{ askToggleLabel }}</button>'],
+  // Conversational shell: Ask first (centre), the Space after it (right); on a phone one at a time.
+  ['<div class="asap-body" style="flex:1;min-height:0;display:grid;grid-template-columns:{{ bodyCols }};overflow:hidden">', '<div class="asap-body" data-view="{{ mobileView }}" style="flex:1;min-height:0;display:grid;grid-template-columns:{{ bodyCols }};overflow:hidden">'],
+  ['<aside class="asap-ask" style="position:relative;min-height:0;display:flex;flex-direction:column;background:#fff;border-left:1px solid #e5e9e5">\n            <div onMouseDown="{{ startDrag }}" onDoubleClick="{{ resetWidth }}" title="Drag to resize · double-click to reset" style="position:absolute;top:0;bottom:0;left:-4px;', '<aside class="asap-ask" style="order:-1;position:relative;min-height:0;display:flex;flex-direction:column;background:#fff;border-right:1px solid #e5e9e5">\n            <button class="asap-mobileonly" onClick="{{ showSpace }}" style="flex:none;border:0;border-bottom:1px solid #eef1ee;background:#f2f7f3;color:#1f6c49;padding:10px 16px;text-align:left;font-weight:600">Open Space · {{ ws.title }} →</button>\n            <div onMouseDown="{{ startDrag }}" onDoubleClick="{{ resetWidth }}" title="Drag to resize · double-click to reset" style="position:absolute;top:0;bottom:0;right:-4px;'],
+  ['<section class="asap-pane" style="min-height:0;overflow-y:auto;padding:20px 22px 40px;background:#fbfcfa">', '<section class="asap-pane" style="min-height:0;overflow-y:auto;padding:20px 22px 40px;background:#fbfcfa">\n          <button class="asap-mobileonly" onClick="{{ showAsk }}" style="border:1px solid #e5e9e5;background:#fff;color:#1f6c49;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-weight:600">← Back to the conversation</button>'],
   // The Ask thread's scroller, named so the logic can keep the newest turn in view.
   ['<div style="flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:15px">\n              <sc-for list="{{ thread }}"', '<div class="asap-thread" style="flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:15px">\n              <sc-for list="{{ thread }}"'],
   // The form block's button and note come from the block, so one form serves every live form.
@@ -204,6 +220,18 @@ tpl = tpl.replace(/style-hover="([^"]*)"/g, (m, st) => 'style-hover="' + retype(
 const LOGO_TILE = "background:#18231c;color:#fff;display:grid;place-items:center;font-size:16.5px;flex:none";
 if (!tpl.includes(LOGO_TILE)) throw new Error("typography: logo tile not found");
 tpl = tpl.replace(LOGO_TILE, "background:#18231c;color:#fff;display:grid;place-items:center;font-family:var(--font-display);font-weight:700;font-size:18px;flex:none");
+// Conversational shell (D-116): on a tablet or phone, Ask and the Space take the screen in turn —
+// never stacked, never squeezed. The toggle is interface state only.
+const SHELL_CSS = `
+.asap-mobileonly{display:none}
+@media(max-width:980px){
+  .asap-mobileonly{display:block}
+  .asap-desktoponly{display:none!important}
+  .asap-body{overflow:hidden!important}
+  .asap-body[data-view="ask"] .asap-pane{display:none!important}
+  .asap-body[data-view="space"] .asap-ask{display:none!important}
+  .asap-ask{min-height:0!important;border-right:0!important;border-top:0!important}
+}`;
 let typedCss = css
   .replace(/font-family:\s*"DM Sans"[^;}]*/g, "font-family:var(--font-body);font-variant-numeric:tabular-nums")
   .replace(/font-family:\s*Manrope[^;}]*/g, "font-family:var(--font-display)")
@@ -344,7 +372,7 @@ export function renderTemplate(v) {
 
 writeFileSync(
   join(outDir, "asap.css"),
-  `/* GENERATED from the approved ASAP interface — do not edit. */\n${typedCss.trim()}\n\n/* hover rules (style-hover) */\n` +
+  `/* GENERATED from the approved ASAP interface — do not edit. */\n${typedCss.trim()}\n${SHELL_CSS}\n\n/* hover rules (style-hover) */\n` +
     hovers.map((hv, i) => `.dch${i}:hover{${hv.split(";").filter(Boolean).map((d) => d.trim() + " !important").join(";")}}`).join("\n") +
     "\n",
 );
