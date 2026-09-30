@@ -298,4 +298,14 @@ describe("live mode", () => {
     expect(applied.ok).toBe(true);
     expect(applyToRecord).toHaveBeenCalledWith(DOC, expect.objectContaining({ targetType: "policy", targetId: POL_OK, fields: [expect.objectContaining({ fieldKey: "policy_number", from: null, to: "TH-MTR-001" })] }));
   });
+
+  it("answers only questions for the client list from the list, and sends the rest on", async () => {
+    const a = await live();
+    for (const q of ["What clients do I have?", "Show me all my clients", "How many clients do we have?", "list clients"]) {
+      expect((await a.ai.route(q, {})).lead).toMatch(/^You have 1 client\./);
+    }
+    for (const q of ["Which policies does this client have?", "What claims do my clients have?", "Show documents for the client"]) {
+      expect((await a.ai.route(q, {})).lead ?? "").not.toMatch(/^You have \d+ clients?\./);
+    }
+  });
 });

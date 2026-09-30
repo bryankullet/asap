@@ -977,7 +977,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
     // Questions about the client list, answered from the records — including when there are none.
-    if (/\b(what|which|list|show|how many)\b.*\bclients?\b/i.test(t) && !/\b(add|create)\b/i.test(t)) {
+    // Only a question *for the list*: "clients" is what is asked for, and no other record is named.
+    // "Which policies does this client have?" is about one client's policies, not the list.
+    const CLIENT_LIST = /^(what|which|list|show( me)?( all)?( my)?|how many|who are)\b[^?]*\bclients\b/i;
+    const OTHER_RECORD = /\b(polic(y|ies)|claims?|documents?|quot(e|es|ation|ations)|renewals?|work|premiums?|invoices?|payments?|contacts?|emails?|this client|the client)\b/i;
+    if (CLIENT_LIST.test(t) && !OTHER_RECORD.test(t) && !/\b(add|create)\b/i.test(t)) {
       const n = db.clients.length;
       return n
         ? { lead: "You have " + n + " client" + (n === 1 ? "" : "s") + ".", text: "They are listed in the workspace beside this answer.", ref: { ws: "clients" }, chips: LIVE_CHIPS }
