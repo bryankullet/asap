@@ -306,7 +306,8 @@ async function hydrate(me) {
         state: workState(it),
         parties: it.task_status === "with_party" && it.task_party ? [{ name: it.task_party, since: it.task_since }] : [],
         assigneeId: it.owner_id,
-        dueAt: it.task_next_check,
+        dueAt: it.due_on ?? null,
+        nextCheckAt: it.task_next_check,
         priority: row.priority ?? "medium",
         // What needs doing and why — the step and what it needs — rather than how the item began.
         // Never how the item began ("created from import") — that is provenance, not a reason.
@@ -791,11 +792,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         name + " saved, switched off. It prepares work on every " + trigger.replace(".", " ") + " event; a person approves anything that leaves.",
       );
     },
-    "opportunity.create": async (p) => {
+    "opportunity.create": async (p, requestKey) => {
       if ((p.title || "").trim().length < 3) return { ok: false, error: "Describe the cover wanted in at least three characters." };
       if ((p.cls || "").trim().length < 3) return { ok: false, error: "Name the class of business, for example Motor commercial." };
       try {
-        const res = await api.createOpportunity(present({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls, coverStart: p.coverStart, coverEnd: p.coverEnd, requestKey: crypto.randomUUID() }));
+        const res = await api.createOpportunity(present({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls, coverStart: p.coverStart, coverEnd: p.coverEnd, requestKey: requestKey ?? crypto.randomUUID() }));
         await refresh();
         const c = db.clients.find((x) => x.id === p.clientId);
         return ok("Quotation work started" + (c ? " for " + c.name : ""), { nav: { ws: "quote", opportunityId: res.opportunityId } });
@@ -924,17 +925,31 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return fail(e);
       }
     },
+    /*
+     * Owner and due date (D-122). Ask's plan and the Work Space's "Owner and due date" block both
+     * land here, and this calls the one server contract — nothing about the change is decided in
+     * the browser. `dueAt` may be given alone: changing a due date is the same action.
+     */
     "work.assign": async (p) => {
       const w = db.workItems.find((x) => x.id === p.workItemId);
-      const u = db.users.find((x) => x.id === p.userId);
-      if (!w || !u) return { ok: false, error: "Choose who this goes to." };
-      if (w.assigneeId === u.id) return { ok: false, error: w.title + " is already with " + u.name + ". Nothing was changed." };
-      if (!w.stepId) return { ok: false, error: "This item has no steps to hand over yet. Nothing was changed." };
+      if (!w) return { ok: false, error: "That work is not in your brokerage’s records. Nothing was changed." };
+      const u = p.userId ? db.users.find((x) => x.id === p.userId) : null;
+      if (p.userId && !u) return { ok: false, error: "Choose who this goes to — that person is not a member here. Nothing was changed." };
+      if (!u && !p.dueAt) return { ok: false, error: "Say who this goes to, or the new due date. Nothing was changed." };
+      const input = { version: w.version, ...(u ? { ownerId: u.id } : {}), ...(p.dueAt ? { dueOn: String(p.dueAt).slice(0, 10) } : {}) };
       try {
-        const res = await api.act(w.id, { stepId: w.stepId, verb: "assign", version: w.version, assigneeId: u.id });
-        if (res && res.outcome && res.outcome !== "applied") return { ok: false, error: res.reason || "The item changed since you opened it. Refresh and try again." };
+        const res = await api.manageWork(w.id, input);
+        if (res.outcome === "blocked") return res.guard === "permission" ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason };
         await refresh();
-        return ok(w.title + " → " + u.name + (p.dueAt ? " (due dates aren’t saved yet)" : ""));
+        const changed = res.changes.map((c) => c.label + ": " + (c.from ?? "—") + " → " + (c.to ?? "—"));
+        if (res.outcome === "already_done")
+          return ok(w.title + " — already so", { already: true, detail: "Nothing needed changing, so nothing was written.", receipt: { action: "Owner and due date", record: w.title, outcome: "Already done", changed: [], unchanged: ["Owner", "Due date", "Next check"], next: w.next?.what ?? null, audit: null } });
+        const fresh = db.workItems.find((x) => x.id === w.id) ?? w;
+        return ok(changed.join(" · ") || w.title, {
+          detail: "Written with an audit entry against your name. No message was sent to anyone.",
+          nav: { ws: "workitem", workItemId: w.id },
+          receipt: { action: u && p.dueAt ? "Owner and due date changed" : u ? "Work assigned" : "Due date changed", record: w.title, outcome: "Done", changed, unchanged: ["The work’s status and next step", "Nothing was sent outside the brokerage"], next: fresh.next?.what ?? null, audit: res.auditAction },
+        });
       } catch (e) {
         return fail(e);
       }
@@ -974,9 +989,20 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     },
   };
 
+  // Writes in flight, by action key: a second click while the first is saving joins it, so the
+  // server sees one request. Kept in memory only — never browser storage.
+  const inflight = new Map();
+  // One idempotency key per action, so a retry after a lost response is the same request.
+  const requestKeys = new Map();
+  const requestKeyFor = (key) => {
+    if (!requestKeys.has(key)) requestKeys.set(key, crypto.randomUUID());
+    return requestKeys.get(key);
+  };
+
   function dispatch(type, payload = {}, actionId) {
     const key = actionId || type + ":" + JSON.stringify(payload);
     if (db.meta.ledger[key]) return { ...db.meta.ledger[key], duplicate: true };
+    if (inflight.has(key)) return inflight.get(key);
     const handler = LIVE[type];
     if (!handler) {
       const what = NOT_CONNECTED[type] ?? "This action";
@@ -993,8 +1019,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       return res;
     };
-    const out = handler(payload);
-    return out && typeof out.then === "function" ? out.then(settle) : settle(out);
+    const out = handler(payload, requestKeyFor(key));
+    if (!(out && typeof out.then === "function")) return settle(out);
+    const p = out.then(settle).finally(() => inflight.delete(key));
+    inflight.set(key, p);
+    return p;
   }
 
   function liveWorkspace(ref) {
@@ -1315,12 +1344,132 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * Start quotation work from Ask, previewed; confirmed through the same "opportunity.create"
+   * action the quotation Space's form uses. The client comes from the resolver (never the first
+   * match); the cover wanted and its class come from the person's own words, or are asked for.
+   */
+  const CLASSES = [["motor", "Commercial motor"], ["fleet", "Commercial motor"], ["fire", "Fire"], ["marine", "Marine"], ["medical", "Medical"], ["liability", "Liability"], ["property", "Property"], ["travel", "Travel"], ["engineering", "Engineering"], ["bond", "Bonds"]];
+  function quoteStartFromAsk(raw, t, ctx) {
+    if (!/\b(start|new|open|begin|get|request)\b.*\bquot(e|es|ation)s?\b|\bquot(e|ation) for\b/i.test(t)) return null;
+    if (/\bprepare|approve|deliver|record\b/i.test(t)) return null;
+    const sub = resolveSubject(t, ctx);
+    if (sub && sub.type === "ambiguous") return clarifyClient(sub.candidates, raw);
+    const client = sub ? db.clients.find((c) => c.id === sub.clientId) : null;
+    if (!client) return { lead: "For which client?", text: "Name the client, or open their Space, and ask again. Nothing was written.", ref: null, keepWorkspace: true };
+    const cls = CLASSES.find(([w]) => new RegExp("\\b" + w + "\\b", "i").test(t))?.[1] ?? null;
+    const m = /\bfor\s+(?:(?:a|an|the|their)\s+)?(.+?)(?:\s+(?:for|with)\s+.+)?[.?!]*$/i.exec(raw.replace(new RegExp(esc(client.name), "i"), "").replace(/\s+/g, " "));
+    const described = m && m[1] && m[1].trim().length >= 3 && !/^(this|the)\s+client$/i.test(m[1].trim()) ? m[1].trim() : null;
+    const ref = { ws: "quote", clientId: client.id };
+    if (!described || !cls)
+      return { lead: "What cover is wanted?", text: "Say the cover and its class — for example “start a quotation for " + client.name + " for a motor fleet of five vans”. Nothing was written.", ref, keepWorkspace: false };
+    const title = described.charAt(0).toUpperCase() + described.slice(1);
+    return {
+      lead: "Start quotation work?",
+      text: "Here is exactly what would be written. Nothing is written until you confirm.",
+      ref,
+      pending: {
+        title: "Start quotation work",
+        sections: [
+          { label: "UNDERSTOOD", items: [raw.trim()] },
+          { label: "CLIENT", items: [client.name] },
+          { label: "WRITE", items: ["Quotation work: " + title + " (" + cls + ")", "Its Work item, owned by you, with the next step", "An audit entry against your name"] },
+          { label: "NOT DONE", items: ["No insurer is asked", "No request is prepared or sent"] },
+        ],
+        external: "No message is sent to anyone.",
+        action: "opportunity.create",
+        payload: { clientId: client.id, title, cls },
+        actionId: "opportunity.create:" + client.id + ":" + title.toLowerCase() + ":" + cls,
+        confirmLabel: "Start quotation",
+        progress: "Saving to your brokerage’s records…",
+      },
+    };
+  }
+
+  /**
+   * The Work item a message is about (D-121): the record in front (a Work item, a claim, a
+   * quotation), else a title the message names uniquely, else the only open item for the client
+   * in front. Several candidates are a question, never the first row.
+   */
+  function workItemFor(t, ctx) {
+    const ref = ctx.ref || ctx;
+    const open = db.workItems.filter((w) => w.taskStatus !== "done");
+    if (ref.workItemId) return { item: db.workItems.find((w) => w.id === ref.workItemId) ?? null };
+    if (ref.opportunityId) return { item: db.workItems.find((w) => w.opportunityId === ref.opportunityId) ?? null };
+    if (ref.claimId) {
+      const c = state.claims?.get?.(ref.claimId) ?? [...(state.claims?.values?.() ?? [])].find((x) => x.claim?.id === ref.claimId);
+      const wid = c?.item?.id ?? c?.claim?.work_item_id;
+      if (wid) return { item: db.workItems.find((w) => w.id === wid) ?? null };
+    }
+    const lower = t.toLowerCase();
+    const named = open.filter((w) => lower.includes(w.title.toLowerCase()) || (w.title.split(" — ")[0] && lower.includes(w.title.split(" — ")[0].toLowerCase()) && w.title.split(" — ")[0].length > 4));
+    if (named.length === 1) return { item: named[0] };
+    const cid = ref.clientId || ctx.clientId;
+    const pool = named.length > 1 ? named : cid ? open.filter((w) => w.clientId === cid) : [];
+    if (pool.length === 1) return { item: pool[0] };
+    if (pool.length > 1) return { several: pool };
+    return { none: true };
+  }
+
+  /**
+   * Assign Work, or change its due date, from Ask — previewed by the same server contract the
+   * Work Space's "Owner and due date" block confirms (D-122). The preview writes nothing.
+   */
+  async function workFromAsk(raw, t, ctx) {
+    const assign = /\b(?:assign|reassign|give|hand(?:\s+it)?\s+over)\b.*?\bto\s+([A-Z][a-z]+)/i.exec(raw);
+    const dueWords = /\b(due|deadline)\b/i.test(t);
+    if (!assign && !dueWords) return null;
+    const when = dueWords ? parseDate(t) : null;
+    if (dueWords && !assign && !when) return { lead: "Due when?", text: "Give the date — for example “due 15 Oct” or “due Friday”. Nothing was changed.", ref: null, keepWorkspace: true };
+    let person = null;
+    if (assign) {
+      const matches = db.users.filter((u) => u.name.toLowerCase().split(/\s+/)[0] === assign[1].toLowerCase() || u.name.toLowerCase() === assign[1].toLowerCase());
+      if (matches.length === 0) return { lead: "Who is " + assign[1] + "?", text: "No member of this brokerage has that name. Nothing was changed.", ref: null, keepWorkspace: true };
+      if (matches.length > 1) return { lead: "Which " + assign[1] + "?", text: "More than one member has that name.", clarify: { question: "Member", options: matches.map((u) => ({ label: u.name, text: raw.replace(assign[1], u.name) })) }, ref: null, keepWorkspace: true };
+      person = matches[0];
+    }
+    const found = workItemFor(t, ctx);
+    if (found.several) return { lead: "Which work?", text: "More than one open item could be meant. I will not pick one.", clarify: { question: "Work", options: found.several.slice(0, 6).map((w) => ({ label: w.title, text: raw + " — " + w.title })) }, ref: null, keepWorkspace: true };
+    if (!found.item) return { lead: "Which work?", text: "Open the Work item, or name it, and ask again. Nothing was changed.", ref: { ws: "work" } };
+    const w = found.item;
+    const input = { version: w.version, ...(person ? { ownerId: person.id } : {}), ...(when ? { dueOn: when.date } : {}) };
+    let pre;
+    try {
+      pre = await api.manageWork(w.id, { ...input, preview: true });
+    } catch (e) {
+      return { lead: "I could not check that just now.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true };
+    }
+    const ref = { ws: "workitem", workItemId: w.id };
+    if (pre.outcome === "blocked") return { lead: pre.guard === "permission" ? "Your role cannot change this." : "That cannot be changed.", text: pre.reason, ref, blocked: true };
+    if (pre.outcome === "already_done") return { lead: "Already so.", text: w.title + " already has that " + (person ? "owner" : "due date") + ". Nothing needs changing.", ref };
+    const title = person && when ? "Change owner and due date" : person ? "Assign this work" : "Change the due date";
+    return {
+      lead: title + "?",
+      text: "Here is exactly what would change. Nothing is written until you confirm.",
+      ref,
+      pending: {
+        title,
+        sections: [
+          { label: "UNDERSTOOD", items: [raw.trim()] },
+          { label: "RECORD", items: [w.title] },
+          { label: "CHANGE", items: pre.changes.map((c) => c.label + ": " + (c.from ?? "—") + " → " + (c.to ?? "—")) },
+        ],
+        external: pre.externalEffect,
+        action: "work.assign",
+        payload: { workItemId: w.id, ...(person ? { userId: person.id } : {}), ...(when ? { dueAt: when.date } : {}) },
+        actionId: "work:" + w.id + ":" + w.version + ":" + JSON.stringify(input),
+        confirmLabel: person ? "Assign" : "Change due date",
+        progress: "Saving to your brokerage’s records…",
+      },
+    };
+  }
+
+  /**
    * Quotation work from Ask, on the same opp.action contract the quotation Space uses. The
    * quotation is the one open in front, or the only open one for the client in context — never
    * guessed among several.
    */
-  function quotationFromAsk(t, ctx) {
-    if (!/\b(quot(e|ation)|insurer|request|deliver(y|ed)?|next|blocked|stuck)\b/i.test(t)) return null;
+  function quotationFromAsk(t, ctx, raw = t) {
+    if (!/\b(quot(e|ation)|insurer|request|deliver(y|ed)?|next|blocked|stuck|requirements?|received|supplied|got)\b/i.test(t)) return null;
     let id = ctx.opportunityId || null;
     if (!id && ctx.clientId) {
       const open = [...state.opportunities.values()].filter((d) => d.client.id === ctx.clientId && !d.opportunity.closedAt);
@@ -1344,6 +1493,24 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (hit.length !== 1)
         return { lead: hit.length ? "Which insurer?" : "Which insurer should I add?", text: "Nothing was changed.", clarify: { question: "Insurer", options: (hit.length ? hit : avail).slice(0, 6).map((a) => ({ label: a.name, text: "Add " + a.name + " as an insurer to this quotation" })) }, ref, keepWorkspace: true };
       return pendingOpp(d, ref, "Add " + hit[0].name + " to this quotation", ["Approach " + hit[0].name + " for " + d.opportunity.classOfBusiness + " terms"], ["One insurer added to " + d.client.name + "’s quotation"], "add_insurer", { insurerId: hit[0].id }, "Add insurer");
+    }
+    // A requirement, in the person's own words (the label is theirs, never corrected).
+    const addReq = /\badd\s+(?:a\s+)?requirement(?:\s+for|\s+of|:)?\s+(.+?)[.?!]*$/i.exec(raw) || /\badd\s+(.+?)\s+as\s+a\s+requirement\b/i.exec(raw);
+    if (addReq) {
+      const label = addReq[1].trim().replace(/^(the|a|an)\s+/i, "");
+      if (label.length < 3) return { lead: "Which requirement?", text: "Name it in at least three characters. Nothing was changed.", ref, keepWorkspace: true };
+      if (d.requirements.some((r) => r.label.toLowerCase() === label.toLowerCase())) return { lead: "Already a requirement.", text: "“" + label + "” is already on this quotation. Nothing was changed.", ref };
+      return pendingOpp(d, ref, "Add the requirement “" + label + "”", ["Requirement: " + label], ["One requirement added — shown as not yet supplied"], "add_requirement", { label }, "Add requirement");
+    }
+    // A requirement supplied: named by its label, with the person's sentence as the evidence note.
+    if (/\b(received|got|have|supplied|provided|sent us)\b/i.test(t)) {
+      const open = d.requirements.filter((r) => !r.suppliedAt);
+      const hit = open.filter((r) => r.label.split(/\s+/).some((w) => w.length >= 4 && new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/s$/i, "") + "s?\\b", "i").test(raw)));
+      if (hit.length === 1) {
+        if (raw.trim().length < 10) return { lead: "What proves it?", text: "Say how it arrived — for example “received the logbooks by email from the client today”. Nothing was changed.", ref, keepWorkspace: true };
+        return pendingOpp(d, ref, "Mark “" + hit[0].label + "” as supplied", ["Evidence: “" + raw.trim() + "”"], ["The requirement is marked supplied by you, with that note as its evidence"], "supply_requirement", { requirementId: hit[0].id, note: raw.trim() }, "Mark supplied");
+      }
+      if (hit.length > 1) return { lead: "Which requirement?", text: "More than one matches. Nothing was changed.", clarify: { question: "Requirement", options: hit.map((r) => ({ label: r.label, text: "We received the " + r.label + " — " + raw.trim() })) }, ref, keepWorkspace: true };
     }
     if (/\bprepare\b/i.test(t) && /\brequest\b/i.test(t)) {
       const cand = live.filter((i) => i.stage === "not_asked");
@@ -1500,7 +1667,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
     if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
-    const quote = quotationFromAsk(t, ctx);
+    const started = quoteStartFromAsk(text.trim(), t, ctx);
+    if (started) return started;
+    const work = await workFromAsk(text, t, ctx);
+    if (work) return work;
+    const quote = quotationFromAsk(t, ctx, text.trim());
     if (quote) return quote;
     const record = recordQuestion(t, ctx);
     if (record) return record;

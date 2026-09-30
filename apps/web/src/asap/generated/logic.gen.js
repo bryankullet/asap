@@ -116,7 +116,7 @@ class Component extends DCLogic {
       if (res.duplicate) { this.flash('Already done — nothing was recorded twice.'); this.bump({ sheet: null }); return; }
       if (opts.after) this.A.records.act(opts.after.action, opts.after.payload, actionId + ':after');
       const receipt = res.text || 'Recorded';
-      const thread = [...this.state.thread, { role: 'ai', lead: receipt, text: 'Written to the records with an audit entry against your name.', receipt: receipt + ' · ' + this.A.records.actor().name, chips: [] }];
+      const thread = [...this.state.thread, this.receiptMessage(res, receipt)];
       this.saveThread(thread);
       this.setState({ sheet: null, thread, staged: opts.clearStaged ? [] : this.state.staged });
       this.flash(receipt);
@@ -128,6 +128,15 @@ class Component extends DCLogic {
   };
 
   // ---------------- pending actions
+  // One receipt, from Ask or from a Space: action, record, actor, time, outcome, audit reference,
+  // what changed, what did not, and the next action (D-122).
+  receiptMessage = (res, lead) => {
+    const r = res.receipt || null;
+    const when = new Date();
+    const lines = r ? [r.changed && r.changed.length ? 'Changed: ' + r.changed.join('; ') + '.' : 'Nothing changed.', r.unchanged && r.unchanged.length ? 'Not changed: ' + r.unchanged.join('; ') + '.' : '', r.next ? 'Next: ' + r.next + '.' : ''].filter(Boolean).join(' ') : '';
+    const stamp = [r ? r.action : null, r ? r.record : null, this.A.records.actor().name, when.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), r ? r.outcome : (res.duplicate || res.already ? 'Already done' : 'Done'), r && r.audit ? 'Audit: ' + r.audit : null].filter(Boolean).join(' \u00b7 ');
+    return { role: 'ai', lead, text: [res.detail || 'Written to your brokerage\u2019s records with an audit entry against your name.', lines].filter(Boolean).join(' '), receipt: stamp, chips: res.next || [] };
+  };
   updatePending = (i, patch) => {
     const thread = this.state.thread.map((m, j) => (j === i && m.pending ? { ...m, pending: { ...m.pending, ...patch } } : m));
     this.setState({ thread });
@@ -145,7 +154,7 @@ class Component extends DCLogic {
     const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
     const thread = this.updatePending(i, { status: res.duplicate || res.already ? 'already' : 'done', statusText: receipt });
     const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const next = [...thread, { role: 'ai', lead: receipt, text: res.detail || 'Written to your brokerage\u2019s records with an audit entry against your name.', receipt: receipt + ' \u00b7 ' + this.A.records.actor().name + ' \u00b7 ' + when, chips: res.next || [] }];
+    const next = [...thread, this.receiptMessage(res, receipt)];
     this.saveThread(next);
     this.setState({ thread: next });
     this.bump();

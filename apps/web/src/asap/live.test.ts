@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 const ORG = "10000000-0000-4000-8000-00000000000a";
 const ME = "20000000-0000-4000-8000-000000000001";
+const BARAKA = "20000000-0000-4000-8000-000000000002";
 const CLIENT = "30000000-0000-4000-8000-000000000001";
 const POL_OK = "40000000-0000-4000-8000-000000000001";
 const POL_UNVERIFIED = "40000000-0000-4000-8000-000000000002";
@@ -111,6 +112,22 @@ const oppDetail = () => ({
   next: { what: { not_asked: "Prepare the request to CIC General", request_prepared: "Review and approve the request to CIC General", approved_to_deliver: "Deliver the approved request to CIC General and record how", with_insurer: "Chase CIC General for terms" }[oppStage], holder: oppStage === "with_insurer" ? "outside_party" : "brokerage", party: oppStage === "with_insurer" ? "CIC General" : null, since: null, missing: [], checkAt: null, why: "Because.", record: { type: "opportunity", id: OPP, label: "Tausi — Motor fleet" }, action: null, stage: oppStage },
 });
 const opportunityAction = vi.fn(async () => ({ outcome: "done", reason: null, opportunity: oppDetail() }));
+// Owner and due date, answered as the server's /manage contract would; a preview changes nothing.
+let workOwner = ME;
+let workDue: string | null = null;
+const manageWork = vi.fn(async (_id: string, input: { version: number; ownerId?: string; dueOn?: string; preview?: boolean }) => {
+  const item = { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: workOwner, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, due_on: workDue, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 };
+  const name = (id: string) => (id === BARAKA ? "Baraka Otieno" : "Wanjiru Kamau");
+  const changes = [
+    ...(input.ownerId && input.ownerId !== workOwner ? [{ field: "owner", label: "Owner", from: name(workOwner), to: name(input.ownerId) }] : []),
+    ...(input.dueOn && input.dueOn !== workDue ? [{ field: "due", label: "Due", from: workDue ?? "No date", to: input.dueOn }] : []),
+  ];
+  if (!changes.length) return { outcome: "already_done", item, changes: [] };
+  if (input.preview) return { outcome: "preview", item, changes, externalEffect: "No message is sent to anyone. The new owner sees it in their Work." };
+  if (input.ownerId) workOwner = input.ownerId;
+  if (input.dueOn) workDue = input.dueOn;
+  return { outcome: "applied", item: { ...item, owner_id: workOwner, due_on: workDue }, changes, auditAction: changes.length === 1 && changes[0]!.field === "owner" ? "work_item.assigned" : "work_item.due_changed" };
+});
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
@@ -120,7 +137,10 @@ vi.mock("../lib/api.js", () => ({
   describeApiError: (e: unknown) => (e instanceof Error ? e.message : "failed"),
   api: {
     members: async () => ({
-      members: [{ membership_id: ME, user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null, last_seen_at: null }, role: { id: ME, key: "owner", name: "Owner" }, is_owner: true, status: "active", joined_at: "2026-09-01" }],
+      members: [
+        { membership_id: ME, user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null, last_seen_at: null }, role: { id: ME, key: "owner", name: "Owner" }, is_owner: true, status: "active", joined_at: "2026-09-01" },
+        { membership_id: BARAKA, user: { id: BARAKA, email: "baraka@example.test", full_name: "Baraka Otieno", display_name: null, last_seen_at: null }, role: { id: BARAKA, key: "account_executive", name: "Account executive" }, is_owner: false, status: "active", joined_at: "2026-09-01" },
+      ],
     }),
     mailboxes: async () => ({ mailboxes: [], providers: [] }),
     automations: async () => ({
@@ -131,7 +151,7 @@ vi.mock("../lib/api.js", () => ({
     workList: async (view: string) => ({
       items:
         view === "needs"
-          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", next: { what: "Request renewal terms from the insurer", holder: "brokerage", party: null, since: null, missing: ["Renewal terms"], checkAt: "2026-10-05T09:00:00Z", why: "Cover ends on its expiry date.", record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, action: null, stage: "first" }, item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: ME, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
+          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", next: { what: "Request renewal terms from the insurer", holder: "brokerage", party: null, since: null, missing: ["Renewal terms"], checkAt: "2026-10-05T09:00:00Z", why: "Cover ends on its expiry date.", record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, action: null, stage: "first" }, item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: workOwner, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, due_on: workDue, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
           : [],
     }),
     clientFiles: async (view: string) => ({
@@ -162,6 +182,7 @@ vi.mock("../lib/api.js", () => ({
           ? { state: "active", label: "Active cover", reason: "Insurer confirmation on file.", verified: true, evidence: [{ label: "Insurer confirmation, 20 Dec 2025", documentId: null, recordedAt: "2025-12-20" }], asOf: "2026-09-29" }
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
+    manageWork,
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
     opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
     opportunityAction,
@@ -202,6 +223,14 @@ describe("live mode", () => {
     setAutomationEnabled.mockClear();
     created.length = 0;
     claimMade = null;
+    workOwner = ME;
+    workDue = null;
+    manageWork.mockClear();
+    opportunityAction.mockClear();
+    createOpportunity.mockClear();
+    createClient.mockClear();
+    createWorkItem.mockClear();
+    oppStage = "not_asked";
   });
 
   it("reads the brokerage's own people, clients and work — and no demo records", async () => {
@@ -601,6 +630,187 @@ describe("live mode", () => {
       expect(which.clarify.options.map((o) => o.label)).toContain("Policy not known yet");
       const when = (await A.ai.route("Report a claim on TH-MTR-001", {})) as { lead: string };
       expect(when.lead).toBe("When did it happen?");
+    });
+  });
+
+  /*
+   * Chat/Space parity (D-122). Each action is reached two ways — Ask's confirmed pending card and
+   * the Space's own control — and both must arrive at the same live action and the same server
+   * call. Ask's preview writes nothing; a repeat of a confirmed action is not sent twice.
+   */
+  describe("chat and Space reach the same contract", () => {
+    type Pending = { action: string; payload: Record<string, unknown>; actionId: string; sections: { label: string; items: string[] }[] };
+    type Routed = { pending?: Pending; lead?: string };
+    const blocks = (ws: { blocks: unknown[] }) => ws.blocks as Record<string, unknown>[];
+    const control = (ws: { blocks: unknown[] }, action: string, pick?: (o: Record<string, unknown>) => boolean) => {
+      const found: Record<string, unknown>[] = [];
+      const walk = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === "object") {
+          const o = v as Record<string, unknown>;
+          if (o["action"] === action && (!pick || pick(o))) found.push(o);
+          Object.values(o).forEach(walk);
+        }
+      };
+      walk(blocks(ws));
+      return found[0] ?? null;
+    };
+
+    it("1 · add client", async () => {
+      const A = await live();
+      const r = (await A.ai.route("add Simba Traders as a company client", {})) as Routed;
+      expect(r.pending!.action).toBe("client.create");
+      expect(createClient.mock.calls.every((c) => c[0].preview === true)).toBe(true);
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = createClient.mock.calls.at(-1)![0];
+      createClient.mockClear();
+      const form = control(A.ai.workspace({ ws: "newclient" }), "client.create")!;
+      expect(form).not.toBeNull();
+      await A.records.act("client.create", { ...(form["payload"] as object), name: "Simba Traders", kind: "Company", confirmNew: "yes" });
+      const fromSpace = createClient.mock.calls.at(-1)![0];
+      expect({ name: fromSpace.name, kind: fromSpace.kind }).toEqual({ name: fromAsk.name, kind: fromAsk.kind });
+    });
+
+    it("2 · start quotation", async () => {
+      const A = await live();
+      const r = (await A.ai.route("Start a quotation for Tausi Hauliers for a motor fleet of five vans", {})) as Routed;
+      expect(r.pending!.action).toBe("opportunity.create");
+      expect(createOpportunity).not.toHaveBeenCalled();
+      await Promise.all([A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId), A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)]);
+      expect(createOpportunity).toHaveBeenCalledTimes(1);
+      const fromAsk = (createOpportunity.mock.calls as unknown as Record<string, unknown>[][])[0]![0]!;
+      const form = control(A.ai.workspace({ ws: "quote", clientId: CLIENT }), "opportunity.create")!;
+      await A.records.act("opportunity.create", { ...(form["payload"] as object), title: r.pending!.payload["title"], cls: r.pending!.payload["cls"] });
+      const fromSpace = (createOpportunity.mock.calls as unknown as Record<string, unknown>[][])[1]![0]!;
+      for (const k of ["clientId", "title", "classOfBusiness"]) expect(fromSpace[k]).toEqual(fromAsk[k]);
+    });
+
+    const oppAsk = async (A: Awaited<ReturnType<typeof live>>, q: string) => (await A.ai.route(q, { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } })) as Routed;
+    const lastOpp = () => opportunityAction.mock.calls.at(-1) as unknown as [string, Record<string, unknown>];
+
+    it("3 · add insurer", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Add Jubilee as an insurer to this quotation");
+      expect(r.pending!.action).toBe("opp.action");
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const add = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "add_insurer")!;
+      await A.records.act("opp.action", add["payload"]);
+      expect(lastOpp()).toEqual(fromAsk);
+    });
+
+    it("4 · add requirement", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Add a requirement: Driver licences");
+      expect(r.pending!.payload).toMatchObject({ action: "add_requirement", label: "Driver licences" });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "add_requirement")!;
+      await A.records.act("opp.action", { ...(form["payload"] as object), label: "Driver licences" });
+      expect(lastOpp()).toEqual(fromAsk);
+    });
+
+    it("5 · supply requirement", async () => {
+      const A = await live();
+      const d = oppDetail();
+      d.requirements[0]!.suppliedAt = null as unknown as string;
+      opportunityAction.mockClear();
+      const detail = { ...d };
+      const api = (await import("../lib/api.js")).api as unknown as { opportunity: (id: string) => Promise<unknown> };
+      const spy = vi.spyOn(api, "opportunity").mockResolvedValue(detail);
+      const B = await live();
+      const r = (await B.ai.route("We received the logbooks from the client by email today", { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } })) as Routed;
+      expect(r.pending!.payload).toMatchObject({ action: "supply_requirement", requirementId: d.requirements[0]!.id });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await B.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(B.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "supply_requirement")!;
+      expect(form).not.toBeNull();
+      // The Space's select supplies the requirement; its text box the note.
+      const choice = ((form["fields"] as { key: string; options?: { value: string }[] }[]).find((f) => f.key === "requirementId")!.options!)[0]!.value;
+      await B.records.act("opp.action", { ...(form["payload"] as object), requirementId: choice, note: r.pending!.payload["note"] });
+      expect(lastOpp()[1]).toMatchObject({ action: "supply_requirement", requirementId: fromAsk[1]["requirementId"], note: fromAsk[1]["note"] });
+      spy.mockRestore();
+      void A;
+    });
+
+    it("6 · prepare request", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Prepare the request to CIC");
+      expect(r.pending!.payload).toMatchObject({ action: "prepare_request", opportunityInsurerId: APPROACH });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "prepare_request")!;
+      await A.records.act("opp.action", { ...(form["payload"] as object), subject: fromAsk[1]["subject"], body: fromAsk[1]["body"] });
+      expect(lastOpp()[1]).toEqual(fromAsk[1]);
+      expect(JSON.stringify(fromAsk)).not.toMatch(/\bsent\b/i);
+    });
+
+    it("7 · report claim", async () => {
+      const A = await live();
+      const ref = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+      const r = (await A.ai.route("Report a claim: van rear-ended on 28 Sep", { ...ref, ref })) as Routed;
+      expect(r.pending!.action).toBe("claim.open");
+      expect(createWorkItem).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = createWorkItem.mock.calls.at(-1)![0];
+      claimMade = null;
+      const form = control(A.ai.workspace({ ws: "claim", clientId: CLIENT }), "claim.open")!;
+      expect(form).not.toBeNull();
+      await A.records.act("claim.open", { ...(form["payload"] as object), policyId: POL_OK, incidentOn: r.pending!.payload["incidentOn"], incidentSummary: r.pending!.payload["incidentSummary"] });
+      const fromSpace = createWorkItem.mock.calls.at(-1)![0];
+      expect(fromSpace).toEqual(fromAsk);
+    });
+
+    it("8 · assign Work: Ask previews from the server, both confirm through /manage", async () => {
+      const A = await live();
+      const ref = { ws: "workitem", workItemId: WORK };
+      const r = (await A.ai.route("Assign this to Baraka", { ...ref, ref })) as Routed;
+      expect(r.pending!.action).toBe("work.assign");
+      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Owner: Wanjiru Kamau → Baraka Otieno");
+      expect(manageWork.mock.calls.every((c) => c[1].preview === true)).toBe(true);
+      const [a, b] = await Promise.all([A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId), A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)]);
+      expect(manageWork.mock.calls.filter((c) => !c[1].preview)).toHaveLength(1);
+      expect((a as { receipt: { audit: string } }).receipt.audit).toBe("work_item.assigned");
+      expect(a).toEqual(b);
+      const fromAsk = manageWork.mock.calls.filter((c) => !c[1].preview).at(-1)!;
+      workOwner = ME;
+      manageWork.mockClear();
+      const B = await live();
+      await B.records.act("work.assign", { workItemId: WORK, userId: BARAKA, dueAt: null });
+      expect(manageWork.mock.calls.at(-1)).toEqual(fromAsk);
+      const again = (await B.records.act("work.assign", { workItemId: WORK, userId: BARAKA, dueAt: null }, "space-second-click")) as { already?: boolean };
+      expect(again.already).toBe(true);
+    });
+
+    it("9 · change Work due date", async () => {
+      const A = await live();
+      const ref = { ws: "workitem", workItemId: WORK };
+      const r = (await A.ai.route("Make this due 15 Oct 2026", { ...ref, ref })) as Routed;
+      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Due: No date → 2026-10-15");
+      expect(workDue).toBeNull();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = manageWork.mock.calls.filter((c) => !c[1].preview).at(-1)!;
+      expect(fromAsk[1]).toMatchObject({ dueOn: "2026-10-15" });
+      workDue = null;
+      manageWork.mockClear();
+      const B = await live();
+      await B.records.act("work.assign", { workItemId: WORK, dueAt: "2026-10-15" });
+      expect(manageWork.mock.calls.at(-1)).toEqual(fromAsk);
+      // After a refresh, Work reads the saved date back from the server.
+      const C = await live();
+      expect(text(C.ai.workspace({ ws: "work" }))).toMatch(/15 Oct/);
+    });
+
+    it("a refusal from the server is a blocked receipt, not a success", async () => {
+      manageWork.mockResolvedValueOnce({ outcome: "blocked", item: {} as never, guard: "permission", reason: "Your role can view Work but not change its owner or dates. Nothing was changed." } as never);
+      const A = await live();
+      const res = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied?: boolean; reason?: string };
+      expect(res.ok).toBe(false);
+      expect(res.denied).toBe(true);
     });
   });
 });
