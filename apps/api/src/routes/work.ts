@@ -1307,7 +1307,9 @@ export function workRoutes(deps: WorkDeps) {
         names.set(u.id, u.display_name ?? u.full_name ?? "A member");
     }
     const who = (v: string | null | undefined) => (v ? (names.get(v) ?? "someone outside this brokerage") : "Nobody");
-    const day = (v: string | null | undefined) => (v ? v.slice(0, 10) : "No date");
+    // A date as a broker reads it, in the brokerage's own time zone.
+    const day = (v: string | null | undefined) =>
+      v ? new Date(v.length === 10 ? v + "T12:00:00Z" : v).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Nairobi" }) : "No date";
     const changes: { field: "owner" | "due" | "next_check"; label: string; from: string | null; to: string | null }[] = [];
     if (req.ownerId !== undefined && req.ownerId !== item.owner_id)
       changes.push({ field: "owner", label: "Owner", from: who(item.owner_id), to: who(req.ownerId) });

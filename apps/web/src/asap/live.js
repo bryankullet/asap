@@ -117,7 +117,8 @@ async function hydrate(me) {
     api.members().catch(() => ({ members: [] })),
     api.mailboxes().catch(() => null),
     api.automations().catch(() => ({ automations: [] })),
-    api.audit().catch(() => ({ entries: [] })),
+    // The audit history is for roles that may read it; asking without that permission is a refusal.
+    (me.permissions ?? []).includes("audit:view") ? api.audit().catch(() => ({ entries: [] })) : Promise.resolve({ entries: [] }),
     api.opportunities().catch(() => ({ opportunities: [] })),
     ...WORK_VIEWS.map((v) => api.workList(v, 100).catch(() => ({ items: [] }))),
   ]);
@@ -615,7 +616,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   };
 
   const ok = (text, extra = {}) => ({ ok: true, text, at: d0(), ...extra });
-  const fail = (err) => ({ ok: false, error: describeApiError(err) });
+  const fail = (err) => ({ ok: false, error: describeApiError(err).replace(/\.?\s*$/, ".") + " Nothing was changed — you can retry." });
   /** Run a write, re-read the records, and report — or report the failure with nothing changed. */
   const write = async (fn, text) => {
     try {
@@ -711,6 +712,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           already,
           detail: already ? "Opened the existing client file." : "Written to your brokerage’s records with an audit entry against your name. No message was sent.",
           nav: { ws: "client", clientId: id },
+          receipt: { action: already ? "Client already on file" : "Client added", record: name, outcome: already ? "Already done" : "Done", changed: already ? [] : ["One client record and its client file"], unchanged: ["No contact was added yet", "No message was sent to anyone"], next: "Add the primary contact", audit: already ? null : "client.created" },
           next: [
             { label: "Add contact", ref: { ws: "newcontact", clientId: id } },
             { label: "Record insurance need", ref: { ws: "quote", clientId: id } },
@@ -867,7 +869,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const res = await api.createOpportunity(present({ clientId: p.clientId, title: p.title, classOfBusiness: p.cls, coverStart: p.coverStart, coverEnd: p.coverEnd, requestKey: requestKey ?? crypto.randomUUID() }));
         await refresh();
         const c = db.clients.find((x) => x.id === p.clientId);
-        return ok("Quotation work started" + (c ? " for " + c.name : ""), { nav: { ws: "quote", opportunityId: res.opportunityId } });
+        return ok("Quotation work started" + (c ? " for " + c.name : ""), { nav: { ws: "quote", opportunityId: res.opportunityId }, detail: "Written with an audit entry against your name.", receipt: { action: "Quotation work started", record: (c ? c.name + " — " : "") + p.title, outcome: "Done", changed: ["The quotation and its Work item, owned by you"], unchanged: ["No insurer was asked", "No request was prepared or sent"], next: state.opportunities.get(res.opportunityId)?.next?.what ?? "Record the requirements and choose the insurers", audit: "opportunity.created" } });
       } catch (e) {
         return fail(e);
       }
@@ -907,11 +909,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       try {
         const res = await api.opportunityAction(id, clean);
-        if (res.outcome === "blocked") return { ok: false, error: res.reason || "That couldn’t be done. Nothing was changed." };
+        if (res.outcome === "blocked") return /may not/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason || "That couldn’t be done. Nothing was changed." };
         await refresh();
+        const o = res.opportunity;
+        const label = ({ add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", prepare_request: "Request prepared", approve_request: "Request approved", record_delivery: "Delivery recorded", record_response: "Insurer's reply recorded" })[clean.action] ?? "Recorded";
+        const receipt = { action: label, record: o ? o.client.name + " — " + o.opportunity.title : "Quotation", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : [label], unchanged: ["Nothing was sent to any insurer from ASAP", "No cover or money changed"], next: o?.next?.what ?? null, audit: res.outcome === "already" ? null : "opportunity." + clean.action };
         return ok(
           ({ add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", prepare_request: "Request prepared for approval — nothing was sent", approve_request: "Request approved — it has not been sent", record_delivery: "Delivery recorded — the insurer now holds the request", record_response: "Insurer's reply recorded" }[clean.action] ?? "Recorded") + (res.outcome === "already" ? " (already done — nothing recorded twice)" : ""),
-          { detail: res.opportunity?.next ? "Next: " + res.opportunity.next.what + "." : undefined, nav: { ws: "quote", opportunityId: id } },
+          { detail: "Written with an audit entry against your name.", nav: { ws: "quote", opportunityId: id }, receipt, already: res.outcome === "already" },
         );
       } catch (e) {
         return fail(e);
@@ -932,6 +937,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           already: !!res.reopened,
           detail: "No message was sent to the insurer, and nothing here says the loss is covered. The documents it needs are listed on the claim.",
           nav: { ws: "claim", clientId: p.clientId, claimId: claim.id },
+          receipt: { action: res.reopened ? "Claim already open" : "Claim reported as a draft", record: (db.clients.find((c) => c.id === p.clientId)?.name ?? "Client") + " — loss of " + S.fmtDate(p.incidentOn), outcome: res.reopened ? "Already done" : "Done", changed: res.reopened ? [] : ["One draft claim and its Work item, looked at again in two days"], unchanged: ["Not registered with the insurer", "No message was sent", "Nothing says the loss is covered"], next: db.workItems.find((w) => w.id === res.item.id)?.next?.what ?? "Collect the claim form and supporting documents", audit: res.reopened ? null : "claim.created" },
           next: [{ label: "Open the claim", ref: { ws: "claim", clientId: p.clientId, claimId: claim.id } }, { label: "Open the client", ref: { ws: "client", clientId: p.clientId } }],
         });
       } catch (e) {
@@ -1081,6 +1087,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const key = actionId || type + ":" + JSON.stringify(payload);
     if (db.meta.ledger[key]) return { ...db.meta.ledger[key], duplicate: true };
     if (inflight.has(key)) return inflight.get(key);
+    const no = refusal(type);
+    if (no) return { ok: false, denied: true, reason: no.lead + " " + no.text };
     const handler = LIVE[type];
     if (!handler) {
       const what = NOT_CONNECTED[type] ?? "This action";
@@ -1361,6 +1369,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * confirm goes through the same client.create handler + New uses.
    */
   async function addClientPreview(name, said) {
+    if (refusal("client.create")) return refusal("client.create");
     if (name.length < 2) return { lead: "What is the client's name?", text: "Nothing was changed.", ref: null, keepWorkspace: true };
     const kind = clientKindFrom(name, said);
     if (!kind)
@@ -1580,6 +1589,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * Work Space's "Owner and due date" block confirms (D-122). The preview writes nothing.
    */
   async function workFromAsk(raw, t, ctx) {
+    if (/\b(?:assign|reassign|give|hand(?:\s+it)?\s+over)\b.*?\bto\s+[A-Z]|\b(due|deadline)\b/i.test(raw) && refusal("work.assign")) return refusal("work.assign");
     const assign = /\b(?:assign|reassign|give|hand(?:\s+it)?\s+over)\b.*?\bto\s+([A-Z][a-z]+)/i.exec(raw);
     const dueWords = /\b(due|deadline)\b/i.test(t);
     if (!assign && !dueWords) return null;
@@ -1587,7 +1597,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (dueWords && !assign && !when) return { lead: "Due when?", text: "Give the date — for example “due 15 Oct” or “due Friday”. Nothing was changed.", ref: null, keepWorkspace: true };
     let person = null;
     if (assign) {
-      const matches = db.users.filter((u) => u.name.toLowerCase().split(/\s+/)[0] === assign[1].toLowerCase() || u.name.toLowerCase() === assign[1].toLowerCase());
+      const matches = db.users.filter((u) => u.name.toLowerCase().split(/\s+/).includes(assign[1].toLowerCase()) || u.name.toLowerCase() === assign[1].toLowerCase());
       if (matches.length === 0) return { lead: "Who is " + assign[1] + "?", text: "No member of this brokerage has that name. Nothing was changed.", ref: null, keepWorkspace: true };
       if (matches.length > 1) return { lead: "Which " + assign[1] + "?", text: "More than one member has that name.", clarify: { question: "Member", options: matches.map((u) => ({ label: u.name, text: raw.replace(assign[1], u.name) })) }, ref: null, keepWorkspace: true };
       person = matches[0];
@@ -1804,8 +1814,25 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /** Every answer passes through here, so the context records what was prepared (D-121). */
+  /*
+   * What the signed-in person's role allows, as the server resolved it into /me (rule 5: read,
+   * never supplied). Used only to refuse early and plainly; every write is still checked by the
+   * server, which is the authority.
+   */
+  const NEEDS = { "client.create": ["client:create", "add clients"], "claim.open": ["claim:create", "report claims"], "opportunity.create": ["space:create", "start quotation work"], "opp.action": ["space:create", "change quotation work"], "work.assign": ["job:edit", "change who owns Work or when it is due"], "automation.create": ["automation:create", "create automations"], "contact.create": ["client:edit", "add contacts"] };
+  const perms = new Set(me.permissions ?? []);
+  const refusal = (action) => {
+    const need = NEEDS[action];
+    if (!need || perms.has(need[0]) || perms.size === 0) return null;
+    return { lead: "Your role cannot " + need[1] + ".", text: "Nothing was changed. Someone whose role allows it can do this; ASAP will not work around it.", ref: null, keepWorkspace: true, blocked: true };
+  };
+
   async function liveRoute(text, ctx) {
     const r = await routeInner(text, ctx);
+    if (r && r.pending) {
+      const no = refusal(r.pending.action);
+      if (no) return no;
+    }
     if (r && r.pending) {
       const pay = r.pending.payload || {};
       const sub = pay.clientId ? { type: "client", clientId: pay.clientId } : null;
@@ -1835,6 +1862,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
     if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
+    // The chips live mode offers, and the places a broker asks to go, answered from the records.
+    const GO = [
+      [/^(show|open|see)( me)?( my)? work\??$|^my work\??$|^work$/i, { ws: "work" }, "Your work, from your records."],
+      [/what needs (my )?attention|^today\??$|what('?s| is) (on )?(for )?today/i, { ws: "today" }, "What matters now, from your records."],
+      [/^(show|open|see)( me)?( the)? activity\??$|^activity$|what (has )?changed/i, { ws: "activity" }, "What changed, who changed it and what is outstanding."],
+      [/^(show|open|see)( me)?( my| the)? automations?\??$|^automations?$/i, { ws: "automation" }, "Your automations, and what each can actually do."],
+    ];
+    const go = GO.find(([re]) => re.test(t.trim()));
+    if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
     const automation = automationFromAsk(text.trim(), t);
     if (automation) return automation;
     const started = quoteStartFromAsk(text.trim(), t, ctx);

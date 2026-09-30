@@ -121,7 +121,7 @@ const manageWork = vi.fn(async (_id: string, input: { version: number; ownerId?:
   const name = (id: string) => (id === BARAKA ? "Baraka Otieno" : "Wanjiru Kamau");
   const changes = [
     ...(input.ownerId && input.ownerId !== workOwner ? [{ field: "owner", label: "Owner", from: name(workOwner), to: name(input.ownerId) }] : []),
-    ...(input.dueOn && input.dueOn !== workDue ? [{ field: "due", label: "Due", from: workDue ?? "No date", to: input.dueOn }] : []),
+    ...(input.dueOn && input.dueOn !== workDue ? [{ field: "due", label: "Due", from: workDue ?? "No date", to: "15 Oct 2026" }] : []),
   ];
   if (!changes.length) return { outcome: "already_done", item, changes: [] };
   if (input.preview) return { outcome: "preview", item, changes, externalEffect: "No message is sent to anyone. The new owner sees it in their Work." };
@@ -213,12 +213,12 @@ const me = {
   user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null },
   memberships: [],
   active_organization: { id: ORG, name: "Tausi Brokers", country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
-  permissions: ["placement:approve", "organization:edit"],
+  permissions: ["placement:approve", "organization:edit", "client:create", "client:edit", "claim:create", "space:create", "job:edit", "automation:create", "automation:edit", "audit:view"],
 };
 
-async function live() {
+async function live(who: typeof me = me) {
   const { loadLiveAdapters } = await import("./live.js");
-  return (await loadLiveAdapters({ me, switchToDemo: () => {} })) as {
+  return (await loadLiveAdapters({ me: who, switchToDemo: () => {} })) as {
     records: { actor(): { name: string }; act(t: string, p: unknown, id?: string): unknown; demo: boolean; sel: { clients(): { name: string }[] } };
     ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }>; context(): { organizationId: string; previousSubject: unknown; pendingClarification: unknown; pendingAction: unknown; latestReceipt: unknown } };
     documents: { read(f: File): Promise<unknown> };
@@ -856,7 +856,7 @@ describe("live mode", () => {
       const A = await live();
       const ref = { ws: "workitem", workItemId: WORK };
       const r = (await A.ai.route("Make this due 15 Oct 2026", { ...ref, ref })) as Routed;
-      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Due: No date → 2026-10-15");
+      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Due: No date → 15 Oct 2026");
       expect(workDue).toBeNull();
       await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
       const fromAsk = manageWork.mock.calls.filter((c) => !c[1].preview).at(-1)!;
@@ -1011,5 +1011,18 @@ describe("live mode", () => {
       const tested = (await A.records.act("automation.test", { id: AUTO })) as { text: string };
       expect(tested.text).toBe("Test mode: it would act on 1 open item of 3 checked");
     });
+  });
+
+  it("a read-only member is refused plainly, before any request, from Ask and from a Space", async () => {
+    const A = await live({ ...me, permissions: ["client:view", "job:view"] });
+    const r = (await A.ai.route("add Simba Traders as a company client", {})) as { lead: string; pending?: unknown };
+    expect(r.lead).toBe("Your role cannot add clients.");
+    expect(r.pending).toBeUndefined();
+    expect(createClient).not.toHaveBeenCalled();
+    const w = (await A.ai.route("Assign this to Baraka", { ws: "workitem", workItemId: WORK, ref: { ws: "workitem", workItemId: WORK } })) as { lead: string };
+    expect(w.lead).toBe("Your role cannot change who owns Work or when it is due.");
+    const space = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied: boolean };
+    expect(space).toMatchObject({ ok: false, denied: true });
+    expect(manageWork).not.toHaveBeenCalled();
   });
 });

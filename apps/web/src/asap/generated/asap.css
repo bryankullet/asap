@@ -25,6 +25,8 @@
   }
 
 .asap-mobileonly{display:none}
+.asap-body[data-space="closed"] .asap-pane{display:none!important}
+.asap-body[data-space="closed"] .asap-ask{width:100%;max-width:860px;margin:0 auto;border-left:0!important}
 @media(max-width:980px){
   .asap-mobileonly{display:block}
   .asap-desktoponly{display:none!important}

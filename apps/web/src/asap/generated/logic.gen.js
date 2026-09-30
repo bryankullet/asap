@@ -96,7 +96,7 @@ class Component extends DCLogic {
     const id = 'tab' + (this.state.tabs.length + 1) + '_' + Date.now().toString(36);
     // A record never replaces another record's tab; only a transient form or a 'nothing opened'
     // tab in front is replaced. Recent holds records, once each, never forms or failed steps.
-    const transient = (r) => ['nothing', 'newclient', 'newcontact', 'import'].includes(r.ws) || (r.ws === 'claim' && !r.claimId);
+    const transient = (r) => ['nothing', 'newclient', 'newcontact', 'import'].includes(r.ws) || (r.ws === 'claim' && !r.claimId) || (r.ws === 'quote' && !r.opportunityId);
     let tabs = this.state.tabs.filter(t => !(t.id === this.state.activeId && !t.pinned && !opts.keep && transient(t.ref)));
     tabs = [...tabs, { id, ref, pinned: false }];
     while (tabs.filter(t => !t.pinned).length > 8) tabs.splice(tabs.findIndex(t => !t.pinned && t.id !== id), 1);
@@ -107,10 +107,11 @@ class Component extends DCLogic {
   closeTab = (id) => {
     const tabs = this.state.tabs.filter(t => t.id !== id);
     // Closing a tab removes the tab, never the record; context follows the tab now in front.
-    const nextTabs = tabs.length ? tabs : [{ id: 't1', ref: { ws: 'today' }, pinned: true }];
-    const front = id === this.state.activeId ? nextTabs[nextTabs.length - 1] : nextTabs.find(t => t.id === this.state.activeId) || nextTabs[nextTabs.length - 1];
+    // Closing the last tab leaves Ask alone in the centre (D-118); opening anything brings a Space back.
+    if (!tabs.length) { try { sessionStorage.removeItem('asap.openRef'); } catch { /* storage blocked */ } this.setState({ tabs: [], activeId: null, contextRef: null }); return; }
+    const front = id === this.state.activeId ? tabs[tabs.length - 1] : tabs.find(t => t.id === this.state.activeId) || tabs[tabs.length - 1];
     try { sessionStorage.setItem('asap.openRef', JSON.stringify(front.ref)); } catch { /* storage blocked */ }
-    this.setState({ tabs: nextTabs, activeId: front.id, contextRef: front.ref });
+    this.setState({ tabs, activeId: front.id, contextRef: front.ref });
   };
 
   // ---------------- actions
@@ -523,7 +524,7 @@ class Component extends DCLogic {
 
   renderVals() {
     const base = {
-      inputRef: this.inputRef, newBelow: !!this.state.newBelow, jumpToNew: this.jumpToNew, searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
+      inputRef: this.inputRef, newBelow: !!this.state.newBelow, jumpToNew: this.jumpToNew, spaceState: this.state.tabs.length ? 'open' : 'closed', searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
       onKeyDown: this.onKeyDown, send: this.send, closeSheet: this.closeSheet,
       openSearch: () => this.openSearch(), openNew: () => this.openNew(), openProfile: () => this.openProfile(),
       openReset: () => this.openReset(), openSweep: () => this.openSweep(), openHistory: () => this.openHistory(),

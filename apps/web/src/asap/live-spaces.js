@@ -290,10 +290,13 @@ function stagesBlock(d, live) {
     ["Terms reviewed", any((i) => (i.response?.terms?.length ?? 0) > 0), ""],
     ["Comparison ready", !!d.comparisonView?.comparison, ""],
   ];
-  const now = steps.findIndex(([, done]) => !done);
+  // "Now" is the server's current stage (D-120), so the Space and Ask always name the same step.
+  const STAGE_AT = { requirements: 1, insurers: 2, prepare: 3, approve: 4, deliver: 5, with_insurer: 7, compare: 8 };
+  const at = STAGE_AT[d.next?.stage];
+  const now = at !== undefined ? (at === 8 && steps[8][1] ? 9 : at) : steps.findIndex(([, done]) => !done);
   return rows(
     "Where this quotation stands",
-    steps.map(([title, done, note], k) => ({ title, note: note || (done ? "Done" : k === now ? "This is the current step" : "Not yet"), badge: done ? "Done" : k === now ? "Now" : "Later", badgeTone: done ? ok : k === now ? warn : "neutral" })),
+    steps.map(([title, done, note], k) => ({ title, note: note || (done ? "Done" : k === now ? "This is the current step" : "Not yet"), badge: k === now ? "Now" : done ? "Done" : k < now ? "Not done" : "Later", badgeTone: k === now ? warn : done ? ok : k < now ? bad : "neutral" })),
   );
 }
 
@@ -689,7 +692,7 @@ function activitySpace(ref) {
         events.length
           ? events.slice(0, 60).map((a) => ({
               title: actionWords(a.action) + (a.record ? " — " + a.record.label : ""),
-              note: [who(a), a.client ? a.client.name : null, a.result === "success" ? "Done" : a.result === "denied" ? "Refused" + (a.failureReason ? ": " + a.failureReason.replace(/_/g, " ") : "") : "Failed" + (a.failureReason ? ": " + a.failureReason : ""), S.fmtDate(a.at) + " " + new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), a.changed?.length ? a.changed.slice(0, 2).join("; ") : null, a.evidence?.length ? "Evidence: " + a.evidence[0] : null].filter(Boolean).join(" · "),
+              note: [who(a), a.client ? a.client.name : null, a.result === "success" ? "Done" : a.result === "denied" ? "Refused" + (a.failureReason ? ": " + a.failureReason.replace(/_/g, " ") : "") : "Failed" + (a.failureReason ? ": " + a.failureReason : ""), S.fmtDate(a.at) + " " + new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), (a.changed || []).filter((c) => !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(c) && !/nothing → nothing/.test(c)).slice(0, 2).map((c) => c.replace(/^due_on:/, "Due:").replace(/^task_next_check:/, "Next check:").replace(/^required_action:/, "Next step:")).join("; ") || null, a.evidence?.length ? "Evidence: " + a.evidence[0] : null].filter(Boolean).join(" · "),
               badge: a.external ? "External" : a.result === "success" ? (a.coverOrMoney ? "Cover/money" : "Done") : a.result === "denied" ? "Refused" : "Failed",
               badgeTone: a.result === "success" ? (a.external || a.coverOrMoney ? warn : ok) : bad,
               action: refForRecord(a.record, a.client) ? { a: "open", ref: refForRecord(a.record, a.client) } : null,
@@ -720,7 +723,8 @@ function workItemSpace(ref) {
         ["Where it stands", w.statusLabel || (w.state === "Completed" ? "Done" : "In progress")],
         ["Owner", owner ? owner.name : "unassigned"],
         ["Priority", { high: "High priority", medium: "Normal priority", low: "Low priority" }[w.priority] || "Normal priority"],
-        ["Look again", w.dueAt ? date(w.dueAt) : "not set"],
+        ["Due", w.dueAt ? date(w.dueAt) : "not set"],
+        ["Look again", w.nextCheckAt ? date(w.nextCheckAt) : "not set"],
       ]),
       // The server's next action (D-120): the same words Today and Ask show for this item.
       ...(w.next ? nextBlock(w.next) : w.reason ? [note("green", "Why it is here", w.reason)] : []),

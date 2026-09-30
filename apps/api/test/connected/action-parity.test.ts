@@ -302,7 +302,7 @@ describe("8–9 · assign Work and change its due date", () => {
   });
   it("9 · the due date is saved once, audited, read back by Work and Today, and survives refresh", async () => {
     const p = await manage(AMINA, { version: item.version, dueOn: "2026-10-15", preview: true });
-    expect(p.body.changes[0]).toMatchObject({ field: "due", to: "2026-10-15" });
+    expect(p.body.changes[0]).toMatchObject({ field: "due", to: "15 Oct 2026" });
     expect((await call(AMINA, "GET", `/work-items/${item.id}`)).body.item.due_on ?? null).toBeNull();
     const [a, b] = await Promise.all([manage(AMINA, { version: item.version, dueOn: "2026-10-15" }), manage(AMINA, { version: item.version, dueOn: "2026-10-15" })]);
     expect([a.body.outcome, b.body.outcome]).toContain("applied");
