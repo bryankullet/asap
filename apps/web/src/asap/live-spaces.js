@@ -245,6 +245,111 @@ const LEGACY = "Legacy record — invalid, needs correction";
 const tooShort = (v, n = 3) => (v || "").trim().length < n;
 const weakSupply = (r) => r.suppliedAt && (/^marked supplied in asap$/i.test((r.evidence?.label || r.evidenceNote || "").trim()) || tooShort(r.evidence?.label || r.evidenceNote, 10));
 
+const DELIVERY_METHODS = [
+  { value: "own_email", label: "Copied into my own email" },
+  { value: "portal", label: "Uploaded to the insurer's portal" },
+  { value: "printed", label: "Printed and delivered" },
+  { value: "hand_delivered", label: "Handed over in person" },
+  { value: "phone", label: "Read out on the phone" },
+  { value: "other", label: "Another way" },
+];
+const deliveryWords = (m) => (DELIVERY_METHODS.find((x) => x.value === m)?.label || "hand").toLowerCase();
+
+/** The request text a person would send, prepared from the records — edited before approval. */
+export function requestDraft(d, insurerName) {
+  const o = d.opportunity;
+  const reqs = d.requirements.filter((r) => r.suppliedAt).map((r) => "- " + r.label);
+  return [
+    "Dear " + insurerName + " underwriting team,",
+    "",
+    "We invite terms for " + o.classOfBusiness + " cover for our client " + d.client.name + (o.coverStart ? ", from " + date(o.coverStart) + (o.coverEnd ? " to " + date(o.coverEnd) : "") : "") + ".",
+    o.riskSummary ? "\nThe risk: " + o.riskSummary : "",
+    reqs.length ? "\nEnclosed:\n" + reqs.join("\n") : "",
+    "",
+    "Please reply with your premium, excess, key conditions and how long the terms are valid.",
+  ].filter((x) => x !== "").join("\n");
+}
+
+function insurerControls(i, d, act) {
+  const out = [];
+  const reqText = i.request ? i.request.subject + "\n\n" + i.request.body : "";
+  if (i.stage === "not_asked" && d.permissions.canEdit)
+    out.push(
+      form(
+        "prep:" + i.id,
+        "Prepare the request to " + i.insurerName,
+        [
+          { key: "subject", label: "SUBJECT", value: "Quotation request — " + d.client.name + ", " + d.opportunity.classOfBusiness },
+          { key: "body", label: "REQUEST", value: requestDraft(d, i.insurerName), multiline: true },
+        ],
+        "opp.action",
+        act("prepare_request", { opportunityInsurerId: i.id }),
+        "Prepare request",
+        "Saved as a draft for approval. Nothing is sent — ASAP has no mailbox connected.",
+      ),
+    );
+  if (i.stage === "request_prepared")
+    out.push(
+      d.permissions.canApprove
+        ? gate("Approve the request to " + i.insurerName, "You approve this exact text. Editing it afterwards clears the approval. Approving does not send it.", "opp.action", act("approve_request", { quoteRequestId: i.request.id }), { label: "Approve request" })
+        : note("amber", "Waiting for approval", "The request to " + i.insurerName + " needs approval by someone who may approve messages leaving the brokerage."),
+    );
+  if (i.stage === "approved_to_deliver") {
+    out.push(
+      rows("Approved request to " + i.insurerName, [
+        { title: i.request.subject, note: "Copy it into the email or portal it should go from. ASAP does not send it.", badge: "Copy", badgeTone: ok, action: { a: "copy", text: reqText } },
+        { title: "Download as a text file", note: "For printing or attaching.", badge: "Download", badgeTone: ok, action: { a: "download", filename: "Quotation request - " + i.insurerName + ".txt", text: reqText } },
+      ]),
+      form(
+        "deliver:" + i.id,
+        "Record how it reached " + i.insurerName,
+        [
+          { key: "method", label: "HOW IT WENT", options: DELIVERY_METHODS },
+          { key: "reference", label: "WHAT PROVES IT", placeholder: "Emailed from Outlook to underwriting@… on 30 Sep, 10:02" },
+          { key: "deliveredOn", label: "DATE DELIVERED (IF NOT TODAY)", type: "date" },
+        ],
+        "opp.action",
+        act("record_delivery", { quoteRequestId: i.request.id }),
+        "Record delivery",
+        "Recorded as delivered by you, with this reference. It is not recorded as sent — nothing left through ASAP.",
+      ),
+    );
+  }
+  if (i.stage === "with_insurer" && d.permissions.canRecordResponse) out.push(responseForm(i, act, false));
+  // A reply that came without a delivered request is allowed, but only as an explicit manual record.
+  if (["not_asked", "request_prepared", "approved_to_deliver"].includes(i.stage) && d.permissions.canRecordResponse) out.push(responseForm(i, act, true));
+  return out;
+}
+
+function responseForm(i, act, withoutRequest) {
+  return form(
+    (withoutRequest ? "resp-manual:" : "resp:") + i.id,
+    withoutRequest ? "Manual record: " + i.insurerName + " replied without a delivered request" : "Record " + i.insurerName + "’s reply",
+    [
+      { key: "outcome", label: "ANSWER", options: [{ value: "quoted", label: "Quoted" }, { value: "declined", label: "Declined" }] },
+      { key: "premiumAmount", label: "PREMIUM, IF QUOTED (NUMBERS ONLY)", placeholder: "485000" },
+      { key: "premiumCurrency", label: "CURRENCY", options: ["KES", "USD", "EUR", "GBP"] },
+      { key: "validUntil", label: "VALID UNTIL (OPTIONAL)", type: "date" },
+      { key: "declineReason", label: "REASON, IF DECLINED", placeholder: "Outside their appetite for this class" },
+      { key: "sourceNote", label: "WHERE IT CAME FROM", placeholder: "Email from the underwriter, 12 Sep" },
+    ],
+    "opp.action",
+    act("record_response", { opportunityInsurerId: i.id, ...(withoutRequest ? { withoutRequest: "yes" } : {}) }),
+    withoutRequest ? "Record as received without a request" : "Record reply",
+    withoutRequest ? "Only for a reply that genuinely arrived with no request delivered — for example an answer on the phone. It is recorded as such." : "Recorded as the insurer's reply, with your name.",
+  );
+}
+
+/** The server's next action, shown the same way on every quotation. */
+function nextBlock(n) {
+  if (!n) return [];
+  const bits = [n.why];
+  if (n.missing?.length) bits.push("Missing: " + n.missing.join("; ") + ".");
+  if (n.holder === "outside_party" && n.party) bits.push("With " + n.party + (n.since ? " since " + date(n.since) : "") + ".");
+  if (n.checkAt) bits.push("Look again " + date(n.checkAt) + ".");
+  return [note(n.holder === "outside_party" ? "amber" : n.stage === "closed" ? "green" : "green", "Next: " + n.what, bits.join(" "))];
+}
+
 function opportunitySpace(id, state) {
   const d = state.opportunities.get(id);
   if (!d) return { kind: "Quotation work", title: "This quotation could not be read", status: "draft", statusLabel: "Unavailable", blocks: [note("red", "Not available", "Refresh records from your profile and try again. Nothing was changed.")] };
@@ -256,6 +361,7 @@ function opportunitySpace(id, state) {
   const act = (action, extra) => ({ id, action, ...extra });
   const legacy = tooShort(o.title) || tooShort(o.classOfBusiness) || tooShort(d.client.name, 2) || d.requirements.some((r) => tooShort(r.label) || weakSupply(r));
   const blocks = [
+    ...nextBlock(d.next),
     ...(legacy ? [note("red", LEGACY, "Some of this quotation was saved before ASAP checked its details — a title, class or requirement too short to mean anything, or a requirement marked supplied without evidence. Correct it before relying on it.")] : []),
     facts([
       ["Client", d.client.name],
@@ -304,38 +410,22 @@ function opportunitySpace(id, state) {
                 : i.response.outcome === "declined"
                   ? "Declined" + (i.response.declineReason ? " — " + i.response.declineReason : "")
                   : "Recorded as no response"
-              : i.request
-                ? "Request prepared " + date(i.request.preparedAt) + (i.request.approvedAt ? " · approved" : " · awaiting approval") + (i.request.sentAt ? " · sent " + date(i.request.sentAt) : " · not sent")
-                : "Added " + date(i.addedAt) + " · no request yet",
-            badge: i.response ? words(i.response.outcome) : i.request?.sentAt ? "With insurer" : "Not asked",
-            badgeTone: i.response?.outcome === "quoted" ? ok : warn,
+              : i.request?.delivery
+                ? "Delivered " + date(i.request.delivery.deliveredAt) + " by " + deliveryWords(i.request.delivery.method) + " · " + i.request.delivery.reference
+                : i.request
+                  ? "Prepared " + date(i.request.preparedAt) + (i.request.approvedAt ? " · approved " + date(i.request.approvedAt) + (i.request.approvedByName ? " by " + i.request.approvedByName : "") : "")
+                  : "Added " + date(i.addedAt),
+            badge: i.stageLabel,
+            badgeTone: i.stage === "quoted" ? ok : i.stage === "declined" ? bad : warn,
           }))
         : [{ title: "No insurers yet", note: addable.length ? "Add them from the list below." : "Insurers appear here once they are on file — importing your book adds them.", badge: "Empty", badgeTone: warn }],
     ),
     ...(addable.length && d.permissions.canEdit
       ? [rows("Insurers you can approach", addable.map((a) => ({ title: a.name, note: "On file in your brokerage", badge: "Available", badgeTone: ok, secondary: { a: "act", action: "opp.action", payload: act("add_insurer", { insurerId: a.id }), label: "Add" } })))]
       : []),
-    ...live
-      .filter((i) => !i.response && d.permissions.canRecordResponse)
-      .map((i) =>
-        form(
-          "resp:" + i.id,
-          "Record " + i.insurerName + "’s answer",
-          [
-            { key: "outcome", label: "ANSWER", options: [{ value: "quoted", label: "Quoted" }, { value: "declined", label: "Declined" }] },
-            { key: "premiumAmount", label: "PREMIUM, IF QUOTED (NUMBERS ONLY)", placeholder: "485000" },
-            { key: "premiumCurrency", label: "CURRENCY", options: ["KES", "USD", "EUR", "GBP"] },
-            { key: "validUntil", label: "VALID UNTIL (OPTIONAL)", type: "date" },
-            { key: "declineReason", label: "REASON, IF DECLINED", placeholder: "Outside their appetite for this class" },
-            { key: "sourceNote", label: "WHERE IT CAME FROM", placeholder: "Email from the underwriter, 12 Sep" },
-          ],
-          "opp.action",
-          act("record_response", { opportunityInsurerId: i.id }),
-          "Record answer",
-          "Recorded as the insurer's answer, with your name. Terms and excesses are added from the quotation document.",
-        ),
-      ),
-    note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "Requests are not sent from ASAP yet", d.sending.reason || "Every request needs your approval before it leaves."),
+    // One control per insurer: the one its stage calls for, and nothing ahead of it.
+    ...live.flatMap((i) => insurerControls(i, d, act)),
+    note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "ASAP does not send requests", d.sending.reason || "Every request needs your approval before it leaves."),
   ];
   if (quoted.length >= 2) blocks.push(note("green", plural(quoted.length, "quote", "quotes") + " to compare", "Comparing them side by side is not connected in this view yet; each quote's premium and terms are listed above."));
   return { kind: "Quotation work", title: d.client.name + " — " + o.title, status: o.closedAt ? "draft" : "live", statusLabel: quoted.length + " of " + live.length + " quoted", recordRef: { ws: "quote", opportunityId: id }, blocks };

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nextActionSchema } from "./next-action.js";
 import { uuidSchema } from "./common.js";
 
 /**
@@ -69,6 +70,19 @@ export const quoteRequestSchema = z.object({
   approvedByName: z.string().nullable(),
   sentAt: z.string().nullable(),
   sentEmailMessageId: uuidSchema.nullable(),
+  /**
+   * A person delivered the approved request outside ASAP (0060) — copied into their own email,
+   * printed, a portal. Never called "sent": nothing left through ASAP.
+   */
+  delivery: z
+    .object({
+      method: z.enum(["own_email", "printed", "portal", "hand_delivered", "phone", "other"]),
+      reference: z.string(),
+      deliveredAt: z.string(),
+      recordedByName: z.string().nullable(),
+      evidenceDocumentId: uuidSchema.nullable(),
+    })
+    .nullable(),
 });
 export type QuoteRequestView = z.infer<typeof quoteRequestSchema>;
 
@@ -98,6 +112,13 @@ export const opportunityInsurerSchema = z.object({
   removedAt: z.string().nullable(),
   removedReason: z.string().nullable(),
   request: quoteRequestSchema.nullable(),
+  /**
+   * Where this insurer stands, derived from the records: not asked → request prepared → approved,
+   * to deliver → with the insurer → replied (quoted or declined). A reply can be recorded only
+   * once the request is with them, unless a person records it explicitly as received without one.
+   */
+  stage: z.enum(["not_asked", "request_prepared", "approved_to_deliver", "with_insurer", "quoted", "declined", "removed"]),
+  stageLabel: z.string(),
   response: z
     .object({
       id: uuidSchema,
@@ -154,6 +175,8 @@ export const opportunityResponseSchema = z.object({
    * be exactly that, never implied to have gone.
    */
   sending: z.object({ available: z.boolean(), reason: z.string().max(300).nullable() }),
+  /** The next action, derived from the state above. The same object Work and Ask read. */
+  next: nextActionSchema,
 });
 export type OpportunityResponse = z.infer<typeof opportunityResponseSchema>;
 
@@ -221,6 +244,15 @@ export const opportunityActionSchema = z.discriminatedUnion("action", [
     body: z.string().trim().min(1).max(20000),
   }),
   z.object({ action: z.literal("approve_request"), quoteRequestId: uuidSchema }),
+  /** A person delivered the approved request outside ASAP, and says how and what proves it. */
+  z.object({
+    action: z.literal("record_delivery"),
+    quoteRequestId: uuidSchema,
+    method: z.enum(["own_email", "printed", "portal", "hand_delivered", "phone", "other"]),
+    reference: z.string().trim().min(3, "Say what proves it: the email subject and time, a portal reference, who received it").max(300),
+    deliveredAt: z.string().datetime({ offset: true }).optional(),
+    evidenceDocumentId: uuidSchema.optional(),
+  }),
   z.object({
     action: z.literal("record_response"),
     opportunityInsurerId: uuidSchema,
@@ -233,6 +265,12 @@ export const opportunityActionSchema = z.discriminatedUnion("action", [
     sourceDocumentId: uuidSchema.optional(),
     sourceEmailMessageId: uuidSchema.optional(),
     sourceNote: z.string().trim().max(500).optional(),
+    /**
+     * A reply that arrived with no delivered request on file (the insurer answered a phone call,
+     * or the request went out before ASAP). Must be said explicitly; otherwise a reply is only
+     * recorded against a request that is with the insurer.
+     */
+    withoutRequest: z.boolean().optional(),
   }),
   z.object({
     action: z.literal("record_term"),

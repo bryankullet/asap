@@ -1,3 +1,4 @@
+import { insurerStage, quotationNext, workStateFrom } from "../quotation/next.js";
 import { createHash } from "node:crypto";
 import {
   createOpportunityRequestSchema,
@@ -312,14 +313,12 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           opportunity: await loadOpportunity(db, ctx, org.id, id),
         }),
       );
-    const done = async (outcome: "done" | "already" = "done") =>
-      c.json(
-        opportunityActionResponseSchema.parse({
-          outcome,
-          reason: null,
-          opportunity: await loadOpportunity(db, ctx, org.id, id),
-        }),
-      );
+    const done = async (outcome: "done" | "already" = "done") => {
+      const opportunity = await loadOpportunity(db, ctx, org.id, id);
+      // The work item carries the same next action the Space shows (D-119).
+      await syncQuotationWork(db, opportunity);
+      return c.json(opportunityActionResponseSchema.parse({ outcome, reason: null, opportunity }));
+    };
 
     /* Approving is its own permission; everything else is ordinary quotation work. */
     const needsApproval = input.action === "approve_request";
@@ -571,7 +570,77 @@ export function opportunityRoutes(deps: { logger: Logger }) {
         return done();
       }
 
+      case "record_delivery": {
+        const req = await db
+          .from("quote_requests")
+          .select("id, opportunity_id, opportunity_insurer_id, approved_at, approved_body_sha256")
+          .eq("organization_id", org.id)
+          .eq("id", input.quoteRequestId)
+          .maybeSingle();
+        const row = req.data as
+          | { id: string; opportunity_id: string; opportunity_insurer_id: string; approved_at: string | null; approved_body_sha256: string | null }
+          | null;
+        if (!row || row.opportunity_id !== id) return blocked("That request is not part of this quotation work.");
+        if (!row.approved_at || !row.approved_body_sha256) {
+          return blocked("This request has not been approved. Approve the exact text before it is delivered.");
+        }
+        const existing = await db
+          .from("quote_request_deliveries")
+          .select("id")
+          .eq("organization_id", org.id)
+          .eq("quote_request_id", row.id)
+          .maybeSingle();
+        if (existing.data) return done("already");
+        const deliveredAt = input.deliveredAt ?? now;
+        if (new Date(deliveredAt).getTime() > Date.now() + 5 * 60_000) return blocked("A delivery cannot be dated in the future.");
+        const ins = await db.from("quote_request_deliveries").insert({
+          organization_id: org.id,
+          quote_request_id: row.id,
+          method: input.method,
+          reference: input.reference,
+          evidence_document_id: input.evidenceDocumentId ?? null,
+          // Delivered text is the approved text; the database refuses anything else.
+          delivered_body_sha256: row.approved_body_sha256,
+          delivered_at: deliveredAt,
+          recorded_by: user.id,
+        });
+        if (ins.error) {
+          if (String(ins.error.code) === "23505") return done("already");
+          return sendError(c, mapDatabaseError(ins.error));
+        }
+        await recordAudit(db, deps.logger, c, {
+          organizationId: org.id,
+          actorUserId: user.id,
+          action: "opportunity.request_delivered",
+          objectType: "opportunity",
+          objectId: id,
+          result: "success",
+          newState: { quoteRequestId: row.id, method: input.method, deliveredAt, reference: input.reference, evidenceDocumentId: input.evidenceDocumentId ?? null },
+        });
+        return done();
+      }
+
       case "record_response": {
+        /*
+         * A reply answers a request the insurer holds. Recording one against an insurer nobody
+         * asked is allowed only when the person says so explicitly — a phone answer, a request
+         * that went out before ASAP — and the record says it arrived without one.
+         */
+        if (!input.withoutRequest) {
+          const approach = await db
+            .from("quote_requests")
+            .select("id")
+            .eq("organization_id", org.id)
+            .eq("opportunity_insurer_id", input.opportunityInsurerId)
+            .maybeSingle();
+          const reqId = (approach.data as { id: string } | null)?.id ?? null;
+          const delivered = reqId
+            ? await db.from("quote_request_deliveries").select("id").eq("organization_id", org.id).eq("quote_request_id", reqId).maybeSingle()
+            : { data: null };
+          if (!delivered.data) {
+            return blocked("No request has been delivered to this insurer yet. Record the delivery first — or, if they replied without one, record it as received without a request.");
+          }
+        }
         if (input.outcome === "quoted") {
           if (
             input.sourceDocumentId === undefined &&
@@ -847,6 +916,14 @@ export async function loadOpportunity(
   ]);
   const requests = (requestsQ.data ?? []) as Record<string, string | null>[];
   const responses = (responsesQ.data ?? []) as Record<string, string | null>[];
+  const deliveriesQ = requests.length
+    ? await db
+        .from("quote_request_deliveries")
+        .select("quote_request_id, method, reference, delivered_at, recorded_by, evidence_document_id")
+        .eq("organization_id", organizationId)
+        .in("quote_request_id", requests.map((r) => r["id"] as string))
+    : { data: [] };
+  const deliveries = (deliveriesQ.data ?? []) as Record<string, string | null>[];
 
   const termsQ = await db
     .from("quote_terms")
@@ -861,6 +938,7 @@ export async function loadOpportunity(
     o["owner_id"],
     ...((reqQ.data ?? []) as Record<string, string | null>[]).map((r) => r["supplied_by"]),
     ...requests.flatMap((r) => [r["prepared_by"], r["approved_by"]]),
+    ...deliveries.map((d) => d["recorded_by"]),
     ...responses.map((r) => r["recorded_by"]),
     ...terms.map((t) => t["corrected_by"] as string | null),
   ].filter((x): x is string => typeof x === "string");
@@ -893,7 +971,7 @@ export async function loadOpportunity(
     return null;
   };
 
-  return {
+  const view: Omit<OpportunityResponse, "next"> = {
     opportunity: {
       id: o.id,
       title: o["title"] as string,
@@ -954,6 +1032,18 @@ export async function loadOpportunity(
                 approvedByName: req["approved_by"] ? (who.get(req["approved_by"]) ?? null) : null,
                 sentAt: req["sent_at"] ?? null,
                 sentEmailMessageId: req["sent_email_message_id"] ?? null,
+                delivery: (() => {
+                  const d = deliveries.find((x) => x["quote_request_id"] === req["id"]);
+                  return d
+                    ? {
+                        method: d["method"] as "own_email",
+                        reference: d["reference"] as string,
+                        deliveredAt: d["delivered_at"] as string,
+                        recordedByName: d["recorded_by"] ? (who.get(d["recorded_by"]) ?? null) : null,
+                        evidenceDocumentId: d["evidence_document_id"] ?? null,
+                      }
+                    : null;
+                })(),
               },
         response:
           res === null
@@ -989,7 +1079,7 @@ export async function loadOpportunity(
                   })),
               },
       };
-    }),
+    }).map((i) => ({ ...i, ...insurerStage(i) })),
     availableInsurers: ((allInsurersQ.data ?? []) as { id: string; name: string }[]).map((i) => ({
       id: i.id,
       name: i.name,
@@ -1011,7 +1101,15 @@ export async function loadOpportunity(
     sending: {
       available: false,
       reason:
-        "Sending from ASAP is not connected yet. An approved request can be copied into the mailbox it should go from.",
+        "Sending from ASAP is not connected yet. An approved request can be copied into the mailbox it should go from, and the delivery recorded here.",
     },
   };
+  return { ...view, next: quotationNext(view) };
+}
+
+/** Writes the derived next action onto the quotation's work item, so every list reads the same. */
+export async function syncQuotationWork(db: SupabaseClient, o: OpportunityResponse): Promise<void> {
+  const { error } = await db.rpc("work_item_set_state", { p_work_item_id: o.workItem.id, ...workStateFrom(o.next) });
+  // A failed sync leaves the previous state; it must not turn a recorded action into an error.
+  if (error) return;
 }

@@ -1994,3 +1994,17 @@ compiler's asserted patches. Chat and Space remain two views over the same recor
 action handlers. On tablets and phones Ask is the first screen and the Space opens full screen,
 with a way back that keeps the thread and the record. Mapping and open items:
 `docs/ui/CONVERSATIONAL-SHELL.md`.
+
+## D-119 — Quotation requests: delivered by a person, with evidence; the next action is derived
+
+With no mailbox connected, an approved quotation request cannot be sent by ASAP, and
+`quote_requests.sent_at` stays reserved for a real provider send. Migration 0060 adds
+`quote_request_deliveries`: a person records how they delivered the approved text (their own email,
+a portal, printed…) and what proves it. It is API-only, append-only, one per request, refuses an
+unapproved request or any text but the approved one, and refuses a future date. The insurer "holds"
+the request only after delivery; a reply is recorded against a delivered request, or explicitly as
+"received without a request". The quotation's stage per insurer and its next action are derived by
+the server from these records (`apps/api/src/quotation/next.ts`), returned as `next` on the
+opportunity, and written onto its work item through `work_item_set_state` (0060) — so Today, Work,
+Ask and the Space read one answer. Reason: an approved request is not a sent one, and a reply to a
+request nobody delivered is the contradiction live testing found.

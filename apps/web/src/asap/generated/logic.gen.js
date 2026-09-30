@@ -331,7 +331,7 @@ class Component extends DCLogic {
         const ns = b.formId || 'form';
         const opts = (x) => (x.options || []).map(v => (typeof v === 'string' ? { value: v, label: v } : v));
         const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? (x.options ? (opts(x)[0] || {}).value ?? '' : ''));
-        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options, options: opts(x),
+        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options && !x.multiline, isTextarea: !!x.multiline, options: opts(x),
           onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));
         o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';
         o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });
@@ -383,6 +383,8 @@ class Component extends DCLogic {
       return this.bump();
     }
     if (a.a === 'link') { if (a.url) window.open(a.url, '_blank', 'noopener'); else this.flash('The file could not be opened just now. Refresh records and try again.'); return; }
+    if (a.a === 'copy') { const done = () => this.flash('Copied. Paste it where it should go \u2014 ASAP has not sent it.'); try { navigator.clipboard.writeText(a.text || '').then(done, () => this.flash('Copying was blocked by the browser. Download it instead.')); } catch { this.flash('Copying was blocked by the browser. Download it instead.'); } return; }
+    if (a.a === 'download') { try { const url = URL.createObjectURL(new Blob([a.text || ''], { type: 'text/plain' })); const el = document.createElement('a'); el.href = url; el.download = a.filename || 'ASAP.txt'; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); this.flash('Downloaded. ASAP has not sent it.'); } catch { this.flash('The download could not start.'); } return; }
     if (a.a === 'unstage') { const staged = [...this.state.staged]; staged.splice(a.index, 1); return this.setState({ staged }); }
     if (a.a === 'retry') { return this.flash('Pick the file again — the read failed and nothing was saved.'); }
   }

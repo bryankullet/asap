@@ -88,6 +88,7 @@ function makeDb(): FakeDb {
         { id: APPROACH_A, organization_id: ORG, opportunity_id: OPP, insurer_id: INS_A, added_by: AMINA.id, added_at: iso, removed_at: null, removed_by: null, removed_reason: null },
       ],
       quote_requests: [],
+      quote_request_deliveries: [],
       insurer_responses: [],
       quote_terms: [],
       documents: [],
@@ -343,7 +344,16 @@ describe("preparing and approving a request", () => {
   });
 });
 
+const REQ_A = "32000000-0000-4000-8000-00000000000a";
+/** The insurer holds an approved, delivered request — what a reply answers. */
+function delivered() {
+  db.tables["quote_requests"] = [{ id: REQ_A, organization_id: ORG, opportunity_id: OPP, opportunity_insurer_id: APPROACH_A, subject: "Quotation request", body_text: "Please quote.", prepared_by: AMINA.id, prepared_at: iso, approved_by: AMINA.id, approved_at: iso, approved_body_sha256: "abc", sent_at: null, sent_email_message_id: null, updated_at: iso }];
+  db.tables["quote_request_deliveries"] = [{ id: "34000000-0000-4000-8000-00000000000a", organization_id: ORG, quote_request_id: REQ_A, method: "own_email", reference: "Emailed from Outlook 30 Sep 10:02", evidence_document_id: null, delivered_body_sha256: "abc", delivered_at: iso, recorded_by: AMINA.id, recorded_at: iso }];
+}
+
 describe("recording what an insurer said", () => {
+  beforeEach(() => delivered());
+
   it("refuses a quote that does not say where it came from", async () => {
     const body = await readJson(
       await act({ action: "record_response", opportunityInsurerId: APPROACH_A, outcome: "quoted" }),
@@ -420,6 +430,7 @@ describe("recording what an insurer said", () => {
 });
 
 describe("terms", () => {
+  beforeEach(() => delivered());
   async function quoted() {
     await act({
       action: "record_response",
@@ -502,5 +513,55 @@ describe("the work layer stays separate", () => {
     // No status is stored on the opportunity at all.
     expect(body.opportunity).not.toHaveProperty("status");
     expect(body.opportunity).not.toHaveProperty("state");
+  });
+});
+
+describe("the quotation request lifecycle (D-119)", () => {
+  it("offers no reply while nobody has been asked, and says the next step is to prepare the request", async () => {
+    // The requirement is supplied, so the first open step is the request itself.
+    db.tables["opportunity_requirements"]![0]!["supplied_at"] = iso;
+    const body = await read();
+    expect(body.insurers[0].stage).toBe("not_asked");
+    expect(body.insurers[0].stageLabel).toBe("Not asked yet");
+    expect(body.next.what).toMatch(/^Prepare the request to /);
+    expect(body.next.action.name).toBe("prepare_request");
+    const reply = await readJson(await act({ action: "record_response", opportunityInsurerId: APPROACH_A, outcome: "declined", declineReason: "No appetite" }));
+    expect(reply.outcome).toBe("blocked");
+    expect(reply.reason).toMatch(/No request has been delivered/);
+  });
+
+  it("records a reply received without a request only when the person says so", async () => {
+    const reply = await readJson(await act({ action: "record_response", opportunityInsurerId: APPROACH_A, outcome: "declined", declineReason: "Said no on the phone", withoutRequest: true }));
+    expect(reply.outcome).toBe("done");
+  });
+
+  it("refuses to deliver an unapproved request, and never calls a delivery sent", async () => {
+    db.tables["quote_requests"] = [{ id: REQ_A, organization_id: ORG, opportunity_id: OPP, opportunity_insurer_id: APPROACH_A, subject: "Quotation request", body_text: "Please quote.", prepared_by: AMINA.id, prepared_at: iso, approved_by: null, approved_at: null, approved_body_sha256: null, sent_at: null, sent_email_message_id: null, updated_at: iso }];
+    const body = await readJson(await act({ action: "record_delivery", quoteRequestId: REQ_A, method: "own_email", reference: "Emailed 10:02" }));
+    expect(body.outcome).toBe("blocked");
+    expect(body.reason).toMatch(/has not been approved/);
+  });
+
+  it("records a delivery of the approved text once; the insurer is then holding it and the work names them", async () => {
+    db.tables["opportunity_requirements"]![0]!["supplied_at"] = iso;
+    db.tables["quote_requests"] = [{ id: REQ_A, organization_id: ORG, opportunity_id: OPP, opportunity_insurer_id: APPROACH_A, subject: "Quotation request", body_text: "Please quote.", prepared_by: AMINA.id, prepared_at: iso, approved_by: AMINA.id, approved_at: iso, approved_body_sha256: "abc", sent_at: null, sent_email_message_id: null, updated_at: iso }];
+    const calls: Record<string, unknown>[] = [];
+    db.rpc["work_item_set_state"] = (args: Record<string, unknown>) => { calls.push(args); return { data: { id: WORK, changed: true } }; };
+    const first = await readJson(await act({ action: "record_delivery", quoteRequestId: REQ_A, method: "own_email", reference: "Emailed from Outlook 30 Sep 10:02" }));
+    expect(first.outcome).toBe("done");
+    const ins = first.opportunity.insurers[0];
+    expect(ins.stage).toBe("with_insurer");
+    expect(ins.request.sentAt).toBeNull();
+    expect(ins.request.delivery.reference).toBe("Emailed from Outlook 30 Sep 10:02");
+    expect(first.opportunity.next.holder).toBe("outside_party");
+    expect(first.opportunity.next.what).toMatch(/^Chase .+ for terms$/);
+    expect(first.opportunity.next.checkAt).not.toBeNull();
+    // The work item carries the same next action: with the insurer, named, since the delivery.
+    expect(calls.at(-1)).toMatchObject({ p_work_item_id: WORK, p_task_status: "with_party", p_required_action: first.opportunity.next.what });
+    expect(db.tables["quote_request_deliveries"]).toHaveLength(1);
+    const again = await readJson(await act({ action: "record_delivery", quoteRequestId: REQ_A, method: "own_email", reference: "Emailed again" }));
+    expect(again.outcome).toBe("already");
+    expect(db.tables["quote_request_deliveries"]).toHaveLength(1);
+    expect((db.tables["audit_log"] ?? []).filter((a) => a["action"] === "opportunity.request_delivered")).toHaveLength(1);
   });
 });

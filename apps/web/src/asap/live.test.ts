@@ -71,6 +71,29 @@ const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clients
 const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
 const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
 const createAutomation = vi.fn(async () => ({}));
+const OPP = "90000000-0000-4000-8000-000000000001";
+const APPROACH = "91000000-0000-4000-8000-000000000001";
+const INS_CIC = "92000000-0000-4000-8000-000000000001";
+// The quotation's server view, with its derived stage and next action; tests set the stage.
+let oppStage: "not_asked" | "request_prepared" | "approved_to_deliver" | "with_insurer" = "not_asked";
+const oppDetail = () => ({
+  opportunity: { id: OPP, title: "Motor fleet", classOfBusiness: "Commercial motor", riskSummary: "Two delivery vans", coverStart: null, coverEnd: null, ownerName: "Wanjiru Kamau", createdAt: "2026-09-30", closedAt: null, closedOutcome: null, closedReason: null, source: null },
+  client: { id: CLIENT, name: "Tausi Hauliers Ltd" },
+  workItem: { id: WORK, taskStatus: "needs_you", taskParty: null, taskSince: null },
+  requirements: [{ id: "93000000-0000-4000-8000-000000000001", label: "Logbooks", required: true, suppliedAt: "2026-09-30", suppliedByName: "Wanjiru Kamau", evidence: null }],
+  insurers: [{
+    id: APPROACH, insurerId: INS_CIC, insurerName: "CIC General", addedAt: "2026-09-30", removedAt: null, removedReason: null,
+    request: oppStage === "not_asked" ? null : { id: "94000000-0000-4000-8000-000000000001", subject: "Quotation request", body: "Please quote.", preparedAt: "2026-09-30", preparedByName: null, approvedAt: oppStage === "request_prepared" ? null : "2026-09-30", approvedByName: null, sentAt: null, sentEmailMessageId: null, delivery: oppStage === "with_insurer" ? { method: "own_email", reference: "Emailed 10:02", deliveredAt: "2026-09-30T07:02:00Z", recordedByName: null, evidenceDocumentId: null } : null },
+    stage: oppStage, stageLabel: { not_asked: "Not asked yet", request_prepared: "Request prepared — awaiting approval", approved_to_deliver: "Approved — not yet delivered", with_insurer: "With CIC General since 30 Sept" }[oppStage],
+    response: null,
+  }],
+  availableInsurers: [{ id: INS_CIC, name: "CIC General" }, { id: "92000000-0000-4000-8000-000000000002", name: "Jubilee Insurance" }],
+  documents: [],
+  permissions: { canEdit: true, canApprove: true, canRecordResponse: true },
+  sending: { available: false, reason: "Sending from ASAP is not connected yet." },
+  next: { what: { not_asked: "Prepare the request to CIC General", request_prepared: "Review and approve the request to CIC General", approved_to_deliver: "Deliver the approved request to CIC General and record how", with_insurer: "Chase CIC General for terms" }[oppStage], holder: oppStage === "with_insurer" ? "outside_party" : "brokerage", party: oppStage === "with_insurer" ? "CIC General" : null, since: null, missing: [], checkAt: null, why: "Because.", record: { type: "opportunity", id: OPP, label: "Tausi — Motor fleet" }, action: null, stage: oppStage },
+});
+const opportunityAction = vi.fn(async () => ({ outcome: "done", reason: null, opportunity: oppDetail() }));
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
@@ -87,7 +110,7 @@ vi.mock("../lib/api.js", () => ({
       automations: [{ id: AUTO, organization_id: ORG, name: "Renewal preparation", description: "Prepare the renewal pack", trigger_event: "renewal.approaching", conditions: [], skill: "renewal.prepare", prepared_verb: "prepare", approval: "always", sends_externally: false, enabled: false, created_by: ME, created_at: "2026-09-01", updated_at: "2026-09-01" }],
     }),
     audit: async () => ({ recordId: null, entries: [{ id: "a1", actorType: "user", actorName: "Wanjiru Kamau", action: "client.created", objectType: "client", objectId: CLIENT, result: "success", failureReason: null, changed: [], evidence: [], occurredAt: "2026-09-02T09:00:00Z" }], visible: 1, returned: 1 }),
-    opportunities: async () => ({ opportunities: [] }),
+    opportunities: async () => ({ opportunities: [{ id: OPP, clientId: CLIENT, title: "Motor fleet", classOfBusiness: "Commercial motor", createdAt: "2026-09-30", closedAt: null }] }),
     workList: async (view: string) => ({
       items:
         view === "needs"
@@ -117,7 +140,8 @@ vi.mock("../lib/api.js", () => ({
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
-    opportunity: async () => null,
+    opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
+    opportunityAction,
     askStatus: async () => ({ modelConfigured: false }),
     conversations: async () => ({ conversations: [] }),
     conversationMessages: async () => ({ messages: [] }),
@@ -394,5 +418,37 @@ describe("live mode", () => {
     await A.records.act("client.create", { name: "Tausi Haulier", kind: "Company" });
     expect(text(A.ai.workspace({ ws: "newclient", name: "Tausi Haulier" }))).toContain("Tausi Hauliers Ltd");
     expect(text(A.ai.workspace({ ws: "newclient", name: "Kifaru Traders" }))).not.toContain("Tausi Hauliers Ltd");
+  });
+
+  it("quotation: the Space shows each insurer's stage and the next action, and no reply form before delivery", async () => {
+    oppStage = "approved_to_deliver";
+    const A = await live();
+    const ws = text(A.ai.workspace({ ws: "quote", opportunityId: OPP }));
+    expect(ws).toContain("Next: Deliver the approved request to CIC General and record how");
+    expect(ws).toContain("Approved — not yet delivered");
+    expect(ws).toContain('"a":"copy"');
+    expect(ws).toContain("Record how it reached CIC General");
+    expect(ws).not.toContain("Record CIC General’s reply");
+    // Only as an explicit manual record.
+    expect(ws).toContain("Manual record: CIC General replied without a delivered request");
+    oppStage = "not_asked";
+  });
+
+  it("quotation: Ask prepares and approves through the same opp.action contract, as pending cards", async () => {
+    oppStage = "not_asked";
+    const A = await live();
+    const ctx = { ws: "quote", opportunityId: OPP, clientId: CLIENT };
+    const prep = (await A.ai.route("Prepare the request to CIC", ctx)) as { pending: { action: string; payload: { action: string; opportunityInsurerId: string; body: string }; external: string } };
+    expect(prep.pending.action).toBe("opp.action");
+    expect(prep.pending.payload.action).toBe("prepare_request");
+    expect(prep.pending.payload.opportunityInsurerId).toBe(APPROACH);
+    expect(prep.pending.payload.body).toContain("Tausi Hauliers Ltd");
+    expect(prep.pending.external).toMatch(/Nothing is sent/);
+    expect(opportunityAction).not.toHaveBeenCalled();
+    const done = (await A.records.act(prep.pending.action, prep.pending.payload, "t1")) as { ok: boolean; text: string };
+    expect(done.text).toBe("Request prepared for approval — nothing was sent");
+    expect(opportunityAction).toHaveBeenLastCalledWith(OPP, expect.objectContaining({ action: "prepare_request", opportunityInsurerId: APPROACH }));
+    const next = (await A.ai.route("What's next on this quotation?", ctx)) as { lead: string };
+    expect(next.lead).toBe("Next: Prepare the request to CIC General.");
   });
 });

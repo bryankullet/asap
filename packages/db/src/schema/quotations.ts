@@ -220,6 +220,37 @@ export const quoteRequests = pgTable(
   ],
 );
 
+/** 0060: an approved request delivered by a person outside ASAP, with its evidence. Append-only. */
+export const quoteRequestDeliveries = pgTable(
+  "quote_request_deliveries",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    quoteRequestId: uuid("quote_request_id").notNull().references(() => quoteRequests.id, { onDelete: "cascade" }),
+    method: text("method").notNull(),
+    reference: text("reference").notNull(),
+    evidenceDocumentId: uuid("evidence_document_id").references(() => documents.id, { onDelete: "set null" }),
+    deliveredBodySha256: text("delivered_body_sha256").notNull(),
+    deliveredAt: timestamptz("delivered_at").notNull(),
+    recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+    recordedAt: timestamptz("recorded_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    unique("quote_request_deliveries_one_per_request").on(t.quoteRequestId),
+    check(
+      "quote_request_deliveries_method_check",
+      sql`${t.method} = ANY (ARRAY['own_email'::text, 'printed'::text, 'portal'::text, 'hand_delivered'::text, 'phone'::text, 'other'::text])`,
+    ),
+    check(
+      "quote_request_deliveries_reference_check",
+      sql`length(btrim(${t.reference})) >= 3 and length(${t.reference}) <= 300`,
+    ),
+    index("quote_request_deliveries_organization_id_idx").on(t.organizationId),
+    index("quote_request_deliveries_recorded_by_idx").on(t.recordedBy),
+    index("quote_request_deliveries_evidence_document_id_idx").on(t.evidenceDocumentId),
+  ],
+);
+
 export const insurerResponses = pgTable(
   "insurer_responses",
   {

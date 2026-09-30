@@ -12,7 +12,7 @@ import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
-import { IMPORT_HEADERS, liveSpace, plural } from "./live-spaces.js";
+import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -788,7 +788,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const clean = present(body);
       if (clean.action === "add_requirement" && (clean.label || "").length < 3) return { ok: false, error: "Name the requirement in at least three characters." };
       if (clean.action === "supply_requirement" && (clean.note || "").length < 10) return { ok: false, error: "Say what proves it — for example where and when the document arrived (at least ten characters)." };
+      if (clean.action === "record_delivery") {
+        if ((clean.reference || "").length < 3) return { ok: false, error: "Say what proves it — the email subject and time, a portal reference, or who received it." };
+        if (clean.deliveredOn) clean.deliveredAt = new Date(clean.deliveredOn + "T12:00:00+03:00").toISOString();
+        delete clean.deliveredOn;
+      }
+      if (clean.action === "prepare_request" && ((clean.subject || "").length < 3 || (clean.body || "").length < 20)) return { ok: false, error: "Give the request a subject and write what the insurer should quote on." };
       if (clean.action === "record_response") {
+        clean.withoutRequest = clean.withoutRequest === "yes" ? true : undefined;
+        if (clean.withoutRequest === undefined) delete clean.withoutRequest;
         if (clean.outcome === "quoted") {
           if (!/^\d+(\.\d{1,2})?$/.test(clean.premiumAmount || "")) return { ok: false, error: "Enter the premium as a number, for example 485000." };
           delete clean.declineReason;
@@ -803,7 +811,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         if (res.outcome === "blocked") return { ok: false, error: res.reason || "That couldn’t be done. Nothing was changed." };
         await refresh();
         return ok(
-          { add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", record_response: "Insurer's answer recorded" }[clean.action] ?? "Recorded",
+          ({ add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", prepare_request: "Request prepared for approval — nothing was sent", approve_request: "Request approved — it has not been sent", record_delivery: "Delivery recorded — the insurer now holds the request", record_response: "Insurer's reply recorded" }[clean.action] ?? "Recorded") + (res.outcome === "already" ? " (already done — nothing recorded twice)" : ""),
+          { detail: res.opportunity?.next ? "Next: " + res.opportunity.next.what + "." : undefined, nav: { ws: "quote", opportunityId: id } },
         );
       } catch (e) {
         return fail(e);
@@ -1165,6 +1174,76 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     };
   }
 
+  /**
+   * Quotation work from Ask, on the same opp.action contract the quotation Space uses. The
+   * quotation is the one open in front, or the only open one for the client in context — never
+   * guessed among several.
+   */
+  function quotationFromAsk(t, ctx) {
+    if (!/\b(quot(e|ation)|insurer|request|deliver(y|ed)?|next|blocked|stuck)\b/i.test(t)) return null;
+    let id = ctx.opportunityId || null;
+    if (!id && ctx.clientId) {
+      const open = [...state.opportunities.values()].filter((d) => d.client.id === ctx.clientId && !d.opportunity.closedAt);
+      if (open.length === 1) id = open[0].opportunity.id;
+      else if (open.length > 1 && /\b(quot(e|ation)|request|insurer)\b/i.test(t))
+        return { lead: "Which quotation?", text: "This client has more than one open. I will not pick one.", clarify: { question: "Quotation", options: open.map((d) => ({ label: d.opportunity.title, text: t + " — " + d.opportunity.title })) }, ref: null, keepWorkspace: true };
+    }
+    const d = id ? state.opportunities.get(id) : null;
+    if (!d) return null;
+    const ref = { ws: "quote", opportunityId: id };
+    const live = d.insurers.filter((i) => !i.removedAt);
+    const named = (list) => list.filter((i) => new RegExp("\\b" + (i.insurerName || i.name).split(/\s+/)[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(t));
+    if (/\b(what('?s| is)? next|next step|why .*(blocked|stuck)|what .*(blocked|stuck)|where .* stand)\b/i.test(t)) {
+      const n = d.next;
+      return { lead: "Next: " + n.what + ".", text: [n.why, n.missing.length ? "Missing: " + n.missing.join("; ") + "." : "", n.party ? "With " + n.party + "." : ""].filter(Boolean).join(" "), ref, chips: n.action ? [n.action.label] : [] };
+    }
+    const add = /\badd\b/i.test(t) && /\binsurer|to (this|the) quot/i.test(t);
+    if (add) {
+      const avail = d.availableInsurers.filter((a) => !live.some((i) => i.insurerId === a.id));
+      const hit = named(avail);
+      if (hit.length !== 1)
+        return { lead: hit.length ? "Which insurer?" : "Which insurer should I add?", text: "Nothing was changed.", clarify: { question: "Insurer", options: (hit.length ? hit : avail).slice(0, 6).map((a) => ({ label: a.name, text: "Add " + a.name + " as an insurer to this quotation" })) }, ref, keepWorkspace: true };
+      return pendingOpp(d, ref, "Add " + hit[0].name + " to this quotation", ["Approach " + hit[0].name + " for " + d.opportunity.classOfBusiness + " terms"], ["One insurer added to " + d.client.name + "’s quotation"], "add_insurer", { insurerId: hit[0].id }, "Add insurer");
+    }
+    if (/\bprepare\b/i.test(t) && /\brequest\b/i.test(t)) {
+      const cand = live.filter((i) => i.stage === "not_asked");
+      const hit = named(cand).length ? named(cand) : cand.length === 1 ? cand : [];
+      if (hit.length !== 1)
+        return { lead: cand.length ? "Which insurer is the request for?" : "Every insurer already has a request.", text: "Nothing was changed.", clarify: cand.length ? { question: "Insurer", options: cand.map((i) => ({ label: i.insurerName, text: "Prepare the request to " + i.insurerName })) } : undefined, ref, keepWorkspace: !cand.length };
+      const i = hit[0];
+      const subject = "Quotation request — " + d.client.name + ", " + d.opportunity.classOfBusiness;
+      return pendingOpp(d, ref, "Prepare the request to " + i.insurerName, ["Subject: " + subject, "Text prepared from the quotation and its supplied requirements — edit it in the quotation before approving"], ["One draft request, awaiting approval"], "prepare_request", { opportunityInsurerId: i.id, subject, body: requestDraft(d, i.insurerName) }, "Prepare request", "Nothing is sent — ASAP has no mailbox connected. The request waits for approval.");
+    }
+    if (/\bapprove\b/i.test(t) && /\brequest\b/i.test(t)) {
+      const cand = live.filter((i) => i.stage === "request_prepared");
+      const hit = named(cand).length ? named(cand) : cand.length === 1 ? cand : [];
+      if (hit.length !== 1) return { lead: cand.length ? "Which request?" : "No request is waiting for approval.", text: "Nothing was changed.", clarify: cand.length > 1 ? { question: "Request", options: cand.map((i) => ({ label: i.insurerName, text: "Approve the request to " + i.insurerName })) } : undefined, ref, keepWorkspace: true };
+      const i = hit[0];
+      return pendingOpp(d, ref, "Approve the request to " + i.insurerName, ["You approve this exact text: “" + i.request.subject + "”"], ["The request is marked approved by you — editing it later clears the approval"], "approve_request", { quoteRequestId: i.request.id }, "Approve request", "Approving does not send it. Deliver it yourself, then record how.");
+    }
+    if (/\b(record|log).*(deliver|sent)|\bdelivered\b/i.test(t))
+      return { lead: "Record the delivery in the quotation.", text: "Say how it went and what proves it — the email subject and time, or a portal reference. ASAP records it as delivered by you, never as sent.", ref };
+    return null;
+  }
+
+  function pendingOpp(d, ref, title, understood, change, action, extra, confirmLabel, external) {
+    return {
+      lead: title + "?",
+      text: "Here is exactly what would change. Nothing is written until you confirm.",
+      ref,
+      pending: {
+        title,
+        sections: [{ label: "UNDERSTOOD", items: understood }, { label: "RECORD", items: [d.client.name + " — " + d.opportunity.title] }, { label: "CHANGE", items: change }],
+        external: external || "No message is sent to anyone.",
+        action: "opp.action",
+        payload: { id: d.opportunity.id, action, ...extra },
+        actionId: "opp:" + d.opportunity.id + ":" + action + ":" + JSON.stringify(extra),
+        confirmLabel,
+        progress: "Saving to your brokerage’s records…",
+      },
+    };
+  }
+
   async function liveRoute(text, ctx) {
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
@@ -1188,6 +1267,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const client = S.sel.clientByName(t) || (ctx.clientId ? S.sel.client(ctx.clientId) : null);
       return { lead: client ? "Reporting a claim for " + client.name + "." : "Which client is the claim for?", text: "The claim opens as a draft; it never means the loss is covered.", ref: { ws: "claim", clientId: client?.id } };
     }
+    const quote = quotationFromAsk(t, ctx);
+    if (quote) return quote;
     const cover = policyCoverAnswer(t, ctx);
     if (cover) return cover;
     const r = interpret(t, ctx) || {};
