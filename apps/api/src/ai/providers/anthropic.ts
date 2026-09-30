@@ -87,7 +87,7 @@ export function anthropicProvider(config: {
         clearTimeout(timer);
       }
 
-      if (!res.ok) throw await classifyFailure(res);
+      if (!res.ok) throw await classifyFailure(res, config.apiKey);
 
       const json = (await res.json()) as {
         content?: (
@@ -212,18 +212,23 @@ function toAnthropicMessages(messages: AiMessage[]): Record<string, unknown>[] {
  * and its request id are kept: the message itself is read for one billing phrase and then
  * dropped, because a provider error can echo the prompt, and the prompt carries brokerage data.
  */
-export async function classifyFailure(res: Response): Promise<AiGatewayError> {
+export async function classifyFailure(res: Response, apiKey = ""): Promise<AiGatewayError> {
   const providerRequestId = res.headers.get("request-id") ?? null;
   let type = "";
   let billing = false;
+  let validation: string | null = null;
   try {
     const body = (await res.json()) as { error?: { type?: string; message?: string } };
     type = body.error?.type ?? "";
-    billing = /credit balance|billing|purchase credits/i.test(body.error?.message ?? "");
+    const message = body.error?.message ?? "";
+    billing = /credit balance|billing|purchase credits/i.test(message);
+    if (res.status === 400) validation = sanitizeValidation(apiKey ? message.split(apiKey).join("…") : message);
   } catch {
     /* no JSON body: the status alone decides */
   }
-  const detail = `HTTP ${res.status}${type ? " " + type : ""}${providerRequestId ? " request " + providerRequestId : ""}`;
+  const detail =
+    `HTTP ${res.status}${type ? " " + type : ""}${providerRequestId ? " request " + providerRequestId : ""}` +
+    (validation ? " — " + validation : "");
   if (res.status === 401 || res.status === 403 || type === "authentication_error" || type === "permission_error")
     return new AiGatewayError("auth_rejected", "The model provider rejected the server's credentials.", detail);
   if (billing) return new AiGatewayError("billing", "The model provider account has no usable credit.", detail);
@@ -233,5 +238,22 @@ export async function classifyFailure(res: Response): Promise<AiGatewayError> {
     return new AiGatewayError("rate_limited", "The model provider is rate limiting this deployment.", detail);
   if (res.status >= 500 || type === "overloaded_error" || type === "api_error")
     return new AiGatewayError("unavailable", "The model provider is temporarily unavailable.", detail);
-  return new AiGatewayError("invalid_output", "The model provider refused the request as malformed.", detail);
+  // A 400 is the request, not the reply: our payload was refused before any model ran.
+  return new AiGatewayError("invalid_request", "The model provider rejected the request format.", detail);
+}
+
+/**
+ * Anthropic's validation message names the offending field ("output_config.format.schema…:
+ * maxItems is not supported"), which is what makes a 400 diagnosable. Only its structure is kept:
+ * anything quoted is removed (it may be prompt or record text), and the result is capped short.
+ */
+export function sanitizeValidation(message: string): string | null {
+  if (!message) return null;
+  const structural = message
+    .replace(/"[^"]*"|'[^']*'|`[^`]*`/g, "…")
+    .replace(/sk-ant-[A-Za-z0-9_-]+/g, "…")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return structural || null;
 }

@@ -953,6 +953,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           rate_limited: ["Too many questions at once — the provider asked us to slow down.", "Nothing was changed. Try again in a minute."],
           timeout: ["The model did not reply in time.", "Nothing was changed. Try again, or ask a shorter question."],
           invalid_output: ["The model's reply could not be used.", "Nothing was changed. Try asking again in different words."],
+          invalid_request: ["ASAP could not send this request to the model because its request format was rejected.", "This is a problem on ASAP's side, not with your question. Nothing was changed."],
         };
         const [lead, why] = WHY[res.failure] ?? ["The model provider is temporarily unavailable.", "Nothing was changed. Try again in a moment."];
         return { lead, text: why + (res.requestId ? " Reference: " + res.requestId + "." : ""), ref: null, keepWorkspace: true, chips: LIVE_CHIPS };

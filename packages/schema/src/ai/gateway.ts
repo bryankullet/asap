@@ -93,7 +93,8 @@ export const AiFailure = z.enum([
   "rate_limited", //     the provider asked us to slow down (429).
   "timeout", //          no reply within AI_REQUEST_TIMEOUT_MS.
   "refused", //          the provider declined. Ask abstains; it does not try another way round.
-  "invalid_output", //   the reply did not satisfy the schema after the allowed retries.
+  "invalid_output", //   the provider answered (HTTP 200) but the reply did not satisfy ASAP's checks.
+  "invalid_request", //  the provider rejected the request itself (HTTP 400): a server payload defect.
   "budget_exceeded", //  too many tool rounds for one question.
 ]);
 export type AiFailure = z.infer<typeof AiFailure>;

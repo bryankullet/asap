@@ -311,7 +311,7 @@ describe("when it goes wrong", () => {
     expect(`${(err as Error).message} ${(err as AiGatewayError).detail}`).not.toContain(KEY);
   });
 
-  it("treats a rejected request as unusable output, not as a retryable outage", async () => {
+  it("treats a rejected request as a request defect, not as unusable output or an outage", async () => {
     stubFetch({ error: { message: "bad request" } }, 400);
     await expect(
       provider.complete({
@@ -321,7 +321,24 @@ describe("when it goes wrong", () => {
         responseSchema: null,
         maxOutputTokens: 1024,
       }),
-    ).rejects.toMatchObject({ failure: "invalid_output" });
+    ).rejects.toMatchObject({ failure: "invalid_request" });
+  });
+
+  it("keeps Anthropic's validation message structurally, with quoted content removed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: `output_config.format.schema: For 'array' type, property 'maxItems' is not supported; saw "Tausi Hauliers owes 1,200,000" ${KEY}` } }), { status: 400, headers: { "request-id": "req_x" } }),
+    );
+    const err = (await provider.complete({ system: "s", messages: [{ role: "user", content: "q" }], tools: [], responseSchema: null, maxOutputTokens: 64 }).catch((e: unknown) => e)) as AiGatewayError;
+    expect(err.failure).toBe("invalid_request");
+    expect(err.detail).toContain("output_config.format.schema: For … type, property … is not supported");
+    expect(err.detail).toContain("request req_x");
+    expect(err.detail).not.toContain("Tausi");
+    expect(err.detail).not.toContain(KEY);
+  });
+
+  it("keeps invalid_output for an HTTP 200 reply ASAP cannot use", async () => {
+    stubFetch({ stop_reason: "end_turn" });
+    await expect(provider.complete({ system: "s", messages: [{ role: "user", content: "q" }], tools: [], responseSchema: null, maxOutputTokens: 64 })).rejects.toMatchObject({ failure: "invalid_output" });
   });
 
   it("reports an unreachable model as unavailable", async () => {

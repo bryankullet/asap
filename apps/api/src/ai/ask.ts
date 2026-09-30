@@ -95,10 +95,11 @@ const replySchema = z.object({
   panel: z.string().nullable().catch(null),
   view: z.enum(["summary", "blocker", "comparison", "policy", "money", "documents", "timeline"]).catch("summary"),
   answer: z.string().min(1).max(1200),
-  suggestions: z.array(z.string()).max(4).catch([]),
+  // More than four is trimmed, not a reason to throw the answer away.
+  suggestions: z.array(z.string()).transform((v) => v.slice(0, 4)).catch([]),
 });
 
-const REPLY_JSON_SCHEMA: Record<string, unknown> = {
+export const REPLY_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   required: ["type", "target", "panel", "view", "answer", "suggestions"],
@@ -111,7 +112,9 @@ const REPLY_JSON_SCHEMA: Record<string, unknown> = {
       enum: ["summary", "blocker", "comparison", "policy", "money", "documents", "timeline"],
     },
     answer: { type: "string" },
-    suggestions: { type: "array", items: { type: "string" }, maxItems: 4 },
+    // No maxItems: Anthropic's structured outputs reject array-size constraints with a 400.
+    // The cap of four is enforced when the reply is validated (replySchema) and sliced below.
+    suggestions: { type: "array", items: { type: "string" } },
   },
 };
 
