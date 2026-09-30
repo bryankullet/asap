@@ -490,10 +490,11 @@ function workItemSpace(ref) {
         ["Kind", w.kind],
         ["Where it stands", w.statusLabel || (w.state === "Completed" ? "Done" : "In progress")],
         ["Owner", owner ? owner.name : "unassigned"],
-        ["Next step", w.nextStep || (w.state === "Completed" ? "None — done" : "Decide the first step and record it")],
         ["Priority", { high: "High priority", medium: "Normal priority", low: "Low priority" }[w.priority] || "Normal priority"],
+        ["Look again", w.dueAt ? date(w.dueAt) : "not set"],
       ]),
-      ...(w.reason ? [note("green", "Why it is here", w.reason)] : []),
+      // The server's next action (D-120): the same words Today and Ask show for this item.
+      ...(w.next ? nextBlock(w.next) : w.reason ? [note("green", "Why it is here", w.reason)] : []),
       ...(claim ? [nav("Open the claim", claim.title, { ws: "claim", clientId: w.clientId, claimId: claim.id })] : []),
       ...(w.opportunityId ? [nav("Open the quotation", "Requirements, insurers and replies.", { ws: "quote", opportunityId: w.opportunityId })] : []),
       ...(client ? [nav("Open " + client.name, "The client's policies, documents and other work.", { ws: "client", clientId: client.id })] : []),
@@ -554,6 +555,7 @@ function documentSpace(ref, state) {
     blocks: [
       ...(state.docNotice?.documentId === doc.id ? [note("green", state.docNotice.title, state.docNotice.text)] : []),
       ...identityWarning(fields, client),
+      ...nextBlock(d.next),
       facts([
         ["Client", client ? client.name : "Not filed under a client"],
         ["Kind", words(doc.kind)],

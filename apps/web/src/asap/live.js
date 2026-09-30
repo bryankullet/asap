@@ -87,6 +87,15 @@ const nextMove = (it, row) => {
   if (it.task_status === "with_party" && it.task_party) return "Chase " + it.task_party + " for a reply";
   return FIRST_MOVE[it.kind] ?? "Decide the first step and record it";
 };
+const shortDay = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+/** The server's next action in one line: what, what is missing, who holds it, when to look again. */
+const nextWords = (n) =>
+  [
+    "Next: " + n.what,
+    n.missing?.length ? "Missing: " + n.missing.join(", ") : null,
+    n.holder === "outside_party" && n.party ? "With " + n.party + (n.since ? " since " + shortDay(n.since) : "") : null,
+    n.checkAt ? "Look again " + shortDay(n.checkAt) : null,
+  ].filter(Boolean).join(" · ");
 const kindWords = (k) => KIND[k] ?? k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 /** Everything the engine reads, from the API. */
@@ -288,7 +297,9 @@ async function hydrate(me) {
         kind: kindWords(it.kind),
         taskStatus: it.task_status,
         statusLabel: it.task_status === "with_party" ? null : STATUS_LABEL[it.task_status] ?? null,
-        nextStep: nextMove(it, row),
+        // The server's next action (D-120) — the same object Today, Ask and the Space read.
+        next: row.next ?? null,
+        nextStep: row.next?.what ?? nextMove(it, row),
         opportunityId: it.source_type === "opportunity" ? it.source_id : null,
         title: it.title,
         state: workState(it),
@@ -298,7 +309,7 @@ async function hydrate(me) {
         priority: row.priority ?? "medium",
         // What needs doing and why — the step and what it needs — rather than how the item began.
         // Never how the item began ("created from import") — that is provenance, not a reason.
-        reason: [nextMove(it, row) ? "Next: " + nextMove(it, row) : null, it.evidence_needed ? "Needs: " + it.evidence_needed : null, it.task_status === "with_party" && it.task_party ? "With " + it.task_party + (it.task_since ? " since " + new Date(it.task_since).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "") : null, it.task_next_check ? "Due " + new Date(it.task_next_check).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null].filter(Boolean).join(" · "),
+        reason: row.next ? nextWords(row.next) : [nextMove(it, row) ? "Next: " + nextMove(it, row) : null, it.evidence_needed ? "Needs: " + it.evidence_needed : null, it.task_status === "with_party" && it.task_party ? "With " + it.task_party + (it.task_since ? " since " + new Date(it.task_since).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "") : null, it.task_next_check ? "Due " + new Date(it.task_next_check).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null].filter(Boolean).join(" · "),
         createdAt: it.created_at ?? it.task_since ?? d0(),
         policyYearId: it.policy_period_id,
         // What an assignment through the API needs: the version seen and a step to act on.

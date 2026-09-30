@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nextActionSchema } from "./next-action.js";
 import { EvidenceCondition } from "./attention.js";
 import { uuidSchema } from "./common.js";
 
@@ -104,6 +105,8 @@ export const documentDetailSchema = z.object({
    */
   fileUrl: z.string().nullable(),
   fileUrlExpiresAt: z.string().nullable(),
+  /** What must happen next with this document, derived by the server (D-120). */
+  next: nextActionSchema.optional(),
 });
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 

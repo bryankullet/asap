@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { nextActionSchema } from "./next-action.js";
 import { WorkItemRow, WorkView, type RunRow } from "../work.js";
 import { uuidSchema } from "./common.js";
 
@@ -182,6 +183,8 @@ export const attentionItemSchema = z.object({
   signals: z.array(attentionSignalSchema).min(1),
   /** The step waiting on a person or a party, so a card need not re-derive it. */
   nowStep: z.object({ id: z.string(), label: z.string(), actor: z.string() }).nullable(),
+  /** What must happen next, derived by the server (D-120). */
+  next: nextActionSchema,
   client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
   /** Null when the item is unassigned, or when the caller may not see who owns it. */
   owner: attentionOwnerSchema.nullable(),
@@ -261,6 +264,8 @@ export const workListResponseSchema = z.object({
       /** The engine's own reason, so a card in Work can say why without re-deriving it. */
       reason: z.string(),
       nowStep: z.object({ id: z.string(), label: z.string(), actor: z.string() }).nullable(),
+      /** What must happen next, derived by the server (D-120). The same shape every surface reads. */
+      next: nextActionSchema,
       runFailure: attentionRunFailureSchema.nullable(),
       /**
        * Who and which period of cover this is about. A work item carries ids only, and a card

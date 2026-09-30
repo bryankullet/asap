@@ -114,7 +114,7 @@ vi.mock("../lib/api.js", () => ({
     workList: async (view: string) => ({
       items:
         view === "needs"
-          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: ME, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
+          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", next: { what: "Request renewal terms from the insurer", holder: "brokerage", party: null, since: null, missing: ["Renewal terms"], checkAt: "2026-10-05T09:00:00Z", why: "Cover ends on its expiry date.", record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, action: null, stage: "first" }, item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: ME, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
           : [],
     }),
     clientFiles: async (view: string) => ({
@@ -450,5 +450,15 @@ describe("live mode", () => {
     expect(opportunityAction).toHaveBeenLastCalledWith(OPP, expect.objectContaining({ action: "prepare_request", opportunityInsurerId: APPROACH }));
     const next = (await A.ai.route("What's next on this quotation?", ctx)) as { lead: string };
     expect(next.lead).toBe("Next: Prepare the request to CIC General.");
+  });
+
+  it("shows the server's next action for a work item, the same on Today and in its Work Space", async () => {
+    const A = await live();
+    const today = text(A.ai.workspace({ ws: "today" }));
+    expect(today).toContain("Next: Request renewal terms from the insurer · Missing: Renewal terms · Look again 5 Oct");
+    const ws = text(A.ai.workspace({ ws: "workitem", workItemId: WORK }));
+    expect(ws).toContain("Next: Request renewal terms from the insurer");
+    expect(ws).toContain("Missing: Renewal terms.");
+    expect(ws).not.toContain("Decide the first step");
   });
 });

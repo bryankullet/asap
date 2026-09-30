@@ -2008,3 +2008,15 @@ the server from these records (`apps/api/src/quotation/next.ts`), returned as `n
 opportunity, and written onto its work item through `work_item_set_state` (0060) — so Today, Work,
 Ask and the Space read one answer. Reason: an approved request is not a sent one, and a reply to a
 request nobody delivered is the contradiction live testing found.
+
+## D-120 — One server-derived next action, read by Today, Work, Ask and the Space
+
+`nextActionSchema` (packages/schema/src/api/next-action.ts): what must happen, who holds it (and
+which outside party, since when), what is missing, when to look again, why it matters, which record,
+and the action a person can take now. The server derives it — from the current step for step-driven
+work (`apps/api/src/work/next.ts`), from the record for quotations (`quotation/next.ts`, synced to
+the work item by `work_item_set_state`) and documents under review (`documentNext`) — and returns it
+on Work and Today rows, the opportunity and the document. Live mode shows it verbatim; its old
+browser-side guess survives only as a fallback when a server sends none. Reason: four surfaces
+composing their own "next step" is how Work came to say "Decide the first step" beside a quotation
+that already had requirements and an insurer.

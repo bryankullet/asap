@@ -1,3 +1,4 @@
+import { workNext } from "../work/next.js";
 import {
   ATTENTION_SECTION_LABELS,
   DRAFT_COLUMNS,
@@ -182,6 +183,7 @@ export function attentionRoutes() {
         reason: s.item.reason ?? `${nowStep(s.item)?.label ?? "This item"} is the step waiting.`,
         signals: s.signals,
         nowStep: nowStep(s.item),
+        next: workNext(s.item),
         client:
           s.item.client_id && clientNames.has(s.item.client_id)
             ? { id: s.item.client_id, name: clientNames.get(s.item.client_id)! }
@@ -311,6 +313,7 @@ export function attentionRoutes() {
           item,
           reason: item.reason ?? `${nowStep(item)?.label ?? "This item"} is the step waiting.`,
           nowStep: nowStep(item),
+          next: workNext(item),
           runFailure: stuckByItem.has(item.id) ? failure(stuckByItem.get(item.id)!) : null,
           client:
             item.client_id && context.clientNames.has(item.client_id)
