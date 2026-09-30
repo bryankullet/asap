@@ -29,7 +29,34 @@ not a second application.
 | Consequential drafts | Engine drafts could carry demo recipients | Email send not connected in live | **Build** — live guard removes any draft without a real recorded recipient and any send control | No placeholder recipient, no `undefined` | Guard strips `@insurer.demo`, `undefined`, `null` |
 | Document identity | Mismatch not flagged | `GET /documents/:id/apply-preview`, `POST …/apply` | **Build** — server blocks apply on insured/client conflict; Space warns first | Values must not land on the wrong client | API: conflict → 409, preview blocked; suffix-only difference not a conflict |
 
-Not yet done in this slice (named, not hidden): Activity actor/record naming; quotation
-"Not asked" → prepare/review/approve request path; Work next step derived from full workflow
-state for every kind; a dedicated Kifaru-style add-client preview card (today the plan card);
-Playwright end-to-end suite against the deployed app.
+## The coherent slice (D-119 – D-127)
+
+What a broker can now do from the centre or from the Space, through one contract each:
+
+| Action | Ask | Space | Server contract | Proven by |
+|---|---|---|---|---|
+| Add client | "add X as a company client" → server preview | + New → Client form | `POST /clients` (`preview`, idempotent on name, `client:create`) | connected parity §1, web parity 1, e2e 03–04 |
+| Start quotation | "start a quotation for X for …" | Quotation form | `POST /opportunities` (request key, `space:create`) | connected §2, web 2, e2e 06–07 |
+| Add insurer | "add Jubilee to this quotation" | Insurers you can approach → Add | `opportunity add_insurer` | connected §3, web 3, e2e 08 |
+| Add requirement | "add a requirement: …" | Add a requirement form | `add_requirement` (audited) | connected §4, web 4 |
+| Supply requirement | "we received the logbooks by email …" | Mark a requirement supplied | `supply_requirement` (evidence, idempotent) | connected §5, web 5 |
+| Prepare request | "prepare the request to Jubilee" | Prepare form | `prepare_request` (re-preparing clears approval) | connected §6, web 6, e2e 09 |
+| Approve / deliver / reply | "approve the request…"; delivery in the Space | gate, copy/download, delivery form, reply forms | `approve_request`, `record_delivery` (0060), `record_response` | connected §6, quotation lifecycle test, e2e 10–11 |
+| Report claim | "report a claim for the accident yesterday" | + New → Claim | `POST /work-items {kind: claim}` (`claim:create`, once, draft, next check +2 days) | connected §7, claim cases, e2e 12–14 |
+| Assign Work | "assign this to Kamau" → server preview | Owner and due date block | `POST /work-items/:id/manage` (0061) | connected §8, web 8, e2e 15 |
+| Change due date | "make this due 15 Oct" → server preview | Owner and due date block | same | connected §9, web 9, e2e 16–18 |
+
+Ask states implemented: empty conversation with live chips, direct answer, answer plus Space,
+clarification, pending card, edit, cancel, executing, receipt, already done, partly written,
+blocked (role), failed with Retry, server unavailable (message returned to the composer),
+unsupported (named, nothing changed), and "New response" when reading older history.
+
+## Next phase (not started here)
+
+- **Activity** beyond the manager view: runs and prepared actions in the Activity chip, filters.
+- **Recent** as a proper surface with record kinds and search.
+- **Manager settings**: roles, approval policy per action, company rules editing.
+- **Automations** beyond the registry: new emitted triggers (quote.received, renewal.approaching,
+  check.overdue), multi-condition builder UI, approving prepared actions from the history.
+- **Gmail / Microsoft 365** connection and verified insurer addresses — until then nothing is sent
+  and claim notices cannot be prepared.
