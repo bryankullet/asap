@@ -145,6 +145,7 @@ export function anthropicProvider(config: {
               ? "max_tokens"
               : "end",
         servedBy: { provider: "anthropic", model: config.model },
+        providerRequestId: res.headers.get("request-id"),
         usage: json.usage
           ? {
               inputTokens: json.usage.input_tokens ?? 0,

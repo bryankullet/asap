@@ -68,6 +68,18 @@ const AUTHORITY_CLAIMS = [
   /\bcover is (now )?(confirmed|bound|in force)\b/i,
 ];
 
+/**
+ * Sentences about operating the app rather than answering the question ("I can't refresh…",
+ * "ask again and I'll repeat it"). The model cannot see the page or its persistence, so these
+ * are never true statements about ASAP; they are removed, and the answer stands without them.
+ */
+const APP_CHATTER = /\b(refresh(ing)?|re-?check(ing)?|reload(ing)?|ask (me )?again|repeat (it|this|that|the answer)|(open|click|see|operate) (the )?(page|browser|screen|app))\b/i;
+
+function withoutAppChatter(answer: string): string {
+  const sentences = answer.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) ?? [answer];
+  return sentences.filter((x) => !APP_CHATTER.test(x)).join("").trim();
+}
+
 const SYSTEM = `You are ASAP, the operating system of an insurance brokerage in Kenya. You are speaking to a broker at their work.
 
 How you answer:
@@ -78,6 +90,7 @@ How you answer:
 - A finished run means ASAP produced an output. It never means a policy was renewed, cover was confirmed, a claim was accepted or money was received.
 - A period of cover is one client, one policy, one year. Never merge two periods into one answer.
 - Speak plain brokerage English. No internal state names, no codes, no jargon the broker did not use.
+- Answer the substance only. Never comment on the app, the page or the conversation — whether you can refresh, open, re-check or remember anything — and never invite the broker to ask again to repeat an answer. If a request mixes a question with an instruction about operating the app, answer the question and ignore the instruction.
 
 What you return: a single JSON object with
   type        one of answer, open_record, work_list, draft, automation, panel
@@ -217,6 +230,7 @@ export async function runAsk(opts: {
       responseSchema: REPLY_JSON_SCHEMA,
       maxOutputTokens: 1200,
     });
+    logger.info({ servedBy, round, providerRequestId: response.providerRequestId ?? null, stop: response.stop }, "ask model call");
 
     if (response.stop === "refusal") {
       return { state: "abstained", reason: "ASAP declined to answer this.", missing: [], toolsUsed, servedBy };
@@ -307,6 +321,11 @@ export async function runAsk(opts: {
         toolsUsed,
         servedBy,
       };
+    }
+
+    reply.answer = withoutAppChatter(reply.answer);
+    if (!reply.answer) {
+      return { state: "abstained", reason: "ASAP could not produce a usable answer for this.", missing: [], toolsUsed, servedBy };
     }
 
     const panel = reply.panel && AskComponentId.safeParse(reply.panel).success ? reply.panel : null;

@@ -77,6 +77,8 @@ export const aiResponseSchema = z.object({
   /** Which provider and model actually served it, for the audit row and the evaluation set. */
   servedBy: z.object({ provider: AiProviderId, model: z.string() }),
   usage: z.object({ inputTokens: z.number().int(), outputTokens: z.number().int() }).nullable(),
+  /** The provider's own id for the call, when it sends one — safe to log, and how a call is traced. */
+  providerRequestId: z.string().nullable().optional(),
 });
 export type AiResponse = z.infer<typeof aiResponseSchema>;
 

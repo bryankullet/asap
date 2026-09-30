@@ -284,6 +284,18 @@ const COMPETENT: FakeScript = [
     },
   },
   {
+    /* A model that answers well but adds chatter about the page — the live defect this guards. */
+    match: /loss ratio/i,
+    reply: {
+      text: intent({
+        answer:
+          "A claims loss ratio is the claims an insurer pays out as a share of the premium it earns over the same period. I can't refresh or re-check anything, since this is a general explanation; ask again any time and I'll repeat it.",
+      }),
+      toolCalls: [],
+      stop: "end",
+    },
+  },
+  {
     match: /approve this/i,
     reply: {
       text: intent({
@@ -343,6 +355,12 @@ describe(`Ask evaluation set (${live ? "configured provider" : "deterministic pr
         const used = (body.message.tools_used as { name: string }[]).map((t) => t.name);
         for (const tool of c.requireTools ?? []) expect(used).toContain(tool);
         if (c.requireTarget) expect(body.message.intent.target).toBe(c.requireTarget);
+        if (c.requireNoRecord) {
+          expect(used).toEqual([]);
+          expect(body.message.intent.target).toBeNull();
+          expect(body.message.citations).toEqual([]);
+          expect(body.message.body.length).toBeGreaterThan(40);
+        }
       }
 
       for (const banned of c.forbid ?? []) {

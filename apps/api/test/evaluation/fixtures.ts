@@ -28,6 +28,8 @@ export type AskExpectation = {
    * person's confirmation on the placement (4B-4A, D-099).
    */
   forbidWrites?: string[];
+  /** A general question: answered with no tool and no record — it must not claim record access. */
+  requireNoRecord?: boolean;
 };
 
 /** Every business table a placement action could write. Ask writes none of them. */
@@ -53,6 +55,15 @@ export const EVAL_CLAIM = "20000000-0000-4000-8000-00000000000c";
 export const EVAL_OTHER_ITEM = "20000000-0000-4000-8000-00000000000b";
 
 export const ASK_EVALUATION: AskExpectation[] = [
+  {
+    id: "general-concept-clean-answer",
+    source: "live retest 2026-09-30 · general insurance question with an app instruction pasted in",
+    utterance: "Explain in plain English what a claims loss ratio means. Then refresh and check the answer is still there.",
+    scope: { kind: "brokerage", id: null },
+    allow: ["answered"],
+    requireNoRecord: true,
+    forbid: ["refresh", "re-check", "ask again", "repeat it", "your records show"],
+  },
   {
     id: "blocker-on-a-renewal",
     source: "demo scenario 1 · skill map unit.blockers",
