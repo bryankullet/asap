@@ -1724,6 +1724,49 @@ type AuditRow = {
   occurred_at: string;
 };
 
+type ResolvedRecord = {
+  client: { id: string; name: string } | null;
+  record: { type: string; id: string; label: string } | null;
+  workItemId: string | null;
+};
+
+/**
+ * The client, record and Work item each audit row is about, read under the caller's own session
+ * (RLS applies: a record the caller cannot see stays unnamed). Nothing is written.
+ */
+async function resolveRecords(db: SupabaseClient, rows: AuditRow[]): Promise<Map<string, ResolvedRecord>> {
+  const byType = new Map<string, Set<string>>();
+  for (const r of rows) if (r.object_id) (byType.get(r.object_type) ?? byType.set(r.object_type, new Set()).get(r.object_type)!).add(r.object_id);
+  const ids = (t: string) => [...(byType.get(t) ?? [])];
+  type Row = { id: string; client_id?: string | null; work_item_id?: string | null; title?: string | null; filename?: string | null; policy_number?: string | null; incident_summary?: string | null; name?: string };
+  const read = async (table: string, cols: string, list: string[]) => (list.length ? (((await db.from(table).select(cols).in("id", list)).data ?? []) as unknown as Row[]) : []);
+  const [work, opps, placements, claims, docs, policies, clientsDirect] = await Promise.all([
+    read("work_items", "id, client_id, title", ids("work_item")),
+    read("opportunities", "id, client_id, work_item_id, title", ids("opportunity")),
+    read("placements", "id, client_id, work_item_id", ids("placement")),
+    read("claims", "id, client_id, work_item_id, incident_summary", ids("claim")),
+    read("documents", "id, client_id, work_item_id, filename", ids("document")),
+    read("policies", "id, client_id, policy_number", ids("policy")),
+    read("clients", "id, name", ids("client")),
+  ]);
+  const clientIds = new Set<string>([...clientsDirect.map((c) => c.id)]);
+  for (const r of [...work, ...opps, ...placements, ...claims, ...docs, ...policies]) if (r.client_id) clientIds.add(r.client_id);
+  const clientNames = new Map<string, string>();
+  for (const c of await read("clients", "id, name", [...clientIds])) clientNames.set(c.id, c.name ?? "");
+  const client = (id: string | null | undefined) => (id && clientNames.has(id) ? { id, name: clientNames.get(id)! } : null);
+  const out = new Map<string, ResolvedRecord>();
+  const put = (type: string, r: Row, label: string, workItemId: string | null) =>
+    out.set(`${type}:${r.id}`, { client: client(type === "client" ? r.id : r.client_id), record: { type, id: r.id, label }, workItemId });
+  for (const r of work) put("work_item", r, r.title ?? "Work", r.id);
+  for (const r of opps) put("opportunity", r, r.title ?? "Quotation", r.work_item_id ?? null);
+  for (const r of placements) put("placement", r, "Placement", r.work_item_id ?? null);
+  for (const r of claims) put("claim", r, "Claim" + (r.incident_summary ? " — " + r.incident_summary.slice(0, 60) : ""), r.work_item_id ?? null);
+  for (const r of docs) put("document", r, r.filename ?? "Document", r.work_item_id ?? null);
+  for (const r of policies) put("policy", r, r.policy_number ?? "Policy (number not recorded)", null);
+  for (const r of clientsDirect) put("client", r, r.name ?? "Client", null);
+  return out;
+}
+
 /**
  * Audit rows as history a person can read: actor names instead of ids, and the fields that
  * changed rather than the whole row. Nothing is redacted a second time here — `audit.ts` refuses
@@ -1744,12 +1787,21 @@ async function summariseHistory(
       names.set(row.id, row.full_name ?? row.email);
     }
   }
+  const records = await resolveRecords(db, rows);
+  const ACTOR_LABEL = { user: "A person", ai: "ASAP", automation: "An automation", system: "The platform" } as const;
   return historyResponseSchema.parse({
     recordId,
     entries: rows.map((r) => ({
       id: String(r.id),
       actorType: r.actor_type,
       actorName: r.actor_user_id ? (names.get(r.actor_user_id) ?? null) : null,
+      actorId: r.actor_user_id,
+      actorLabel: ACTOR_LABEL[r.actor_type],
+      ...(r.object_id && records.has(`${r.object_type}:${r.object_id}`)
+        ? records.get(`${r.object_type}:${r.object_id}`)!
+        : { client: null, record: null, workItemId: r.object_type === "work_item" ? r.object_id : null }),
+      external: /(^|\.)(email\.sent|send|sent_external|delivered)\b|email_send/i.test(r.action) && r.result === "success",
+      coverOrMoney: /^(placement|issuance|policy|payment|invoice|commission|money|cover)\b|\.(issued|applied_to_policy|cover_confirmed|paid)\b/i.test(r.object_type + "." + r.action) || /^(placement|policy)$/.test(r.object_type),
       action: r.action,
       objectType: r.object_type,
       objectId: r.object_id,

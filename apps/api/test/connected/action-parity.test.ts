@@ -329,3 +329,22 @@ describe("8–9 · assign Work and change its due date", () => {
 });
 
 void ORG_A;
+
+/* ------------------------------------------------------------ Activity names the real actor ---- */
+describe("Activity reads the audit truth, with the person, client and record resolved", () => {
+  it("the assignment above is Amina's, on Acme's work, openable; a refusal is shown as refused", async () => {
+    const res = await call(AMINA, "GET", "/audit");
+    expect(res.status).toBe(200);
+    const assigned = (res.body.entries as Json[]).find((e) => e.action === "work_item.assigned");
+    expect(assigned).toMatchObject({ actorType: "user", actorId: AMINA.id, actorLabel: "A person", external: false });
+    expect(assigned.actorName).toBeTruthy();
+    expect(assigned.client?.id).toBe(ACME);
+    expect(assigned.record).toMatchObject({ type: "work_item" });
+    expect(assigned.workItemId).toBe(assigned.record.id);
+    const refused = (res.body.entries as Json[]).find((e) => e.result === "denied");
+    expect(refused?.actorId).toBeTruthy();
+    /* The history is presented, never rewritten: the stored rows are unchanged by reading them. */
+    const [row] = await sql<{ actor_type: string }[]>`select actor_type from audit_log where id = ${assigned.id}`;
+    expect(row!.actor_type).toBe("user");
+  });
+});

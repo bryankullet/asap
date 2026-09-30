@@ -553,6 +553,75 @@ function claimSpace(ref, state) {
   };
 }
 
+/* ---------------------------------------------------------------- activity */
+
+/**
+ * Activity, as a manager reads it (D-124): what changed, who changed it, which client, whether
+ * anything left the brokerage, whether cover or money moved, what is blocked, who owns the next
+ * action and what is overdue — each row opening its record. Everything comes from existing audit
+ * rows and Work as the server returned them; the actor is the person the row names, never a
+ * "system" guessed in the browser.
+ */
+const ACTION_WORDS = {
+  "client.created": "Client added", "client.create": "Client add attempted", "opportunity.insurer_added": "Insurer added to a quotation",
+  "opportunity.requirement_added": "Requirement added", "opportunity.requirement_supplied": "Requirement supplied",
+  "work_item.assigned": "Work assigned", "work_item.due_changed": "Due date changed", "work_item.managed": "Work owner or dates changed",
+  "work_item.state_derived": "Work's next step updated", "work_item.draft": "Message preparation attempted",
+};
+const actionWords = (a) => ACTION_WORDS[a] || a.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+function refForRecord(rec, client) {
+  if (!rec) return client ? { ws: "client", clientId: client.id } : null;
+  if (rec.type === "work_item") return { ws: "workitem", workItemId: rec.id };
+  if (rec.type === "opportunity") return { ws: "quote", opportunityId: rec.id };
+  if (rec.type === "claim") return { ws: "claim", clientId: client?.id, claimId: rec.id };
+  if (rec.type === "document") return { ws: "document", documentId: rec.id };
+  if (rec.type === "client") return { ws: "client", clientId: rec.id };
+  return client ? { ws: "client", clientId: client.id } : null;
+}
+function activitySpace(ref) {
+  const events = S.sel.audit().filter((a) => !ref.clientId || a.client?.id === ref.clientId);
+  const now = Date.now();
+  const open = S.all("workItems").filter((w) => w.taskStatus !== "done" && (!ref.clientId || w.clientId === ref.clientId));
+  const overdue = open.filter((w) => (w.dueAt && new Date(w.dueAt).getTime() < now) || (w.nextCheckAt && new Date(w.nextCheckAt).getTime() < now));
+  const external = events.filter((a) => a.external);
+  const coverMoney = events.filter((a) => a.coverOrMoney && a.result === "success");
+  const blocked = events.filter((a) => a.result !== "success");
+  const owners = new Map();
+  for (const w of open) {
+    const name = w.assigneeId ? S.byId("users", w.assigneeId)?.name || "A member no longer here" : "Nobody";
+    owners.set(name, (owners.get(name) || 0) + 1);
+  }
+  const who = (a) => a.actorName || (a.actorType === "user" ? "A person no longer in this brokerage" : a.actorLabel || "The platform");
+  return {
+    kind: "Activity",
+    title: ref.clientId ? (S.sel.client(ref.clientId)?.name || "Client") + " — activity" : "Activity",
+    status: "live",
+    statusLabel: plural(events.length, "change", "changes"),
+    blocks: [
+      facts([
+        ["What changed", events.length ? plural(events.length, "recorded change", "recorded changes") + " — newest first below" : "Nothing recorded yet"],
+        ["Sent outside the brokerage", external.length ? plural(external.length, "message or request", "messages or requests") + " — see the rows marked External" : "Nothing — no message left ASAP"],
+        ["Cover or money", coverMoney.length ? plural(coverMoney.length, "change", "changes") + " to cover or money records" : "No change to cover or money"],
+        ["Blocked or refused", blocked.length ? plural(blocked.length, "attempt", "attempts") + " refused or failed" : "None"],
+        ["Next actions held by", owners.size ? [...owners.entries()].map(([n, k]) => n + " (" + k + ")").join(", ") : "No open work"],
+        ["Overdue", overdue.length ? overdue.map((w) => w.title).slice(0, 4).join("; ") + (overdue.length > 4 ? " and " + (overdue.length - 4) + " more" : "") : "Nothing overdue"],
+      ]),
+      rows(
+        "Changes, newest first",
+        events.length
+          ? events.slice(0, 60).map((a) => ({
+              title: actionWords(a.action) + (a.record ? " — " + a.record.label : ""),
+              note: [who(a), a.client ? a.client.name : null, a.result === "success" ? "Done" : a.result === "denied" ? "Refused" + (a.failureReason ? ": " + a.failureReason.replace(/_/g, " ") : "") : "Failed" + (a.failureReason ? ": " + a.failureReason : ""), S.fmtDate(a.at) + " " + new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), a.changed?.length ? a.changed.slice(0, 2).join("; ") : null, a.evidence?.length ? "Evidence: " + a.evidence[0] : null].filter(Boolean).join(" · "),
+              badge: a.external ? "External" : a.result === "success" ? (a.coverOrMoney ? "Cover/money" : "Done") : a.result === "denied" ? "Refused" : "Failed",
+              badgeTone: a.result === "success" ? (a.external || a.coverOrMoney ? warn : ok) : bad,
+              action: refForRecord(a.record, a.client) ? { a: "open", ref: refForRecord(a.record, a.client) } : null,
+            }))
+          : [{ title: "No activity yet", note: "Changes appear here as people and ASAP work.", badge: "Empty", badgeTone: warn }],
+      ),
+    ],
+  };
+}
+
 /* ---------------------------------------------------------------- work items */
 
 function workItemSpace(ref) {
@@ -885,6 +954,9 @@ export function liveSpace(ref, state) {
       return workItemSpace(ref);
     case "document":
       return documentSpace(ref, state);
+    case "activity":
+    case "audit":
+      return activitySpace(ref);
     case "settings":
       return settingsSpace(state);
     case "connections":

@@ -237,6 +237,21 @@ export const historyEntrySchema = z.object({
   /** Evidence references recorded with the action, if any. */
   evidence: z.array(z.string()).max(10),
   occurredAt: z.string(),
+  /*
+   * What a manager reads on Activity (D-124), resolved by the server from existing audit rows —
+   * never rewritten. Optional so an older reader and an older writer still agree.
+   */
+  /** The person who acted, when a person did. The browser never guesses "system" for a person. */
+  actorId: uuidSchema.nullable().optional(),
+  /** "A person", "ASAP", "An automation", "The platform". */
+  actorLabel: z.string().optional(),
+  client: z.object({ id: uuidSchema, name: z.string() }).nullable().optional(),
+  record: z.object({ type: z.string(), id: uuidSchema, label: z.string() }).nullable().optional(),
+  workItemId: uuidSchema.nullable().optional(),
+  /** True only when the audit row records something leaving the brokerage. */
+  external: z.boolean().optional(),
+  /** True when the action touched cover or money state (placement, issuance, payment…). */
+  coverOrMoney: z.boolean().optional(),
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 

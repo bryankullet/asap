@@ -351,11 +351,24 @@ async function hydrate(me) {
     db.auditEvents.push({
       id: e.id,
       at: e.occurredAt,
-      actorId: null,
+      // The person the audit row names (D-124): never replaced by "system" for want of a lookup.
+      actorId: e.actorId ?? null,
       actorName: e.actorName,
+      actorType: e.actorType,
+      actorLabel: e.actorLabel ?? null,
+      action: e.action,
+      result: e.result,
+      failureReason: e.failureReason,
+      changed: e.changed,
+      evidence: e.evidence,
+      client: e.client ?? null,
+      record: e.record ?? null,
+      workItemId: e.workItemId ?? null,
+      external: !!e.external,
+      coverOrMoney: !!e.coverOrMoney,
       // "client.created" → "Client created": the writer's vocabulary, read as words.
       text: e.action.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase()) + (e.result === "success" ? "" : " — " + e.result + (e.failureReason ? ": " + e.failureReason : "")),
-      clientId: null,
+      clientId: e.client?.id ?? null,
       entity: e.objectId,
       evidenceIds: [],
       kind: e.actorType === "system" ? "system" : "action",
@@ -479,7 +492,7 @@ const NOT_CONNECTED_WS = {
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];

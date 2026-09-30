@@ -146,7 +146,11 @@ vi.mock("../lib/api.js", () => ({
     automations: async () => ({
       automations: [{ id: AUTO, organization_id: ORG, name: "Renewal preparation", description: "Prepare the renewal pack", trigger_event: "renewal.approaching", conditions: [], skill: "renewal.prepare", prepared_verb: "prepare", approval: "always", sends_externally: false, enabled: false, created_by: ME, created_at: "2026-09-01", updated_at: "2026-09-01" }],
     }),
-    audit: async () => ({ recordId: null, entries: [{ id: "a1", actorType: "user", actorName: "Wanjiru Kamau", action: "client.created", objectType: "client", objectId: CLIENT, result: "success", failureReason: null, changed: [], evidence: [], occurredAt: "2026-09-02T09:00:00Z" }], visible: 1, returned: 1 }),
+    audit: async () => ({ recordId: null, entries: [
+      { id: "a1", actorType: "user", actorName: "Wanjiru Kamau", actorId: ME, actorLabel: "A person", action: "client.created", objectType: "client", objectId: CLIENT, result: "success", failureReason: null, changed: [], evidence: [], occurredAt: "2026-09-02T09:00:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "client", id: CLIENT, label: "Tausi Hauliers Ltd" }, workItemId: null, external: false, coverOrMoney: false },
+      { id: "a2", actorType: "user", actorName: "Baraka Otieno", actorId: BARAKA, actorLabel: "A person", action: "work_item.assigned", objectType: "work_item", objectId: WORK, result: "success", failureReason: null, changed: ["owner_id: Wanjiru → Baraka"], evidence: [], occurredAt: "2026-09-30T08:00:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, workItemId: WORK, external: false, coverOrMoney: false },
+      { id: "a3", actorType: "user", actorName: "Baraka Otieno", actorId: BARAKA, actorLabel: "A person", action: "work_item.manage", objectType: "work_item", objectId: WORK, result: "denied", failureReason: "permission_denied", changed: [], evidence: [], occurredAt: "2026-09-30T08:05:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, workItemId: WORK, external: false, coverOrMoney: false },
+    ], visible: 3, returned: 3 }),
     opportunities: async () => ({ opportunities: [{ id: OPP, clientId: CLIENT, title: "Motor fleet", classOfBusiness: "Commercial motor", createdAt: "2026-09-30", closedAt: null }] }),
     workList: async (view: string) => ({
       items:
@@ -947,6 +951,25 @@ describe("live mode", () => {
       expect(all).toContain("Claim form");
       expect(all).toMatch(/Next check","2 Oct/);
       expect(all).not.toMatch(/undefined|\bnull\b|NaN|\.demo|@example|Review and send/);
+    });
+  });
+
+  describe("Activity for a manager (D-124)", () => {
+    it("names the person who acted, the client, the record, the outcome — and answers the manager's questions", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "activity" }) as { blocks: { t: string; items?: string[][]; rows?: { title: string; note: string; badge: string; action: { ref: object } | null }[] }[] };
+      const all = text(ws);
+      expect(all).not.toMatch(/· system\b|"system"/);
+      const list = ws.blocks.find((b) => b.t === "rows")!.rows!;
+      const assigned = list.find((r) => r.title.startsWith("Work assigned"))!;
+      expect(assigned.note).toMatch(/^Baraka Otieno · Tausi Hauliers Ltd · Done/);
+      expect(assigned.action!.ref).toEqual({ ws: "workitem", workItemId: WORK });
+      expect(list.find((r) => r.badge === "Refused")!.note).toContain("Refused: permission denied");
+      const facts = Object.fromEntries(ws.blocks.find((b) => b.t === "facts")!.items!);
+      expect(facts["Sent outside the brokerage"]).toBe("Nothing — no message left ASAP");
+      expect(facts["Cover or money"]).toBe("No change to cover or money");
+      expect(facts["Blocked or refused"]).toMatch(/^1 attempt/);
+      expect(facts["Next actions held by"]).toContain("Wanjiru Kamau (1)");
     });
   });
 });
