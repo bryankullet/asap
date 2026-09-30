@@ -18,11 +18,13 @@ import { fakeProvider } from "./providers/fake.js";
 export function resolveProvider(env: ServerEnv, logger: Logger): AiProvider | null {
   const id = env.AI_DEFAULT_PROVIDER as AiProviderId;
   const key = id === "anthropic" ? env.ANTHROPIC_API_KEY : id === "openai" ? env.OPENAI_API_KEY : "fake";
-  // One safe line, every boot: which provider and model, and whether a key arrived — never the key.
-  // The env parser trims and turns a blank value into "absent", so a trailing newline cannot hide one.
+  const configured = id === "fake" || (key !== undefined && env.AI_MODEL !== undefined);
+  // One safe line, every boot: which provider and model, and whether each key arrived — never a
+  // key. The env parser trims and turns a blank value into "absent", so a trailing newline
+  // cannot hide one. Both keys are reported so a provider mismatch is visible at a glance.
   logger.info(
-    { provider: id, model: env.AI_MODEL ?? null, keyPresent: key !== undefined, configured: id === "fake" || (key !== undefined && env.AI_MODEL !== undefined) },
-    `AI gateway: provider=${id} model=${env.AI_MODEL ?? "none"} configured=${id === "fake" || (key !== undefined && env.AI_MODEL !== undefined)} keyPresent=${key !== undefined}`,
+    { provider: id, model: env.AI_MODEL ?? null, configured, keyPresent: key !== undefined, anthropicKeyPresent: env.ANTHROPIC_API_KEY !== undefined, openaiKeyPresent: env.OPENAI_API_KEY !== undefined },
+    `AI gateway: provider=${id} model=${env.AI_MODEL ?? "none"} configured=${configured} keyPresent=${key !== undefined}`,
   );
 
   if (id === "fake") {
