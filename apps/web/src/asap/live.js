@@ -1187,6 +1187,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    */
   function resolveSubject(t, ctx) {
     const explicit = explicitSubject(t);
+    // "No, I meant the other Tausi": of exactly two candidates, the one not just used.
+    if (explicit?.type === "ambiguous" && /\bthe other\b/i.test(t) && convo.previousSubject && explicit.candidates.length === 2) {
+      const other = explicit.candidates.find((c) => c.clientId !== convo.previousSubject.clientId);
+      if (other && explicit.candidates.some((c) => c.clientId === convo.previousSubject.clientId)) return { ...other, source: "correction" };
+    }
     if (explicit) return { ...explicit, source: "message" };
     const chip = ctx.chip && ctx.chip.clientId ? db.clients.find((c) => c.id === ctx.chip.clientId) : null;
     const active = activeSubject(ctx);
@@ -1360,6 +1365,28 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * "What's next on this claim / this work?" — the server's next action for the record in front
+   * (D-120). "This claim" with no claim in front is said so, never answered about another one.
+   */
+  function nextFromAsk(t, ctx) {
+    if (!/\b(what('?s| is)? next|next step|where .* stand|what .* (blocked|stuck)|who (has|holds|owns) (it|this))\b/i.test(t)) return null;
+    const ref = ctx.ref || ctx;
+    if (/\bthis claim\b/i.test(t) && !ref.claimId) return { lead: "No claim is open in front of you.", text: "Open the claim, or name the client, and ask again.", ref: null, keepWorkspace: true };
+    if (/\bthis quotation\b/i.test(t) && !ref.opportunityId) return { lead: "No quotation is open in front of you.", text: "Open the quotation, or name the client, and ask again.", ref: null, keepWorkspace: true };
+    if (!ref.workItemId && !ref.claimId) return null;
+    const found = workItemFor(t, ctx);
+    const w = found.item;
+    if (!w || !w.next) return null;
+    const n = w.next;
+    const owner = w.assigneeId ? db.users.find((u) => u.id === w.assigneeId)?.name : null;
+    return {
+      lead: "Next: " + n.what + ".",
+      text: [n.why, n.missing.length ? "Missing: " + n.missing.join("; ") + "." : "", n.party ? "With " + n.party + "." : "", owner ? "Owner: " + owner + "." : "No owner yet.", n.checkAt ? "Looked at again " + S.fmtDate(n.checkAt) + "." : ""].filter(Boolean).join(" "),
+      ref: ref.claimId ? { ws: "claim", clientId: ref.clientId, claimId: ref.claimId } : { ws: "workitem", workItemId: w.id },
+    };
+  }
+
+  /**
    * Start quotation work from Ask, previewed; confirmed through the same "opportunity.create"
    * action the quotation Space's form uses. The client comes from the resolver (never the first
    * match); the cover wanted and its class come from the person's own words, or are asked for.
@@ -1485,6 +1512,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * guessed among several.
    */
   function quotationFromAsk(t, ctx, raw = t) {
+    // "This claim" or "this work" is about another record; never answered from a quotation.
+    if (/\bthis (claim|work|policy)\b/i.test(t)) return null;
+    if (/\bthis quotation\b/i.test(t) && !(ctx.ref || ctx).opportunityId && !ctx.opportunityId) return null;
     if (!/\b(quot(e|ation)|insurer|request|deliver(y|ed)?|next|blocked|stuck|requirements?|received|supplied|got)\b/i.test(t)) return null;
     let id = ctx.opportunityId || null;
     if (!id && ctx.clientId) {
@@ -1688,6 +1718,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const work = await workFromAsk(text, t, ctx);
     if (work) return work;
     const quote = quotationFromAsk(t, ctx, text.trim());
+    if (!quote) {
+      const nextUp = nextFromAsk(t, ctx);
+      if (nextUp) return nextUp;
+    }
     if (quote) return quote;
     const record = recordQuestion(t, ctx);
     if (record) return record;

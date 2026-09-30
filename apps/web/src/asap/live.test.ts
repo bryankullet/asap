@@ -536,6 +536,62 @@ describe("live mode", () => {
     const route = async (A: Awaited<ReturnType<typeof live>>, q: string, ref: object, chip: object | null = null) =>
       (await A.ai.route(q, { ...ref, ref, chip })) as Answer;
 
+    it("an explicit client name wins over the Space in front", async () => {
+      const A = await live();
+      const r = await route(A, "Which policies does Tausi Farms Ltd have?", clientA);
+      expect(r.lead).toMatch(/Tausi Farms Ltd/);
+      expect(r.lead).not.toMatch(/Hauliers/);
+    });
+
+    it("'No, I meant the other Tausi' switches between the two similar clients", async () => {
+      const A = await live();
+      await route(A, "Which policies does Tausi Hauliers Ltd have?", {});
+      const r = await route(A, "No, I meant the other Tausi. Which policies does it have?", {});
+      expect(r.lead).toMatch(/Tausi Farms Ltd/);
+    });
+
+    it("'this claim' and 'this quotation' with nothing of that kind in front are said so, not guessed", async () => {
+      const A = await live();
+      expect((await route(A, "What's next on this claim?", clientA)).lead).toBe("No claim is open in front of you.");
+      expect((await route(A, "What's next on this quotation?", clientBref)).lead).toBe("No quotation is open in front of you.");
+    });
+
+    it("'this quotation' and 'this work' read the record in front", async () => {
+      const A = await live();
+      const q = await route(A, "What's next on this quotation?", { ws: "quote", opportunityId: OPP });
+      expect(q.lead).toBe("Next: Prepare the request to CIC General.");
+      const w = await route(A, "What's next on this work?", { ws: "workitem", workItemId: WORK });
+      expect(w.lead).toBe("Next: Request renewal terms from the insurer.");
+    });
+
+    it("removing the context chip stops it applying; the Space in front is used instead", async () => {
+      const A = await live();
+      const withChip = await route(A, "When does this client's policy expire?", clientA, { clientId: CLIENT_B });
+      expect(withChip.lead).toMatch(/TF-FIRE-009/);
+      const B = await live();
+      const without = await route(B, "When does this client's policy expire?", clientBref, null);
+      expect(without.lead).toMatch(/TF-FIRE-009/);
+      const C = await live();
+      const other = await route(C, "Which policies does this client have?", clientA, null);
+      expect(other.lead).toMatch(/Tausi Hauliers/);
+    });
+
+    it("a subject from another client does not leak into a question asked in front of a different client", async () => {
+      const A = await live();
+      await route(A, "When does TF-FIRE-009 expire?", clientBref);
+      const r = await route(A, "When does it expire?", clientA);
+      expect(r.lead).not.toMatch(/TF-FIRE-009/);
+    });
+
+    it("a refresh starts a clean context: nothing resolved before it is carried over", async () => {
+      const A = await live();
+      await route(A, "When does TF-FIRE-009 expire?", clientBref);
+      expect(A.ai.context().previousSubject).not.toBeNull();
+      const B = await live();
+      expect(B.ai.context().previousSubject).toBeNull();
+      expect(B.ai.context().pendingAction).toBeNull();
+    });
+
     it("an explicit policy number wins over the Space in front, and never takes the vehicle path", async () => {
       const A = await live();
       const r = await route(A, "Is cover active on TH-MTR-001?", clientBref);
