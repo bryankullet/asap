@@ -106,7 +106,9 @@ export const REPLY_JSON_SCHEMA: Record<string, unknown> = {
   properties: {
     type: { type: "string", enum: ["answer", "open_record", "work_list", "draft", "automation", "panel"] },
     target: { type: ["string", "null"] },
-    panel: { type: ["string", "null"], enum: [...AskComponentId.options, null] },
+    // anyOf, not a type array with null inside the enum: Anthropic's structured outputs reject an
+    // enum value whose type does not match the declared type (a live 400).
+    panel: { anyOf: [{ type: "string", enum: [...AskComponentId.options] }, { type: "null" }] },
     view: {
       type: "string",
       enum: ["summary", "blocker", "comparison", "policy", "money", "documents", "timeline"],

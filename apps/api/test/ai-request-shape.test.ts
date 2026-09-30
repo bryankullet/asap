@@ -17,6 +17,12 @@ function violations(schema: unknown, path: string, out: string[] = []): string[]
   for (const k of UNSUPPORTED) if (k in o) out.push(`${path}.${k}`);
   if ("minItems" in o && o["minItems"] !== 0 && o["minItems"] !== 1) out.push(`${path}.minItems`);
   if (o["type"] === "object" && o["additionalProperties"] !== false) out.push(`${path}.additionalProperties`);
+  // Every enum value must match the declared type; a type array beside an enum is refused outright.
+  if (Array.isArray(o["enum"])) {
+    if (Array.isArray(o["type"])) out.push(`${path}.enum beside a type array`);
+    const jsType = (v: unknown) => (v === null ? "null" : Number.isInteger(v) ? "integer" : typeof v);
+    if (typeof o["type"] === "string") for (const v of o["enum"] as unknown[]) if (jsType(v) !== o["type"] && !(o["type"] === "number" && jsType(v) === "integer")) out.push(`${path}.enum value of type ${jsType(v)}`);
+  }
   if (Array.isArray(o["required"])) for (const r of o["required"] as string[]) if (!o["properties"] || !(r in (o["properties"] as object))) out.push(`${path}.required.${r}`);
   for (const [k, v] of Object.entries(o)) if (v && typeof v === "object") violations(v, `${path}.${k}`, out);
   return out;
