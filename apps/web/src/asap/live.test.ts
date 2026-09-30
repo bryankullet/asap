@@ -239,7 +239,7 @@ describe("live mode", () => {
     expect(list.ref?.ws).toBe("clients");
     const other = await A.ai.route("Summarise the market mood", {});
     expect(askQuestion).toHaveBeenCalled();
-    expect(other.lead).toMatch(/No model is configured/);
+    expect(other.lead).toMatch(/assistant isn’t switched on/);
     const add = await A.ai.route("add Simba Traders as a client", {});
     expect(add.plan?.action).toBe("client.create");
   });

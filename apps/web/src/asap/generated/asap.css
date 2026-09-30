@@ -1,6 +1,6 @@
 /* GENERATED from the approved ASAP interface — do not edit. */
 *{box-sizing:border-box}
-  body{margin:0;background:#fbfcfa;color:#18231c;font-family:"DM Sans",system-ui,sans-serif;font-size:16px}
+  body{margin:0;background:#fbfcfa;color:#18231c;font-family:var(--font-body);font-variant-numeric:tabular-nums;font-size:16px}
   a{color:#1f6c49;text-decoration:none}
   a:hover{color:#18231c;text-decoration:underline}
   button{cursor:pointer;font:inherit}

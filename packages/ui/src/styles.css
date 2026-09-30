@@ -9,28 +9,22 @@
  * prototype uses a value once it is still here, because "close enough" on a border tone is how a
  * rebuild stops being recognisable as the same product.
  *
- * Fonts: DM Sans for interface text, Manrope for headings, both from Google Fonts in
- * apps/web/index.html with a system stack behind them, so the app is legible before the webfont
- * lands and if it never does.
+ * Fonts (the Musters system): Outfit for display and UI — headings, titles, buttons, badges,
+ * counts, navigation — and Inter for reading text, both bundled from our own origin (fontsource),
+ * never fetched from a font CDN. Monospace only for shortcut keys and aligned ids or amounts.
  *
  * Shell geometry is here too, because the sidebar width and the Ask panel width are design tokens
  * that three different components need to agree on. The numbers are measured
  * (scripts/visual/capture.mjs), not chosen.
  */
 @theme {
-  /*
-   * The fallback tail is part of the design, not decoration: when DM Sans has not arrived yet the
-   * page renders in whatever comes next, and `system-ui` and `sans-serif` do not share metrics —
-   * measured, the difference is a 1px taller line at 13.5px, which moves a tab row by 3px. This is
-   * the prototype's stack, exactly.
-   */
-  --font-sans: "DM Sans", system-ui, sans-serif;
-  /*
-   * The prototype's heading stack is `Manrope, sans-serif` — no `system-ui` in it. Measured, the
-   * difference is 44px on the Today title, because `system-ui` and `sans-serif` are different
-   * faces and Manrope has not loaded yet when the page first paints.
-   */
-  --font-heading: "Manrope", sans-serif;
+  /* Defined once; nothing else names a font. */
+  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Older names, kept as aliases so existing utilities resolve to the same two faces. */
+  --font-sans: var(--font-body);
+  --font-heading: var(--font-display);
 
   /*
    * Ink, in the four tones the prototype actually uses. The two middle tones carry most of the

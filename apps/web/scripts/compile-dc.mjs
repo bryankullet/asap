@@ -157,6 +157,60 @@ for (const [from, to] of PATCHES) {
   logic = logic.replace(from, to);
 }
 
+// ---- typography (the Musters system). One pass over every literal style in the approved markup
+// and its stylesheet; the approved file itself is untouched. Fonts come only from the variables
+// in packages/ui/src/styles.css — no font is named here or in any generated style.
+const SCALE = [11, 12, 13, 14, 15, 16, 18, 20, 28];
+const toScale = (px) => SCALE.reduce((a, b) => (Math.abs(b - px) < Math.abs(a - px) ? b : a));
+function retype(style) {
+  const decls = style.split(";").map((d) => d.trim()).filter(Boolean);
+  const get = (k) => decls.find((d) => d.startsWith(k + ":"))?.slice(k.length + 1).trim();
+  const set = (k, v) => {
+    const i = decls.findIndex((d) => d.startsWith(k + ":"));
+    if (v === null) { if (i >= 0) decls.splice(i, 1); return; }
+    if (i >= 0) decls[i] = k + ":" + v; else decls.push(k + ":" + v);
+  };
+  const fam = get("font-family");
+  const sizeRaw = get("font-size");
+  const size = sizeRaw && /^[\d.]+px$/.test(sizeRaw) ? parseFloat(sizeRaw) : null;
+  const weightRaw = get("font-weight");
+  const weight = weightRaw && /^\d+$/.test(weightRaw) ? Number(weightRaw) : null;
+  const spacing = get("letter-spacing");
+  // An icon glyph in a fixed box keeps its font and size, so icons do not shift or change shape.
+  const iconBox = size !== null && size >= 16 && weight === null && !fam && /(^|;)\s*(width:\d+px|text-align:center)/.test(style) && /text-align:center|place-items:center/.test(style);
+  if (fam && /serif/.test(fam) && !/sans/.test(fam)) return style; // the document page's serif stays
+  const eyebrow = size !== null && size <= 12 && spacing && /^\.?\d*\.?\d+em$/.test(spacing) && parseFloat(spacing) >= 0.05;
+  if (eyebrow) {
+    set("font-family", "var(--font-body)"); set("font-weight", "400"); set("font-size", "12px"); set("letter-spacing", "0.04em");
+    return decls.join(";");
+  }
+  const display = (fam && /Manrope/.test(fam)) || (weight !== null && weight >= 600);
+  if (fam && /DM Sans/.test(fam)) set("font-family", "var(--font-body)");
+  if (display) {
+    set("font-family", "var(--font-display)");
+    const px = size !== null ? toScale(size) : null;
+    // 700 only for small numbers and badges; everything else in the UI is 600. No 800.
+    set("font-weight", weight !== null && weight >= 700 && px !== null && px <= 12 ? "700" : "600");
+    if (px !== null && px >= 20 && !spacing) set("letter-spacing", "-0.02em");
+    if (px === 28) set("line-height", "1.15");
+  }
+  if (size !== null && !iconBox) set("font-size", toScale(size) + "px");
+  if (weight === 800) set("font-weight", "600");
+  return decls.join(";");
+}
+tpl = tpl.replace(/style="([^"]*)"/g, (m, st) => 'style="' + retype(st) + '"');
+tpl = tpl.replace(/style-hover="([^"]*)"/g, (m, st) => 'style-hover="' + retype(st) + '"');
+// The logo tile is a letter, not an icon: Outfit 700, 18px, as the mapping sets it.
+const LOGO_TILE = "background:#18231c;color:#fff;display:grid;place-items:center;font-size:16.5px;flex:none";
+if (!tpl.includes(LOGO_TILE)) throw new Error("typography: logo tile not found");
+tpl = tpl.replace(LOGO_TILE, "background:#18231c;color:#fff;display:grid;place-items:center;font-family:var(--font-display);font-weight:700;font-size:18px;flex:none");
+let typedCss = css
+  .replace(/font-family:\s*"DM Sans"[^;}]*/g, "font-family:var(--font-body);font-variant-numeric:tabular-nums")
+  .replace(/font-family:\s*Manrope[^;}]*/g, "font-family:var(--font-display)")
+  .replace(/font-size:\s*([\d.]+)px/g, (m, n) => "font-size:" + toScale(parseFloat(n)) + "px")
+  .replace(/font-weight:\s*800/g, "font-weight:600");
+if (/Manrope|DM Sans/.test(tpl + typedCss)) throw new Error("typography: an old font name survived the retype");
+
 // ---- a small, strict parser for the template dialect.
 const VOID = new Set(["input", "link", "br", "img", "meta", "hr"]);
 function parse(s) {
@@ -290,7 +344,7 @@ export function renderTemplate(v) {
 
 writeFileSync(
   join(outDir, "asap.css"),
-  `/* GENERATED from the approved ASAP interface — do not edit. */\n${css.trim()}\n\n/* hover rules (style-hover) */\n` +
+  `/* GENERATED from the approved ASAP interface — do not edit. */\n${typedCss.trim()}\n\n/* hover rules (style-hover) */\n` +
     hovers.map((hv, i) => `.dch${i}:hover{${hv.split(";").filter(Boolean).map((d) => d.trim() + " !important").join(";")}}`).join("\n") +
     "\n",
 );

@@ -59,17 +59,17 @@ export function Onboarding() {
 
   if (justCreated)
     return (
-      <div role="status" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: '"DM Sans", system-ui, sans-serif' }}>
+      <div role="status" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: "var(--font-body)" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 10.5, letterSpacing: ".12em", fontWeight: 700, color: "#1f6c49" }}>BROKERAGE CREATED</div>
-          <h1 style={{ fontFamily: "Manrope, sans-serif", fontWeight: 700, fontSize: 22, margin: "6px 0 6px" }}>Opening your workspace…</h1>
+          <div style={{ fontSize: 12, letterSpacing: "0.04em", fontWeight: 400, color: "#1f6c49" }}>BROKERAGE CREATED</div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em", margin: "6px 0 6px" }}>Opening your workspace…</h1>
           <p style={{ color: "#4c564e", fontSize: 14, margin: 0 }}>Reading your brokerage's records for the first time.</p>
         </div>
       </div>
     );
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: '"DM Sans", system-ui, sans-serif' }}>
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: "var(--font-body)" }}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -77,32 +77,32 @@ export function Onboarding() {
         }}
         style={{ width: "100%", maxWidth: 440, background: "#fff", border: "1px solid #e5e9e5", borderRadius: 16, padding: 22 }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "Manrope, sans-serif", fontWeight: 800, fontSize: 22, marginBottom: 18 }}>
-          <span style={{ width: 30, height: 30, borderRadius: 10, background: "#18231c", color: "#fff", display: "grid", placeItems: "center", fontSize: 16.5 }}>A</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.01em", marginBottom: 18 }}>
+          <span style={{ width: 30, height: 30, borderRadius: 10, background: "#18231c", color: "#fff", display: "grid", placeItems: "center", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 18 }}>A</span>
           ASAP
         </div>
-        <div style={{ fontSize: 10.5, letterSpacing: ".12em", fontWeight: 700, color: "#1f6c49" }}>SETUP</div>
-        <h1 style={{ fontFamily: "Manrope, sans-serif", fontWeight: 700, fontSize: 22, margin: "6px 0 6px" }}>Create your brokerage</h1>
+        <div style={{ fontSize: 12, letterSpacing: "0.04em", fontWeight: 400, color: "#1f6c49" }}>SETUP</div>
+        <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em", margin: "6px 0 6px" }}>Create your brokerage</h1>
         <p style={{ color: "#4c564e", fontSize: 14, lineHeight: 1.55, margin: "0 0 16px" }}>
           Your brokerage is a private workspace over your own clients, policies, documents and email. Nobody outside it can see them.
         </p>
-        <label style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "#4c564e", marginBottom: 6 }} htmlFor="brokerage-name">
+        <label style={{ display: "block", fontSize: 12, fontFamily: "var(--font-display)", fontWeight: 600, color: "#4c564e", marginBottom: 6 }} htmlFor="brokerage-name">
           Brokerage name
         </label>
         <input id="brokerage-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus style={field} />
-        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 14, fontSize: 13.5, color: "#4c564e", lineHeight: 1.5 }}>
+        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", marginTop: 14, fontSize: 13, color: "#4c564e", lineHeight: 1.5 }}>
           <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} style={{ marginTop: 3 }} />
           I accept the data-processing and security terms for this brokerage.
         </label>
         {create.isError && (
-          <div role="alert" style={{ marginTop: 14, background: "#fdeae7", color: "#a43b32", borderRadius: 11, padding: "10px 12px", fontSize: 13.5 }}>
+          <div role="alert" style={{ marginTop: 14, background: "#fdeae7", color: "#a43b32", borderRadius: 11, padding: "10px 12px", fontSize: 13 }}>
             {describeApiError(create.error)} Nothing was created — you can retry.
           </div>
         )}
         <button
           type="submit"
           disabled={!canSubmit}
-          style={{ marginTop: 18, width: "100%", border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "11px 14px", fontSize: 14, fontWeight: 700 }}
+          style={{ marginTop: 18, width: "100%", border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "11px 14px", fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600 }}
         >
           {create.isPending ? "Creating…" : "Create brokerage"}
         </button>

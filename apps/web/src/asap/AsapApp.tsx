@@ -77,11 +77,11 @@ export function AsapApp() {
     return (
       <div role="alert" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#fbfcfa" }}>
         <div style={{ maxWidth: 440, background: "#fff", border: "1px solid #e5e9e5", borderRadius: 16, padding: 22 }}>
-          <div style={{ fontSize: 10.5, letterSpacing: ".12em", fontWeight: 700, color: "#a43b32" }}>COULD NOT LOAD</div>
-          <h1 style={{ fontFamily: "Manrope, sans-serif", fontSize: 21, margin: "6px 0 8px" }}>Your records could not be loaded</h1>
+          <div style={{ fontSize: 12, letterSpacing: "0.04em", fontWeight: 400, color: "#a43b32" }}>COULD NOT LOAD</div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, margin: "6px 0 8px" }}>Your records could not be loaded</h1>
           <p style={{ color: "#4c564e", fontSize: 14, lineHeight: 1.55, margin: 0 }}>{failure} Nothing was changed.</p>
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-            <button type="button" onClick={() => { setFailure(null); setMode(mode); window.location.reload(); }} style={{ border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "10px 14px", fontWeight: 700 }}>
+            <button type="button" onClick={() => { setFailure(null); setMode(mode); window.location.reload(); }} style={{ border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 600 }}>
               Try again
             </button>
             {mode === "live" && (
@@ -97,9 +97,9 @@ export function AsapApp() {
   return (
     <>
       {mode === "demo" && (
-        <div role="status" style={{ position: "fixed", left: "50%", bottom: 10, transform: "translateX(-50%)", zIndex: 60, background: "#18231c", color: "#fff", borderRadius: 99, padding: "6px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center" }}>
+        <div role="status" style={{ position: "fixed", left: "50%", bottom: 10, transform: "translateX(-50%)", zIndex: 60, background: "#18231c", color: "#fff", borderRadius: 99, padding: "6px 12px", fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 600, display: "flex", gap: 10, alignItems: "center" }}>
           Demo — fictional records in this browser only
-          <button type="button" onClick={() => choose("live")} style={{ border: 0, background: "#fff", color: "#18231c", borderRadius: 99, padding: "3px 9px", fontSize: 12, fontWeight: 700 }}>
+          <button type="button" onClick={() => choose("live")} style={{ border: 0, background: "#fff", color: "#18231c", borderRadius: 99, padding: "3px 9px", fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 600 }}>
             Back to your brokerage
           </button>
         </div>

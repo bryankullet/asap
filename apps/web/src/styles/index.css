@@ -3,21 +3,18 @@
  * a font CDN at runtime: nothing about a brokerage's session should depend on, or be visible to,
  * a third party.
  */
-@import "@fontsource/dm-sans/400.css";
-@import "@fontsource/dm-sans/500.css";
-@import "@fontsource/dm-sans/600.css";
-@import "@fontsource/dm-sans/700.css";
-@import "@fontsource/manrope/500.css";
-@import "@fontsource/manrope/600.css";
-@import "@fontsource/manrope/700.css";
-@import "@fontsource/manrope/800.css";
+@import "@fontsource/outfit/500.css";
+@import "@fontsource/outfit/600.css";
+@import "@fontsource/outfit/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
 @import "tailwindcss";
 @import "@asap/ui/styles.css";
 @source "../../../../packages/ui/src";
 
 @layer base {
   html {
-    font-family: var(--font-sans);
+    font-family: var(--font-body);
     color: var(--color-ink);
     background: var(--color-wash);
   }

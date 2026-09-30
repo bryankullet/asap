@@ -115,6 +115,12 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+      # The app shell always revalidates, so a new deploy reaches the next page load instead of a
+      # cached index.html pointing at the previous bundle. Bundles are content-hashed, so this
+      # costs a small conditional request and nothing else.
+      - path: /*
+        name: Cache-Control
+        value: no-cache
     envVars:
       - key: VITE_PUBLIC_APP_ENV
         value: staging

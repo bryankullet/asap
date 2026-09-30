@@ -105,10 +105,10 @@ importers:
       '@asap/ui':
         specifier: workspace:*
         version: link:../../packages/ui
-      '@fontsource/dm-sans':
+      '@fontsource/inter':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource/manrope':
+      '@fontsource/outfit':
         specifier: ^5.3.0
         version: 5.3.0
       '@hookform/resolvers':
@@ -545,11 +545,11 @@ packages:
       '@noble/hashes':
         optional: true
 
-  '@fontsource/dm-sans@5.3.0':
-    resolution: {integrity: sha512-lYJtMXXO28q1z+yz+z8XKd0s4hXaa9QdkETzkyD760sidCv5heI86weYA0sx0Nc4pAMAQTUuyf4gO44cYKKS9g==}
+  '@fontsource/inter@5.3.0':
+    resolution: {integrity: sha512-RofMylZmjlJEfELXeNHFWBRcSs75rGU/6bV2S2jfnvv/3rPXPGe0LgUJTklcHZ9lM4OZmAVFhcJPnACfb91A3g==}
 
-  '@fontsource/manrope@5.3.0':
-    resolution: {integrity: sha512-obJ1Dv3+uCA6HlHgW8u4BGYxJR9In2HW7gjJhlflEvkrj1X1iSEwu0fToL+JYGC/FEKFfIz1sBuPduvcL2gIAA==}
+  '@fontsource/outfit@5.3.0':
+    resolution: {integrity: sha512-0AVHzTTVJSxWDOxPKSfMeHhZeBFDU3cmgrcOb76ZEyhGo0+xgyG3GsLF3h9+X8w0IX7G4jzjJgFQEBiWdX6VgA==}
 
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
@@ -2420,9 +2420,9 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@fontsource/dm-sans@5.3.0': {}
+  '@fontsource/inter@5.3.0': {}
 
-  '@fontsource/manrope@5.3.0': {}
+  '@fontsource/outfit@5.3.0': {}
 
   '@hono/node-server@2.1.1(hono@4.13.7)':
     dependencies:

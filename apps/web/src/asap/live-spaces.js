@@ -100,7 +100,7 @@ export const IMPORT_HEADERS = Object.entries(IMPORT_COLUMN_SYNONYMS).map(([meani
 function importSpace(state) {
   const p = state.importPreview;
   const blocks = [
-    note("amber", "Nothing is saved until you confirm", "ASAP reads the file on its own server, shows what every row would do and waits. A client that is only a possible match is never assumed — you choose."),
+    note("amber", "Nothing is saved until you confirm", "ASAP reads the file privately, shows what each row would do, and waits for you. If a client is only a possible match, you choose — ASAP never assumes."),
     { t: "upload", label: "Choose a spreadsheet, CSV or PDF of clients and policies", action: "import.preview" },
   ];
   if (state.importError && !p) blocks.push(note("red", state.importError.title, state.importError.text));
@@ -629,19 +629,19 @@ function connectionsSpace(state) {
     blocks: [
       rows("Email", mailRows),
       rows("Records and questions", [
-        { title: "Records import", note: "Spreadsheets, CSV and PDF books are read on ASAP's own server.", badge: "Available", badgeTone: ok, action: { a: "open", ref: { ws: "import" } } },
+        { title: "Records import", note: "Spreadsheets, CSV files and PDFs are read privately by ASAP.", badge: "Available", badgeTone: ok, action: { a: "open", ref: { ws: "import" } } },
         S.getDb().meta?.docsDegraded
-          ? { title: "Documents", note: "Some documents or client files could not be read back just now, so they may be missing from where you expect them. Nothing was lost; refresh records to retry.", badge: "Degraded", badgeTone: warn }
+          ? { title: "Documents", note: "Some documents or client files didn’t load just now, so they may be missing from where you expect them. Nothing was lost; refresh records to try again.", badge: "Degraded", badgeTone: warn }
           : { title: "Documents", note: "Stored privately for this brokerage and read by ASAP's own extraction service.", badge: "Available", badgeTone: ok },
         { title: "Questions about your records", note: "Clients, work, policies and documents are answered in the app from the records it has read.", badge: "Available", badgeTone: ok },
         {
           title: "AI model",
-          note: model === true ? "Configured on the server. Questions the app cannot answer from records go to it." : model === false ? "Not configured on this deployment. Questions beyond your records are answered with that message, never guessed." : "Could not be checked just now.",
+          note: model === true ? "Switched on. Questions ASAP can’t answer straight from your records go to the assistant." : model === false ? "Not configured on this deployment. Questions beyond your records are answered with that message, never guessed." : "Could not be checked just now.",
           badge: model === true ? "Configured" : model === false ? "Not configured" : "Unknown",
           badgeTone: model === true ? ok : warn,
         },
       ]),
-      note("green", "Read from the server", "Each status above comes from your brokerage's records on the server, not from this browser."),
+      note("green", "From your records", "Each status above comes from your brokerage’s own records."),
     ],
   };
 }

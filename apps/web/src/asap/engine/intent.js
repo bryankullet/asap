@@ -194,8 +194,8 @@ const ANSWERS = {
   coverage: ({ reg, clientId }) => {
     const it = reg ? sel.itemByReg(reg) : null;
     const year = sel.activeYear(clientId);
-    if (!it) return { lead: (reg || 'That vehicle') + ' is not on any confirmed schedule.',
-      text: 'A client request or a logbook is not proof of cover. No insurer confirmation exists for it, so I cannot say it is covered.' };
+    if (!it) return { lead: 'We can’t confirm cover for ' + (reg || 'that vehicle') + ' yet.',
+      text: 'It isn’t on any insurer schedule we hold. A request from the client or a logbook doesn’t prove cover — only the insurer’s confirmation does.' };
     const y = byId('policyYears', it.policyYearId);
     return { lead: reg + ' is on cover under ' + byId('policies', y.policyId).number + '.',
       text: 'Confirmed on schedule v' + it.scheduleVersion + ', period ' + fmtDate(y.from) + ' – ' + fmtDate(y.to) + ', insurer ' + y.insurer + '. ' + (y.confirmationEvidenceId ? 'Insurer confirmation is linked.' : 'No insurer confirmation is linked — treat this as unconfirmed.') };
@@ -399,12 +399,12 @@ WS.coverage = (r) => {
   const it = reg ? sel.itemByReg(reg) : null;
   const year = it ? byId('policyYears', it.policyYearId) : sel.activeYear(r.clientId);
   const confirmed = year && year.confirmationEvidenceId;
-  return { kind: 'Coverage check', title: (reg || 'Cover') + ' — cover truth', status: it && confirmed ? 'live' : 'draft',
+  return { kind: 'Coverage check', title: (reg || 'Cover') + ' — cover check', status: it && confirmed ? 'live' : 'draft',
     statusLabel: it ? (confirmed ? 'On cover' : 'Unconfirmed') : 'Not on cover',
     blocks: [
-      note(it && confirmed ? 'green' : 'red', it && confirmed ? 'Covered' : 'Not covered',
+      note(it && confirmed ? 'green' : 'red', it && confirmed ? 'Covered' : 'Cover not confirmed',
         it && confirmed ? reg + ' appears on schedule v' + it.scheduleVersion + ' of ' + byId('policies', year.policyId).number + ', in force ' + fmtDate(year.from) + ' – ' + fmtDate(year.to) + '.'
-          : reg + ' is not on a confirmed schedule. A client request, a logbook or an email is not proof of cover.'),
+          : (reg || 'This vehicle') + ' isn’t on any insurer schedule we hold. A request from the client, a logbook or an email doesn’t prove cover — only the insurer’s confirmation does.'),
       { t: 'facts', items: [['Vehicle', it ? it.reg + ' · ' + it.make : (reg || '—')],
         ['Sum insured', it ? fmtMoney(it.value) : 'not declared'],
         ['Policy', year ? byId('policies', year.policyId).number : 'none'],
@@ -634,7 +634,7 @@ WS.servicing = (r) => {
   const tor = sr ? where('torRequests', t => t.servicingId === sr.id).slice(-1)[0] : null;
   const work = sr ? sel.work({ clientId: client.id, kind: 'Servicing' }).find(w => w.servicingId === sr.id) : null;
   const onCover = reg ? !!sel.itemByReg(reg) : false;
-  const blocks = [note(onCover ? 'green' : 'red', onCover ? 'Now on cover' : 'A client request is not proof of cover',
+  const blocks = [note(onCover ? 'green' : 'red', onCover ? 'Now on cover' : 'A client’s request doesn’t prove cover',
     onCover ? reg + ' appears on the confirmed schedule following the insurer endorsement.' :
       'The client asked for this today. It is not on the schedule and no insurer confirmation exists. Do not tell the client it is covered.')];
   if (!sr) blocks.push({ t: 'gate', kind: 'approve', label: 'Open servicing work for ' + (reg || 'this change'),
@@ -713,7 +713,7 @@ WS.claim = (r) => {
     return { kind: 'Claim', title: 'Register a claim — ' + reg, status: 'draft', statusLabel: 'Not registered',
       blocks: [
         note(it ? 'green' : 'red', it ? 'Cover check passed' : 'Cover check failed',
-          it ? reg + ' is on the confirmed schedule of ' + byId('policies', byId('policyYears', it.policyYearId).policyId).number + '.' : reg + ' is not on a confirmed schedule. Registering a claim will record that.'),
+          it ? reg + ' is on the confirmed schedule of ' + byId('policies', byId('policyYears', it.policyYearId).policyId).number + '.' : (reg || 'This vehicle') + ' isn’t on any insurer schedule we hold. Registering the claim will note that.'),
         { t: 'facts', items: [['Vehicle', reg], ['Sum insured', it ? fmtMoney(it.value) : '—'],
           ['Estimated excess', it ? fmtMoney(Math.max(30000, it.value * 0.025)) : '—'], ['Loss date', fmtDate(new Date().toISOString())],
           ['Driver', r.driver || 'not recorded'], ['Location', r.location || 'not recorded']] },

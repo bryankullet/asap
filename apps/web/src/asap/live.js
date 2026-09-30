@@ -672,7 +672,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         // Success is claimed only for what can be read back: every imported policy must now be on file.
         const onFile = new Set(db.policies.map((x) => x.number));
         const missing = expected.filter((n) => !onFile.has(n));
-        state.importResult = { ...res, unverified: missing.length ? "These policies were reported written but cannot be read back yet: " + missing.join(", ") + ". Refresh records; if they are still missing, tell your administrator." : "" };
+        state.importResult = { ...res, unverified: missing.length ? "These policies were saved but aren’t showing yet: " + missing.join(", ") + ". Refresh records; if they are still missing, tell your administrator." : "" };
         const b = res.batch;
         const parts = [b.policiesCreated ? plural(b.policiesCreated, "policy", "policies") : null, b.clientsCreated ? plural(b.clientsCreated, "new client", "new clients") : "no new clients"].filter(Boolean);
         if (missing.length) return { ok: false, error: "Imported, but " + plural(missing.length, "policy is", "policies are") + " not readable yet: " + missing.join(", ") + "." };
@@ -771,7 +771,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       try {
         const res = await api.opportunityAction(id, clean);
-        if (res.outcome === "blocked") return { ok: false, error: res.reason || "The server refused that. Nothing was changed." };
+        if (res.outcome === "blocked") return { ok: false, error: res.reason || "That couldn’t be done. Nothing was changed." };
         await refresh();
         return ok(
           { add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", record_response: "Insurer's answer recorded" }[clean.action] ?? "Recorded",
@@ -786,7 +786,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const policy = p.policyId === "unknown" ? { policyUnknown: true } : { policyId: p.policyId };
       try {
         const res = await api.createWorkItem({ kind: "claim", clientId: p.clientId, incidentOn: p.incidentOn, incidentSummary: p.incidentSummary, source: "manual", ...policy });
-        if (res.outcome !== "opened") return { ok: false, error: "The server could not open the claim for this client. Nothing was changed." };
+        if (res.outcome !== "opened") return { ok: false, error: "The claim couldn’t be opened for this client. Nothing was changed." };
         await refresh();
         const claim = db.claims.find((c) => c.workItemId === res.item.id);
         return ok(res.reopened ? "That claim was already open — opened it" : "Claim reported as a draft", { nav: claim ? { ws: "claim", clientId: p.clientId, claimId: claim.id } : { ws: "work" } });
@@ -869,7 +869,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const res = await api.act(w.id, { stepId: w.stepId, verb: "assign", version: w.version, assigneeId: u.id });
         if (res && res.outcome && res.outcome !== "applied") return { ok: false, error: res.reason || "The item changed since you opened it. Refresh and try again." };
         await refresh();
-        return ok(w.title + " → " + u.name + (p.dueAt ? " (the due date is not recorded by the server yet)" : ""));
+        return ok(w.title + " → " + u.name + (p.dueAt ? " (due dates aren’t saved yet)" : ""));
       } catch (e) {
         return fail(e);
       }
@@ -938,7 +938,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         statusLabel: "Could not be read",
         ref,
         blocks: [
-          note("red", "This client's record could not be read", "The server did not return this client's policies, documents and work, so none are shown — that does not mean there are none. Refresh records; if it persists, tell your administrator."),
+          note("red", "This client's record could not be read", "We couldn’t load this client’s policies, documents and work just now, so none are shown — that doesn’t mean there are none. Refresh records; if it keeps happening, tell your administrator."),
         ],
       };
     }
@@ -958,10 +958,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       // The server stored the question and its answer when it actually answered.
       serverStoredLast = res.state === "answered" || res.state === "abstained" || res.state === "clarify";
       if (res.state === "not_configured")
-        return { lead: "No model is configured on the server yet.", text: "I answer from your records directly where I can. Questions beyond that need the server's model, which is not configured for this deployment.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
+        return { lead: "ASAP’s AI assistant isn’t switched on for this brokerage yet.", text: "I can still answer from your records directly. Other questions need the assistant, which your administrator can switch on.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
       if (res.state === "unavailable") {
         const WHY = {
-          auth_rejected: ["The model provider rejected this deployment's credentials.", "The server's AI key was refused. Whoever administers the deployment needs to check it; nothing was changed."],
+          auth_rejected: ["The model provider rejected this deployment's credentials.", "The AI service didn’t accept ASAP’s sign-in. Your administrator needs to check it; nothing was changed."],
           model_unavailable: ["The configured model is not available.", "The provider says the model this deployment names does not exist or this key may not use it. Nothing was changed."],
           billing: ["The model provider account has no usable credit.", "The provider refused the request for billing reasons. Nothing was changed."],
           rate_limited: ["Too many questions at once — the provider asked us to slow down.", "Nothing was changed. Try again in a minute."],
@@ -983,7 +983,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         chips: res.suggestions.length ? res.suggestions : LIVE_CHIPS,
       };
     } catch (e) {
-      return { lead: "I could not reach the server.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
+      return { lead: "I couldn’t connect to ASAP just now.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
     }
   }
 
@@ -1075,7 +1075,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     greetingChips: LIVE_CHIPS,
     savingNote: "Saving to your brokerage's records…",
     suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
-    historyNote: "Kept with your brokerage on the server, so it follows you to any browser. It is a transcript of asking, never a record.",
+    historyNote: "Saved with your brokerage, so it follows you to any device. It’s a record of what you asked, not a business record.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },
     records: {
       demo: false,
