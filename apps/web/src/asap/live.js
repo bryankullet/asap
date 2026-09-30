@@ -761,7 +761,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         state.importResult = { ...res, unverified: missing.length ? "These policies were saved but aren’t showing yet: " + missing.join(", ") + ". Refresh records; if they are still missing, tell your administrator." : "" };
         const b = res.batch;
         const parts = [b.policiesCreated ? plural(b.policiesCreated, "policy", "policies") : null, b.clientsCreated ? plural(b.clientsCreated, "new client", "new clients") : "no new clients"].filter(Boolean);
-        if (missing.length) return { ok: false, error: "Imported, but " + plural(missing.length, "policy is", "policies are") + " not readable yet: " + missing.join(", ") + "." };
+        // Some of it written and some not is its own outcome — never a success, never a plain failure.
+        const failed = (res.failures ?? []).length;
+        if (missing.length || failed)
+          return ok("Imported " + parts.join("; ") + " from " + b.filename, { partial: [failed ? plural(failed, "line was", "lines were") + " not imported" : null, missing.length ? plural(missing.length, "policy is", "policies are") + " not readable yet: " + missing.join(", ") : null].filter(Boolean).join("; ") + ".", detail: "What was written is on file with an audit entry; the rest was not written." });
         return ok("Imported " + parts.join("; ") + " from " + b.filename);
       } catch (e) {
         return fail(e);

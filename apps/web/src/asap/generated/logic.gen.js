@@ -76,8 +76,10 @@ class Component extends DCLogic {
     if (!el) return;
     if (!el.dataset.watched) { el.dataset.watched = '1'; el.addEventListener('scroll', () => { this._pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }); }
     const grew = !prev || prev.thread !== this.state.thread || prev.thinking !== this.state.thinking;
-    if (grew && this._pinned !== false) el.scrollTop = el.scrollHeight;
+    if (grew && this._pinned !== false) { el.scrollTop = el.scrollHeight; if (this.state.newBelow) this.setState({ newBelow: false }); }
+    else if (grew && prev && prev.thread !== this.state.thread && !this.state.newBelow) this.setState({ newBelow: true });
   }
+  jumpToNew = () => { const el = document.querySelector('.asap-thread'); if (el) el.scrollTop = el.scrollHeight; this._pinned = true; this.setState({ newBelow: false }); };
   saveThread(thread) {
     this.A.records.act('conversation.save', { id: 'cnv_main', messages: thread.slice(-40), contextId: this.state.contextRef?.clientId || null }, 'conv:' + Date.now());
   }
@@ -92,14 +94,23 @@ class Component extends DCLogic {
     const existing = this.state.tabs.find(t => ident(t.ref) === ident(ref));
     if (existing) { this.setState({ activeId: existing.id, sheet: null, contextRef: ref }); return; }
     const id = 'tab' + (this.state.tabs.length + 1) + '_' + Date.now().toString(36);
-    const tabs = [...this.state.tabs.filter(t => t.pinned || t.id !== this.state.activeId || opts.keep), { id, ref, pinned: false }];
-    this.setState({ tabs, activeId: id, sheet: null, contextRef: ref,
-      recent: [{ ref, at: Date.now() }, ...this.state.recent.filter(r => JSON.stringify(r.ref) !== key)].slice(0, 12) });
+    // A record never replaces another record's tab; only a transient form or a 'nothing opened'
+    // tab in front is replaced. Recent holds records, once each, never forms or failed steps.
+    const transient = (r) => ['nothing', 'newclient', 'newcontact', 'import'].includes(r.ws) || (r.ws === 'claim' && !r.claimId);
+    let tabs = this.state.tabs.filter(t => !(t.id === this.state.activeId && !t.pinned && !opts.keep && transient(t.ref)));
+    tabs = [...tabs, { id, ref, pinned: false }];
+    while (tabs.filter(t => !t.pinned).length > 8) tabs.splice(tabs.findIndex(t => !t.pinned && t.id !== id), 1);
+    const recent = transient(ref) ? this.state.recent : [{ ref, at: Date.now() }, ...this.state.recent.filter(r => ident(r.ref) !== ident(ref))].slice(0, 12);
+    void key;
+    this.setState({ tabs, activeId: id, sheet: null, contextRef: ref, recent });
   };
   closeTab = (id) => {
     const tabs = this.state.tabs.filter(t => t.id !== id);
-    this.setState({ tabs: tabs.length ? tabs : [{ id: 't1', ref: { ws: 'today' }, pinned: true }],
-      activeId: (tabs[tabs.length - 1] || { id: 't1' }).id });
+    // Closing a tab removes the tab, never the record; context follows the tab now in front.
+    const nextTabs = tabs.length ? tabs : [{ id: 't1', ref: { ws: 'today' }, pinned: true }];
+    const front = id === this.state.activeId ? nextTabs[nextTabs.length - 1] : nextTabs.find(t => t.id === this.state.activeId) || nextTabs[nextTabs.length - 1];
+    try { sessionStorage.setItem('asap.openRef', JSON.stringify(front.ref)); } catch { /* storage blocked */ }
+    this.setState({ tabs: nextTabs, activeId: front.id, contextRef: front.ref });
   };
 
   // ---------------- actions
@@ -152,7 +163,7 @@ class Component extends DCLogic {
     if (res.denied) { this.updatePending(i, { status: 'blocked', statusText: res.reason || 'Your role cannot do this.' }); return; }
     if (!res.ok) { this.updatePending(i, { status: 'failed', statusText: res.error || 'That failed. Nothing was changed \u2014 you can retry.' }); return; }
     const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
-    const thread = this.updatePending(i, { status: res.duplicate || res.already ? 'already' : 'done', statusText: receipt });
+    const thread = this.updatePending(i, { status: res.partial ? 'partial' : res.duplicate || res.already ? 'already' : 'done', statusText: res.partial ? 'Partly written — ' + (res.partial === true ? 'some of it could not be saved; the receipt says which.' : res.partial) : receipt });
     const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const next = [...thread, this.receiptMessage(res, receipt)];
     this.saveThread(next);
@@ -179,7 +190,12 @@ class Component extends DCLogic {
       const tab = this.activeTab();
       const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref, chip: this.state.contextRef || null };
       if (!this.state.contextRef) { delete ctx.clientId; }
-      const r = (await this.A.ai.route(text, ctx)) || {};
+      let r;
+      try { r = (await this.A.ai.route(text, ctx)) || {}; }
+      catch (e) {
+        r = { lead: 'ASAP could not answer just now.', text: 'Nothing was changed. Your message is back in the box \u2014 send it again, or try in a moment.', keepWorkspace: true, clarify: { options: [{ label: 'Try again', text }] }, failed: true };
+        if (this.inputRef.current && !this.inputRef.current.value) this.inputRef.current.value = text;
+      }
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
       if (r.pending) msg.pending = { ...r.pending, status: 'open' };
@@ -507,7 +523,7 @@ class Component extends DCLogic {
 
   renderVals() {
     const base = {
-      inputRef: this.inputRef, searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
+      inputRef: this.inputRef, newBelow: !!this.state.newBelow, jumpToNew: this.jumpToNew, searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
       onKeyDown: this.onKeyDown, send: this.send, closeSheet: this.closeSheet,
       openSearch: () => this.openSearch(), openNew: () => this.openNew(), openProfile: () => this.openProfile(),
       openReset: () => this.openReset(), openSweep: () => this.openSweep(), openHistory: () => this.openHistory(),
@@ -596,7 +612,7 @@ class Component extends DCLogic {
         hasChips: (m.chips || []).length > 0,
         chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
         hasPending: !!m.pending,
-        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
+        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },
