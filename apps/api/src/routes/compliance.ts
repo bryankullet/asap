@@ -33,7 +33,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
-import { requireActiveOrganization, resolveContext } from "../context.js";
+import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
 
@@ -129,6 +129,11 @@ export function complianceRoutes(deps: { logger: Logger }) {
     const input = await parseBody(c, createClientRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
+    // A read-only member may look but not add: refused before any preview or write, and audited.
+    if (!hasPermission(ctx, "client", "create")) {
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "client.create", objectType: "client", objectId: null, result: "denied", failureReason: "permission_denied" });
+      throw new HttpError(403, "not_permitted", "Your role cannot add clients. Nothing was written.");
+    }
     if (input.preview) {
       const r = await db
         .from("clients")

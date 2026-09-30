@@ -144,6 +144,43 @@ export const actResponseSchema = z.discriminatedUnion("outcome", [
 ]);
 export type ActResponse = z.infer<typeof actResponseSchema>;
 
+/**
+ * `POST /work-items/:id/manage` — a person changes who owns a Work item, when it is due, or when it
+ * is looked at again (D-122). Ask and the Work Space both call this one contract. `preview` returns
+ * what would change and writes nothing.
+ */
+export const manageWorkRequestSchema = z
+  .object({
+    version: z.number().int(),
+    preview: z.boolean().default(false),
+    /** A member of this brokerage, or null to leave it unowned. Omit to leave the owner unchanged. */
+    ownerId: uuidSchema.nullable().optional(),
+    /** YYYY-MM-DD, or null to clear. Omit to leave unchanged. */
+    dueOn: z.string().date().nullable().optional(),
+    /** When the item is looked at again. Omit to leave unchanged. */
+    nextCheckAt: z.string().datetime({ offset: true }).nullable().optional(),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine((r) => r.ownerId !== undefined || r.dueOn !== undefined || r.nextCheckAt !== undefined, {
+    message: "Say what to change: the owner, the due date or the next check.",
+  });
+export type ManageWorkRequest = z.infer<typeof manageWorkRequestSchema>;
+
+export const manageWorkChangeSchema = z.object({
+  field: z.enum(["owner", "due", "next_check"]),
+  label: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+});
+
+export const manageWorkResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("preview"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema), externalEffect: z.string() }),
+  z.object({ outcome: z.literal("applied"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema), auditAction: z.string() }),
+  z.object({ outcome: z.literal("already_done"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema) }),
+  z.object({ outcome: z.literal("blocked"), item: WorkItemRow, guard: z.string(), reason: z.string() }),
+]);
+export type ManageWorkResponse = z.infer<typeof manageWorkResponseSchema>;
+
 export const workItemResponseSchema = z.object({
   item: WorkItemRow,
   runs: z.array(RunRow),

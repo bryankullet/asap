@@ -58,7 +58,7 @@ describe("quotation records through the API only, connected", () => {
     for (const [insurerId, premium] of [[JUBILEE, "5310000.00"], [CIC, "5620000.00"]] as const) {
       const oi = opp.insurers.find((i: { insurerId: string }) => i.insurerId === insurerId);
       expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, {
-        action: "record_response", opportunityInsurerId: oi.id, outcome: "quoted", receivedAt: "2026-09-05T09:00:00.000Z",
+        action: "record_response", withoutRequest: true, opportunityInsurerId: oi.id, outcome: "quoted", receivedAt: "2026-09-05T09:00:00.000Z",
         premiumAmount: premium, premiumCurrency: "KES", validUntil: "2027-06-30", sourceNote: "Quotation letter received by email.",
       })).body.outcome).toBe("done");
     }

@@ -230,6 +230,8 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
     }
 
+    // From its first moment the work item carries the same next action as the quotation (D-120).
+    await syncQuotationWork(db, await loadOpportunity(db, ctx, org.id, opportunityId));
     return c.json({ opportunityId, workItemId }, 201);
   });
 
@@ -326,6 +328,16 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       return blocked("You may not approve messages going out of this brokerage.");
     }
     if (!needsApproval && !hasPermission(ctx, "space", "create")) {
+      // A refused action is still an attempt, and attempts are audited (D-026).
+      await recordAudit(db, deps.logger, c, {
+        organizationId: org.id,
+        actorUserId: user.id,
+        action: `opportunity.${input.action}`,
+        objectType: "opportunity",
+        objectId: id,
+        result: "denied",
+        failureReason: "permission_denied",
+      });
       return blocked("You may not change this quotation work.");
     }
     if (closed && input.action !== "close") {
@@ -411,6 +423,15 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           .maybeSingle();
         /* The unique index makes a repeated label the same requirement, not a second one. */
         if (added.error || !added.data) return done("already");
+        await recordAudit(db, deps.logger, c, {
+          organizationId: org.id,
+          actorUserId: user.id,
+          action: "opportunity.requirement_added",
+          objectType: "opportunity",
+          objectId: id,
+          result: "success",
+          newState: { requirementId: (added.data as { id: string }).id, label: input.label },
+        });
         return done();
       }
 
@@ -423,6 +444,16 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           // A note is evidence only if it says something: "ok" or "x" proves nothing.
           return blocked("Say what proves this: a document, an email, or a note of at least ten characters.");
         }
+        const current = await db
+          .from("opportunity_requirements")
+          .select("id, supplied_at")
+          .eq("organization_id", org.id)
+          .eq("opportunity_id", id)
+          .eq("id", input.requirementId)
+          .maybeSingle();
+        if (!current.data) return blocked("That requirement is not part of this quotation work.");
+        /* Supplied already: a retry or a second click records nothing new. */
+        if ((current.data as { supplied_at: string | null }).supplied_at !== null) return done("already");
         const updated = await db
           .from("opportunity_requirements")
           .update({

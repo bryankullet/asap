@@ -96,7 +96,7 @@ describe("the Policy Space, connected to a real database", () => {
     const by = (id: string) => opp.insurers.find((i: { insurerId: string }) => i.insurerId === id);
     for (const [insurerId, premium] of [[JUBILEE, "5310000.00"], [CIC, "5620000.00"]] as const) {
       expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, {
-        action: "record_response", opportunityInsurerId: by(insurerId).id, outcome: "quoted", receivedAt: `${shift(-30)}T09:00:00.000Z`,
+        action: "record_response", withoutRequest: true, opportunityInsurerId: by(insurerId).id, outcome: "quoted", receivedAt: `${shift(-30)}T09:00:00.000Z`,
         premiumAmount: premium, premiumCurrency: "KES", validUntil: shift(300), sourceNote: "Quotation letter received by email.",
       })).body.outcome).toBe("done");
     }

@@ -1,5 +1,5 @@
 import pino from "pino";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import type { Mailer } from "../src/mail/index.js";
 import { hashInvitationToken } from "../src/tokens.js";
@@ -515,7 +515,15 @@ describe("ask (Phase 1: search only) — endpoint gates ported from the prototyp
 describe("Ask never creates a client (D-050)", () => {
   const ACME = "70000000-0000-4000-8000-00000000000a";
   const rpcCalls: string[] = [];
+  // The administrator may add clients and start claim and policy work; restored after each test.
+  const GRANTS = [["client", "create"], ["claim", "create"], ["policy", "edit"]].map(([object_type, verb]) => ({ role_id: ROLE_ADMIN, permission: { object_type, verb } }));
+  let savedGrants: unknown[] = [];
+  afterEach(() => {
+    db.tables["role_permissions"] = savedGrants as never;
+  });
   beforeEach(() => {
+    savedGrants = [...(db.tables["role_permissions"] ?? [])];
+    db.tables["role_permissions"] = [...savedGrants, ...GRANTS] as never;
     rpcCalls.length = 0;
     db.tables["clients"] = [
       {

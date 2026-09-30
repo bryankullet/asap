@@ -8,6 +8,7 @@
  *
  * Actions the API cannot perform yet are refused in words, never simulated.
  */
+import { draftProblems } from "@asap/schema";
 import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
@@ -537,22 +538,8 @@ function correctTypos(text, protectedWords) {
 const DEMO_WORDS = /\b(Acme|KDN|KDA|Karibu|Bluewave|GreenCare|Mara|APA|CIC|Jubilee)\b/;
 const LIVE_CHIPS = ["What needs attention today?", "Show my work", "What clients do I have?"];
 
-/**
- * Why a prepared message may not be sent, in words a broker reads. Checked on the raw draft, before
- * any clean-up: a draft carrying "undefined", "null", a demo address, no insured, an unresolved
- * insurer, or no policy (without the policy explicitly recorded as not known) is never sendable.
- */
-export function draftProblems(d) {
-  const out = [];
-  const text = [d.subject, d.body, d.text, d.to].filter((v) => v != null).map(String).join("\n");
-  if (/\b(undefined|null|NaN)\b/.test(text)) out.push("the draft has a blank value in it");
-  if (/\.demo\b|@example\./i.test(text) || [d.to, ...(d.send?.payload?.recipients ?? []).map((r) => r.email)].some((e) => e && /\.demo\b|@example\./i.test(String(e))))
-    out.push("its recipient is not a real address on file");
-  if ("insured" in d && !d.insured) out.push("the insured is missing");
-  if ("insurer" in d && !d.insurer) out.push("the insurer is not resolved");
-  if ("policy" in d && !d.policy && d.policyUnknown !== true) out.push("no policy is named and it is not recorded as unknown");
-  return out;
-}
+// One rule for an unsafe draft, shared with the API that refuses to prepare one (D-123).
+export { draftProblems };
 
 async function sha256File(file) {
   return sha256Hex(await file.arrayBuffer());
@@ -1055,7 +1042,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const to = [b.to, ...((b.send?.payload?.recipients ?? []).map((r) => r.email))];
         if (to.some(fake) || !b.to)
           return note("amber", (b.label || "Message") + " — not prepared", "No recipient address is on file for this, so ASAP will not prepare a message. Nothing has been sent. Add the insurer's contact first; any message will then wait for your approval.");
-        const problems = draftProblems(b);
+        const problems = draftProblems({ ...b, recipients: (b.send?.payload?.recipients ?? []).map((r) => r.email) });
         if (problems.length)
           return note("amber", (b.label || "Message") + " — cannot be sent", "Sending is off because " + problems.join("; ") + ". Nothing has been sent.");
       }

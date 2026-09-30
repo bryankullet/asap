@@ -47,7 +47,11 @@ import {
   renewalSteps,
   runEventsResponseSchema,
   workItemResponseSchema,
+  manageWorkRequestSchema,
+  draftProblems,
+  manageWorkResponseSchema,
   type ActResponse,
+  type ManageWorkResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
@@ -122,6 +126,12 @@ export function workRoutes(deps: WorkDeps) {
     const input = await parseBody(c, createWorkItemRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
+    // Reporting a claim is claim work; a renewal or endorsement is policy work. Read-only may do neither.
+    const [permObject, permVerb] = input.kind === "claim" ? ["claim", "create"] : ["policy", "edit"];
+    if (!hasPermission(ctx, permObject, permVerb)) {
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: `work_item.create_${input.kind}`, objectType: "work_item", objectId: null, result: "denied", failureReason: "permission_denied" });
+      throw new HttpError(403, "not_permitted", "Your role cannot start this work. Nothing was written.");
+    }
 
     let client: { id: string; name: string };
     if (input.clientId) {
@@ -1014,6 +1024,17 @@ export function workRoutes(deps: WorkDeps) {
     const item = await loadItem(db, id);
     const facts = await loadGuardFacts(db, item);
     const ctx = await resolveContext(db, user.id);
+    /*
+     * A claim notice needs a connected mailbox and a verified insurer address; ASAP verifies no
+     * insurer address yet, so a claim notice cannot be prepared at all (D-123). Refused before any
+     * step logic, so no path around it exists.
+     */
+    if (item.kind === "claim" && req.verb === "draft") {
+      const mailbox = await db.from("mailboxes").select("id").eq("organization_id", item.organization_id).eq("status", "connected").limit(1);
+      const why = [...((mailbox.data ?? []).length === 0 ? ["no mailbox is connected"] : []), "no verified insurer address is on file"];
+      await recordAudit(db, deps.logger, c, { organizationId: item.organization_id, actorUserId: user.id, action: "work_item.draft", objectType: "work_item", objectId: item.id, result: "denied", failureReason: "unsafe_draft" });
+      return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason: `A claim notice cannot be prepared: ${why.join("; ")}. Nothing was prepared or sent.` } satisfies ActResponse), 409);
+    }
     const result = applyAction(
       item,
       req,
@@ -1041,6 +1062,30 @@ export function workRoutes(deps: WorkDeps) {
       return c.json(actResponseSchema.parse(body), 409);
     }
     const { derived, effects } = result;
+
+    /*
+     * An unsafe message is refused here, not hidden in the browser (D-123). A claim notice needs a
+     * connected mailbox and a verified insurer address, and no insurer address is verified in
+     * ASAP yet, so a claim notice cannot be prepared at all. Any other draft is refused when it
+     * carries a blank value or an invented address.
+     */
+    if (effects.createDraft) {
+      const d = effects.createDraft;
+      const refuse = async (reason: string) => {
+        await recordAudit(db, deps.logger, c, {
+          organizationId: item.organization_id,
+          actorUserId: user.id,
+          action: "work_item.draft",
+          objectType: "work_item",
+          objectId: item.id,
+          result: "denied",
+          failureReason: "unsafe_draft",
+        });
+        return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason } satisfies ActResponse), 409);
+      };
+      const unsafe = draftProblems(d).filter((p) => /blank value|not a real address/.test(p));
+      if (unsafe.length) return refuse(`This message cannot be prepared: ${unsafe.join("; ")}. Nothing was prepared or sent.`);
+    }
 
     if (effects.startRun) {
       const { data, error } = await db.rpc("run_start", {
@@ -1237,6 +1282,78 @@ export function workRoutes(deps: WorkDeps) {
     return c.json(
       actResponseSchema.parse({ outcome: "applied", item: fresh, run: null, draft: null }),
     );
+  });
+
+  /**
+   * Who owns a Work item, when it is due, when it is looked at again (D-122). The one contract Ask
+   * and the Work Space both call. `preview` reads and writes nothing; a confirmed change goes
+   * through work_item_manage (0061), which re-checks permission, membership and version, and
+   * audits. Asking for what is already true is `already_done`, so a double-click writes once.
+   */
+  app.post("/work-items/:id/manage", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const req = await parseBody(c, manageWorkRequestSchema);
+    const item = await loadItem(db, id);
+    const ctx = await resolveContext(db, user.id);
+    const blocked = (status: 403 | 409 | 422, guard: string, reason: string, current = item) =>
+      c.json(manageWorkResponseSchema.parse({ outcome: "blocked", item: current, guard, reason } satisfies ManageWorkResponse), status);
+
+    const names = new Map<string, string>();
+    const ids = [item.owner_id, req.ownerId].filter((v): v is string => typeof v === "string");
+    if (ids.length) {
+      const { data } = await db.from("users").select("id, display_name, full_name").in("id", ids);
+      for (const u of (data ?? []) as { id: string; display_name: string | null; full_name: string | null }[])
+        names.set(u.id, u.display_name ?? u.full_name ?? "A member");
+    }
+    const who = (v: string | null | undefined) => (v ? (names.get(v) ?? "someone outside this brokerage") : "Nobody");
+    const day = (v: string | null | undefined) => (v ? v.slice(0, 10) : "No date");
+    const changes: { field: "owner" | "due" | "next_check"; label: string; from: string | null; to: string | null }[] = [];
+    if (req.ownerId !== undefined && req.ownerId !== item.owner_id)
+      changes.push({ field: "owner", label: "Owner", from: who(item.owner_id), to: who(req.ownerId) });
+    if (req.dueOn !== undefined && (req.dueOn ?? null) !== (item.due_on ?? null))
+      changes.push({ field: "due", label: "Due", from: day(item.due_on), to: day(req.dueOn) });
+    if (req.nextCheckAt !== undefined && (req.nextCheckAt ? new Date(req.nextCheckAt).getTime() : null) !== (item.task_next_check ? new Date(item.task_next_check).getTime() : null))
+      changes.push({ field: "next_check", label: "Looked at again", from: day(item.task_next_check), to: day(req.nextCheckAt) });
+
+    if (!hasPermission(ctx, "job", "edit")) {
+      if (!req.preview)
+        await recordAudit(db, deps.logger, c, { organizationId: item.organization_id, actorUserId: user.id, action: "work_item.manage", objectType: "work_item", objectId: item.id, result: "denied", failureReason: "permission_denied" });
+      return blocked(403, "permission", "Your role can view Work but not change its owner or dates. Nothing was changed.");
+    }
+    if (item.task_status === "done") return blocked(409, "done", "This work is done; its owner and dates no longer change. Nothing was changed.");
+    if (req.ownerId && !names.has(req.ownerId)) return blocked(422, "owner_not_member", "That person is not a member of this brokerage. Nothing was changed.");
+    if (req.nextCheckAt && new Date(req.nextCheckAt).getTime() < Date.now() - 60_000)
+      return blocked(422, "next_check_in_past", "The next check cannot be in the past. Nothing was changed.");
+
+    if (!changes.length) return c.json(manageWorkResponseSchema.parse({ outcome: "already_done", item, changes }));
+    if (req.preview)
+      return c.json(manageWorkResponseSchema.parse({ outcome: "preview", item, changes, externalEffect: "No message is sent to anyone. The new owner sees it in their Work." }));
+
+    const { data, error } = await db.rpc("work_item_manage", {
+      p_work_item_id: id,
+      p_expected_version: req.version,
+      p_set_owner: req.ownerId !== undefined,
+      p_owner_id: req.ownerId ?? null,
+      p_set_due: req.dueOn !== undefined,
+      p_due_on: req.dueOn ?? null,
+      p_set_next_check: req.nextCheckAt !== undefined,
+      p_next_check: req.nextCheckAt ?? null,
+      p_note: req.note ?? null,
+    });
+    if (error) {
+      const m = error.message ?? "";
+      if (error.code === "40001" || m.includes("version_stale"))
+        return blocked(409, "version_current", "This work changed since you looked at it. Nothing was changed; reload to see the current version.", await loadItem(db, id));
+      if (m.includes("permission_denied")) return blocked(403, "permission", "Your role can view Work but not change it. Nothing was changed.");
+      if (m.includes("owner_not_member")) return blocked(422, "owner_not_member", "That person is not a member of this brokerage. Nothing was changed.");
+      return sendError(c, mapDatabaseError(error));
+    }
+    const fresh = await loadItem(db, id);
+    const res = data as { changed: boolean };
+    if (!res.changed) return c.json(manageWorkResponseSchema.parse({ outcome: "already_done", item: fresh, changes: [] }));
+    const auditAction = changes.length === 1 && changes[0]!.field === "owner" ? "work_item.assigned" : changes.length === 1 && changes[0]!.field === "due" ? "work_item.due_changed" : "work_item.managed";
+    return c.json(manageWorkResponseSchema.parse({ outcome: "applied", item: fresh, changes, auditAction }));
   });
 
   /** Copying is a fact about the draft. It advances nothing (Part 7). */
