@@ -813,4 +813,33 @@ describe("live mode", () => {
       expect(res.denied).toBe(true);
     });
   });
+
+  describe("the quotation lifecycle, without Gmail", () => {
+    it("Space and Ask show the same stage at each step; a reply is recorded normally only once delivered", async () => {
+      for (const stage of ["not_asked", "request_prepared", "approved_to_deliver", "with_insurer"] as const) {
+        oppStage = stage;
+        const A = await live();
+        const ws = A.ai.workspace({ ws: "quote", opportunityId: OPP });
+        const all = text(ws);
+        const next = oppDetail().next.what;
+        expect(all).toContain(next);
+        const asked = await A.ai.route("What's next on this quotation?", { ws: "quote", opportunityId: OPP, ref: { ws: "quote", opportunityId: OPP } });
+        expect(asked.lead).toBe("Next: " + next + ".");
+        // Never "sent"; the ordinary reply form only once someone has delivered the request.
+        expect(all).not.toMatch(/"(Request )?[Ss]ent\b/);
+        expect(all.includes("Record CIC General’s reply")).toBe(stage === "with_insurer");
+        if (stage !== "with_insurer") expect(all).toContain("Manual record: CIC General replied without a delivered request");
+        const stages = (ws.blocks as { t: string; label?: string; rows?: { title: string; badge: string }[] }[]).find((b) => b.label === "Where this quotation stands")!;
+        const done = stages.rows!.filter((r) => r.badge === "Done").map((r) => r.title);
+        expect(done.includes("Delivered by a person, with evidence")).toBe(stage === "with_insurer");
+        expect(done.includes("Reviewed and approved")).toBe(stage === "approved_to_deliver" || stage === "with_insurer");
+        if (stage === "approved_to_deliver") {
+          expect(all).toMatch(/"a":"copy"/);
+          expect(all).toMatch(/"a":"download"/);
+          expect(all).toContain("Record how it reached CIC General");
+        }
+        if (stage === "with_insurer") expect(stages.rows!.map((r) => r.title)).toContain("With CIC General");
+      }
+    });
+  });
 });

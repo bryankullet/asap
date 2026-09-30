@@ -203,6 +203,15 @@ describe("2–6 · quotation work", () => {
     const resp = await act(AMINA, { action: "record_response", opportunityInsurerId: oi.id, outcome: "quoted", receivedAt: new Date().toISOString(), premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30", sourceNote: "Quotation letter received by email." });
     expect(resp.body.outcome).toBe("done");
     expect(resp.body.opportunity.insurers.find((i: Json) => i.insurerId === JUBILEE).stage).toBe("quoted");
+    /* Terms reviewed, a second quote, and the comparison ready — still nothing sent. */
+    const jubResp = resp.body.opportunity.insurers.find((i: Json) => i.insurerId === JUBILEE).response;
+    expect((await act(AMINA, { action: "record_term", insurerResponseId: jubResp.id, termType: "excess", label: "Own damage", extractedValue: "5% min KES 30,000" })).body.outcome).toBe("done");
+    expect((await act(AMINA, { action: "add_insurer", insurerId: CIC })).body.outcome).toBe("done");
+    const cicOi = (await call(AMINA, "GET", `/opportunities/${oppId}`)).body.insurers.find((i: Json) => i.insurerId === CIC);
+    expect((await act(AMINA, { action: "record_response", withoutRequest: true, opportunityInsurerId: cicOi.id, outcome: "quoted", receivedAt: new Date().toISOString(), premiumAmount: "5620000.00", premiumCurrency: "KES", validUntil: "2027-06-30", sourceNote: "CIC phoned terms through and confirmed by letter." })).body.outcome).toBe("done");
+    const cmp = await call(AMINA, "POST", `/opportunities/${oppId}/comparison/actions`, { action: "generate_comparison" });
+    expect(cmp.body.outcome).toBe("done");
+    expect((await call(AMINA, "GET", `/opportunities/${oppId}/comparison`)).body.comparison).toBeTruthy();
     expect(await audits(oppId)).toBeGreaterThan(5);
     /* No mail left ASAP at any point. */
     expect((await sql<{ n: number }[]>`select count(*)::int as n from audit_log where object_id = ${oppId} and action like '%email.sent%'`)[0]!.n).toBe(0);
@@ -320,4 +329,3 @@ describe("8–9 · assign Work and change its due date", () => {
 });
 
 void ORG_A;
-void CIC;

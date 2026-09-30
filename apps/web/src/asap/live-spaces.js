@@ -270,6 +270,33 @@ export function requestDraft(d, insurerName) {
   ].filter((x) => x !== "").join("\n");
 }
 
+/**
+ * Where the quotation stands, read from its records — never authored. Each stage is done only
+ * when the record that proves it exists: a request prepared is not a request sent.
+ */
+function stagesBlock(d, live) {
+  const any = (f) => live.some(f);
+  const withIns = live.filter((i) => i.stage === "with_insurer").map((i) => i.insurerName);
+  const required = d.requirements.filter((r) => r.required !== false);
+  const steps = [
+    ["Need recorded", true, d.opportunity.title],
+    ["Requirements gathered", required.length > 0 && required.every((r) => r.suppliedAt), required.length ? required.filter((r) => r.suppliedAt).length + " of " + required.length + " supplied" : "None recorded"],
+    ["Insurers selected", live.length > 0, live.length ? live.map((i) => i.insurerName).join(", ") : "None yet"],
+    ["Request prepared", any((i) => !!i.request), ""],
+    ["Reviewed and approved", any((i) => !!i.request?.approvedAt), "Approval does not send it"],
+    ["Delivered by a person, with evidence", any((i) => !!i.request?.delivery), "Copy or download it, deliver it yourself, record how"],
+    [withIns.length ? "With " + withIns.join(", ") : "With the insurer", any((i) => ["with_insurer", "quoted", "declined"].includes(i.stage)), ""],
+    ["Response received", any((i) => !!i.response), ""],
+    ["Terms reviewed", any((i) => (i.response?.terms?.length ?? 0) > 0), ""],
+    ["Comparison ready", !!d.comparisonView?.comparison, ""],
+  ];
+  const now = steps.findIndex(([, done]) => !done);
+  return rows(
+    "Where this quotation stands",
+    steps.map(([title, done, note], k) => ({ title, note: note || (done ? "Done" : k === now ? "This is the current step" : "Not yet"), badge: done ? "Done" : k === now ? "Now" : "Later", badgeTone: done ? ok : k === now ? warn : "neutral" })),
+  );
+}
+
 function insurerControls(i, d, act) {
   const out = [];
   const reqText = i.request ? i.request.subject + "\n\n" + i.request.body : "";
@@ -362,6 +389,7 @@ function opportunitySpace(id, state) {
   const legacy = tooShort(o.title) || tooShort(o.classOfBusiness) || tooShort(d.client.name, 2) || d.requirements.some((r) => tooShort(r.label) || weakSupply(r));
   const blocks = [
     ...nextBlock(d.next),
+    stagesBlock(d, live),
     ...(legacy ? [note("red", LEGACY, "Some of this quotation was saved before ASAP checked its details — a title, class or requirement too short to mean anything, or a requirement marked supplied without evidence. Correct it before relying on it.")] : []),
     facts([
       ["Client", d.client.name],
@@ -427,7 +455,10 @@ function opportunitySpace(id, state) {
     ...live.flatMap((i) => insurerControls(i, d, act)),
     note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "ASAP does not send requests", d.sending.reason || "Every request needs your approval before it leaves."),
   ];
-  if (quoted.length >= 2) blocks.push(note("green", plural(quoted.length, "quote", "quotes") + " to compare", "Comparing them side by side is not connected in this view yet; each quote's premium and terms are listed above."));
+  const cv = d.comparisonView;
+  if (cv?.comparison) blocks.push(note("green", "Comparison ready", "Built " + date(cv.comparison.generatedAt) + " from the recorded quotes" + (cv.comparison.stale ? " — a quote has changed since, so build it again before presenting." : ". Present it to the client once reviewed.")));
+  else if (cv?.readiness?.ready && cv.permissions?.canGenerate) blocks.push(gate("Build the comparison", "From the " + plural(quoted.length, "recorded quote", "recorded quotes") + " and their terms. Nothing is sent to the client.", "comparison.generate", { id }, { label: "Build comparison" }));
+  else if (cv?.readiness && !cv.readiness.ready) blocks.push(note("amber", "Comparison not ready yet", cv.readiness.blockers.join(" ")));
   return { kind: "Quotation work", title: d.client.name + " — " + o.title, status: o.closedAt ? "draft" : "live", statusLabel: quoted.length + " of " + live.length + " quoted", recordRef: { ws: "quote", opportunityId: id }, blocks };
 }
 

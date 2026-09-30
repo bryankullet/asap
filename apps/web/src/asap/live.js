@@ -156,7 +156,13 @@ async function hydrate(me) {
   const detailsP = pool(
     opportunities.opportunities.filter((o) => !o.closedAt).slice(0, 40),
     6,
-    (o) => api.opportunity(o.id),
+    // The quotation and, beside it, whether its comparison is ready: both from the server.
+    async (o) => {
+      const d = await api.opportunity(o.id);
+      if (!d) return d;
+      const cmp = typeof api.comparison === "function" ? await api.comparison(o.id).catch(() => null) : null;
+      return { ...d, comparisonView: cmp ?? null };
+    },
   );
   const clientLists = await clientListsP;
   const seen = new Set();
@@ -800,6 +806,16 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         await refresh();
         const c = db.clients.find((x) => x.id === p.clientId);
         return ok("Quotation work started" + (c ? " for " + c.name : ""), { nav: { ws: "quote", opportunityId: res.opportunityId } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "comparison.generate": async (p) => {
+      try {
+        const res = await api.comparisonAction(p.id, { action: "generate_comparison" });
+        if (res.outcome === "blocked") return { ok: false, error: res.reason || "The comparison cannot be built yet. Nothing was changed." };
+        await refresh();
+        return ok("Comparison built from the recorded quotes", { nav: { ws: "quote", opportunityId: p.id }, detail: "Built from the premiums and terms on file. Nothing was sent to the client.", receipt: { action: "Comparison built", record: "Quotation comparison", outcome: "Done", changed: ["A comparison of the recorded quotes"], unchanged: ["The quotes themselves", "Nothing was sent to the client"], next: "Review it, then present it to the client", audit: "comparison.generated" } });
       } catch (e) {
         return fail(e);
       }
