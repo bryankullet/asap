@@ -127,6 +127,39 @@ class Component extends DCLogic {
     }, 320);
   };
 
+  // ---------------- pending actions
+  updatePending = (i, patch) => {
+    const thread = this.state.thread.map((m, j) => (j === i && m.pending ? { ...m, pending: { ...m.pending, ...patch } } : m));
+    this.setState({ thread });
+    return thread;
+  };
+  confirmPending = async (i) => {
+    const m = this.state.thread[i];
+    if (!m || !m.pending || !['open', 'failed'].includes(m.pending.status)) return;
+    this.updatePending(i, { status: 'running', statusText: m.pending.progress || 'Saving to your brokerage\u2019s records\u2026' });
+    let res;
+    try { res = await this.A.records.act(m.pending.action, m.pending.payload, m.pending.actionId); }
+    catch (e) { res = { ok: false, error: 'That could not be saved just now. Nothing was changed \u2014 you can retry.' }; }
+    if (res.denied) { this.updatePending(i, { status: 'blocked', statusText: res.reason || 'Your role cannot do this.' }); return; }
+    if (!res.ok) { this.updatePending(i, { status: 'failed', statusText: res.error || 'That failed. Nothing was changed \u2014 you can retry.' }); return; }
+    const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
+    const thread = this.updatePending(i, { status: res.duplicate || res.already ? 'already' : 'done', statusText: receipt });
+    const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const next = [...thread, { role: 'ai', lead: receipt, text: res.detail || 'Written to your brokerage\u2019s records with an audit entry against your name.', receipt: receipt + ' \u00b7 ' + this.A.records.actor().name + ' \u00b7 ' + when, chips: res.next || [] }];
+    this.saveThread(next);
+    this.setState({ thread: next });
+    this.bump();
+    if (res.nav) this.openRef(res.nav);
+  };
+  cancelPending = (i) => this.updatePending(i, { status: 'cancelled', statusText: 'Cancelled \u2014 nothing was written.' });
+  editPending = (i) => {
+    const m = this.state.thread[i];
+    if (!m || !m.pending) return;
+    // An edit replaces this preview: its matches and checks no longer describe what will be written.
+    this.updatePending(i, { status: 'replaced', statusText: 'Replaced by your edit \u2014 nothing was written from this preview.' });
+    if (m.pending.editRef) this.openRef(m.pending.editRef);
+  };
+
   // ---------------- Ask
   ask = (text) => {
     if (!text || !text.trim()) return;
@@ -140,6 +173,7 @@ class Component extends DCLogic {
       const r = (await this.A.ai.route(text, ctx)) || {};
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
+      if (r.pending) msg.pending = { ...r.pending, status: 'open' };
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
       if (r.keepWorkspace) msg.panelNote = '';
       else if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';
@@ -155,7 +189,7 @@ class Component extends DCLogic {
         this.openRef(r.ref);
         if (r.ref.clientId) this.setState({ contextRef: r.ref });
       }
-      if (r.plan) this.act(r.plan.action, r.plan.payload, { actionId: r.plan.actionId });
+      if (r.plan && !r.pending) this.act(r.plan.action, r.plan.payload, { actionId: r.plan.actionId });
     }, this.A.ai.latencyMs);
   };
   send = () => { const el = this.inputRef.current; if (!el) return; const v = el.value; el.value = ''; this.ask(v); };
@@ -549,7 +583,9 @@ class Component extends DCLogic {
         hasPanelNote: !!m.panelNote, panelNote: m.panelNote,
         hasReceipt: !!m.receipt, receipt: m.receipt, openAudit: () => this.openRef({ ws: 'audit', clientId: this.state.contextRef?.clientId }),
         hasChips: (m.chips || []).length > 0,
-        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => this.ask(c.text || c.label || c) })) })),
+        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
+        hasPending: !!m.pending,
+        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },

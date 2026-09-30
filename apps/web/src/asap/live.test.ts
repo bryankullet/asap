@@ -39,11 +39,24 @@ const applyPreview = vi.fn(async () => ({
 const applyToRecord = vi.fn(async () => ({ applicationId: "b2000000-0000-4000-8000-000000000001" }));
 
 const setAutomationEnabled = vi.fn(async () => ({}));
-const createClient = vi.fn(async (input: { name: string; confirmNew?: boolean }) =>
-  input.confirmNew || input.name !== "Tausi Haulier"
-    ? { outcome: "created", file: { client: { id: "30000000-0000-4000-8000-0000000000ff" } } }
-    : { outcome: "possible_duplicates", name: input.name, candidates: [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] },
-);
+// Clients created during a test, so the read-back after a create finds them as the server would.
+const created: { id: string; name: string }[] = [];
+const createClient = vi.fn(async (input: { name: string; kind?: string; confirmNew?: boolean; preview?: boolean }) => {
+  if (input.preview)
+    return {
+      outcome: "preview", name: input.name, kind: input.kind ?? "corporate",
+      candidates: /tausi/i.test(input.name) ? [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] : [],
+      exact: null, missing: ["Primary contact", "Phone", "Email"],
+      writes: ["One client record: " + input.name + ", a company", "Its client file, started as not yet begun", "An audit entry against your name"],
+      externalEffect: "No message is sent to anyone.",
+    };
+  if (input.confirmNew || input.name !== "Tausi Haulier") {
+    const id = "30000000-0000-4000-8000-0000000000ff";
+    if (!created.some((c) => c.id === id)) created.push({ id, name: input.name });
+    return { outcome: "created", file: { client: { id } } };
+  }
+  return { outcome: "possible_duplicates", name: input.name, candidates: [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] };
+});
 const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
   batch: { id: "80000000-0000-4000-8000-000000000001", filename: "book.csv", rowCount: 2, premiumBasis: input.premiumBasis },
   source: "csv",
@@ -84,7 +97,7 @@ vi.mock("../lib/api.js", () => ({
     clientFiles: async (view: string) => ({
       view,
       counts: {},
-      items: view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
+      items: view === "not_started" ? created.map((c) => ({ client: { id: c.id, organization_id: ORG, name: c.name, kind: "corporate", source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-30", updated_at: "2026-09-30", deleted_at: null }, effective_status: "not_started", blocking: [], in_state_since: "2026-09-30", documents_held: 0 })) : view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
     }),
     clientSpace: async () => ({
       client: { id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate", fileStatus: "cleared", createdAt: "2026-09-01" },
@@ -134,7 +147,10 @@ async function live() {
 const text = (v: unknown) => JSON.stringify(v);
 
 describe("live mode", () => {
-  beforeEach(() => setAutomationEnabled.mockClear());
+  beforeEach(() => {
+    setAutomationEnabled.mockClear();
+    created.length = 0;
+  });
 
   it("reads the brokerage's own people, clients and work — and no demo records", async () => {
     const A = await live();
@@ -240,8 +256,13 @@ describe("live mode", () => {
     const other = await A.ai.route("Summarise the market mood", {});
     expect(askQuestion).toHaveBeenCalled();
     expect(other.lead).toMatch(/assistant isn’t switched on/);
-    const add = await A.ai.route("add Simba Traders as a client", {});
-    expect(add.plan?.action).toBe("client.create");
+    // A write proposed in Ask waits for the person: a pending card, never a plan that runs itself.
+    const add = (await A.ai.route("add Simba Traders as a client", {})) as { plan?: unknown; pending?: { action: string; title: string; external: string; sections: { label: string; items: string[] }[] } };
+    expect(add.plan).toBeUndefined();
+    expect(add.pending?.action).toBe("client.create");
+    expect(add.pending?.title).toBe("Add Simba Traders");
+    expect(add.pending?.external).toBe("No message is sent to anyone.");
+    expect(add.pending?.sections.find((x) => x.label === "MISSING")?.items).toEqual(["Primary contact", "Phone", "Email"]);
   });
 
   it("uses the accepted Work views and shows no simulated connection controls", async () => {
@@ -338,5 +359,40 @@ describe("live mode", () => {
     S.getDb().clients.push({ id: "30000000-0000-4000-8000-0000000000aa", name: "A" });
     expect(S.sel.clientByName("Is cover active on this policy?")).toBeNull();
     expect(S.sel.clientByName("Open Tausi Hauliers")?.name).toBe("Tausi Hauliers Ltd");
+  });
+
+  it("adds a client from Ask: preview, confirm through the + New handler, read back, receipt, next steps", async () => {
+    const A = await live();
+    const r = (await A.ai.route("Add Kifaru Traders as a client.", {})) as { lead: string; pending: { action: string; payload: Record<string, unknown>; actionId: string; editRef: { ws: string; name: string } } };
+    expect(r.lead).toBe("I can add Kifaru Traders as a company. I found no close matches.");
+    // Nothing was written by asking.
+    expect(createClient).toHaveBeenLastCalledWith({ name: "Kifaru Traders", kind: "corporate", preview: true });
+    const first = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; text: string; nav: { ws: string; clientId: string }; next: { label: string }[] };
+    expect(first.ok).toBe(true);
+    expect(first.text).toBe("Kifaru Traders added as a client");
+    expect(first.nav).toEqual({ ws: "client", clientId: "30000000-0000-4000-8000-0000000000ff" });
+    expect(first.next.map((n) => n.label)).toEqual(["Add contact", "Record insurance need", "Start quotation", "Upload document"]);
+    expect(createClient).toHaveBeenLastCalledWith({ name: "Kifaru Traders", kind: "corporate", confirmNew: true });
+    // A second press of the same Confirm is recognised, not written again.
+    const calls = createClient.mock.calls.length;
+    const again = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; duplicate?: boolean };
+    expect(again.duplicate).toBe(true);
+    expect(createClient.mock.calls.length).toBe(calls);
+    // Edit opens the form with the name, company chosen.
+    expect(r.pending.editRef).toEqual({ ws: "newclient", name: "Kifaru Traders", kind: "corporate" });
+  });
+
+  it("asks company or person when the name does not say, and drops a duplicate result for a different name", async () => {
+    const A = await live();
+    const ask = (await A.ai.route("Add Wanjiru Kamau as a client", {})) as { lead: string; pending?: unknown; clarify?: { options: { text: string }[] } };
+    expect(ask.lead).toBe("Is Wanjiru Kamau a company or a person?");
+    expect(ask.pending).toBeUndefined();
+    expect(ask.clarify?.options.map((o) => o.text)).toEqual(["Add Wanjiru Kamau as a company client", "Add Wanjiru Kamau as a person client"]);
+    const person = (await A.ai.route("Add Wanjiru Kamau as a person client", {})) as { pending: { payload: { kind: string } } };
+    expect(person.pending.payload.kind).toBe("individual");
+    // A duplicate check for one name is not shown against another.
+    await A.records.act("client.create", { name: "Tausi Haulier", kind: "Company" });
+    expect(text(A.ai.workspace({ ws: "newclient", name: "Tausi Haulier" }))).toContain("Tausi Hauliers Ltd");
+    expect(text(A.ai.workspace({ ws: "newclient", name: "Kifaru Traders" }))).not.toContain("Tausi Hauliers Ltd");
   });
 });

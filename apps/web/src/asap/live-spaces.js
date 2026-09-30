@@ -60,7 +60,9 @@ function clientsSpace() {
   };
 }
 
-function newClientSpace(state) {
+function newClientSpace(state, ref = {}) {
+  // A duplicate result describes one name only: opening the form for a different name drops it.
+  if (ref.name && state.duplicate && state.duplicate.name.toLowerCase() !== ref.name.toLowerCase()) state.duplicate = null;
   const dup = state.duplicate;
   return {
     kind: "New client",
@@ -73,8 +75,8 @@ function newClientSpace(state) {
         "newclient",
         "Client",
         [
-          { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents" },
-          { key: "kind", label: "COMPANY OR PERSON", options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
+          { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents", value: ref.name || "" },
+          { key: "kind", label: "COMPANY OR PERSON", value: ref.kind || undefined, options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
         ],
         "client.create",
         {},
@@ -410,6 +412,34 @@ function workItemSpace(ref) {
   };
 }
 
+/** A contact for a client, through the same POST /contacts the client record uses. */
+function newContactSpace(ref) {
+  const c = ref.clientId ? S.sel.client(ref.clientId) : null;
+  if (!c) return { kind: "Contact", title: "Choose the client first", status: "draft", statusLabel: "Not saved yet", blocks: [note("amber", "No client chosen", "Open the client, then add the contact from there. Nothing was changed.")] };
+  return {
+    kind: "Contact",
+    title: "Add a contact for " + c.name,
+    status: "draft",
+    statusLabel: "Not saved yet",
+    blocks: [
+      form(
+        "newcontact:" + c.id,
+        "Contact",
+        [
+          { key: "fullName", label: "FULL NAME", placeholder: "Who ASAP should talk to" },
+          { key: "roleLabel", label: "ROLE", placeholder: "For example Finance manager" },
+          { key: "phone", label: "PHONE", placeholder: "+254…" },
+          { key: "email", label: "EMAIL", placeholder: "name@company.co.ke" },
+        ],
+        "contact.create",
+        { clientId: c.id },
+        "Add contact",
+        "Saved to " + c.name + "’s file as the primary contact. No message is sent to them.",
+      ),
+    ],
+  };
+}
+
 /* ---------------------------------------------------------------- documents */
 
 function documentSpace(ref, state) {
@@ -668,7 +698,9 @@ export function liveSpace(ref, state) {
     case "clients":
       return clientsSpace();
     case "newclient":
-      return newClientSpace(state);
+      return newClientSpace(state, ref);
+    case "newcontact":
+      return newContactSpace(ref);
     case "import":
       return importSpace(state);
     case "quote":

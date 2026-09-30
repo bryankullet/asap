@@ -613,6 +613,37 @@ describe("Ask never creates a client (D-050)", () => {
     expect(rpcCalls).toEqual([]);
   });
 
+  it("a preview says what would be written, what is similar and what is missing — and writes nothing", async () => {
+    const res = await app.request("/clients", json({ name: "Acme Logistics", kind: "corporate", preview: true }, "tok-admin"));
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.outcome).toBe("preview");
+    expect(body.candidates.map((c: { name: string }) => c.name)).toContain("Acme Logistics Ltd");
+    expect(body.missing).toEqual(["Primary contact", "Phone", "Email"]);
+    expect(body.writes[0]).toBe("One client record: Acme Logistics, a company");
+    expect(body.externalEffect).toBe("No message is sent to anyone.");
+    const fresh = await readJson(await app.request("/clients", json({ name: "Kifaru Traders", kind: "corporate", preview: true }, "tok-admin")));
+    expect(fresh.candidates).toEqual([]);
+    expect(fresh.exact).toBeNull();
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("a repeated create reports the client already on file instead of making another", async () => {
+    db.rpc["client_create"] = () => {
+      rpcCalls.push("client_create");
+      return { data: { id: ACME, created: false } };
+    };
+    db.rpc["client_file_missing"] = () => ({ data: [] });
+    const acme = (db.tables["clients"] ?? []).find((r) => r["id"] === ACME)!;
+    Object.assign(acme, { source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", deleted_at: null });
+    db.tables["client_file_documents"] = [];
+    const res = await app.request("/clients", json({ name: "Acme Motors", kind: "corporate", confirmNew: true }, "tok-admin"));
+    if (res.status !== 200) throw new Error(await res.text());
+    const body = await readJson(res);
+    expect(body.outcome).toBe("already_on_file");
+    expect(body.file.client.id).toBe(ACME);
+  });
+
   it("the create path reviews duplicates before creating", async () => {
     const dup = await app.request(
       "/clients",

@@ -455,7 +455,7 @@ const NOT_CONNECTED_WS = {
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "import", "quote", "settings", "connections"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -643,9 +643,38 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           state.duplicate = { name, kind, candidates: res.candidates };
           return { ok: false, error: "A similar client is already on file — check the matches before creating another." };
         }
+        if (res.outcome !== "created" && res.outcome !== "already_on_file") return { ok: false, error: "That was not saved. Nothing was changed." };
         state.duplicate = null;
         await refresh();
-        return ok(name + " added as a client", { nav: { ws: "client", clientId: res.file.client.id } });
+        const id = res.file.client.id;
+        // Success is claimed only when the client can be read back.
+        if (!db.clients.some((c) => c.id === id)) return { ok: false, error: name + " was saved but is not showing yet. Refresh records to check before trying again." };
+        const already = res.outcome === "already_on_file";
+        return ok(already ? name + " was already a client — nothing new was created" : name + " added as a client", {
+          already,
+          detail: already ? "Opened the existing client file." : "Written to your brokerage’s records with an audit entry against your name. No message was sent.",
+          nav: { ws: "client", clientId: id },
+          next: [
+            { label: "Add contact", ref: { ws: "newcontact", clientId: id } },
+            { label: "Record insurance need", ref: { ws: "quote", clientId: id } },
+            { label: "Start quotation", ref: { ws: "quote", clientId: id } },
+            { label: "Upload document", ref: { ws: "client", clientId: id } },
+          ],
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "contact.create": async (p) => {
+      const fullName = (p.fullName || "").trim();
+      if (fullName.length < 2) return { ok: false, error: "Give the contact's full name." };
+      const email = (p.email || "").trim();
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, error: "That does not look like an email address. Nothing was saved." };
+      try {
+        await api.createContact({ clientId: p.clientId, fullName, roleLabel: (p.roleLabel || "").trim() || null, email: email || null, phone: (p.phone || "").trim() || null, isPrimary: true });
+        await refresh();
+        const c = db.clients.find((x) => x.id === p.clientId);
+        return ok(fullName + " added as the primary contact" + (c ? " for " + c.name : ""), { detail: "No message was sent to them.", nav: { ws: "client", clientId: p.clientId } });
       } catch (e) {
         return fail(e);
       }
@@ -1057,6 +1086,85 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     };
   }
 
+  /** Company or person, from the name itself; null when the name does not say. */
+  function clientKindFrom(name, said) {
+    if (said) return /person|individual/i.test(said) ? "individual" : "corporate";
+    if (/\b(ltd|limited|plc|llc|inc|co|company|traders|trading|motors|enterprises?|holdings|group|industries|logistics|services|agencies|agency|stores?|foods|clinics?|hospital|school|sacco|farm|farms|transport|hauliers?|properties|investments|&)\b/i.test(name)) return "corporate";
+    if (/^(mr|mrs|ms|miss|dr)\.?\s/i.test(name)) return "individual";
+    return null;
+  }
+
+  /**
+   * "Add Kifaru Traders as a client": ask the API what would be written — similar clients, what is
+   * missing — and put it before the person as a card. Nothing is written until Confirm, and the
+   * confirm goes through the same client.create handler + New uses.
+   */
+  async function addClientPreview(name, said) {
+    if (name.length < 2) return { lead: "What is the client's name?", text: "Nothing was changed.", ref: null, keepWorkspace: true };
+    const kind = clientKindFrom(name, said);
+    if (!kind)
+      return {
+        lead: "Is " + name + " a company or a person?",
+        text: "One detail decides how the client file is kept. Nothing was changed.",
+        clarify: { question: "Kind of client", options: [{ label: "A company", text: "Add " + name + " as a company client" }, { label: "A person", text: "Add " + name + " as a person client" }] },
+        ref: null,
+        keepWorkspace: true,
+      };
+    let p;
+    try {
+      p = await api.createClient({ name, kind, preview: true });
+    } catch (e) {
+      return { lead: "I could not check for similar clients just now.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true, chips: ["Add " + name + " as a client"] };
+    }
+    if (p.outcome !== "preview") return { lead: "I could not prepare that.", text: "Nothing was changed.", ref: null, keepWorkspace: true };
+    const kindWord = kind === "individual" ? "a person" : "a company";
+    const found = p.exact
+      ? [p.exact.name + " is already on file — confirming opens it and adds nothing"]
+      : p.candidates.length
+        ? p.candidates.map((c) => "Similar: " + c.name + " (" + (c.kind === "individual" ? "person" : "company") + ") — check it is not the same client")
+        : ["No similar client on file"];
+    const lead = p.exact
+      ? name + " is already a client."
+      : "I can add " + name + " as " + kindWord + ". " + (p.candidates.length ? "I found " + p.candidates.length + " similar name" + (p.candidates.length === 1 ? "" : "s") + " — check before confirming." : "I found no close matches.");
+    return {
+      lead,
+      text: "I still need the primary contact, or you can create the client now and add that later.",
+      ref: null,
+      keepWorkspace: true,
+      pending: {
+        title: p.exact ? "Open " + p.exact.name : "Add " + name,
+        sections: [
+          { label: "UNDERSTOOD", items: ["Create " + kindWord + " client", "Name: " + name, "Owner: " + (me.user.full_name || me.user.email)] },
+          { label: "FOUND", items: found },
+          { label: "MISSING", items: p.exact ? [] : p.missing },
+          { label: "CHANGE", items: p.writes },
+        ],
+        external: p.externalEffect,
+        action: "client.create",
+        payload: { name, kind, confirmNew: "yes" },
+        // One press of Confirm: a retry or a second press finds the same client (the create is idempotent on the name).
+        actionId: "client.create:" + kind + ":" + name.toLowerCase(),
+        confirmLabel: p.exact ? "Open client" : "Add client",
+        progress: "Checking for similar clients and saving to your brokerage’s records…",
+        editRef: { ws: "newclient", name, kind },
+      },
+    };
+  }
+
+  /** Any other write the engine proposes, shown as a card rather than run. */
+  function genericPending(plan) {
+    const external = /^(email|message|notify)\./.test(plan.action) ? "This would reach someone outside the brokerage; it waits for your approval." : "No message is sent to anyone.";
+    return {
+      title: plan.label || "Confirm this change",
+      sections: [{ label: "UNDERSTOOD", items: [plan.label || plan.action] }, { label: "CHANGE", items: [plan.detail || "One change to your brokerage's records, with an audit entry against your name."] }],
+      external,
+      action: plan.action,
+      payload: plan.payload,
+      actionId: plan.actionId,
+      confirmLabel: "Confirm",
+    };
+  }
+
   async function liveRoute(text, ctx) {
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
@@ -1071,8 +1179,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         ? { lead: "You have " + n + " client" + (n === 1 ? "" : "s") + ".", text: "They are listed in the workspace beside this answer.", ref: { ws: "clients" }, chips: LIVE_CHIPS }
         : { lead: "You do not have any clients yet.", text: "Import your book, or add your first client by name — say “add Tausi Hauliers as a client”.", ref: { ws: "clients" }, chips: ["Import records", "Add a client"] };
     }
-    const add = /\b(?:add|create)\s+(.+?)\s+as\s+an?\s+(?:new\s+)?client\b/i.exec(t);
-    if (add) return { lead: "Adding " + add[1] + " as a client.", text: "ASAP checks for a client with a similar name first.", ref: { ws: "newclient" }, plan: { action: "client.create", payload: { name: add[1], kind: "Company" }, actionId: "client.create:" + add[1].toLowerCase() } };
+    // The name comes from what was typed, never the typo-corrected text: a client's name is theirs.
+    const add = /\b(?:add|create)\s+(.+?)\s+as\s+an?\s+(?:new\s+)?(company|person|individual|corporate)?\s*client\b/i.exec(text.trim());
+    if (add) return addClientPreview(add[1].trim(), add[2] || null);
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
     if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) {
@@ -1096,6 +1205,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return { ...r, lead: "Opening it from your records.", text: "The workspace beside this answer is read from your brokerage's records.", plan: null, chips: LIVE_CHIPS };
     }
     if (r.plan && !LIVE[r.plan.action]) r.plan = null;
+    // Every write the engine proposes waits for the person (D-118): it becomes a pending card.
+    if (r.plan) r.pending = genericPending(r.plan);
     return r;
   }
 
