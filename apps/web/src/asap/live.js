@@ -8,7 +8,7 @@
  *
  * Actions the API cannot perform yet are refused in words, never simulated.
  */
-import { draftProblems } from "@asap/schema";
+import { AUTOMATION_REGISTRY, automationProblems, draftProblems } from "@asap/schema";
 import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
@@ -327,8 +327,25 @@ async function hydrate(me) {
     }
   }
 
+  // Each automation's history and last test, from the server: the last real run, any failure, and
+  // what test mode last found. Nothing about an automation's state is kept in the browser.
+  const autoFacts = new Map(
+    await Promise.all(
+      automations.automations.slice(0, 20).map(async (a) => {
+        const [runs, last] = await Promise.all([
+          typeof api.automationRuns === "function" ? api.automationRuns(a.id).catch(() => ({ runs: [] })) : { runs: [] },
+          typeof api.automationLastTest === "function" ? api.automationLastTest(a.id).catch(() => ({ lastTest: null })) : { lastTest: null },
+        ]);
+        return [a.id, { runs: runs.runs, lastTest: last.lastTest, raw: a }];
+      }),
+    ),
+  );
   for (const a of automations.automations) {
+    const f = autoFacts.get(a.id);
     db.automations.push({
+      raw: a,
+      history: f?.runs ?? [],
+      lastTest: f?.lastTest ?? null,
       id: a.id,
       name: a.name,
       on: a.enabled,
@@ -492,7 +509,7 @@ const NOT_CONNECTED_WS = {
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -776,6 +793,35 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (!a.on && a.legacyConditions)
         return { ok: false, error: "Cannot enable — conditions are not supported. This automation was saved with conditions in words that ASAP cannot apply, so switching it on would fire where it was told not to. Save a new one without conditions." };
       return write(() => api.setAutomationEnabled(a.id, !a.on), a.name + (a.on ? " is paused" : " is on"));
+    },
+    /*
+     * A new automation from the registry (D-125): structured parts, each validated against the
+     * shared registry before anything is sent, and again by the server. Words that are not an
+     * executable part are refused with the reason — they are never saved as if they ran.
+     */
+    "automation.create": async (p) => {
+      const conditions = Array.isArray(p.conditions) ? p.conditions : p.fact ? [{ fact: p.fact, operator: p.operator, value: p.value === undefined || p.value === "" ? null : /^(days_)/.test(p.operator || "") ? Number(p.value) : String(p.value).includes(",") ? String(p.value).split(",").map((v) => v.trim()).filter(Boolean) : p.value }] : [];
+      const action = AUTOMATION_REGISTRY.actions.find((x) => x.verb === p.verb);
+      const input = { name: (p.name || "").trim(), description: (p.description || "").trim().slice(0, 500), triggerEvent: p.trigger, conditions, skill: action?.skill ?? "", preparedVerb: p.verb, approval: action?.approvalRequired ? "always" : p.approval === "never" ? "never" : "always", enabled: false };
+      if (input.name.length < 3) return { ok: false, error: "Give the automation a name of at least three characters. Nothing was saved." };
+      const problems = automationProblems(input);
+      if (problems.length) return { ok: false, error: "This cannot run as written: " + problems.join("; ") + ". Nothing was saved." };
+      try {
+        const res = await api.createAutomation(input);
+        await refresh();
+        return ok(input.name + " saved, switched off", { nav: { ws: "automation", automationId: res.automation.id }, detail: "Run it in test mode, then switch it on. It prepares; a person approves anything that leaves the brokerage, and any change to cover or money.", receipt: { action: "Automation saved", record: input.name, outcome: "Done", changed: ["A standing instruction, switched off"], unchanged: ["Nothing runs until it is switched on", "No work was prepared"], next: "Run it in test mode", audit: "automation.created" } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "automation.test": async (p) => {
+      try {
+        const res = await api.testAutomation(p.id);
+        await refresh();
+        return ok("Test mode: it would act on " + plural(res.wouldFire.length, "open item", "open items") + " of " + res.checked + " checked", { detail: res.problems.length ? "It cannot run as saved: " + res.problems.join("; ") + "." : "Nothing was prepared or written, apart from recording that the test ran." });
+      } catch (e) {
+        return fail(e);
+      }
     },
     "automation.save": async (p) => {
       const words = [p.trigger, p.name].join(" ").toLowerCase();
@@ -1378,6 +1424,66 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * Ask helps build an automation (D-125): each part of the sentence is matched to the registry,
+   * and Save is offered only when every part is executable. A part that is not — a trigger nothing
+   * emits yet, a condition ASAP cannot check, an action an automation may not take — is shown as
+   * a note that would not run, and nothing is offered for saving.
+   */
+  const TRIGGER_WORDS = [[/document|file|upload|attachment/i, "document.received"], [/quote|quotation/i, "quote.received"], [/renew|expir/i, "renewal.approaching"], [/pay(ment)?|premium received|receipt/i, "payment.received"], [/cover.*confirm|confirmation/i, "cover.confirmed"], [/claim.*regist|registered claim/i, "claim.registered"], [/overdue|late|no movement/i, "check.overdue"]];
+  function automationFromAsk(raw, t) {
+    if (!/\b(automation|automatically|whenever|every time|each time)\b/i.test(t)) return null;
+    if (/\b(what|which|show|list)\b.*\bautomations?\b/i.test(t) && !/\b(when|whenever)\b/i.test(t)) return null;
+    const whenPart = (/\b(?:when|whenever|every time|each time)\b(.+?)(?:,|\bthen\b|\bprepare\b|\bdraft\b|\bsend\b|\bemail\b|$)/i.exec(raw) || [])[1] || "";
+    const trig = TRIGGER_WORDS.find(([re]) => re.test(whenPart))?.[1] ?? null;
+    const reg = AUTOMATION_REGISTRY;
+    const conditions = [];
+    const notes = [];
+    const kindWord = /\b(claim|renewal|endorsement|placement)s?\b/i.exec(whenPart);
+    if (kindWord && trig !== "claim.registered") conditions.push({ fact: "kind", operator: "equals", value: kindWord[1].toLowerCase() });
+    const cls = CLASSES.find(([w]) => new RegExp("\\b" + w + "\\b", "i").test(whenPart));
+    if (cls) conditions.push({ fact: "class_of_business", operator: "equals", value: cls[1] });
+    if (/\b(over|above|more than|worth)\s+(kes|ksh)?\s*[\d,]+/i.test(raw)) notes.push("A money threshold — ASAP cannot check an amount in an automation yet");
+    if (/\bvip|important client|key account\b/i.test(raw)) notes.push("“Important clients” — there is no such fact on the record to check");
+    const wantsSend = /\b(send|email|notify|message|tell)\b/i.test(raw);
+    const verb = /\bdraft\b/i.test(raw) || wantsSend ? "draft" : "prepare";
+    if (wantsSend) notes.push("Sending — an automation never sends; it can draft for a person to send");
+    if (/\b(pay|refund|settle|commission|cover|bind|renew the policy)\b/i.test(raw.replace(whenPart, ""))) notes.push("Changing cover or money — never automatic; a person does it");
+    const input = { triggerEvent: trig ?? "", conditions, preparedVerb: verb, approval: "always" };
+    const problems = trig ? automationProblems(input) : ["ASAP could not tell what should start it"];
+    const part = (ok, text) => (ok ? "✓ " : "✗ ") + text;
+    const understood = [
+      part(!!trig && reg.triggers.find((x) => x.event === trig)?.executable, "When: " + (trig ? reg.triggers.find((x) => x.event === trig).label : "not recognised") + (trig && !reg.triggers.find((x) => x.event === trig).executable ? " — not available yet" : "")),
+      ...conditions.map((c) => part(true, "Only if: " + reg.facts.find((f) => f.fact === c.fact).label + " is " + c.value)),
+      part(true, "Then: " + reg.actions.find((x) => x.verb === verb).label),
+      part(true, "Approval: a person approves each result"),
+    ];
+    const ref = { ws: "automation" };
+    if (problems.length || notes.length)
+      return {
+        lead: "That cannot be saved as a working automation.",
+        text: [problems.length ? "It cannot run: " + problems.join("; ") + "." : "", notes.length ? "Not executable, so it would only be a note: " + notes.join("; ") + "." : "", "Nothing was saved. The builder beside this shows what ASAP can run today."].filter(Boolean).join(" "),
+        ref,
+        understood,
+      };
+    const name = (raw.replace(/^(please\s+)?(create|set up|make|add)\s+(an?\s+)?automation\s*(to|that|which)?\s*/i, "").trim() || "Automation").slice(0, 80);
+    return {
+      lead: "Save this automation, switched off?",
+      text: "Every part below is something ASAP can execute. It starts off; test it before switching it on.",
+      ref,
+      pending: {
+        title: "Save an automation",
+        sections: [{ label: "UNDERSTOOD", items: understood }, { label: "WRITE", items: ["One standing instruction, switched off", "An audit entry against your name"] }, { label: "NOT DONE", items: ["Nothing runs until you switch it on", "It never sends, and never changes cover or money"] }],
+        external: "No message is sent to anyone.",
+        action: "automation.create",
+        payload: { name: name.charAt(0).toUpperCase() + name.slice(1), trigger: trig, verb, conditions },
+        actionId: "automation.create:" + JSON.stringify(input),
+        confirmLabel: "Save switched off",
+        progress: "Saving to your brokerage’s records…",
+      },
+    };
+  }
+
+  /**
    * "What's next on this claim / this work?" — the server's next action for the record in front
    * (D-120). "This claim" with no claim in front is said so, never answered about another one.
    */
@@ -1726,6 +1832,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
     if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
+    const automation = automationFromAsk(text.trim(), t);
+    if (automation) return automation;
     const started = quoteStartFromAsk(text.trim(), t, ctx);
     if (started) return started;
     const work = await workFromAsk(text, t, ctx);

@@ -348,3 +348,39 @@ describe("Activity reads the audit truth, with the person, client and record res
     expect(row!.actor_type).toBe("user");
   });
 });
+
+/* ------------------------------------------------------------ Automations from the registry ---- */
+describe("automations are only what the registry can execute (D-125)", () => {
+  let id = "";
+  it("a trigger nothing emits is refused as not executable; nothing is saved", async () => {
+    const r = await call(AMINA, "POST", "/automations", { name: `Parity renewal ${RUN}`, triggerEvent: "renewal.approaching", skill: "work.prepare", preparedVerb: "prepare" });
+    expect(r.status).toBe(422);
+    expect(r.body.error.problems.join(" ")).toMatch(/does not fire yet/);
+    expect((await sql<{ n: number }[]>`select count(*)::int as n from automations where name = ${`Parity renewal ${RUN}`}`)[0]!.n).toBe(0);
+  });
+  it("an executable one saves switched off; test mode checks open work and writes nothing but its audit", async () => {
+    const r = await call(AMINA, "POST", "/automations", {
+      name: `Parity documents ${RUN}`, triggerEvent: "document.received", skill: "work.prepare", preparedVerb: "prepare",
+      conditions: [{ fact: "kind", operator: "equals", value: "claim" }],
+    });
+    expect(r.status).toBe(201);
+    id = r.body.automation.id;
+    expect(r.body.automation.enabled).toBe(false);
+    const runsBefore = (await sql<{ n: number }[]>`select count(*)::int as n from automation_runs where automation_id = ${id}`)[0]!.n;
+    const t = await call(AMINA, "POST", `/automations/${id}/test`);
+    expect(t.status).toBe(200);
+    expect(t.body.checked).toBeGreaterThan(0);
+    expect(t.body.problems).toEqual([]);
+    expect(t.body.wouldFire.every((w: Json) => typeof w.title === "string")).toBe(true);
+    expect((await sql<{ n: number }[]>`select count(*)::int as n from automation_runs where automation_id = ${id}`)[0]!.n).toBe(runsBefore);
+    const last = await call(AMINA, "GET", `/automations/${id}/last-test`);
+    expect(last.body.lastTest.checked).toBe(t.body.checked);
+    expect((await call(AMINA, "POST", `/automations/${id}/enabled`, { enabled: true })).body.automation.enabled).toBe(true);
+    expect((await call(AMINA, "POST", `/automations/${id}/enabled`, { enabled: false })).body.automation.enabled).toBe(false);
+  });
+  it("the registry is served as one list; another brokerage cannot test this automation", async () => {
+    const reg = (await call(AMINA, "GET", "/automations/registry")).body;
+    expect(reg.triggers.filter((x: Json) => x.executable).map((x: Json) => x.event)).toEqual(["document.received"]);
+    expect((await call(BETA, "POST", `/automations/${id}/test`)).status).toBe(404);
+  });
+});

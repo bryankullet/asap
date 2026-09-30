@@ -101,6 +101,7 @@ import {
   automationsResponseSchema,
   automationRunsResponseSchema,
   automationResponseSchema,
+  automationTestResponseSchema,
   type CreateAutomationRequest,
   pinsResponseSchema,
   setPinResponseSchema,
@@ -232,6 +233,10 @@ export const api = {
   automationRuns: (id: string) =>
     request("GET", `/automations/${id}/runs`, automationRunsResponseSchema),
   /** A new standing instruction. Created switched off, and never able to send by itself. */
+  /** Test mode: conditions checked against open work; nothing prepared or written but its audit. */
+  testAutomation: (id: string) => request("POST", `/automations/${id}/test`, automationTestResponseSchema, {}),
+  automationLastTest: (id: string) =>
+    request("GET", `/automations/${id}/last-test`, z.object({ lastTest: z.object({ testedAt: z.string(), checked: z.number(), wouldFire: z.number(), problems: z.array(z.string()) }).nullable() })),
   createAutomation: (input: CreateAutomationRequest) =>
     request("POST", "/automations", automationResponseSchema, input),
   setAutomationEnabled: (id: string, enabled: boolean) =>

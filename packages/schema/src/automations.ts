@@ -174,3 +174,75 @@ export type AutomationRunsResponse = z.infer<typeof automationRunsResponseSchema
 
 export const automationResponseSchema = z.object({ automation: automationSchema });
 export type AutomationResponse = z.infer<typeof automationResponseSchema>;
+
+/**
+ * What an automation can actually do today (D-125) — the one list the builder, Ask and the server
+ * validator read. A trigger is `executable` only when our own code emits that event against a
+ * piece of work; the rest exist in the vocabulary but nothing fires them yet, so saving one would
+ * be a standing instruction that never runs. The browser never decides this.
+ */
+export const AUTOMATION_REGISTRY = {
+  triggers: [
+    { event: "document.received", label: "A document arrives on a piece of work", executable: true, why: "Emitted when a document is uploaded or synced and filed against work." },
+    { event: "quote.received", label: "An insurer's quote is recorded", executable: false, why: "Nothing emits this event yet." },
+    { event: "renewal.approaching", label: "A renewal is approaching", executable: false, why: "Nothing emits this event yet." },
+    { event: "payment.received", label: "A payment is received", executable: false, why: "Nothing emits this event yet." },
+    { event: "cover.confirmed", label: "Cover is confirmed", executable: false, why: "Nothing emits this event yet." },
+    { event: "claim.registered", label: "A claim is registered", executable: false, why: "Nothing emits this event yet." },
+    { event: "check.overdue", label: "A check is overdue", executable: false, why: "Nothing emits this event yet." },
+    { event: "run.could_not_finish", label: "An ASAP run could not finish", executable: false, why: "Nothing emits this event yet." },
+  ],
+  facts: [
+    { fact: "kind", label: "Kind of work", operators: ["equals", "not_equals", "is_one_of"], value: "text" },
+    { fact: "task_status", label: "Work status", operators: ["equals", "not_equals", "is_one_of"], value: "text" },
+    { fact: "class_of_business", label: "Class of business", operators: ["equals", "not_equals", "is_one_of", "is_empty", "is_not_empty"], value: "text" },
+    { fact: "insurer_name", label: "Insurer", operators: ["equals", "not_equals", "is_one_of", "is_empty", "is_not_empty"], value: "text" },
+    { fact: "client_file_status", label: "Client file status", operators: ["equals", "not_equals", "is_one_of"], value: "text" },
+    { fact: "cover_status", label: "Cover status", operators: ["equals", "not_equals", "is_one_of", "is_empty", "is_not_empty"], value: "text" },
+    { fact: "money_status", label: "Money status", operators: ["equals", "not_equals", "is_one_of", "is_empty", "is_not_empty"], value: "text" },
+    { fact: "period_end", label: "Cover ends", operators: ["days_until_less_than"], value: "days" },
+    { fact: "last_touched", label: "Last touched", operators: ["days_since_more_than"], value: "days" },
+    { fact: "exception", label: "Exception recorded", operators: ["is_empty", "is_not_empty"], value: "none" },
+  ],
+  actions: [
+    { verb: "prepare", skill: "work.prepare", label: "Prepare the current step for review", sendsExternally: false, approvalRequired: false, why: "Starts ASAP's preparation of the step; a person reviews what it prepared." },
+    { verb: "draft", skill: "message.draft", label: "Draft a message for a person to send", sendsExternally: true, approvalRequired: true, why: "Opens a draft only; a person sends it. Always needs approval." },
+  ],
+} as const satisfies {
+  triggers: readonly { event: z.infer<typeof AutomationTrigger>; label: string; executable: boolean; why: string }[];
+  facts: readonly { fact: AutomationCondition["fact"]; label: string; operators: readonly z.infer<typeof AutomationConditionOperator>[]; value: "text" | "days" | "none" }[];
+  actions: readonly { verb: z.infer<typeof ActionVerb>; skill: string; label: string; sendsExternally: boolean; approvalRequired: boolean; why: string }[];
+};
+
+/**
+ * Why a proposed automation cannot be saved as executable, in plain words. Empty means every part
+ * is in the registry. The server refuses a create that fails this; Ask uses it before offering Save.
+ */
+export function automationProblems(p: { triggerEvent: string; conditions: { fact: string; operator: string; value?: unknown }[]; preparedVerb: string; approval: string }): string[] {
+  const out: string[] = [];
+  const trig = AUTOMATION_REGISTRY.triggers.find((t) => t.event === p.triggerEvent);
+  if (!trig) out.push("its trigger is not one ASAP knows");
+  else if (!trig.executable) out.push(`“${trig.label}” does not fire yet — ${trig.why.toLowerCase()}`);
+  for (const c of p.conditions) {
+    const f = AUTOMATION_REGISTRY.facts.find((x) => x.fact === c.fact);
+    if (!f) out.push(`the condition on “${c.fact}” is not one ASAP can check`);
+    else if (!(f.operators as readonly string[]).includes(c.operator)) out.push(`“${f.label}” cannot be checked with “${c.operator.replace(/_/g, " ")}”`);
+    else if (f.value === "days" && !(typeof c.value === "number" && c.value > 0)) out.push(`“${f.label}” needs a number of days`);
+    else if (f.value === "text" && !["is_empty", "is_not_empty"].includes(c.operator) && (c.value === null || c.value === undefined || c.value === "" || (Array.isArray(c.value) && c.value.length === 0)))
+      out.push(`“${f.label}” needs a value`);
+  }
+  const act = AUTOMATION_REGISTRY.actions.find((a) => a.verb === p.preparedVerb);
+  if (!act) out.push("its action is not one an automation may take");
+  else if (act.approvalRequired && p.approval !== "always") out.push(`“${act.label}” always needs a person's approval`);
+  return out;
+}
+
+/** `POST /automations/:id/test` — conditions checked against open work, nothing written or prepared. */
+export const automationTestResponseSchema = z.object({
+  testedAt: z.string(),
+  checked: z.number().int().min(0),
+  wouldFire: z.array(z.object({ workItemId: uuidSchema, title: z.string() })),
+  wouldNotFire: z.array(z.object({ workItemId: uuidSchema, title: z.string(), failed: z.array(conditionResultSchema) })),
+  problems: z.array(z.string()),
+});
+export type AutomationTestResponse = z.infer<typeof automationTestResponseSchema>;

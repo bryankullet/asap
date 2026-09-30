@@ -82,7 +82,8 @@ const createWorkItem = vi.fn(async (input: { kind: string; policyId?: string; po
   }
   return { outcome: "opened", reopened: false, item: { id: WORK } };
 });
-const createAutomation = vi.fn(async () => ({}));
+const createAutomation = vi.fn(async (input: { name: string }) => ({ automation: { id: "71000000-0000-4000-8000-000000000001", name: input.name } }));
+const testAutomation = vi.fn(async () => ({ testedAt: "2026-09-30T10:00:00Z", checked: 3, wouldFire: [{ workItemId: WORK, title: "Renew Tausi Hauliers motor fleet" }], wouldNotFire: [], problems: [] }));
 // A second client whose name shares a word with the first, for switching and ambiguity (D-121).
 let twoClients = false;
 const CLIENT_B = "30000000-0000-4000-8000-0000000000b2";
@@ -189,6 +190,9 @@ vi.mock("../lib/api.js", () => ({
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
     manageWork,
+    testAutomation,
+    automationRuns: async () => ({ runs: [{ id: "72000000-0000-4000-8000-000000000001", automation_id: AUTO, event_id: "73000000-0000-4000-8000-000000000001", event_name: "document.received", work_item_id: WORK, outcome: "could_not_finish", condition_results: [], prepared_action: null, reason: "The step had nothing to prepare from.", decided_by: null, decided_at: null, decision: null, started_at: "2026-09-29T10:00:00Z", finished_at: "2026-09-29T10:00:01Z" }] }),
+    automationLastTest: async () => ({ lastTest: { testedAt: "2026-09-28T10:00:00Z", checked: 4, wouldFire: 1, problems: [] } }),
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
     opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
     opportunityAction,
@@ -970,6 +974,42 @@ describe("live mode", () => {
       expect(facts["Cover or money"]).toBe("No change to cover or money");
       expect(facts["Blocked or refused"]).toMatch(/^1 attempt/);
       expect(facts["Next actions held by"]).toContain("Wanjiru Kamau (1)");
+    });
+  });
+
+  describe("automations are honest (D-125)", () => {
+    it("the saved renewal automation, whose trigger nothing emits, reads as unable to run and cannot be switched on", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "automation", automationId: AUTO }) as { statusLabel: string; blocks: unknown[] };
+      expect(ws.statusLabel).toBe("Cannot run");
+      const all = text(ws);
+      expect(all).toContain("does not fire yet");
+      expect(all).not.toContain("Switch this automation on");
+      expect(all).toContain("Run in test mode");
+      expect(all).toContain("Could not finish");
+      expect(all).toContain("would act on 1 item of 4");
+      expect(all).not.toMatch(/Force a failure|Simulate/);
+    });
+
+    it("the builder offers only executable triggers; Ask offers Save only when every part runs", async () => {
+      const A = await live();
+      const list = A.ai.workspace({ ws: "automation" }) as { blocks: { t: string; fields?: { key: string; options?: { value: string }[] }[] }[] };
+      const builder = list.blocks.find((b) => b.t === "builder")!;
+      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received"]);
+      const bad = (await A.ai.route("Create an automation: when a renewal is approaching, email the client automatically", {})) as { pending?: unknown; lead: string; text: string };
+      expect(bad.pending).toBeUndefined();
+      expect(bad.lead).toBe("That cannot be saved as a working automation.");
+      expect(bad.text).toMatch(/not available yet|does not fire yet/);
+      expect(bad.text).toMatch(/never sends/);
+      const good = (await A.ai.route("Create an automation: whenever a document arrives on a claim, prepare it for review", {})) as { pending: { action: string; payload: Record<string, unknown>; actionId: string } };
+      expect(good.pending.action).toBe("automation.create");
+      expect(good.pending.payload).toMatchObject({ trigger: "document.received", verb: "prepare", conditions: [{ fact: "kind", operator: "equals", value: "claim" }] });
+      expect(createAutomation).not.toHaveBeenCalled();
+      const saved = (await A.records.act(good.pending.action, good.pending.payload, good.pending.actionId)) as { ok: boolean };
+      expect(saved.ok).toBe(true);
+      expect(createAutomation).toHaveBeenCalledWith(expect.objectContaining({ triggerEvent: "document.received", enabled: false, approval: "always", conditions: [{ fact: "kind", operator: "equals", value: "claim" }] }));
+      const tested = (await A.records.act("automation.test", { id: AUTO })) as { text: string };
+      expect(tested.text).toBe("Test mode: it would act on 1 open item of 3 checked");
     });
   });
 });

@@ -5,7 +5,7 @@
  *
  * Every value shown comes from an API response. Nothing here is example content.
  */
-import { IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
+import { AUTOMATION_REGISTRY, automationProblems, IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
 import * as S from "./engine/store.js";
 
 const ok = "ok";
@@ -553,6 +553,84 @@ function claimSpace(ref, state) {
   };
 }
 
+/* ---------------------------------------------------------------- automations */
+
+/**
+ * Automations from the server's registry (D-125). Every part shown as a rule is one ASAP can
+ * execute; anything else is labelled a note that does not run. Test mode, the last test, the last
+ * real run, pause/resume and failures all come from the server.
+ */
+const OUTCOME_WORDS = { working: "Working", prepared: "Prepared for review", conditions_not_met: "Conditions not met — nothing done", needs_approval: "Waiting for a person's approval", exception: "Stopped on an exception", could_not_finish: "Could not finish" };
+function automationSpace(ref) {
+  const reg = AUTOMATION_REGISTRY;
+  const trigLabel = (e) => reg.triggers.find((t) => t.event === e)?.label ?? e;
+  const factLabel = (f) => reg.facts.find((x) => x.fact === f)?.label ?? f;
+  const actLabel = (v) => reg.actions.find((x) => x.verb === v)?.label ?? v;
+  const a = ref.automationId ? S.byId("automations", ref.automationId) : null;
+  if (a && a.raw) {
+    const r = a.raw;
+    const problems = automationProblems({ triggerEvent: r.trigger_event, conditions: r.conditions, preparedVerb: r.prepared_verb, approval: r.approval });
+    const real = a.history || [];
+    const lastReal = real[0] || null;
+    const failures = real.filter((x) => x.outcome === "could_not_finish" || x.outcome === "exception");
+    return {
+      kind: "Automation",
+      title: r.name,
+      status: r.enabled ? "live" : "draft",
+      statusLabel: problems.length ? "Cannot run" : r.enabled ? "On" : "Paused",
+      recordRef: { ws: "automation", automationId: r.id },
+      blocks: [
+        ...(problems.length ? [note("red", "This automation cannot run", "It was saved before ASAP checked it: " + problems.join("; ") + ". It stays off. Save a new one from the parts below.")] : []),
+        facts([
+          ["When", trigLabel(r.trigger_event)],
+          ["Only if", r.conditions.length ? r.conditions.map((c) => factLabel(c.fact) + " " + c.operator.replace(/_/g, " ") + (c.value == null ? "" : " " + (Array.isArray(c.value) ? c.value.join(", ") : c.value))).join("; ") : "No conditions — every time it fires"],
+          ["Then", actLabel(r.prepared_verb)],
+          ["Approval", r.approval === "always" ? "A person approves each result before it is used" : "Prepared without an approval step — it never sends, and never changes cover or money"],
+          ["Explanation", reg.actions.find((x) => x.verb === r.prepared_verb)?.why ?? "—"],
+          ["Last test", a.lastTest ? S.fmtDate(a.lastTest.testedAt) + " — would act on " + plural(a.lastTest.wouldFire, "item", "items") + " of " + a.lastTest.checked + (a.lastTest.problems.length ? "; cannot run: " + a.lastTest.problems.join("; ") : "") : "Never tested"],
+          ["Last real run", lastReal ? S.fmtDate(lastReal.started_at) + " — " + (OUTCOME_WORDS[lastReal.outcome] || lastReal.outcome) : "It has not run yet"],
+        ]),
+        ...(failures.length ? [rows("Failures", failures.slice(0, 5).map((x) => ({ title: OUTCOME_WORDS[x.outcome], note: S.fmtDate(x.started_at) + (x.reason ? " · " + x.reason : ""), badge: "Failed", badgeTone: bad, action: x.work_item_id ? { a: "open", ref: { ws: "workitem", workItemId: x.work_item_id } } : null })))] : []),
+        rows("Every firing, including the ones that did nothing", real.length ? real.slice(0, 12).map((x) => ({ title: OUTCOME_WORDS[x.outcome] || x.outcome, note: S.fmtDate(x.started_at) + " · " + x.event_name + (x.reason ? " · " + x.reason : "") + (x.condition_results?.some((c) => !c.held) ? " · failed: " + x.condition_results.filter((c) => !c.held).map((c) => factLabel(c.fact)).join(", ") : ""), badge: x.outcome === "could_not_finish" || x.outcome === "exception" ? "Failed" : "Recorded", badgeTone: x.outcome === "could_not_finish" || x.outcome === "exception" ? bad : ok, action: x.work_item_id ? { a: "open", ref: { ws: "workitem", workItemId: x.work_item_id } } : null })) : [{ title: "No firings yet", note: "Firings appear here, with why each did or did not act.", badge: "None", badgeTone: warn }]),
+        gate("Run in test mode", "Checks its conditions against open work and says what it would act on. Nothing is prepared or changed.", "automation.test", { id: r.id }),
+        ...(problems.length ? [] : [gate(r.enabled ? "Pause this automation" : "Switch this automation on", r.enabled ? "Stops it firing. Work it already prepared stays." : "It starts watching for “" + trigLabel(r.trigger_event).toLowerCase() + "”. Every result still needs a person where the action says so.", "automation.toggle", { id: r.id })]),
+      ],
+    };
+  }
+  const list = S.all("automations");
+  const executable = reg.triggers.filter((t) => t.executable);
+  return {
+    kind: "Automations",
+    title: "Automations",
+    status: "live",
+    statusLabel: plural(list.filter((x) => x.on).length, "on", "on"),
+    blocks: [
+      note("green", "People stay in charge", "An automation prepares; it never sends a message, changes cover or moves money. Those always need a person's approval."),
+      rows("Standing instructions", list.length ? list.map((x) => {
+        const bad2 = x.raw ? automationProblems({ triggerEvent: x.raw.trigger_event, conditions: x.raw.conditions, preparedVerb: x.raw.prepared_verb, approval: x.raw.approval }).length > 0 : true;
+        return { title: x.name, note: (x.raw ? trigLabel(x.raw.trigger_event) + " → " + actLabel(x.raw.prepared_verb) : x.trigger) + (bad2 ? " · cannot run as saved" : ""), badge: bad2 ? "Cannot run" : x.on ? "On" : "Paused", badgeTone: bad2 ? "missing" : x.on ? ok : warn, action: { a: "open", ref: { ws: "automation", automationId: x.id } } };
+      }) : [{ title: "No automations yet", note: "Build one from the parts below.", badge: "None", badgeTone: warn }]),
+      rows("What can start an automation today", reg.triggers.map((t) => ({ title: t.label, note: t.executable ? t.why : "Not available yet — " + t.why.toLowerCase(), badge: t.executable ? "Available" : "Not yet", badgeTone: t.executable ? ok : warn }))),
+      form(
+        "automation:new",
+        "Build an automation",
+        [
+          { key: "name", label: "NAME", placeholder: "Prepare new claim documents for review" },
+          { key: "trigger", label: "WHEN", options: executable.map((t) => ({ value: t.event, label: t.label })) },
+          { key: "fact", label: "ONLY IF (OPTIONAL)", options: [{ value: "", label: "No condition" }, ...reg.facts.map((f) => ({ value: f.fact, label: f.label }))] },
+          { key: "operator", label: "CHECK", options: [...new Set(reg.facts.flatMap((f) => f.operators))].map((o) => ({ value: o, label: o.replace(/_/g, " ") })) },
+          { key: "value", label: "VALUE (DAYS FOR DATE CHECKS; COMMAS FOR A LIST)", placeholder: "claim" },
+          { key: "verb", label: "THEN", options: reg.actions.map((x) => ({ value: x.verb, label: x.label + (x.approvalRequired ? " — always needs approval" : "") })) },
+        ],
+        "automation.create",
+        {},
+        "Save switched off",
+        "Each part is checked against what ASAP can execute before it is saved. It starts off; test it first.",
+      ),
+    ],
+  };
+}
+
 /* ---------------------------------------------------------------- activity */
 
 /**
@@ -954,6 +1032,8 @@ export function liveSpace(ref, state) {
       return workItemSpace(ref);
     case "document":
       return documentSpace(ref, state);
+    case "automation":
+      return automationSpace(ref);
     case "activity":
     case "audit":
       return activitySpace(ref);
