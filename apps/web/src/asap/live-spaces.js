@@ -529,7 +529,9 @@ function claimSpace(ref, state) {
       ...(w?.next ? nextBlock(w.next) : []),
       facts([
         ["Client", client ? client.name : "not recorded"],
-        ["Policy", pol ? pol.number + " — " + (pol.cls || "") : "Not known yet — to be matched before registering"],
+        ["Policy", pol ? pol.number + " — " + (pol.cls || "class not recorded") : "Policy not known — to be matched before registering"],
+        ["Owner", w?.assigneeId ? (S.byId("users", w.assigneeId)?.name ?? "A member of this brokerage") : "Nobody yet — assign it"],
+        ["Next check", w?.nextCheckAt ? date(w.nextCheckAt) : "not set"],
         ["Date of loss", date(c.incident_on)],
         ["What happened", c.incident_summary],
         ["Where it stands", status],

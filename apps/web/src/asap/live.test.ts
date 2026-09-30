@@ -152,7 +152,9 @@ vi.mock("../lib/api.js", () => ({
       items:
         view === "needs"
           ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", next: { what: "Request renewal terms from the insurer", holder: "brokerage", party: null, since: null, missing: ["Renewal terms"], checkAt: "2026-10-05T09:00:00Z", why: "Cover ends on its expiry date.", record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, action: null, stage: "first" }, item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: workOwner, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, due_on: workDue, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
-          : [],
+          : view === "with" && claimMade
+            ? [{ rank: 1, reason: "A new claim.", priority: "high", next: { what: "Collect the claim form and supporting documents", holder: "brokerage", party: null, since: null, missing: ["Claim form"], checkAt: "2026-10-02T09:00:00Z", why: "An insurer can refuse a late claim.", record: { type: "work_item", id: CLAIM_WORK, label: "Claim — Tausi Hauliers Ltd" }, action: null, stage: "derived" }, item: { id: CLAIM_WORK, organization_id: ORG, title: "Claim — Tausi Hauliers Ltd", kind: "claim", client_id: CLIENT, policy_period_id: null, insurer_id: null, class_of_business: null, owner_id: ME, task_status: "with_party", task_party: "Tausi Hauliers Ltd", task_since: "2026-09-30", task_next_check: "2026-10-02T09:00:00Z", due_on: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
+            : [],
     }),
     clientFiles: async (view: string) => ({
       view,
@@ -840,6 +842,55 @@ describe("live mode", () => {
         }
         if (stage === "with_insurer") expect(stages.rows!.map((r) => r.title)).toContain("With CIC General");
       }
+    });
+  });
+
+  describe("claim cases", () => {
+    const ask = async (A: Awaited<ReturnType<typeof live>>, q: string, ref: object = {}) =>
+      (await A.ai.route(q, { ...ref, ref })) as { lead?: string; clarify?: { options: { label: string; text: string }[] }; pending?: { action: string; payload: Record<string, string>; actionId: string; sections: { label: string; items: string[] }[] } };
+
+    it("a client with one policy: the policy is taken, not asked; an explicit date and the words are kept", async () => {
+      twoClients = true;
+      const A = await live();
+      const r = await ask(A, "Report a claim: fire in the store on 12 Sep", { ws: "client", clientId: CLIENT_B });
+      expect(r.pending!.payload).toMatchObject({ clientId: CLIENT_B, policyId: POL_B, incidentSummary: "Fire in the store on 12 Sep" });
+      expect(r.pending!.payload["incidentOn"]).toMatch(/-09-12$/);
+      twoClients = false;
+    });
+
+    it("several policies: asked, with 'not known' — choosing it reports the claim with the policy unknown", async () => {
+      const A = await live();
+      const which = await ask(A, "Report a claim for the van hit yesterday", { ws: "client", clientId: CLIENT });
+      const unknown = which.clarify!.options.find((o) => o.label === "Policy not known yet")!;
+      const r = await ask(A, unknown.text, { ws: "client", clientId: CLIENT });
+      expect(r.pending!.payload["policyId"]).toBe("unknown");
+      expect(r.pending!.sections.find((x) => x.label === "MISSING")!.items).toContain("The policy the loss falls under");
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      expect(createWorkItem).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "claim", policyUnknown: true }));
+      expect(createWorkItem.mock.lastCall![0]).not.toHaveProperty("policyId");
+    });
+
+    it("an unclear date is asked for, never guessed", async () => {
+      const A = await live();
+      const r = await ask(A, "Report a claim on TH-MTR-001 for damage recently");
+      expect(r.lead).toBe("When did it happen?");
+      expect(r.pending).toBeUndefined();
+    });
+
+    it("the Claim Space after refresh: draft, policy, owner, next action, documents, next check — no placeholder text", async () => {
+      const A = await live();
+      const r = await ask(A, "Report a claim for the accident yesterday", { ws: "policy", clientId: CLIENT, policyYearId: PER_OK });
+      const done = (await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)) as { nav: object };
+      const B = await live();
+      const space = B.ai.workspace(done.nav) as { statusLabel: string; blocks: unknown[] };
+      const all = text(space);
+      expect(space.statusLabel).toBe("Draft — not registered");
+      expect(all).toContain("TH-MTR-001");
+      expect(all).toContain("Wanjiru Kamau");
+      expect(all).toContain("Collect the claim form and supporting documents");
+      expect(all).toContain("Claim form");
+      expect(all).toMatch(/Next check","2 Oct/);
+      expect(all).not.toMatch(/undefined|\bnull\b|NaN|\.demo|@example|Review and send/);
     });
   });
 });

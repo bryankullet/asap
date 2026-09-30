@@ -1625,7 +1625,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       convo.pendingClarification = { question: "claim date", text: raw };
       return { lead: "When did it happen?", text: "The date of the loss decides which period of cover it falls in. Nothing was changed.", clarify: { question: "Date of loss", options: [{ label: "Today", text: raw + " today" }, { label: "Yesterday", text: raw + " yesterday" }] }, ref: null, keepWorkspace: true };
     }
-    const what = raw.replace(/^.*?\bclaim\b\s*(for|about|—|-)?\s*/i, "").replace(/\s+on\s+[A-Z0-9-]{4,}\s*$/i, "").trim();
+    const what = raw.replace(/^.*?\bclaim\b\s*(for|about|—|-|:)?\s*/i, "").replace(/\s+on\s+[A-Z0-9-]{4,}\s*$/i, "").trim();
     const summary = what.length >= 8 ? what.charAt(0).toUpperCase() + what.slice(1) : "Loss reported by the client — details to be added";
     const policyLine = policy ? policy.number + " — " + (policy.cls || "class not recorded") : "Not known yet — the claim says so until it is matched";
     return {
