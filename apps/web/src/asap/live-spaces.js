@@ -455,9 +455,10 @@ function newClaimSpace(ref) {
         "claim:" + client.id,
         "The loss, as the client reported it",
         [
-          { key: "policyId", label: "POLICY THE LOSS FALLS UNDER", options: [...policyOptions, { value: "unknown", label: "Policy not known yet — report without one" }] },
-          { key: "incidentOn", label: "DATE OF LOSS", type: "date" },
-          { key: "incidentSummary", label: "WHAT HAPPENED", placeholder: "Vehicle KDA 123A hit from behind at Westlands" },
+          // Values carried from Ask or the policy in front are kept, never dropped.
+          { key: "policyId", label: "POLICY THE LOSS FALLS UNDER", value: ref.policyId || undefined, options: [...policyOptions, { value: "unknown", label: "Policy not known yet — report without one" }] },
+          { key: "incidentOn", label: "DATE OF LOSS", type: "date", value: ref.incidentOn || "" },
+          { key: "incidentSummary", label: "WHAT HAPPENED", placeholder: "Vehicle KDA 123A hit from behind at Westlands", value: ref.incidentSummary || "" },
         ],
         "claim.open",
         { clientId: client.id },
@@ -467,6 +468,54 @@ function newClaimSpace(ref) {
       ...(existing.length
         ? [rows("Claims already on file", existing.map((c) => ({ title: c.title, note: date(c.lossAt) + " · " + c.status, badge: c.status, badgeTone: warn, action: { a: "open", ref: { ws: "claim", clientId: client.id, claimId: c.id } } })))]
         : []),
+    ],
+  };
+}
+
+/**
+ * A claim, read from its record: what was reported, which policy (or that it is not known), the
+ * documents it needs, and the server's next action. No notification draft is offered here: none
+ * can be addressed while no mailbox is connected, and none before the insurer and policy are known.
+ */
+function claimSpace(ref, state) {
+  const d = state.claims?.get(ref.claimId);
+  const row = S.byId("claims", ref.claimId);
+  if (!d || !row) return { kind: "Claim", title: "This claim could not be read", status: "draft", statusLabel: "Unavailable", blocks: [note("red", "Not available", "Refresh records and try again. Nothing was changed.")] };
+  const c = d.claim;
+  const client = S.sel.client(c.client_id);
+  const pol = c.policy_id ? S.byId("policies", c.policy_id) : null;
+  const w = S.all("workItems").find((x) => x.id === c.work_item_id);
+  const step = (d.item?.steps || []).find((st) => st.state === "now" || st.state === "blocked");
+  const stepMissing = step ? step.evidence.filter((e) => !step.recorded.some((r) => r.kind === e.kind)).map((e) => e.label) : [];
+  const status = { draft: "Draft — not registered", registered: "Registered", closed: "Closed" }[c.status] || c.status;
+  return {
+    kind: "Claim",
+    title: (client ? client.name + " — " : "") + "claim, " + date(c.incident_on),
+    status: c.status === "draft" ? "draft" : "live",
+    statusLabel: status,
+    recordRef: { ws: "claim", clientId: c.client_id, claimId: c.id },
+    blocks: [
+      ...(w?.next ? nextBlock(w.next) : []),
+      facts([
+        ["Client", client ? client.name : "not recorded"],
+        ["Policy", pol ? pol.number + " — " + (pol.cls || "") : "Not known yet — to be matched before registering"],
+        ["Date of loss", date(c.incident_on)],
+        ["What happened", c.incident_summary],
+        ["Where it stands", status],
+        ["Insurer reference", c.insurer_reference || "none yet"],
+      ]),
+      rows(
+        "Documents the claim needs",
+        d.documents.length || stepMissing.length
+          ? [
+              ...d.documents.map((doc) => ({ title: doc.label, note: doc.received_at ? "Received " + date(doc.received_at) : doc.requested_at ? "Requested " + date(doc.requested_at) + " from the " + words(doc.holder).toLowerCase() : "Not requested yet", badge: doc.received_at ? "Received" : "Missing", badgeTone: doc.received_at ? ok : bad })),
+              ...stepMissing.filter((m) => !d.documents.some((doc) => doc.label === m)).map((m) => ({ title: m, note: "Needed before the claim can move", badge: "Missing", badgeTone: bad })),
+            ]
+          : [{ title: "No document list yet", note: "The insurer's claim form and supporting documents are requested once the policy is known.", badge: "Pending", badgeTone: warn }],
+      ),
+      note("amber", "Nothing is sent from here", "No message goes to the insurer from ASAP: no mailbox is connected, and a notification is only prepared once the insurer and the policy are known — and then it waits for your approval. Nothing here says the loss is covered; that is the insurer's written decision."),
+      ...(d.notes.length ? [rows("Notes", d.notes.map((n) => ({ title: n.body.slice(0, 120), note: date(n.noted_at) + (n.spoke_with ? " · with " + n.spoke_with : ""), badge: words(n.kind), badgeTone: ok })))] : []),
+      ...(client ? [nav("Open " + client.name, "The client's policies, documents and other work.", { ws: "client", clientId: client.id })] : []),
     ],
   };
 }
@@ -798,7 +847,7 @@ export function liveSpace(ref, state) {
     case "quote":
       return quoteSpace(ref, state);
     case "claim":
-      return ref.claimId ? null : newClaimSpace(ref);
+      return ref.claimId ? claimSpace(ref, state) : newClaimSpace(ref);
     case "workitem":
       return workItemSpace(ref);
     case "document":

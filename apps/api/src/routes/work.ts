@@ -284,6 +284,23 @@ export function workRoutes(deps: WorkDeps) {
         p_source: input.source ?? "ask",
       });
       if (r.error) return sendError(c, mapDatabaseError(r.error));
+      /*
+       * A new claim is looked at again in two days: the documents an insurer assesses are what a
+       * late claim is refused for. Written through the same contract as every derived work state.
+       */
+      const created = await loadItem(db, id);
+      const now = created.steps.find((s) => s.state === "now" || s.state === "blocked") ?? null;
+      const check = new Date(Date.now() + 2 * 86_400_000).toISOString();
+      await db.rpc("work_item_set_state", {
+        p_work_item_id: id,
+        p_task_status: created.task_status,
+        p_task_party: created.task_party,
+        p_task_since: created.task_since,
+        p_task_next_check: check,
+        p_reason: created.reason ?? "A claim is only as strong as the documents behind it and how soon the insurer hears of it.",
+        p_required_action: now?.label ?? "Collect the claim documents",
+        p_evidence_needed: now ? now.evidence.filter((e) => !now.recorded.some((x) => x.kind === e.kind)).map((e) => e.label).join("; ") || null : null,
+      });
     }
     if (!reopened && input.kind === "endorsement") {
       const r = await db.rpc("endorsement_create", {

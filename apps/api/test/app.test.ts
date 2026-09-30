@@ -570,6 +570,41 @@ describe("Ask never creates a client (D-050)", () => {
     };
   });
 
+  it("a claim is created once, stays a draft, and its work is looked at again in two days", async () => {
+    const claims: Record<string, unknown>[] = [];
+    const states: Record<string, unknown>[] = [];
+    db.tables["policies"] = [];
+    db.tables["policy_periods"] = [];
+    db.rpc["work_item_create"] = (args) => {
+      const existing = (db.tables["work_items"] ?? []).find((w) => w["title"] === args["p_title"]);
+      if (existing) return { data: { id: existing["id"], reopened: true } };
+      db.tables["work_items"]!.push({
+        id: "30000000-0000-4000-8000-0000000000cc", organization_id: ORG_A, title: args["p_title"], kind: "claim",
+        client_id: args["p_client_id"], policy_period_id: null, insurer_id: null, class_of_business: null, owner_id: null,
+        task_status: args["p_task_status"], task_party: args["p_task_party"], task_since: args["p_task_party"] ? "2026-09-30T08:00:00Z" : null,
+        task_next_check: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null,
+        steps: args["p_steps"], exception: null, version: 1, created_at: "2026-09-30T08:00:00Z", updated_at: "2026-09-30T08:00:00Z", completed_at: null, deleted_at: null,
+      });
+      return { data: { id: "30000000-0000-4000-8000-0000000000cc", reopened: false } };
+    };
+    db.rpc["claim_create"] = (args) => { claims.push(args); return { data: { id: "31000000-0000-4000-8000-0000000000cc" } }; };
+    db.rpc["work_item_set_state"] = (args) => { states.push(args); return { data: { id: args["p_work_item_id"], changed: true } }; };
+    const body = { kind: "claim", clientId: ACME, incidentOn: "2026-09-29", incidentSummary: "Van rear-ended at a junction", policyUnknown: true, source: "manual" };
+    const first = await app.request("/work-items", json(body, "tok-admin"));
+    expect(first.status).toBe(201);
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ p_policy_id: null, p_incident_on: "2026-09-29", p_summary: "Van rear-ended at a junction" });
+    expect(states).toHaveLength(1);
+    const check = new Date(states[0]!["p_task_next_check"] as string).getTime();
+    expect(check - Date.now()).toBeGreaterThan(1.9 * 86_400_000);
+    expect(check - Date.now()).toBeLessThan(2.1 * 86_400_000);
+    expect(states[0]!["p_required_action"]).toBeTruthy();
+    // A repeated submit reopens the same claim and creates nothing.
+    const again = await app.request("/work-items", json(body, "tok-admin"));
+    expect(again.status).toBe(200);
+    expect(claims).toHaveLength(1);
+  });
+
   it("three spellings of one seeded client open a renewal on that client and create zero rows", async () => {
     for (const clientName of ["acme motors", "ACME MOTORS LTD", "Acme  Motors."]) {
       const res = await app.request(

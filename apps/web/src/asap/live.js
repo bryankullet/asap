@@ -363,6 +363,11 @@ async function hydrate(me) {
   const opportunityDetails = new Map();
   details.forEach((d) => d && opportunityDetails.set(d.opportunity.id, d));
 
+  // Each claim in full — its documents, notes and clock — so its Space reads the record, not a template.
+  const claimDetails = new Map();
+  const claimRows = await pool(db.claims.slice(0, 40), 4, (c) => (c.workItemId ? api.workItem(c.workItemId) : null));
+  db.claims.slice(0, 40).forEach((c, i) => claimRows[i]?.claim && claimDetails.set(c.id, { ...claimRows[i].claim, item: claimRows[i].item }));
+
   // A claim's work item opens the claim.
   for (const c of db.claims) {
     const w = db.workItems.find((x) => x.id === c.workItemId);
@@ -389,7 +394,7 @@ async function hydrate(me) {
   db.meta.docsDegraded = docsDegraded;
   const modelConfigured = await modelConfiguredP;
 
-  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, modelConfigured, conversationId: convo.id } };
+  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -504,7 +509,7 @@ const note = (tone, title, text) => ({ t: "note", tone, title, text });
  * answers from records are corrected before matching, so "wht clints do i hav" reaches the
  * client list rather than a model.
  */
-const VOCABULARY = ["what", "which", "show", "list", "many", "clients", "client", "have", "today", "attention", "needs", "work", "automations", "policies", "policy", "claim", "claims", "quote", "quotation", "import", "records", "renewal", "search", "document", "documents", "covered", "cover"];
+const VOCABULARY = ["what", "which", "show", "list", "many", "clients", "client", "have", "today", "attention", "needs", "work", "automations", "policies", "policy", "claim", "claims", "quote", "quotation", "import", "records", "renewal", "search", "document", "documents", "covered", "cover", "report", "register", "accident", "open"];
 function distance(a, b) {
   const m = a.length, n = b.length;
   const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]);
@@ -532,6 +537,23 @@ function correctTypos(text, protectedWords) {
 const DEMO_WORDS = /\b(Acme|KDN|KDA|Karibu|Bluewave|GreenCare|Mara|APA|CIC|Jubilee)\b/;
 const LIVE_CHIPS = ["What needs attention today?", "Show my work", "What clients do I have?"];
 
+/**
+ * Why a prepared message may not be sent, in words a broker reads. Checked on the raw draft, before
+ * any clean-up: a draft carrying "undefined", "null", a demo address, no insured, an unresolved
+ * insurer, or no policy (without the policy explicitly recorded as not known) is never sendable.
+ */
+export function draftProblems(d) {
+  const out = [];
+  const text = [d.subject, d.body, d.text, d.to].filter((v) => v != null).map(String).join("\n");
+  if (/\b(undefined|null|NaN)\b/.test(text)) out.push("the draft has a blank value in it");
+  if (/\.demo\b|@example\./i.test(text) || [d.to, ...(d.send?.payload?.recipients ?? []).map((r) => r.email)].some((e) => e && /\.demo\b|@example\./i.test(String(e))))
+    out.push("its recipient is not a real address on file");
+  if ("insured" in d && !d.insured) out.push("the insured is missing");
+  if ("insurer" in d && !d.insurer) out.push("the insurer is not resolved");
+  if ("policy" in d && !d.policy && d.policyUnknown !== true) out.push("no policy is named and it is not recorded as unknown");
+  return out;
+}
+
 async function sha256File(file) {
   return sha256Hex(await file.arrayBuffer());
 }
@@ -557,14 +579,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   const refresh = async () => {
     const thread = db.conversations.find((c) => c.id === "cnv_main");
     loaded = await hydrate(me);
     db = loaded.db;
     if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, modelConfigured: loaded.extras.modelConfigured });
+    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, modelConfigured: loaded.extras.modelConfigured });
     S.useBackend({ db, dispatch });
   };
 
@@ -838,7 +860,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         if (res.outcome !== "opened") return { ok: false, error: "The claim couldn’t be opened for this client. Nothing was changed." };
         await refresh();
         const claim = db.claims.find((c) => c.workItemId === res.item.id);
-        return ok(res.reopened ? "That claim was already open — opened it" : "Claim reported as a draft", { nav: claim ? { ws: "claim", clientId: p.clientId, claimId: claim.id } : { ws: "work" } });
+        // Success is claimed only when the claim reads back.
+        if (!claim) return { ok: false, error: "The claim was saved but is not showing yet. Refresh records to check before reporting it again." };
+        return ok(res.reopened ? "That claim was already open — nothing new was created" : "Claim reported as a draft — not registered", {
+          already: !!res.reopened,
+          detail: "No message was sent to the insurer, and nothing here says the loss is covered. The documents it needs are listed on the claim.",
+          nav: { ws: "claim", clientId: p.clientId, claimId: claim.id },
+          next: [{ label: "Open the claim", ref: { ws: "claim", clientId: p.clientId, claimId: claim.id } }, { label: "Open the client", ref: { ws: "client", clientId: p.clientId } }],
+        });
       } catch (e) {
         return fail(e);
       }
@@ -1026,6 +1055,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const to = [b.to, ...((b.send?.payload?.recipients ?? []).map((r) => r.email))];
         if (to.some(fake) || !b.to)
           return note("amber", (b.label || "Message") + " — not prepared", "No recipient address is on file for this, so ASAP will not prepare a message. Nothing has been sent. Add the insurer's contact first; any message will then wait for your approval.");
+        const problems = draftProblems(b);
+        if (problems.length)
+          return note("amber", (b.label || "Message") + " — cannot be sent", "Sending is off because " + problems.join("; ") + ". Nothing has been sent.");
       }
       if (b && b.t === "gate" && b.action === "email.send") return null;
       return clean(b);
@@ -1365,6 +1397,90 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     };
   }
 
+  /** A loss date: today, yesterday, a recent weekday (the last one, never a future one), or a date. */
+  function lossDate(t) {
+    const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const now = new Date();
+    const back = (n) => local(new Date(now.getTime() - n * 864e5));
+    if (/\btoday|this morning|earlier today\b/i.test(t)) return { date: back(0), label: "today" };
+    if (/\byesterday|last night\b/i.test(t)) return { date: back(1), label: "yesterday" };
+    const wd = /\b(?:last|on)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.exec(t);
+    if (wd) {
+      const target = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(wd[1].toLowerCase());
+      let delta = (now.getDay() - target + 7) % 7;
+      if (delta === 0) delta = 7;
+      return { date: back(delta), label: "last " + wd[1] };
+    }
+    const iso = /\b(\d{4}-\d{2}-\d{2})\b/.exec(t);
+    if (iso) return { date: iso[1], label: iso[1] };
+    const dm = /\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.exec(t);
+    if (dm) {
+      const mo = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(dm[2].toLowerCase());
+      let d = new Date(now.getFullYear(), mo, +dm[1]);
+      if (d > now) d = new Date(now.getFullYear() - 1, mo, +dm[1]);
+      return { date: local(d), label: dm[0] };
+    }
+    return null;
+  }
+
+  /**
+   * "Report a claim for the accident yesterday": the client and policy from the context (asked
+   * only when genuinely unclear), the date and what happened from the words, shown as a card.
+   * Confirm goes through claim.open — the same handler as the claim form. It is a draft, never
+   * registered, never "covered", and nothing is sent.
+   */
+  function claimPreview(raw, t, ctx) {
+    const sub = resolveSubject(t, ctx);
+    if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, raw);
+    const client = sub && db.clients.find((c) => c.id === sub.clientId);
+    if (!client) return { lead: "Which client is the claim for?", text: "Open the client or name them. Nothing was changed.", ref: { ws: "claim" } };
+    // The policy: the one named or in front; the client's only one; otherwise ask (with "not known").
+    let policy = sub.type === "policy" ? db.policies.find((p) => p.id === sub.policyId) : null;
+    if (!policy) {
+      const pols = db.policies.filter((p) => p.clientId === client.id);
+      if (pols.length === 1) policy = pols[0];
+      else if (pols.length > 1 && !/\bpolicy (is )?(not known|unknown)\b/i.test(t)) {
+        convo.pendingClarification = { question: "claim policy", text: raw };
+        return {
+          lead: "Which policy does this claim relate to?",
+          text: "Nothing was changed.",
+          clarify: { question: "Policy", options: [...pols.map((p) => ({ label: p.number + " — " + (p.cls || "class not recorded"), text: raw.replace(/[?.!]*$/, "") + " on " + p.number })), { label: "Policy not known yet", text: raw.replace(/[?.!]*$/, "") + " — policy not known" }] },
+          ref: null,
+          keepWorkspace: true,
+        };
+      }
+    }
+    const when = lossDate(t);
+    if (!when) {
+      convo.pendingClarification = { question: "claim date", text: raw };
+      return { lead: "When did it happen?", text: "The date of the loss decides which period of cover it falls in. Nothing was changed.", clarify: { question: "Date of loss", options: [{ label: "Today", text: raw + " today" }, { label: "Yesterday", text: raw + " yesterday" }] }, ref: null, keepWorkspace: true };
+    }
+    const what = raw.replace(/^.*?\bclaim\b\s*(for|about|—|-)?\s*/i, "").replace(/\s+on\s+[A-Z0-9-]{4,}\s*$/i, "").trim();
+    const summary = what.length >= 8 ? what.charAt(0).toUpperCase() + what.slice(1) : "Loss reported by the client — details to be added";
+    const policyLine = policy ? policy.number + " — " + (policy.cls || "class not recorded") : "Not known yet — the claim says so until it is matched";
+    return {
+      lead: "I can report this as a draft claim for " + client.name + ".",
+      text: "It stays a draft — not registered, and not a finding that the loss is covered.",
+      ref: null,
+      keepWorkspace: true,
+      pending: {
+        title: "Report a claim for " + client.name,
+        sections: [
+          { label: "UNDERSTOOD", items: ["A draft claim — not registered", "Client: " + client.name, "Policy: " + policyLine, "Date of loss: " + S.fmtDate(when.date) + " (" + when.label + ")", "What happened: " + summary] },
+          { label: "MISSING", items: ["Claim form", "Supporting documents (photos, police abstract where it applies)"].concat(policy ? [] : ["The policy the loss falls under"]) },
+          { label: "CHANGE", items: ["One draft claim and its Work item, looked at again in two days", "An audit entry against your name"] },
+        ],
+        external: "No message is sent to the insurer or anyone else. Registering the claim and notifying the insurer each need your approval later.",
+        action: "claim.open",
+        payload: { clientId: client.id, policyId: policy ? policy.id : "unknown", incidentOn: when.date, incidentSummary: summary },
+        actionId: "claim.open:" + client.id + ":" + (policy ? policy.id : "unknown") + ":" + when.date + ":" + summary.toLowerCase(),
+        confirmLabel: "Report the claim",
+        progress: "Opening the draft claim and its Work…",
+        editRef: { ws: "claim", clientId: client.id, policyId: policy ? policy.id : "unknown", incidentOn: when.date, incidentSummary: summary },
+      },
+    };
+  }
+
   /** Every answer passes through here, so the context records what was prepared (D-121). */
   async function liveRoute(text, ctx) {
     const r = await routeInner(text, ctx);
@@ -1396,10 +1512,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (add) return addClientPreview(add[1].trim(), add[2] || null);
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
-    if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) {
-      const client = S.sel.clientByName(t) || (ctx.clientId ? S.sel.client(ctx.clientId) : null);
-      return { lead: client ? "Reporting a claim for " + client.name + "." : "Which client is the claim for?", text: "The claim opens as a draft; it never means the loss is covered.", ref: { ws: "claim", clientId: client?.id } };
-    }
+    if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
     const quote = quotationFromAsk(t, ctx);
     if (quote) return quote;
     const record = recordQuestion(t, ctx);

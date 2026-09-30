@@ -69,7 +69,18 @@ const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
 }));
 const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clientsCreated: 1, contactsCreated: 0, policiesCreated: 1, periodsCreated: 1 }, failures: [] }));
 const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
-const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
+// A claim created in a test is read back through the client's record, as the server would return it.
+const CLAIM = "95000000-0000-4000-8000-000000000001";
+const CLAIM_WORK = "96000000-0000-4000-8000-000000000001";
+let claimMade: { policyId: string | null; incidentOn: string; incidentSummary: string } | null = null;
+const createWorkItem = vi.fn(async (input: { kind: string; policyId?: string; policyUnknown?: boolean; incidentOn?: string; incidentSummary?: string }) => {
+  if (input.kind === "claim") {
+    const reopened = claimMade !== null;
+    claimMade = { policyId: input.policyId ?? null, incidentOn: input.incidentOn ?? "", incidentSummary: input.incidentSummary ?? "" };
+    return { outcome: "opened", reopened, item: { id: CLAIM_WORK } };
+  }
+  return { outcome: "opened", reopened: false, item: { id: WORK } };
+});
 const createAutomation = vi.fn(async () => ({}));
 // A second client whose name shares a word with the first, for switching and ambiguity (D-121).
 let twoClients = false;
@@ -141,7 +152,7 @@ vi.mock("../lib/api.js", () => ({
         { id: POL_OK, policyNumber: "TH-MTR-001", classOfBusiness: "Motor", insurerName: "First Insurer", periods: [{ id: PER_OK, periodStart: "2026-01-01", periodEnd: "2026-12-31", premiumAmount: "1200000.00", premiumCurrency: "KES", premiumBasis: "gross", commissionAmount: null, premiumSource: "document", premiumVerifiedAt: "2026-01-02", premiumEvidenceDocumentId: null, current: true }] },
         { id: POL_UNVERIFIED, policyNumber: null, classOfBusiness: "Fire", insurerName: null, periods: [{ id: PER_UNVERIFIED, periodStart: "2026-02-01", periodEnd: "2027-01-31", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] },
       ],
-      work: [], claims: [], endorsements: [], documents: [{ id: DOC, filename: "schedule.pdf", kind: "policy_schedule", createdAt: "2026-09-02", extractionState: "extracted" }], threads: [], fileMissing: [], mailboxConnected: false,
+      work: [], claims: claimMade ? [{ id: CLAIM, workItemId: CLAIM_WORK, policyId: claimMade.policyId, insurerReference: null, incidentSummary: claimMade.incidentSummary, incidentOn: claimMade.incidentOn, status: "draft" }] : [], endorsements: [], documents: [{ id: DOC, filename: "schedule.pdf", kind: "policy_schedule", createdAt: "2026-09-02", extractionState: "extracted" }], threads: [], fileMissing: [], mailboxConnected: false,
       permissions: { canEditContacts: true, canUploadDocuments: true, canStartWork: true },
     }),
     policySpace: async (id: string) => ({
@@ -154,6 +165,10 @@ vi.mock("../lib/api.js", () => ({
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
     opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
     opportunityAction,
+    workItem: async (id: string) => (id === CLAIM_WORK && claimMade ? {
+      item: { id: CLAIM_WORK, steps: [{ id: "docs", label: "Collect the claim form and supporting documents", actor: "client", state: "now", guards: [], evidence: [{ kind: "document", label: "Claim form" }], actions: [], party: null, reason: null, recorded: [], runId: null }] },
+      claim: { claim: { id: CLAIM, organization_id: ORG, work_item_id: CLAIM_WORK, client_id: CLIENT, policy_id: claimMade.policyId, policy_period_id: null, status: "draft", source: "manual", incident_on: claimMade.incidentOn, incident_summary: claimMade.incidentSummary, reported_on: null, insurer_reference: null }, documents: [], notes: [], clock: null, candidatePeriods: [] },
+    } : null),
     askStatus: async () => ({ modelConfigured: false }),
     conversations: async () => ({ conversations: [] }),
     conversationMessages: async () => ({ messages: [] }),
@@ -186,6 +201,7 @@ describe("live mode", () => {
   beforeEach(() => {
     setAutomationEnabled.mockClear();
     created.length = 0;
+    claimMade = null;
   });
 
   it("reads the brokerage's own people, clients and work — and no demo records", async () => {
@@ -550,6 +566,41 @@ describe("live mode", () => {
       expect(A.ai.context().pendingAction).toBeNull();
       expect(A.ai.context().latestReceipt).toMatchObject({ text: "Kifaru Traders added as a client" });
       expect(A.ai.context().organizationId).toBe(ORG);
+    });
+  });
+
+  describe("the claim vertical slice", () => {
+    const yesterday = () => { const d = new Date(Date.now() - 864e5); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+
+    it("reports a claim from the policy in front: kept values, a draft, one create, read back, its Space", async () => {
+      const A = await live();
+      const ref = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+      const r = (await A.ai.route("Report a claim for the accident yesterday", { ...ref, ref })) as { pending: { action: string; payload: Record<string, string>; actionId: string; external: string; sections: { label: string; items: string[] }[] } };
+      expect(r.pending.action).toBe("claim.open");
+      expect(r.pending.payload).toEqual({ clientId: CLIENT, policyId: POL_OK, incidentOn: yesterday(), incidentSummary: "The accident yesterday" });
+      expect(r.pending.external).toMatch(/^No message is sent to the insurer/);
+      expect(r.pending.sections[0]!.items[0]).toBe("A draft claim — not registered");
+      expect(createWorkItem).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "claim" }));
+      const done = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; text: string; nav: { ws: string; claimId: string } };
+      expect(done.text).toBe("Claim reported as a draft — not registered");
+      expect(done.nav).toEqual({ ws: "claim", clientId: CLIENT, claimId: CLAIM });
+      const again = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { duplicate?: boolean };
+      expect(again.duplicate).toBe(true);
+      expect(createWorkItem.mock.calls.filter((c) => (c[0] as { kind: string }).kind === "claim")).toHaveLength(1);
+      const space = text(A.ai.workspace(done.nav));
+      expect(space).toContain("Draft — not registered");
+      expect(space).toContain("Claim form");
+      expect(space).toContain("Nothing is sent from here");
+      expect(space).not.toMatch(/@|undefined|\bnull\b|Review and send|"t":"email"/);
+    });
+
+    it("asks which policy only when the client has several, offering 'not known'; asks the date when it is missing", async () => {
+      const A = await live();
+      const which = (await A.ai.route("Report a claim for the accident yesterday", { chip: { clientId: CLIENT } })) as { lead: string; clarify: { options: { label: string }[] } };
+      expect(which.lead).toBe("Which policy does this claim relate to?");
+      expect(which.clarify.options.map((o) => o.label)).toContain("Policy not known yet");
+      const when = (await A.ai.route("Report a claim on TH-MTR-001", {})) as { lead: string };
+      expect(when.lead).toBe("When did it happen?");
     });
   });
 });
