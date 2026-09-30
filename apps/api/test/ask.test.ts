@@ -310,6 +310,25 @@ describe("POST /ask", () => {
     expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("passes a general answer from the model through Ask and keeps both turns in the conversation", async () => {
+    const GENERAL: FakeScript = [
+      {
+        match: /loss ratio/i,
+        reply: {
+          text: JSON.stringify({ type: "answer", target: null, panel: null, view: "summary", answer: "A claims loss ratio is the claims an insurer pays out divided by the premium it earns, so it shows how much of each shilling of premium goes back out as claims.", suggestions: [] }),
+          toolCalls: [],
+          stop: "end",
+        },
+      },
+    ];
+    const body = await readJson(await ask(build(db, GENERAL), { question: "Explain in plain English what a claims loss ratio means." }));
+    expect(body.state).toBe("answered");
+    expect(body.message.body).toMatch(/claims an insurer pays out divided by the premium/);
+    expect(body.message.tools_used).toEqual([]);
+    const rows = db.tables["conversation_messages"] ?? [];
+    expect(rows.map((r) => r["role"])).toEqual(["person", "asap"]);
+  });
+
   it("refuses a scope the caller cannot read", async () => {
     const res = await ask(build(db, GROUNDED), {
       question: "What is happening here?",
