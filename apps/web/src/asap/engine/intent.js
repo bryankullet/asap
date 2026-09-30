@@ -40,7 +40,9 @@ function findUser(t) {
 }
 function findClient(t, ctx) {
   const q = (t || '').toLowerCase();
-  const hit = sel.clients().find(c => q.includes(c.name.split(' ')[0].toLowerCase()));
+  // Edited from the approved build: a whole word of three or more letters, never a substring —
+  // a client called "A" otherwise matched almost every sentence and took over the context.
+  const hit = sel.clients().find(c => { const w = c.name.split(' ')[0].toLowerCase(); return w.length >= 3 && new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(q); });
   if (hit) return hit;
   const reg = findReg(t || '');
   if (reg) { const it = sel.itemByReg(reg); if (it) return sel.client(it.clientId); }

@@ -69,6 +69,13 @@ class Component extends DCLogic {
   bump(extra) { this.setState({ tick: this.state.tick + 1, ...(extra || {}) }); }
   flash(toast) { this.setState({ toast }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 3200); }
 
+  componentDidUpdate(_p, prev) {
+    const el = typeof document !== 'undefined' ? document.querySelector('.asap-thread') : null;
+    if (!el) return;
+    if (!el.dataset.watched) { el.dataset.watched = '1'; el.addEventListener('scroll', () => { this._pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }); }
+    const grew = !prev || prev.thread !== this.state.thread || prev.thinking !== this.state.thinking;
+    if (grew && this._pinned !== false) el.scrollTop = el.scrollHeight;
+  }
   saveThread(thread) {
     this.A.records.act('conversation.save', { id: 'cnv_main', messages: thread.slice(-40), contextId: this.state.contextRef?.clientId || null }, 'conv:' + Date.now());
   }
@@ -121,6 +128,7 @@ class Component extends DCLogic {
   // ---------------- Ask
   ask = (text) => {
     if (!text || !text.trim()) return;
+    this._pinned = true;
     const thread = [...this.state.thread, { role: 'user', text }];
     this.setState({ thread, thinking: true });
     setTimeout(async () => {

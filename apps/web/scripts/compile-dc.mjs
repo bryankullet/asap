@@ -110,6 +110,10 @@ const PATCHES = [
   ["    if (!ref) return;\n    const ident = ", "    if (!ref) return;\n    try { sessionStorage.setItem('asap.openRef', JSON.stringify(ref)); } catch { /* storage blocked: a reload opens Today */ }\n    const ident = "],
   ["go: () => this.setState({ activeId: t.id, contextRef: t.ref }),", "go: () => { try { sessionStorage.setItem('asap.openRef', JSON.stringify(t.ref)); } catch { /* storage blocked */ } this.setState({ activeId: t.id, contextRef: t.ref }); },"],
   ["    const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];\n    this.setState({ ready: true, tabs, activeId: 't1',", "    const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];\n    let reopen = null;\n    try { reopen = JSON.parse(sessionStorage.getItem('asap.openRef') || 'null'); } catch { reopen = null; }\n    let back = null;\n    try { back = reopen && reopen.ws && reopen.ws !== 'today' && reopen.ws !== 'nothing' ? A.ai.workspace(reopen) : null; } catch { back = null; }\n    if (back) tabs.push({ id: 't2', ref: reopen, pinned: false });\n    this.setState({ ready: true, tabs, activeId: back ? 't2' : 't1', contextRef: back ? reopen : undefined,"],
+  // Ask shows its newest turn: the thread stays pinned to the bottom as answers arrive, unless
+  // the person has scrolled up to read something; sending a question pins it again.
+  ["  saveThread(thread) {", "  componentDidUpdate(_p, prev) {\n    const el = typeof document !== 'undefined' ? document.querySelector('.asap-thread') : null;\n    if (!el) return;\n    if (!el.dataset.watched) { el.dataset.watched = '1'; el.addEventListener('scroll', () => { this._pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }); }\n    const grew = !prev || prev.thread !== this.state.thread || prev.thinking !== this.state.thinking;\n    if (grew && this._pinned !== false) el.scrollTop = el.scrollHeight;\n  }\n  saveThread(thread) {"],
+  ["    const thread = [...this.state.thread, { role: 'user', text }];", "    this._pinned = true;\n    const thread = [...this.state.thread, { role: 'user', text }];"],
   // An upload may name the action its file goes to (live import reads a book this way).
   // The picker is emptied once its files are read, so a file chosen in one workspace does not stay
   // selected in the next one that happens to reuse the same control.
@@ -133,6 +137,8 @@ const PATCHES = [
    "    const actionId = opts.actionId || (action + ':' + JSON.stringify(payload));\n    this.setState({ busy: true });\n    if (this.A.savingNote && !/^(conversation|draft)\\./.test(action)) this.flash(this.A.savingNote);"],
 ];
 const TEMPLATE_PATCHES = [
+  // The Ask thread's scroller, named so the logic can keep the newest turn in view.
+  ['<div style="flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:15px">\n              <sc-for list="{{ thread }}"', '<div class="asap-thread" style="flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:15px">\n              <sc-for list="{{ thread }}"'],
   // The form block's button and note come from the block, so one form serves every live form.
   ['>Save automation</button>', '>{{ b.saveLabel }}</button>'],
   ['>Saved automations start paused. Test mode writes nothing.</small>', '>{{ b.saveNote }}</small>'],

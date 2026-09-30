@@ -308,4 +308,35 @@ describe("live mode", () => {
       expect((await a.ai.route(q, {})).lead ?? "").not.toMatch(/^You have \d+ clients?\./);
     }
   });
+
+  it("answers a policy cover question from that policy's server cover check, never the vehicle check", async () => {
+    const a = await live();
+    const inFront = await a.ai.route("Is cover active on this policy?", { clientId: CLIENT, policyYearId: PER_OK });
+    expect(inFront.lead).toBe("TH-MTR-001 has active cover.");
+    expect(inFront.ref).toEqual({ ws: "policy", clientId: CLIENT, policyYearId: PER_OK });
+
+    const byNumber = await a.ai.route("Is cover active on TH-MTR-001?", {});
+    expect(byNumber.lead).toBe("TH-MTR-001 has active cover.");
+    expect(byNumber.ref).toMatchObject({ ws: "policy", policyYearId: PER_OK });
+
+    const unverified = await a.ai.route("Is cover active on this policy?", { clientId: CLIENT, policyYearId: PER_UNVERIFIED });
+    expect(unverified.lead).toMatch(/Cover not verified/);
+
+    // Nothing open and nothing named: one question, no workspace, no guessed client.
+    const bare = await a.ai.route("Is cover active on this policy?", {});
+    expect(bare.lead).toBe("Which policy do you mean?");
+    expect(bare.ref).toBeNull();
+    const vague = await a.ai.route("Is it covered?", {});
+    expect(text(vague)).not.toContain('"ws":"coverage"');
+    expect(text(vague)).not.toContain("null is not");
+  });
+
+  it("never takes a one-letter client name as a match for ordinary words", async () => {
+    await live();
+    // @ts-expect-error -- the approved engine is untyped JavaScript
+    const S = (await import("./engine/store.js")) as { getDb(): { clients: { id: string; name: string }[] }; sel: { clientByName(t: string): { name: string } | null } };
+    S.getDb().clients.push({ id: "30000000-0000-4000-8000-0000000000aa", name: "A" });
+    expect(S.sel.clientByName("Is cover active on this policy?")).toBeNull();
+    expect(S.sel.clientByName("Open Tausi Hauliers")?.name).toBe("Tausi Hauliers Ltd");
+  });
 });

@@ -710,7 +710,8 @@ export const sel = {
   client: (id) => byId('clients', id),
   clientByName: (t) => {
     const q = (t || '').toLowerCase();
-    return all('clients').find(c => q.includes(c.name.split(' ')[0].toLowerCase())) || null;
+    // Edited: whole word of three or more letters, as in findClient.
+    return all('clients').find(c => { const w = c.name.split(' ')[0].toLowerCase(); return w.length >= 3 && new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(q); }) || null;
   },
   contacts: (clientId) => where('contacts', c => c.clientId === clientId),
   policies: (clientId) => where('policies', p => p.clientId === clientId),

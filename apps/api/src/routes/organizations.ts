@@ -79,7 +79,7 @@ export function organizationRoutes(logger: Logger) {
       .from("organization_memberships")
       .select(
         `id, is_owner, status, joined_at,
-         user:users ( id, email, full_name, display_name, last_seen_at ),
+         user:users!organization_memberships_user_id_fkey ( id, email, full_name, display_name, last_seen_at ),
          role:roles ( id, key, name, description, is_system )`,
       )
       .eq("organization_id", org.id)

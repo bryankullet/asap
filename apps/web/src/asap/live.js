@@ -97,6 +97,12 @@ async function hydrate(me) {
 
   db.brokerages.push({ id: org.id, name: org.name, country: org.country ?? "", approvalRules: {} });
 
+  // Every load that depends on nothing else starts now, together: the API is far from its
+  // database, so each call costs seconds and waves run one after another add up (a 20 s load).
+  const clientListsP = Promise.all(CLIENT_VIEWS.map((v) => api.clientFiles(v).catch(() => ({ items: [] }))));
+  const convoP = loadConversation();
+  const modelConfiguredP = api.askStatus().then((r) => r.modelConfigured).catch(() => null);
+
   const [members, mailboxes, automations, audit, opportunities, ...workViews] = await Promise.all([
     api.members().catch(() => ({ members: [] })),
     api.mailboxes().catch(() => null),
@@ -136,7 +142,13 @@ async function hydrate(me) {
   db.connections.push({ id: "con_model", kind: "AI model", account: "ASAP", status: "disconnected", note: "Ask ASAP reads your records directly in this view." });
 
   // Clients: every compliance view, de-duplicated.
-  const clientLists = await Promise.all(CLIENT_VIEWS.map((v) => api.clientFiles(v).catch(() => ({ items: [] }))));
+  // Each open quotation in full, fetched alongside the client records rather than after them.
+  const detailsP = pool(
+    opportunities.opportunities.filter((o) => !o.closedAt).slice(0, 40),
+    6,
+    (o) => api.opportunity(o.id),
+  );
+  const clientLists = await clientListsP;
   const seen = new Set();
   for (const list of clientLists) {
     for (const row of list.items) {
@@ -240,7 +252,11 @@ async function hydrate(me) {
   });
 
   // Cover, as the server derives it — the only source allowed to say "Active cover".
-  const covers = await pool(policyIds, 6, (id) => api.policySpace(id));
+  // Cover checks and document details depend only on the client records, so they run together.
+  const [covers, docDetails] = await Promise.all([
+    pool(policyIds, 6, (id) => api.policySpace(id)),
+    pool(db.documents.slice(0, 60), 6, (d) => api.document(d.id)),
+  ]);
   covers.forEach((ps) => {
     if (!ps) return;
     const year = db.policyYears.find((y) => y.id === ps.selectedPeriodId);
@@ -254,6 +270,9 @@ async function hydrate(me) {
     } else {
       year.status = ps.cover.label;
     }
+    // The server's own words for why, so Ask can say it without deciding anything itself.
+    year.coverLabel = ps.cover.label;
+    year.coverReason = ps.cover.reason;
   });
 
   // Work: the four task-status views.
@@ -325,15 +344,11 @@ async function hydrate(me) {
   }
 
   // The person's latest Ask conversation, from the server (rule 14: a transcript, never records).
-  const convo = await loadConversation();
+  const convo = await convoP;
   db.conversations.push({ id: "cnv_main", messages: convo.messages, contextId: null });
 
   // Each open quotation in full, so its workspace can show requirements, insurers and replies.
-  const details = await pool(
-    opportunities.opportunities.filter((o) => !o.closedAt).slice(0, 40),
-    6,
-    (o) => api.opportunity(o.id),
-  );
+  const details = await detailsP;
   const opportunityDetails = new Map();
   details.forEach((d) => d && opportunityDetails.set(d.opportunity.id, d));
 
@@ -344,7 +359,6 @@ async function hydrate(me) {
   }
 
   // Each document's reading state and the values read from it, so it can be reviewed.
-  const docDetails = await pool(db.documents.slice(0, 60), 6, (d) => api.document(d.id));
   const documents = new Map();
   docDetails.forEach((d) => {
     if (!d) return;
@@ -362,7 +376,7 @@ async function hydrate(me) {
   // Documents count as working only when every client's documents and every document read back.
   const docsDegraded = (db.meta.unreadableClients || []).length > 0 || docDetails.some((d) => !d) || [...documents.values()].some((d) => d.document.extractionState === "failed");
   db.meta.docsDegraded = docsDegraded;
-  const modelConfigured = await api.askStatus().then((r) => r.modelConfigured).catch(() => null);
+  const modelConfigured = await modelConfiguredP;
 
   return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, modelConfigured, conversationId: convo.id } };
 }
@@ -973,6 +987,46 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     }
   }
 
+  /**
+   * "Is cover active on this policy / on POL-…?" — answered from the server's cover check for
+   * that policy, never from the vehicle check. An explicit policy number wins; then the policy
+   * open in front; then the only policy of the client open in front. Anything else is one
+   * clarifying question — never a guessed client and never a workspace built on nothing.
+   * A vehicle registration in the question leaves it to the vehicle check.
+   */
+  function policyCoverAnswer(t, ctx) {
+    if (!/\bcover(ed|age)?\b|\bin force\b|\bon risk\b/i.test(t)) return null;
+    if (/\b[kK][a-zA-Z]{2}\s?\d{3}[a-zA-Z]?\b/.test(t)) return null; // a registration: the vehicle check
+    const byNumber = db.policies.find((p) => p.number && p.number !== "Number not recorded" && new RegExp("\\b" + p.number.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(t));
+    const mentionsPolicy = /\b(polic(y|ies)|this|it)\b/i.test(t);
+    let year = null;
+    if (byNumber) {
+      year = db.policyYears.filter((y) => y.policyId === byNumber.id).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
+    } else if (mentionsPolicy && ctx.policyYearId) {
+      year = db.policyYears.find((y) => y.id === ctx.policyYearId) ?? null;
+    } else if (mentionsPolicy && ctx.policyId) {
+      year = db.policyYears.filter((y) => y.policyId === ctx.policyId).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
+    } else if (mentionsPolicy && ctx.clientId) {
+      const pols = db.policies.filter((p) => p.clientId === ctx.clientId);
+      if (pols.length === 1) year = db.policyYears.filter((y) => y.policyId === pols[0].id).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
+      else if (pols.length > 1)
+        return { lead: "Which policy?", text: "This client has more than one policy; I will not pick one.", clarify: { question: "Policy", options: pols.map((p) => ({ label: p.number, text: "Is cover active on " + p.number + "?" })) }, ref: null, keepWorkspace: true };
+    }
+    if (!year) {
+      if (!mentionsPolicy && !byNumber) return null;
+      return { lead: "Which policy do you mean?", text: "Name the policy number, or open the policy first. I will not guess which record you mean.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
+    }
+    const pol = db.policies.find((p) => p.id === year.policyId);
+    const client = db.clients.find((c) => c.id === year.clientId);
+    const active = year.status === "active";
+    return {
+      lead: (pol?.number ?? "This policy") + (active ? " has active cover." : ": " + (year.coverLabel || "cover not verified") + "."),
+      text: (year.coverReason ? year.coverReason + " " : "") + (client ? "Client " + client.name + ". " : "") + "Period " + S.fmtDate(year.from) + " – " + S.fmtDate(year.to) + ", " + year.insurer + ". ASAP reports what the insurer's records show; it does not decide cover.",
+      ref: { ws: "policy", clientId: year.clientId, policyYearId: year.id },
+      chips: LIVE_CHIPS,
+    };
+  }
+
   async function liveRoute(text, ctx) {
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
@@ -995,7 +1049,13 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const client = S.sel.clientByName(t) || (ctx.clientId ? S.sel.client(ctx.clientId) : null);
       return { lead: client ? "Reporting a claim for " + client.name + "." : "Which client is the claim for?", text: "The claim opens as a draft; it never means the loss is covered.", ref: { ws: "claim", clientId: client?.id } };
     }
+    const cover = policyCoverAnswer(t, ctx);
+    if (cover) return cover;
     const r = interpret(t, ctx) || {};
+    // The vehicle check needs a vehicle. Without a registration it asks, rather than opening a
+    // cover workspace about nothing ("null is not on a confirmed schedule").
+    if (r.ref && r.ref.ws === "coverage" && !r.ref.reg)
+      return { lead: "Which vehicle or policy?", text: "Give the registration or the policy number, or open the policy first. Nothing was opened.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
     if (r.nothing) return askServer(text.trim(), ctx);
     if (Array.isArray(r.chips) && r.chips.some((c) => DEMO_WORDS.test(typeof c === "string" ? c : c.label ?? ""))) r.chips = LIVE_CHIPS;
     if (r.ref && NOT_CONNECTED_WS[r.ref.ws]) {
