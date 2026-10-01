@@ -144,6 +144,43 @@ export const actResponseSchema = z.discriminatedUnion("outcome", [
 ]);
 export type ActResponse = z.infer<typeof actResponseSchema>;
 
+/**
+ * `POST /work-items/:id/manage` — a person changes who owns a Work item, when it is due, or when it
+ * is looked at again (D-122). Ask and the Work Space both call this one contract. `preview` returns
+ * what would change and writes nothing.
+ */
+export const manageWorkRequestSchema = z
+  .object({
+    version: z.number().int(),
+    preview: z.boolean().default(false),
+    /** A member of this brokerage, or null to leave it unowned. Omit to leave the owner unchanged. */
+    ownerId: uuidSchema.nullable().optional(),
+    /** YYYY-MM-DD, or null to clear. Omit to leave unchanged. */
+    dueOn: z.string().date().nullable().optional(),
+    /** When the item is looked at again. Omit to leave unchanged. */
+    nextCheckAt: z.string().datetime({ offset: true }).nullable().optional(),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine((r) => r.ownerId !== undefined || r.dueOn !== undefined || r.nextCheckAt !== undefined, {
+    message: "Say what to change: the owner, the due date or the next check.",
+  });
+export type ManageWorkRequest = z.infer<typeof manageWorkRequestSchema>;
+
+export const manageWorkChangeSchema = z.object({
+  field: z.enum(["owner", "due", "next_check"]),
+  label: z.string(),
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+});
+
+export const manageWorkResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("preview"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema), externalEffect: z.string() }),
+  z.object({ outcome: z.literal("applied"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema), auditAction: z.string() }),
+  z.object({ outcome: z.literal("already_done"), item: WorkItemRow, changes: z.array(manageWorkChangeSchema) }),
+  z.object({ outcome: z.literal("blocked"), item: WorkItemRow, guard: z.string(), reason: z.string() }),
+]);
+export type ManageWorkResponse = z.infer<typeof manageWorkResponseSchema>;
+
 export const workItemResponseSchema = z.object({
   item: WorkItemRow,
   runs: z.array(RunRow),
@@ -200,6 +237,21 @@ export const historyEntrySchema = z.object({
   /** Evidence references recorded with the action, if any. */
   evidence: z.array(z.string()).max(10),
   occurredAt: z.string(),
+  /*
+   * What a manager reads on Activity (D-124), resolved by the server from existing audit rows —
+   * never rewritten. Optional so an older reader and an older writer still agree.
+   */
+  /** The person who acted, when a person did. The browser never guesses "system" for a person. */
+  actorId: uuidSchema.nullable().optional(),
+  /** "A person", "ASAP", "An automation", "The platform". */
+  actorLabel: z.string().optional(),
+  client: z.object({ id: uuidSchema, name: z.string() }).nullable().optional(),
+  record: z.object({ type: z.string(), id: uuidSchema, label: z.string() }).nullable().optional(),
+  workItemId: uuidSchema.nullable().optional(),
+  /** True only when the audit row records something leaving the brokerage. */
+  external: z.boolean().optional(),
+  /** True when the action touched cover or money state (placement, issuance, payment…). */
+  coverOrMoney: z.boolean().optional(),
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 

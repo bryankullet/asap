@@ -46,9 +46,29 @@ export const createClientRequestSchema = z.object({
   name: z.string().trim().min(2, "Give the client's name").max(200),
   kind: ClientKind,
   confirmNew: z.boolean().default(false),
+  /**
+   * Ask's preview: say what would be written, what is similar and what is missing — and write
+   * nothing. The same contract as the create itself, so a preview can never describe a write the
+   * create would not make.
+   */
+  preview: z.boolean().default(false),
 });
+const clientCandidateSchema = z.object({ id: uuidSchema, name: z.string(), kind: ClientKind });
 export const createClientResponseSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("created"), file: clientFileResponseSchema }),
+  /* The create is idempotent on the exact name: a repeat (a retry, a double press) finds it. */
+  z.object({ outcome: z.literal("already_on_file"), file: clientFileResponseSchema }),
+  z.object({
+    outcome: z.literal("preview"),
+    name: z.string(),
+    kind: ClientKind,
+    candidates: z.array(clientCandidateSchema),
+    /** A client with this exact name exists: confirming would find it, not make another. */
+    exact: clientCandidateSchema.nullable(),
+    missing: z.array(z.string()),
+    writes: z.array(z.string()),
+    externalEffect: z.string(),
+  }),
   z.object({
     outcome: z.literal("possible_duplicates"),
     name: z.string(),

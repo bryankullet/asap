@@ -20,6 +20,7 @@ import {
   type ApplyTarget,
   type ApplyTargetType as ApplyTargetTypeValue,
   type DocumentSummary,
+  type NextAction,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pgMoney } from "../numeric.js";
@@ -275,6 +276,59 @@ async function currentValues(
   return { label: row.name, values: { insured_name: row.name } };
 }
 
+
+/** The next action on a document under review (D-120), from its reading state and fields. */
+export function documentNext(doc: DocumentSummary, fields: DocumentField[], conflict: string | null): NextAction {
+  const record = { type: "document" as const, id: doc.id, label: doc.filename };
+  const base = { party: null, since: null, checkAt: null, record };
+  const proposed = fields.filter((f) => f.state === "proposed");
+  if (doc.extractionState === "failed")
+    return { ...base, what: `Read ${doc.filename} again, or review it by hand`, holder: "brokerage", missing: ["The values in this document"], why: doc.extractionError ?? "ASAP could not read this file.", action: { name: "retry_extraction", label: "Read it again", targetId: doc.id }, stage: "read_failed" };
+  if (doc.extractionState !== "extracted" && doc.extractionState !== "not_applicable")
+    return { ...base, what: `Wait while ASAP reads ${doc.filename}`, holder: "nobody", missing: [], why: "Its values appear for review once it has been read.", action: null, stage: "reading" };
+  if (conflict)
+    return { ...base, what: "Resolve which client this document belongs to", holder: "brokerage", missing: ["The right client for this document"], why: conflict, action: null, stage: "identity_conflict" };
+  if (proposed.length)
+    return { ...base, what: `Confirm the ${proposed.length} value${proposed.length === 1 ? "" : "s"} read from ${doc.filename}`, holder: "brokerage", missing: proposed.map((f) => f.fieldKey.replace(/_/g, " ")), why: "A value read from a document is a proposal until a person confirms it.", action: { name: "review_fields", label: "Confirm the values", targetId: doc.id }, stage: "review" };
+  if (fields.some((f) => f.state === "accepted" || f.state === "corrected"))
+    return { ...base, what: "Apply the confirmed values to the record they belong to", holder: "brokerage", missing: [], why: "Confirmed values change nothing on a record until a person applies them.", action: { name: "apply", label: "Choose the record", targetId: doc.id }, stage: "apply" };
+  return { ...base, what: "Nothing to review in this document", holder: "nobody", missing: [], why: "ASAP found no values it reads here.", action: null, stage: "nothing" };
+}
+
+/** Names compared as a person would: case, punctuation and company suffixes do not matter. */
+function comparableName(v: string): string {
+  return v
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(limited|ltd|plc|llc|inc|co|company|the)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A document filed under one client that names a different insured is a conflict, not a detail:
+ * applying its values would write one client's terms onto another's record. Returns the reason,
+ * or null when the names agree or either is unknown.
+ */
+export async function identityConflict(
+  db: SupabaseClient,
+  orgId: string,
+  documentClientId: string | null,
+  fields: DocumentField[],
+): Promise<string | null> {
+  if (!documentClientId) return null;
+  const insured = fields.find((f) => f.fieldKey === "insured_name" && f.state !== "rejected");
+  const named = (insured?.correctedValue ?? insured?.proposedValue ?? "").trim();
+  if (!named) return null;
+  const res = await db.from("clients").select("name").eq("organization_id", orgId).eq("id", documentClientId).maybeSingle();
+  const clientName = ((res.data as { name?: string } | null)?.name ?? "").trim();
+  if (!clientName) return null;
+  const a = comparableName(named);
+  const b = comparableName(clientName);
+  if (!a || !b || a === b || a.includes(b) || b.includes(a)) return null;
+  return `This document names the insured as ${named}, but it is filed under ${clientName}. Nothing can be applied until that is resolved — file it under the right client, or correct the insured name.`;
+}
+
 export function documentRoutes(deps: {
   logger: Logger;
   bucket: string;
@@ -357,8 +411,11 @@ export function documentRoutes(deps: {
       deps.logger.warn({ documentId: id }, "could not sign a document url");
     }
 
+    const detailFields = ((fieldsR.data ?? []) as FieldRow[]).map(toField);
+    const conflict = await identityConflict(db, org.id, doc.client_id, detailFields);
     return c.json(
       documentDetailSchema.parse({
+        next: documentNext(summarise(doc), detailFields, conflict),
         document: summarise(doc),
         pages: ((pagesR.data ?? []) as { page_number: number; width: number; height: number; text: string }[]).map(
           (p) => ({
@@ -979,6 +1036,8 @@ export function documentRoutes(deps: {
     const fields = ((fieldsRes.data ?? []) as FieldRow[]).map(toField);
     const accepts = APPLICABLE_FIELDS[targetType];
 
+    const conflict = await identityConflict(db, org.id, (found.data as DocumentRow).client_id, fields);
+
     const rows: ApplyPreviewField[] = fields
       .filter((f) => f.state !== "rejected")
       .map((f) => {
@@ -995,7 +1054,9 @@ export function documentRoutes(deps: {
           condition: f.condition,
           state: f.state,
           unchanged: applicable && sameValue(f.fieldKey, held, proposed),
-          blockedBecause: applicable
+          blockedBecause: conflict
+            ? conflict
+            : applicable
             ? proposed === null
               ? "The document gave no value for this."
               : null
@@ -1100,6 +1161,22 @@ export function documentRoutes(deps: {
           `A ${req.targetType.replace(/_/g, " ")} does not hold ${f.fieldKey.replace(/_/g, " ")}.`,
         );
       }
+    }
+
+    // An identity conflict blocks every apply from this document, whatever the target.
+    const docRow = await db.from("documents").select("client_id").eq("organization_id", org.id).eq("id", id).maybeSingle();
+    const conflict = await identityConflict(db, org.id, (docRow.data as { client_id: string | null } | null)?.client_id ?? null, [...known.values()]);
+    if (conflict) {
+      await recordAudit(db, deps.logger, c, {
+        organizationId: org.id,
+        actorUserId: user.id,
+        action: "document.apply_to_record",
+        objectType: req.targetType,
+        objectId: req.targetId,
+        result: "denied",
+        failureReason: "identity_conflict",
+      });
+      throw new HttpError(409, "identity_conflict", conflict);
     }
 
     const rpc = await db.rpc("document_apply_to_record", {

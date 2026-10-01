@@ -225,7 +225,10 @@ ASAP
 Profile
 ```
 
-**Ask ASAP is persistent, not a destination** (D-074). It is docked at the foot of every screen. It
+**Ask ASAP is the centre of the screen** (D-118, amending D-074/D-115): the conversation is the
+central surface and the live Space sits on its right; on phones Ask is first and the Space opens
+full screen. It is still not a destination in the sidebar.
+**Ask ASAP is persistent, not a destination** (D-074). It is present on every screen. It
 keeps the address `/ask` so a conversation can be linked and reopened, and so the composer has
 somewhere to open into — but it is not in the sidebar, because something always in reach is never
 somewhere to go.

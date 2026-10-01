@@ -59,7 +59,7 @@ const transport: typeof fetch = async (input, init) => {
 export const newApiKey = () => `connected-internal-key-${randomUUID()}`;
 
 const silentMailer = { send: async () => ({ ok: true as const }), sendInvitation: async () => {} } as unknown as Mailer;
-export const buildApp = (apiKey: string, askScript: FakeScript = []) =>
+export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl = "http://localhost:5173") =>
   createApp({
     logger: pino({ level: process.env["CONNECTED_LOG"] ?? "silent" }),
     build: { version: "connected", commit: "connected" },
@@ -71,7 +71,7 @@ export const buildApp = (apiKey: string, askScript: FakeScript = []) =>
       fetch: transport,
     }),
     mailer: silentMailer,
-    webBaseUrl: "http://localhost:5173",
+    webBaseUrl,
     invitationTtlHours: 168,
     exposeAcceptUrl: false,
     executor: () => async () => {},

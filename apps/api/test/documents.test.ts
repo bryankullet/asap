@@ -574,6 +574,35 @@ describe("applying what a document says to the record it is about", () => {
     expect(sum.blockedBecause).toMatch(/does not hold this/);
   });
 
+  const insured = (value: string) => {
+    const doc = (db.tables["documents"] ?? []).find((d) => d["id"] === DOC);
+    if (doc) doc["client_id"] = CLIENT;
+    (db.tables["document_fields"] ?? []).push({
+      id: "91000000-0000-4000-8000-0000000000ee", organization_id: ORG_A, document_id: DOC, field_key: "insured_name",
+      proposed_value: value, corrected_value: null, page_number: 1, region_x: 1, region_y: 1, region_width: 10, region_height: 10,
+      state: "accepted", condition: "known", reviewed_by: AMINA.id, reviewed_at: "2026-09-16T11:00:00Z", created_at: "2026-09-10T09:00:00Z",
+    });
+  };
+
+  it("blocks every apply when the document names a different insured than its client", async () => {
+    reviewEverything();
+    insured("Rapid Test Motors Limited");
+    const res = await apply("tok-amina", policyNumberChange());
+    expect(res.status).toBe(409);
+    const body = await readJson(res);
+    expect(body.error ?? body.code).toBeDefined();
+    expect(JSON.stringify(body)).toContain("identity_conflict");
+    const preview = await readJson(await app.request(`/documents/${DOC}/apply-preview?targetType=policy&targetId=${POLICY}`, { headers: hdr("tok-amina") }));
+    for (const f of preview.fields) expect(f.blockedBecause).toMatch(/names the insured as Rapid Test Motors Limited, but it is filed under Acme Manufacturing Ltd/);
+  });
+
+  it("does not call it a conflict when only the company suffix differs", async () => {
+    reviewEverything();
+    insured("ACME MANUFACTURING LIMITED");
+    const preview = await readJson(await app.request(`/documents/${DOC}/apply-preview?targetType=policy&targetId=${POLICY}`, { headers: hdr("tok-amina") }));
+    expect(preview.fields.some((f: { blockedBecause: string | null }) => /names the insured/.test(f.blockedBecause ?? ""))).toBe(false);
+  });
+
   it("refuses an apply with no target", async () => {
     reviewEverything();
     const res = await apply("tok-amina", {

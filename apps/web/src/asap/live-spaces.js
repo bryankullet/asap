@@ -5,7 +5,7 @@
  *
  * Every value shown comes from an API response. Nothing here is example content.
  */
-import { IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
+import { AUTOMATION_REGISTRY, automationProblems, IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
 import * as S from "./engine/store.js";
 
 const ok = "ok";
@@ -60,7 +60,9 @@ function clientsSpace() {
   };
 }
 
-function newClientSpace(state) {
+function newClientSpace(state, ref = {}) {
+  // A duplicate result describes one name only: opening the form for a different name drops it.
+  if (ref.name && state.duplicate && state.duplicate.name.toLowerCase() !== ref.name.toLowerCase()) state.duplicate = null;
   const dup = state.duplicate;
   return {
     kind: "New client",
@@ -73,8 +75,8 @@ function newClientSpace(state) {
         "newclient",
         "Client",
         [
-          { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents" },
-          { key: "kind", label: "COMPANY OR PERSON", options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
+          { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents", value: ref.name || "" },
+          { key: "kind", label: "COMPANY OR PERSON", value: ref.kind || undefined, options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
         ],
         "client.create",
         {},
@@ -243,6 +245,141 @@ const LEGACY = "Legacy record — invalid, needs correction";
 const tooShort = (v, n = 3) => (v || "").trim().length < n;
 const weakSupply = (r) => r.suppliedAt && (/^marked supplied in asap$/i.test((r.evidence?.label || r.evidenceNote || "").trim()) || tooShort(r.evidence?.label || r.evidenceNote, 10));
 
+const DELIVERY_METHODS = [
+  { value: "own_email", label: "Copied into my own email" },
+  { value: "portal", label: "Uploaded to the insurer's portal" },
+  { value: "printed", label: "Printed and delivered" },
+  { value: "hand_delivered", label: "Handed over in person" },
+  { value: "phone", label: "Read out on the phone" },
+  { value: "other", label: "Another way" },
+];
+const deliveryWords = (m) => (DELIVERY_METHODS.find((x) => x.value === m)?.label || "hand").toLowerCase();
+
+/** The request text a person would send, prepared from the records — edited before approval. */
+export function requestDraft(d, insurerName) {
+  const o = d.opportunity;
+  const reqs = d.requirements.filter((r) => r.suppliedAt).map((r) => "- " + r.label);
+  return [
+    "Dear " + insurerName + " underwriting team,",
+    "",
+    "We invite terms for " + o.classOfBusiness + " cover for our client " + d.client.name + (o.coverStart ? ", from " + date(o.coverStart) + (o.coverEnd ? " to " + date(o.coverEnd) : "") : "") + ".",
+    o.riskSummary ? "\nThe risk: " + o.riskSummary : "",
+    reqs.length ? "\nEnclosed:\n" + reqs.join("\n") : "",
+    "",
+    "Please reply with your premium, excess, key conditions and how long the terms are valid.",
+  ].filter((x) => x !== "").join("\n");
+}
+
+/**
+ * Where the quotation stands, read from its records — never authored. Each stage is done only
+ * when the record that proves it exists: a request prepared is not a request sent.
+ */
+function stagesBlock(d, live) {
+  const any = (f) => live.some(f);
+  const withIns = live.filter((i) => i.stage === "with_insurer").map((i) => i.insurerName);
+  const required = d.requirements.filter((r) => r.required !== false);
+  const steps = [
+    ["Need recorded", true, d.opportunity.title],
+    ["Requirements gathered", required.length > 0 && required.every((r) => r.suppliedAt), required.length ? required.filter((r) => r.suppliedAt).length + " of " + required.length + " supplied" : "None recorded"],
+    ["Insurers selected", live.length > 0, live.length ? live.map((i) => i.insurerName).join(", ") : "None yet"],
+    ["Request prepared", any((i) => !!i.request), ""],
+    ["Reviewed and approved", any((i) => !!i.request?.approvedAt), "Approval does not send it"],
+    ["Delivered by a person, with evidence", any((i) => !!i.request?.delivery), "Copy or download it, deliver it yourself, record how"],
+    [withIns.length ? "With " + withIns.join(", ") : "With the insurer", any((i) => ["with_insurer", "quoted", "declined"].includes(i.stage)), ""],
+    ["Response received", any((i) => !!i.response), ""],
+    ["Terms reviewed", any((i) => (i.response?.terms?.length ?? 0) > 0), ""],
+    ["Comparison ready", !!d.comparisonView?.comparison, ""],
+  ];
+  // "Now" is the server's current stage (D-120), so the Space and Ask always name the same step.
+  const STAGE_AT = { requirements: 1, insurers: 2, prepare: 3, approve: 4, deliver: 5, with_insurer: 7, compare: 8 };
+  const at = STAGE_AT[d.next?.stage];
+  const now = at !== undefined ? (at === 8 && steps[8][1] ? 9 : at) : steps.findIndex(([, done]) => !done);
+  return rows(
+    "Where this quotation stands",
+    steps.map(([title, done, note], k) => ({ title, note: note || (done ? "Done" : k === now ? "This is the current step" : "Not yet"), badge: k === now ? "Now" : done ? "Done" : k < now ? "Not done" : "Later", badgeTone: k === now ? warn : done ? ok : k < now ? bad : "neutral" })),
+  );
+}
+
+function insurerControls(i, d, act) {
+  const out = [];
+  const reqText = i.request ? i.request.subject + "\n\n" + i.request.body : "";
+  if (i.stage === "not_asked" && d.permissions.canEdit)
+    out.push(
+      form(
+        "prep:" + i.id,
+        "Prepare the request to " + i.insurerName,
+        [
+          { key: "subject", label: "SUBJECT", value: "Quotation request — " + d.client.name + ", " + d.opportunity.classOfBusiness },
+          { key: "body", label: "REQUEST", value: requestDraft(d, i.insurerName), multiline: true },
+        ],
+        "opp.action",
+        act("prepare_request", { opportunityInsurerId: i.id }),
+        "Prepare request",
+        "Saved as a draft for approval. Nothing is sent — ASAP has no mailbox connected.",
+      ),
+    );
+  if (i.stage === "request_prepared")
+    out.push(
+      d.permissions.canApprove
+        ? gate("Approve the request to " + i.insurerName, "You approve this exact text. Editing it afterwards clears the approval. Approving does not send it.", "opp.action", act("approve_request", { quoteRequestId: i.request.id }), { label: "Approve request" })
+        : note("amber", "Waiting for approval", "The request to " + i.insurerName + " needs approval by someone who may approve messages leaving the brokerage."),
+    );
+  if (i.stage === "approved_to_deliver") {
+    out.push(
+      rows("Approved request to " + i.insurerName, [
+        { title: i.request.subject, note: "Copy it into the email or portal it should go from. ASAP does not send it.", badge: "Copy", badgeTone: ok, action: { a: "copy", text: reqText } },
+        { title: "Download as a text file", note: "For printing or attaching.", badge: "Download", badgeTone: ok, action: { a: "download", filename: "Quotation request - " + i.insurerName + ".txt", text: reqText } },
+      ]),
+      form(
+        "deliver:" + i.id,
+        "Record how it reached " + i.insurerName,
+        [
+          { key: "method", label: "HOW IT WENT", options: DELIVERY_METHODS },
+          { key: "reference", label: "WHAT PROVES IT", placeholder: "Emailed from Outlook to underwriting@… on 30 Sep, 10:02" },
+          { key: "deliveredOn", label: "DATE DELIVERED (IF NOT TODAY)", type: "date" },
+        ],
+        "opp.action",
+        act("record_delivery", { quoteRequestId: i.request.id }),
+        "Record delivery",
+        "Recorded as delivered by you, with this reference. It is not recorded as sent — nothing left through ASAP.",
+      ),
+    );
+  }
+  if (i.stage === "with_insurer" && d.permissions.canRecordResponse) out.push(responseForm(i, act, false));
+  // A reply that came without a delivered request is allowed, but only as an explicit manual record.
+  if (["not_asked", "request_prepared", "approved_to_deliver"].includes(i.stage) && d.permissions.canRecordResponse) out.push(responseForm(i, act, true));
+  return out;
+}
+
+function responseForm(i, act, withoutRequest) {
+  return form(
+    (withoutRequest ? "resp-manual:" : "resp:") + i.id,
+    withoutRequest ? "Manual record: " + i.insurerName + " replied without a delivered request" : "Record " + i.insurerName + "’s reply",
+    [
+      { key: "outcome", label: "ANSWER", options: [{ value: "quoted", label: "Quoted" }, { value: "declined", label: "Declined" }] },
+      { key: "premiumAmount", label: "PREMIUM, IF QUOTED (NUMBERS ONLY)", placeholder: "485000" },
+      { key: "premiumCurrency", label: "CURRENCY", options: ["KES", "USD", "EUR", "GBP"] },
+      { key: "validUntil", label: "VALID UNTIL (OPTIONAL)", type: "date" },
+      { key: "declineReason", label: "REASON, IF DECLINED", placeholder: "Outside their appetite for this class" },
+      { key: "sourceNote", label: "WHERE IT CAME FROM", placeholder: "Email from the underwriter, 12 Sep" },
+    ],
+    "opp.action",
+    act("record_response", { opportunityInsurerId: i.id, ...(withoutRequest ? { withoutRequest: "yes" } : {}) }),
+    withoutRequest ? "Record as received without a request" : "Record reply",
+    withoutRequest ? "Only for a reply that genuinely arrived with no request delivered — for example an answer on the phone. It is recorded as such." : "Recorded as the insurer's reply, with your name.",
+  );
+}
+
+/** The server's next action, shown the same way on every quotation. */
+function nextBlock(n) {
+  if (!n) return [];
+  const bits = [n.why];
+  if (n.missing?.length) bits.push("Missing: " + n.missing.join("; ") + ".");
+  if (n.holder === "outside_party" && n.party) bits.push("With " + n.party + (n.since ? " since " + date(n.since) : "") + ".");
+  if (n.checkAt) bits.push("Look again " + date(n.checkAt) + ".");
+  return [note(n.holder === "outside_party" ? "amber" : n.stage === "closed" ? "green" : "green", "Next: " + n.what, bits.join(" "))];
+}
+
 function opportunitySpace(id, state) {
   const d = state.opportunities.get(id);
   if (!d) return { kind: "Quotation work", title: "This quotation could not be read", status: "draft", statusLabel: "Unavailable", blocks: [note("red", "Not available", "Refresh records from your profile and try again. Nothing was changed.")] };
@@ -254,6 +391,8 @@ function opportunitySpace(id, state) {
   const act = (action, extra) => ({ id, action, ...extra });
   const legacy = tooShort(o.title) || tooShort(o.classOfBusiness) || tooShort(d.client.name, 2) || d.requirements.some((r) => tooShort(r.label) || weakSupply(r));
   const blocks = [
+    ...nextBlock(d.next),
+    stagesBlock(d, live),
     ...(legacy ? [note("red", LEGACY, "Some of this quotation was saved before ASAP checked its details — a title, class or requirement too short to mean anything, or a requirement marked supplied without evidence. Correct it before relying on it.")] : []),
     facts([
       ["Client", d.client.name],
@@ -302,40 +441,27 @@ function opportunitySpace(id, state) {
                 : i.response.outcome === "declined"
                   ? "Declined" + (i.response.declineReason ? " — " + i.response.declineReason : "")
                   : "Recorded as no response"
-              : i.request
-                ? "Request prepared " + date(i.request.preparedAt) + (i.request.approvedAt ? " · approved" : " · awaiting approval") + (i.request.sentAt ? " · sent " + date(i.request.sentAt) : " · not sent")
-                : "Added " + date(i.addedAt) + " · no request yet",
-            badge: i.response ? words(i.response.outcome) : i.request?.sentAt ? "With insurer" : "Not asked",
-            badgeTone: i.response?.outcome === "quoted" ? ok : warn,
+              : i.request?.delivery
+                ? "Delivered " + date(i.request.delivery.deliveredAt) + " by " + deliveryWords(i.request.delivery.method) + " · " + i.request.delivery.reference
+                : i.request
+                  ? "Prepared " + date(i.request.preparedAt) + (i.request.approvedAt ? " · approved " + date(i.request.approvedAt) + (i.request.approvedByName ? " by " + i.request.approvedByName : "") : "")
+                  : "Added " + date(i.addedAt),
+            badge: i.stageLabel,
+            badgeTone: i.stage === "quoted" ? ok : i.stage === "declined" ? bad : warn,
           }))
         : [{ title: "No insurers yet", note: addable.length ? "Add them from the list below." : "Insurers appear here once they are on file — importing your book adds them.", badge: "Empty", badgeTone: warn }],
     ),
     ...(addable.length && d.permissions.canEdit
       ? [rows("Insurers you can approach", addable.map((a) => ({ title: a.name, note: "On file in your brokerage", badge: "Available", badgeTone: ok, secondary: { a: "act", action: "opp.action", payload: act("add_insurer", { insurerId: a.id }), label: "Add" } })))]
       : []),
-    ...live
-      .filter((i) => !i.response && d.permissions.canRecordResponse)
-      .map((i) =>
-        form(
-          "resp:" + i.id,
-          "Record " + i.insurerName + "’s answer",
-          [
-            { key: "outcome", label: "ANSWER", options: [{ value: "quoted", label: "Quoted" }, { value: "declined", label: "Declined" }] },
-            { key: "premiumAmount", label: "PREMIUM, IF QUOTED (NUMBERS ONLY)", placeholder: "485000" },
-            { key: "premiumCurrency", label: "CURRENCY", options: ["KES", "USD", "EUR", "GBP"] },
-            { key: "validUntil", label: "VALID UNTIL (OPTIONAL)", type: "date" },
-            { key: "declineReason", label: "REASON, IF DECLINED", placeholder: "Outside their appetite for this class" },
-            { key: "sourceNote", label: "WHERE IT CAME FROM", placeholder: "Email from the underwriter, 12 Sep" },
-          ],
-          "opp.action",
-          act("record_response", { opportunityInsurerId: i.id }),
-          "Record answer",
-          "Recorded as the insurer's answer, with your name. Terms and excesses are added from the quotation document.",
-        ),
-      ),
-    note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "Requests are not sent from ASAP yet", d.sending.reason || "Every request needs your approval before it leaves."),
+    // One control per insurer: the one its stage calls for, and nothing ahead of it.
+    ...live.flatMap((i) => insurerControls(i, d, act)),
+    note(d.sending.available ? "green" : "amber", d.sending.available ? "Requests can be sent" : "ASAP does not send requests", d.sending.reason || "Every request needs your approval before it leaves."),
   ];
-  if (quoted.length >= 2) blocks.push(note("green", plural(quoted.length, "quote", "quotes") + " to compare", "Comparing them side by side is not connected in this view yet; each quote's premium and terms are listed above."));
+  const cv = d.comparisonView;
+  if (cv?.comparison) blocks.push(note("green", "Comparison ready", "Built " + date(cv.comparison.generatedAt) + " from the recorded quotes" + (cv.comparison.stale ? " — a quote has changed since, so build it again before presenting." : ". Present it to the client once reviewed.")));
+  else if (cv?.readiness?.ready && cv.permissions?.canGenerate) blocks.push(gate("Build the comparison", "From the " + plural(quoted.length, "recorded quote", "recorded quotes") + " and their terms. Nothing is sent to the client.", "comparison.generate", { id }, { label: "Build comparison" }));
+  else if (cv?.readiness && !cv.readiness.ready) blocks.push(note("amber", "Comparison not ready yet", cv.readiness.blockers.join(" ")));
   return { kind: "Quotation work", title: d.client.name + " — " + o.title, status: o.closedAt ? "draft" : "live", statusLabel: quoted.length + " of " + live.length + " quoted", recordRef: { ws: "quote", opportunityId: id }, blocks };
 }
 
@@ -363,9 +489,10 @@ function newClaimSpace(ref) {
         "claim:" + client.id,
         "The loss, as the client reported it",
         [
-          { key: "policyId", label: "POLICY THE LOSS FALLS UNDER", options: [...policyOptions, { value: "unknown", label: "Policy not known yet — report without one" }] },
-          { key: "incidentOn", label: "DATE OF LOSS", type: "date" },
-          { key: "incidentSummary", label: "WHAT HAPPENED", placeholder: "Vehicle KDA 123A hit from behind at Westlands" },
+          // Values carried from Ask or the policy in front are kept, never dropped.
+          { key: "policyId", label: "POLICY THE LOSS FALLS UNDER", value: ref.policyId || undefined, options: [...policyOptions, { value: "unknown", label: "Policy not known yet — report without one" }] },
+          { key: "incidentOn", label: "DATE OF LOSS", type: "date", value: ref.incidentOn || "" },
+          { key: "incidentSummary", label: "WHAT HAPPENED", placeholder: "Vehicle KDA 123A hit from behind at Westlands", value: ref.incidentSummary || "" },
         ],
         "claim.open",
         { clientId: client.id },
@@ -375,6 +502,203 @@ function newClaimSpace(ref) {
       ...(existing.length
         ? [rows("Claims already on file", existing.map((c) => ({ title: c.title, note: date(c.lossAt) + " · " + c.status, badge: c.status, badgeTone: warn, action: { a: "open", ref: { ws: "claim", clientId: client.id, claimId: c.id } } })))]
         : []),
+    ],
+  };
+}
+
+/**
+ * A claim, read from its record: what was reported, which policy (or that it is not known), the
+ * documents it needs, and the server's next action. No notification draft is offered here: none
+ * can be addressed while no mailbox is connected, and none before the insurer and policy are known.
+ */
+function claimSpace(ref, state) {
+  const d = state.claims?.get(ref.claimId);
+  const row = S.byId("claims", ref.claimId);
+  if (!d || !row) return { kind: "Claim", title: "This claim could not be read", status: "draft", statusLabel: "Unavailable", blocks: [note("red", "Not available", "Refresh records and try again. Nothing was changed.")] };
+  const c = d.claim;
+  const client = S.sel.client(c.client_id);
+  const pol = c.policy_id ? S.byId("policies", c.policy_id) : null;
+  const w = S.all("workItems").find((x) => x.id === c.work_item_id);
+  const step = (d.item?.steps || []).find((st) => st.state === "now" || st.state === "blocked");
+  const stepMissing = step ? step.evidence.filter((e) => !step.recorded.some((r) => r.kind === e.kind)).map((e) => e.label) : [];
+  const status = { draft: "Draft — not registered", registered: "Registered", closed: "Closed" }[c.status] || c.status;
+  return {
+    kind: "Claim",
+    title: (client ? client.name + " — " : "") + "claim, " + date(c.incident_on),
+    status: c.status === "draft" ? "draft" : "live",
+    statusLabel: status,
+    recordRef: { ws: "claim", clientId: c.client_id, claimId: c.id },
+    blocks: [
+      ...(w?.next ? nextBlock(w.next) : []),
+      facts([
+        ["Client", client ? client.name : "not recorded"],
+        ["Policy", pol ? pol.number + " — " + (pol.cls || "class not recorded") : "Policy not known — to be matched before registering"],
+        ["Owner", w?.assigneeId ? (S.byId("users", w.assigneeId)?.name ?? "A member of this brokerage") : "Nobody yet — assign it"],
+        ["Next check", w?.nextCheckAt ? date(w.nextCheckAt) : "not set"],
+        ["Date of loss", date(c.incident_on)],
+        ["What happened", c.incident_summary],
+        ["Where it stands", status],
+        ["Insurer reference", c.insurer_reference || "none yet"],
+      ]),
+      rows(
+        "Documents the claim needs",
+        d.documents.length || stepMissing.length
+          ? [
+              ...d.documents.map((doc) => ({ title: doc.label, note: doc.received_at ? "Received " + date(doc.received_at) : doc.requested_at ? "Requested " + date(doc.requested_at) + " from the " + words(doc.holder).toLowerCase() : "Not requested yet", badge: doc.received_at ? "Received" : "Missing", badgeTone: doc.received_at ? ok : bad })),
+              ...stepMissing.filter((m) => !d.documents.some((doc) => doc.label === m)).map((m) => ({ title: m, note: "Needed before the claim can move", badge: "Missing", badgeTone: bad })),
+            ]
+          : [{ title: "No document list yet", note: "The insurer's claim form and supporting documents are requested once the policy is known.", badge: "Pending", badgeTone: warn }],
+      ),
+      note("amber", "Nothing is sent from here", "No message goes to the insurer from ASAP: no mailbox is connected, and a notification is only prepared once the insurer and the policy are known — and then it waits for your approval. Nothing here says the loss is covered; that is the insurer's written decision."),
+      ...(d.notes.length ? [rows("Notes", d.notes.map((n) => ({ title: n.body.slice(0, 120), note: date(n.noted_at) + (n.spoke_with ? " · with " + n.spoke_with : ""), badge: words(n.kind), badgeTone: ok })))] : []),
+      ...(client ? [nav("Open " + client.name, "The client's policies, documents and other work.", { ws: "client", clientId: client.id })] : []),
+    ],
+  };
+}
+
+/* ---------------------------------------------------------------- automations */
+
+/**
+ * Automations from the server's registry (D-125). Every part shown as a rule is one ASAP can
+ * execute; anything else is labelled a note that does not run. Test mode, the last test, the last
+ * real run, pause/resume and failures all come from the server.
+ */
+const OUTCOME_WORDS = { working: "Working", prepared: "Prepared for review", conditions_not_met: "Conditions not met — nothing done", needs_approval: "Waiting for a person's approval", exception: "Stopped on an exception", could_not_finish: "Could not finish" };
+function automationSpace(ref) {
+  const reg = AUTOMATION_REGISTRY;
+  const trigLabel = (e) => reg.triggers.find((t) => t.event === e)?.label ?? e;
+  const factLabel = (f) => reg.facts.find((x) => x.fact === f)?.label ?? f;
+  const actLabel = (v) => reg.actions.find((x) => x.verb === v)?.label ?? v;
+  const a = ref.automationId ? S.byId("automations", ref.automationId) : null;
+  if (a && a.raw) {
+    const r = a.raw;
+    const problems = automationProblems({ triggerEvent: r.trigger_event, conditions: r.conditions, preparedVerb: r.prepared_verb, approval: r.approval });
+    const real = a.history || [];
+    const lastReal = real[0] || null;
+    const failures = real.filter((x) => x.outcome === "could_not_finish" || x.outcome === "exception");
+    return {
+      kind: "Automation",
+      title: r.name,
+      status: r.enabled ? "live" : "draft",
+      statusLabel: problems.length ? "Cannot run" : r.enabled ? "On" : "Paused",
+      recordRef: { ws: "automation", automationId: r.id },
+      blocks: [
+        ...(problems.length ? [note("red", "This automation cannot run", "It was saved before ASAP checked it: " + problems.join("; ") + ". It stays off. Save a new one from the parts below.")] : []),
+        facts([
+          ["When", trigLabel(r.trigger_event)],
+          ["Only if", r.conditions.length ? r.conditions.map((c) => factLabel(c.fact) + " " + c.operator.replace(/_/g, " ") + (c.value == null ? "" : " " + (Array.isArray(c.value) ? c.value.join(", ") : c.value))).join("; ") : "No conditions — every time it fires"],
+          ["Then", actLabel(r.prepared_verb)],
+          ["Approval", r.approval === "always" ? "A person approves each result before it is used" : "Prepared without an approval step — it never sends, and never changes cover or money"],
+          ["Explanation", reg.actions.find((x) => x.verb === r.prepared_verb)?.why ?? "—"],
+          ["Last test", a.lastTest ? S.fmtDate(a.lastTest.testedAt) + " — would act on " + plural(a.lastTest.wouldFire, "item", "items") + " of " + a.lastTest.checked + (a.lastTest.problems.length ? "; cannot run: " + a.lastTest.problems.join("; ") : "") : "Never tested"],
+          ["Last real run", lastReal ? S.fmtDate(lastReal.started_at) + " — " + (OUTCOME_WORDS[lastReal.outcome] || lastReal.outcome) : "It has not run yet"],
+        ]),
+        ...(failures.length ? [rows("Failures", failures.slice(0, 5).map((x) => ({ title: OUTCOME_WORDS[x.outcome], note: S.fmtDate(x.started_at) + (x.reason ? " · " + x.reason : ""), badge: "Failed", badgeTone: bad, action: x.work_item_id ? { a: "open", ref: { ws: "workitem", workItemId: x.work_item_id } } : null })))] : []),
+        rows("Every firing, including the ones that did nothing", real.length ? real.slice(0, 12).map((x) => ({ title: OUTCOME_WORDS[x.outcome] || x.outcome, note: S.fmtDate(x.started_at) + " · " + x.event_name + (x.reason ? " · " + x.reason : "") + (x.condition_results?.some((c) => !c.held) ? " · failed: " + x.condition_results.filter((c) => !c.held).map((c) => factLabel(c.fact)).join(", ") : ""), badge: x.outcome === "could_not_finish" || x.outcome === "exception" ? "Failed" : "Recorded", badgeTone: x.outcome === "could_not_finish" || x.outcome === "exception" ? bad : ok, action: x.work_item_id ? { a: "open", ref: { ws: "workitem", workItemId: x.work_item_id } } : null })) : [{ title: "No firings yet", note: "Firings appear here, with why each did or did not act.", badge: "None", badgeTone: warn }]),
+        gate("Run in test mode", "Checks its conditions against open work and says what it would act on. Nothing is prepared or changed.", "automation.test", { id: r.id }),
+        ...(problems.length ? [] : [gate(r.enabled ? "Pause this automation" : "Switch this automation on", r.enabled ? "Stops it firing. Work it already prepared stays." : "It starts watching for “" + trigLabel(r.trigger_event).toLowerCase() + "”. Every result still needs a person where the action says so.", "automation.toggle", { id: r.id })]),
+      ],
+    };
+  }
+  const list = S.all("automations");
+  const executable = reg.triggers.filter((t) => t.executable);
+  return {
+    kind: "Automations",
+    title: "Automations",
+    status: "live",
+    statusLabel: plural(list.filter((x) => x.on).length, "on", "on"),
+    blocks: [
+      note("green", "People stay in charge", "An automation prepares; it never sends a message, changes cover or moves money. Those always need a person's approval."),
+      rows("Standing instructions", list.length ? list.map((x) => {
+        const bad2 = x.raw ? automationProblems({ triggerEvent: x.raw.trigger_event, conditions: x.raw.conditions, preparedVerb: x.raw.prepared_verb, approval: x.raw.approval }).length > 0 : true;
+        return { title: x.name, note: (x.raw ? trigLabel(x.raw.trigger_event) + " → " + actLabel(x.raw.prepared_verb) : x.trigger) + (bad2 ? " · cannot run as saved" : ""), badge: bad2 ? "Cannot run" : x.on ? "On" : "Paused", badgeTone: bad2 ? "missing" : x.on ? ok : warn, action: { a: "open", ref: { ws: "automation", automationId: x.id } } };
+      }) : [{ title: "No automations yet", note: "Build one from the parts below.", badge: "None", badgeTone: warn }]),
+      rows("What can start an automation today", reg.triggers.map((t) => ({ title: t.label, note: t.executable ? t.why : "Not available yet — " + t.why.toLowerCase(), badge: t.executable ? "Available" : "Not yet", badgeTone: t.executable ? ok : warn }))),
+      form(
+        "automation:new",
+        "Build an automation",
+        [
+          { key: "name", label: "NAME", placeholder: "Prepare new claim documents for review" },
+          { key: "trigger", label: "WHEN", options: executable.map((t) => ({ value: t.event, label: t.label })) },
+          { key: "fact", label: "ONLY IF (OPTIONAL)", options: [{ value: "", label: "No condition" }, ...reg.facts.map((f) => ({ value: f.fact, label: f.label }))] },
+          { key: "operator", label: "CHECK", options: [...new Set(reg.facts.flatMap((f) => f.operators))].map((o) => ({ value: o, label: o.replace(/_/g, " ") })) },
+          { key: "value", label: "VALUE (DAYS FOR DATE CHECKS; COMMAS FOR A LIST)", placeholder: "claim" },
+          { key: "verb", label: "THEN", options: reg.actions.map((x) => ({ value: x.verb, label: x.label + (x.approvalRequired ? " — always needs approval" : "") })) },
+        ],
+        "automation.create",
+        {},
+        "Save switched off",
+        "Each part is checked against what ASAP can execute before it is saved. It starts off; test it first.",
+      ),
+    ],
+  };
+}
+
+/* ---------------------------------------------------------------- activity */
+
+/**
+ * Activity, as a manager reads it (D-124): what changed, who changed it, which client, whether
+ * anything left the brokerage, whether cover or money moved, what is blocked, who owns the next
+ * action and what is overdue — each row opening its record. Everything comes from existing audit
+ * rows and Work as the server returned them; the actor is the person the row names, never a
+ * "system" guessed in the browser.
+ */
+const ACTION_WORDS = {
+  "client.created": "Client added", "client.create": "Client add attempted", "opportunity.insurer_added": "Insurer added to a quotation",
+  "opportunity.requirement_added": "Requirement added", "opportunity.requirement_supplied": "Requirement supplied",
+  "work_item.assigned": "Work assigned", "work_item.due_changed": "Due date changed", "work_item.managed": "Work owner or dates changed",
+  "work_item.state_derived": "Work's next step updated", "work_item.draft": "Message preparation attempted",
+};
+const actionWords = (a) => ACTION_WORDS[a] || a.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+function refForRecord(rec, client) {
+  if (!rec) return client ? { ws: "client", clientId: client.id } : null;
+  if (rec.type === "work_item") return { ws: "workitem", workItemId: rec.id };
+  if (rec.type === "opportunity") return { ws: "quote", opportunityId: rec.id };
+  if (rec.type === "claim") return { ws: "claim", clientId: client?.id, claimId: rec.id };
+  if (rec.type === "document") return { ws: "document", documentId: rec.id };
+  if (rec.type === "client") return { ws: "client", clientId: rec.id };
+  return client ? { ws: "client", clientId: client.id } : null;
+}
+function activitySpace(ref) {
+  const events = S.sel.audit().filter((a) => !ref.clientId || a.client?.id === ref.clientId);
+  const now = Date.now();
+  const open = S.all("workItems").filter((w) => w.taskStatus !== "done" && (!ref.clientId || w.clientId === ref.clientId));
+  const overdue = open.filter((w) => (w.dueAt && new Date(w.dueAt).getTime() < now) || (w.nextCheckAt && new Date(w.nextCheckAt).getTime() < now));
+  const external = events.filter((a) => a.external);
+  const coverMoney = events.filter((a) => a.coverOrMoney && a.result === "success");
+  const blocked = events.filter((a) => a.result !== "success");
+  const owners = new Map();
+  for (const w of open) {
+    const name = w.assigneeId ? S.byId("users", w.assigneeId)?.name || "A member no longer here" : "Nobody";
+    owners.set(name, (owners.get(name) || 0) + 1);
+  }
+  const who = (a) => a.actorName || (a.actorType === "user" ? "A person no longer in this brokerage" : a.actorLabel || "The platform");
+  return {
+    kind: "Activity",
+    title: ref.clientId ? (S.sel.client(ref.clientId)?.name || "Client") + " — activity" : "Activity",
+    status: "live",
+    statusLabel: plural(events.length, "change", "changes"),
+    blocks: [
+      facts([
+        ["What changed", events.length ? plural(events.length, "recorded change", "recorded changes") + " — newest first below" : "Nothing recorded yet"],
+        ["Sent outside the brokerage", external.length ? plural(external.length, "message or request", "messages or requests") + " — see the rows marked External" : "Nothing — no message left ASAP"],
+        ["Cover or money", coverMoney.length ? plural(coverMoney.length, "change", "changes") + " to cover or money records" : "No change to cover or money"],
+        ["Blocked or refused", blocked.length ? plural(blocked.length, "attempt", "attempts") + " refused or failed" : "None"],
+        ["Next actions held by", owners.size ? [...owners.entries()].map(([n, k]) => n + " (" + k + ")").join(", ") : "No open work"],
+        ["Overdue", overdue.length ? overdue.map((w) => w.title).slice(0, 4).join("; ") + (overdue.length > 4 ? " and " + (overdue.length - 4) + " more" : "") : "Nothing overdue"],
+      ]),
+      rows(
+        "Changes, newest first",
+        events.length
+          ? events.slice(0, 60).map((a) => ({
+              title: actionWords(a.action) + (a.record ? " — " + a.record.label : ""),
+              note: [who(a), a.client ? a.client.name : null, a.result === "success" ? "Done" : a.result === "denied" ? "Refused" + (a.failureReason ? ": " + a.failureReason.replace(/_/g, " ") : "") : "Failed" + (a.failureReason ? ": " + a.failureReason : ""), S.fmtDate(a.at) + " " + new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), (a.changed || []).filter((c) => !/[0-9a-f]{8}-[0-9a-f]{4}-/.test(c) && !/nothing → nothing/.test(c)).slice(0, 2).map((c) => c.replace(/^due_on:/, "Due:").replace(/^task_next_check:/, "Next check:").replace(/^required_action:/, "Next step:")).join("; ") || null, a.evidence?.length ? "Evidence: " + a.evidence[0] : null].filter(Boolean).join(" · "),
+              badge: a.external ? "External" : a.result === "success" ? (a.coverOrMoney ? "Cover/money" : "Done") : a.result === "denied" ? "Refused" : "Failed",
+              badgeTone: a.result === "success" ? (a.external || a.coverOrMoney ? warn : ok) : bad,
+              action: refForRecord(a.record, a.client) ? { a: "open", ref: refForRecord(a.record, a.client) } : null,
+            }))
+          : [{ title: "No activity yet", note: "Changes appear here as people and ASAP work.", badge: "Empty", badgeTone: warn }],
+      ),
     ],
   };
 }
@@ -398,14 +722,44 @@ function workItemSpace(ref) {
         ["Kind", w.kind],
         ["Where it stands", w.statusLabel || (w.state === "Completed" ? "Done" : "In progress")],
         ["Owner", owner ? owner.name : "unassigned"],
-        ["Next step", w.nextStep || (w.state === "Completed" ? "None — done" : "Decide the first step and record it")],
         ["Priority", { high: "High priority", medium: "Normal priority", low: "Low priority" }[w.priority] || "Normal priority"],
+        ["Due", w.dueAt ? date(w.dueAt) : "not set"],
+        ["Look again", w.nextCheckAt ? date(w.nextCheckAt) : "not set"],
       ]),
-      ...(w.reason ? [note("green", "Why it is here", w.reason)] : []),
+      // The server's next action (D-120): the same words Today and Ask show for this item.
+      ...(w.next ? nextBlock(w.next) : w.reason ? [note("green", "Why it is here", w.reason)] : []),
       ...(claim ? [nav("Open the claim", claim.title, { ws: "claim", clientId: w.clientId, claimId: claim.id })] : []),
       ...(w.opportunityId ? [nav("Open the quotation", "Requirements, insurers and replies.", { ws: "quote", opportunityId: w.opportunityId })] : []),
       ...(client ? [nav("Open " + client.name, "The client's policies, documents and other work.", { ws: "client", clientId: client.id })] : []),
       ...(w.state !== "Completed" ? [{ t: "assign", label: "Who holds it", workItemId: w.id }] : []),
+    ],
+  };
+}
+
+/** A contact for a client, through the same POST /contacts the client record uses. */
+function newContactSpace(ref) {
+  const c = ref.clientId ? S.sel.client(ref.clientId) : null;
+  if (!c) return { kind: "Contact", title: "Choose the client first", status: "draft", statusLabel: "Not saved yet", blocks: [note("amber", "No client chosen", "Open the client, then add the contact from there. Nothing was changed.")] };
+  return {
+    kind: "Contact",
+    title: "Add a contact for " + c.name,
+    status: "draft",
+    statusLabel: "Not saved yet",
+    blocks: [
+      form(
+        "newcontact:" + c.id,
+        "Contact",
+        [
+          { key: "fullName", label: "FULL NAME", placeholder: "Who ASAP should talk to" },
+          { key: "roleLabel", label: "ROLE", placeholder: "For example Finance manager" },
+          { key: "phone", label: "PHONE", placeholder: "+254…" },
+          { key: "email", label: "EMAIL", placeholder: "name@company.co.ke" },
+        ],
+        "contact.create",
+        { clientId: c.id },
+        "Add contact",
+        "Saved to " + c.name + "’s file as the primary contact. No message is sent to them.",
+      ),
     ],
   };
 }
@@ -433,6 +787,8 @@ function documentSpace(ref, state) {
     recordRef: base,
     blocks: [
       ...(state.docNotice?.documentId === doc.id ? [note("green", state.docNotice.title, state.docNotice.text)] : []),
+      ...identityWarning(fields, client),
+      ...nextBlock(d.next),
       facts([
         ["Client", client ? client.name : "Not filed under a client"],
         ["Kind", words(doc.kind)],
@@ -478,6 +834,20 @@ function documentSpace(ref, state) {
         : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
     ],
   };
+}
+
+/** Names compared as a person would: case, punctuation and company suffixes do not matter. */
+const comparable = (v) => (v || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(limited|ltd|plc|llc|inc|co|company|the)\b/g, " ").replace(/\s+/g, " ").trim();
+
+/** A document that names a different insured than the client it is filed under is flagged first. */
+function identityWarning(fields, client) {
+  const f = fields.find((x) => x.fieldKey === "insured_name" && x.state !== "rejected");
+  const named = (f?.correctedValue ?? f?.proposedValue ?? "").trim();
+  if (!named || !client) return [];
+  const a = comparable(named);
+  const b = comparable(client.name);
+  if (!a || !b || a === b || a.includes(b) || b.includes(a)) return [];
+  return [note("red", "This document may belong to another client", "It names the insured as " + named + ", but it is filed under " + client.name + ". Nothing from it can be applied until that is resolved — file it under the right client, or correct the insured name.")];
 }
 
 /** The page a value was read from, with the value marked where it stands, and the file itself. */
@@ -653,17 +1023,24 @@ export function liveSpace(ref, state) {
     case "clients":
       return clientsSpace();
     case "newclient":
-      return newClientSpace(state);
+      return newClientSpace(state, ref);
+    case "newcontact":
+      return newContactSpace(ref);
     case "import":
       return importSpace(state);
     case "quote":
       return quoteSpace(ref, state);
     case "claim":
-      return ref.claimId ? null : newClaimSpace(ref);
+      return ref.claimId ? claimSpace(ref, state) : newClaimSpace(ref);
     case "workitem":
       return workItemSpace(ref);
     case "document":
       return documentSpace(ref, state);
+    case "automation":
+      return automationSpace(ref);
+    case "activity":
+    case "audit":
+      return activitySpace(ref);
     case "settings":
       return settingsSpace(state);
     case "connections":

@@ -102,6 +102,8 @@ export const WorkItemRow = z
     task_party: z.string().nullable(),
     task_since: isoDate.nullable(),
     task_next_check: isoDate.nullable(),
+    /** A date a person committed to (0061). Never derived. Absent on rows read before 0061. */
+    due_on: z.string().date().nullable().optional(),
     cover_status: CoverStatus.nullable(),
     /** Set when cover is confirmed; Confirmed reads as Active cover once this date passes (Part 6.2 step 6). */
     cover_inception_at: isoDate.nullable(),
@@ -183,7 +185,7 @@ export const WORK_VIEW_LABELS: Readonly<Record<WorkView, string>> = {
 
 /** The columns the web app selects. One string so query keys and RLS-scoped reads agree. */
 export const WORK_ITEM_COLUMNS =
-  "id, organization_id, title, kind, client_id, policy_period_id, insurer_id, class_of_business, owner_id, task_status, task_party, task_since, task_next_check, cover_status, cover_inception_at, money_status, reason, source_type, source_id, reason_code, required_action, evidence_needed, outcome_after, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
+  "id, organization_id, title, kind, client_id, policy_period_id, insurer_id, class_of_business, owner_id, task_status, task_party, task_since, task_next_check, due_on, cover_status, cover_inception_at, money_status, reason, source_type, source_id, reason_code, required_action, evidence_needed, outcome_after, steps, exception, version, created_at, updated_at, completed_at, deleted_at";
 export const RUN_COLUMNS =
   "id, organization_id, work_item_id, title, status, next_step, started_by, boot_token, started_at, ended_at, created_at, updated_at";
 

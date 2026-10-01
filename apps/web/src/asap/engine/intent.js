@@ -314,7 +314,7 @@ WS.activity = () => {
         action: x.writes && x.writes.length ? { a: 'open', ref: { ws: 'work' } } : null,
         secondary: x.status === 'failed' ? { a: 'act', action: 'automation.run', payload: { id: x.automationId }, label: 'Retry' } : null
       })) : [{ title: 'No runs yet', note: 'Switch an automation on, or run one in test mode.', badge: 'Idle', badgeTone: tone.ok }]),
-      rows('Audit ASAP wrote', sel.audit().slice(0, 8).map(a => ({ title: a.text, note: fmtDate(a.at) + ' · ' + (sel.user(a.actorId)?.name || 'system'), badge: a.kind, badgeTone: tone.ok })))
+      rows('Audit ASAP wrote', sel.audit().slice(0, 8).map(a => ({ title: a.text, note: fmtDate(a.at) + ' · ' + (a.actorName || sel.user(a.actorId)?.name || a.actorLabel || 'system'), badge: a.kind, badgeTone: tone.ok })))
     ] };
 };
 
@@ -967,7 +967,7 @@ WS.settings = () => {
         ['Money approval', S.ROLES.finance], ['Cover truth', 'Insurer confirmation required'], ['Users', sel.users().length + '']] },
       rows('Team and permissions', sel.users().map(u => ({ title: u.name, note: S.ROLES[u.role],
         badge: u.role, badgeTone: tone.ok, secondary: S.can('user.role') ? { a: 'role', userId: u.id, label: 'Change role' } : null }))),
-      rows('Audit', sel.audit().slice(0, 10).map(a => ({ title: a.text, note: fmtDate(a.at) + ' · ' + (sel.user(a.actorId)?.name || 'system'), badge: a.kind, badgeTone: tone.ok })))
+      rows('Audit', sel.audit().slice(0, 10).map(a => ({ title: a.text, note: fmtDate(a.at) + ' · ' + (a.actorName || sel.user(a.actorId)?.name || a.actorLabel || 'system'), badge: a.kind, badgeTone: tone.ok })))
     ] };
 };
 
@@ -1028,7 +1028,7 @@ WS.audit = (r) => {
   return { kind: 'Audit trail', title: (sel.client(r.clientId)?.name || 'Brokerage') + ' — full history', status: 'live',
     statusLabel: list.length + ' events',
     blocks: [{ t: 'timeline', events: list.map(a => ({ when: fmtDate(a.at), text: a.text,
-      by: sel.user(a.actorId)?.name || 'system', evidenceIds: a.evidenceIds, kind: a.kind,
+      by: a.actorName || sel.user(a.actorId)?.name || a.actorLabel || 'system', evidenceIds: a.evidenceIds, kind: a.kind,
       ref: a.evidenceIds && a.evidenceIds[0] ? { ws: 'evidence', evidenceId: a.evidenceIds[0] } : null })) }] };
 };
 

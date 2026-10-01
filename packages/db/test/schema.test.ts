@@ -164,6 +164,7 @@ describe("Drizzle schema conventions", () => {
       "quote_comparison_terms",
       "quote_comparisons",
       "quote_request_approvals",
+      "quote_request_deliveries",
       "quote_requests",
       "quote_term_revisions",
       "quote_terms",

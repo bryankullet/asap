@@ -260,7 +260,7 @@ describe("the automations API", () => {
       headers: { Authorization: "Bearer tok-amina", "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Chase insurers automatically",
-        triggerEvent: "check.overdue",
+        triggerEvent: "document.received",
         skill: "quote.track_responses",
         preparedVerb: "draft",
         // Asking for no approval on something that drafts to an insurer.

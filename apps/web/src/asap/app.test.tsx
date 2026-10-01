@@ -57,4 +57,24 @@ describe("the approved interface", () => {
     }
     expect(screen.getByRole("button", { name: "Save automation" })).toBeTruthy();
   });
+
+  it("puts Ask in the centre and the Space on its right (D-118)", async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    const { default: Component } = await import("./generated/logic.gen.js");
+    const { renderTemplate } = await import("./generated/template.gen.js");
+    const { loadDemoAdapters } = await import("./demo.js");
+    type Logic = { props: object; renderVals(): object };
+    const C = Component as unknown as { prototype: { render(this: Logic): unknown } } & React.ComponentType<{ loadAdapters: () => Promise<unknown> }>;
+    C.prototype.render = function (this: Logic) {
+      return renderTemplate({ ...this.props, ...this.renderVals() });
+    };
+    const { container } = render(<C loadAdapters={() => loadDemoAdapters({ switchToLive: () => {} })} />);
+    await screen.findByRole("heading", { level: 1, name: "What matters now" });
+    const body = container.querySelector(".asap-body") as HTMLElement;
+    const ask = container.querySelector(".asap-ask") as HTMLElement;
+    expect(body.style.gridTemplateColumns).toMatch(/^minmax\(360px, ?560px\) minmax\(0(px)?, ?1fr\)$/);
+    expect(ask.style.order).toBe("-1");
+    expect(body.getAttribute("data-view")).toBe("ask");
+  });
 });

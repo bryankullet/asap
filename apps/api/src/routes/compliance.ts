@@ -33,7 +33,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
-import { requireActiveOrganization, resolveContext } from "../context.js";
+import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
 
@@ -129,6 +129,39 @@ export function complianceRoutes(deps: { logger: Logger }) {
     const input = await parseBody(c, createClientRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
+    // A read-only member may look but not add: refused before any preview or write, and audited.
+    if (!hasPermission(ctx, "client", "create")) {
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "client.create", objectType: "client", objectId: null, result: "denied", failureReason: "permission_denied" });
+      throw new HttpError(403, "not_permitted", "Your role cannot add clients. Nothing was written.");
+    }
+    if (input.preview) {
+      const r = await db
+        .from("clients")
+        .select("id, name, kind")
+        .eq("organization_id", org.id)
+        .is("deleted_at", null);
+      if (r.error) return sendError(c, mapDatabaseError(r.error));
+      const rows = (r.data ?? []) as ClientCandidate[];
+      const match = matchClientName(input.name, rows);
+      const candidates = match.outcome === "one" ? [match.client] : match.outcome === "many" ? match.candidates : [];
+      const exact = rows.find((x) => x.name.trim().toLowerCase() === input.name.trim().toLowerCase()) ?? null;
+      const kindWord = input.kind === "individual" ? "person" : "company";
+      return c.json(
+        createClientResponseSchema.parse({
+          outcome: "preview",
+          name: input.name,
+          kind: input.kind,
+          candidates,
+          exact,
+          // A new client has no contact yet; saying so is what makes the next step obvious.
+          missing: ["Primary contact", "Phone", "Email"],
+          writes: exact
+            ? [`Nothing new: ${exact.name} is already on file and would be opened`]
+            : [`One client record: ${input.name.trim()}, a ${kindWord}`, "Its client file, started as not yet begun", "An audit entry against your name"],
+          externalEffect: "No message is sent to anyone.",
+        }),
+      );
+    }
     if (!input.confirmNew) {
       const r = await db
         .from("clients")
@@ -156,12 +189,13 @@ export function complianceRoutes(deps: { logger: Logger }) {
       p_source: "manual",
     });
     if (error) return sendError(c, mapDatabaseError(error));
+    const made = data as { id: string; created?: boolean };
     return c.json(
       createClientResponseSchema.parse({
-        outcome: "created",
-        file: await loadFile(db, org.id, (data as { id: string }).id),
+        outcome: made.created === false ? "already_on_file" : "created",
+        file: await loadFile(db, org.id, made.id),
       }),
-      201,
+      made.created === false ? 200 : 201,
     );
   });
 

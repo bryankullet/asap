@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
  * Live mode over a brokerage's records, with the API answered in the shapes its Zod contracts
@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const ORG = "10000000-0000-4000-8000-00000000000a";
 const ME = "20000000-0000-4000-8000-000000000001";
+const BARAKA = "20000000-0000-4000-8000-000000000002";
 const CLIENT = "30000000-0000-4000-8000-000000000001";
 const POL_OK = "40000000-0000-4000-8000-000000000001";
 const POL_UNVERIFIED = "40000000-0000-4000-8000-000000000002";
@@ -39,11 +40,24 @@ const applyPreview = vi.fn(async () => ({
 const applyToRecord = vi.fn(async () => ({ applicationId: "b2000000-0000-4000-8000-000000000001" }));
 
 const setAutomationEnabled = vi.fn(async () => ({}));
-const createClient = vi.fn(async (input: { name: string; confirmNew?: boolean }) =>
-  input.confirmNew || input.name !== "Tausi Haulier"
-    ? { outcome: "created", file: { client: { id: "30000000-0000-4000-8000-0000000000ff" } } }
-    : { outcome: "possible_duplicates", name: input.name, candidates: [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] },
-);
+// Clients created during a test, so the read-back after a create finds them as the server would.
+const created: { id: string; name: string }[] = [];
+const createClient = vi.fn(async (input: { name: string; kind?: string; confirmNew?: boolean; preview?: boolean }) => {
+  if (input.preview)
+    return {
+      outcome: "preview", name: input.name, kind: input.kind ?? "corporate",
+      candidates: /tausi/i.test(input.name) ? [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] : [],
+      exact: null, missing: ["Primary contact", "Phone", "Email"],
+      writes: ["One client record: " + input.name + ", a company", "Its client file, started as not yet begun", "An audit entry against your name"],
+      externalEffect: "No message is sent to anyone.",
+    };
+  if (input.confirmNew || input.name !== "Tausi Haulier") {
+    const id = "30000000-0000-4000-8000-0000000000ff";
+    if (!created.some((c) => c.id === id)) created.push({ id, name: input.name });
+    return { outcome: "created", file: { client: { id } } };
+  }
+  return { outcome: "possible_duplicates", name: input.name, candidates: [{ id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate" }] };
+});
 const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
   batch: { id: "80000000-0000-4000-8000-000000000001", filename: "book.csv", rowCount: 2, premiumBasis: input.premiumBasis },
   source: "csv",
@@ -56,8 +70,65 @@ const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
 }));
 const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clientsCreated: 1, contactsCreated: 0, policiesCreated: 1, periodsCreated: 1 }, failures: [] }));
 const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
-const createWorkItem = vi.fn(async () => ({ outcome: "opened", reopened: false, item: { id: WORK } }));
-const createAutomation = vi.fn(async () => ({}));
+// A claim created in a test is read back through the client's record, as the server would return it.
+const CLAIM = "95000000-0000-4000-8000-000000000001";
+const CLAIM_WORK = "96000000-0000-4000-8000-000000000001";
+let claimMade: { policyId: string | null; incidentOn: string; incidentSummary: string } | null = null;
+const createWorkItem = vi.fn(async (input: { kind: string; policyId?: string; policyUnknown?: boolean; incidentOn?: string; incidentSummary?: string }) => {
+  if (input.kind === "claim") {
+    const reopened = claimMade !== null;
+    claimMade = { policyId: input.policyId ?? null, incidentOn: input.incidentOn ?? "", incidentSummary: input.incidentSummary ?? "" };
+    return { outcome: "opened", reopened, item: { id: CLAIM_WORK } };
+  }
+  return { outcome: "opened", reopened: false, item: { id: WORK } };
+});
+const createAutomation = vi.fn(async (input: { name: string }) => ({ automation: { id: "71000000-0000-4000-8000-000000000001", name: input.name } }));
+const testAutomation = vi.fn(async () => ({ testedAt: "2026-09-30T10:00:00Z", checked: 3, wouldFire: [{ workItemId: WORK, title: "Renew Tausi Hauliers motor fleet" }], wouldNotFire: [], problems: [] }));
+// A second client whose name shares a word with the first, for switching and ambiguity (D-121).
+let twoClients = false;
+const CLIENT_B = "30000000-0000-4000-8000-0000000000b2";
+const POL_B = "40000000-0000-4000-8000-0000000000b2";
+const PER_B = "50000000-0000-4000-8000-0000000000b2";
+const clientB = () => ({ client: { id: CLIENT_B, organization_id: ORG, name: "Tausi Farms Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 });
+const OPP = "90000000-0000-4000-8000-000000000001";
+const APPROACH = "91000000-0000-4000-8000-000000000001";
+const INS_CIC = "92000000-0000-4000-8000-000000000001";
+// The quotation's server view, with its derived stage and next action; tests set the stage.
+let oppStage: "not_asked" | "request_prepared" | "approved_to_deliver" | "with_insurer" = "not_asked";
+const oppDetail = () => ({
+  opportunity: { id: OPP, title: "Motor fleet", classOfBusiness: "Commercial motor", riskSummary: "Two delivery vans", coverStart: null, coverEnd: null, ownerName: "Wanjiru Kamau", createdAt: "2026-09-30", closedAt: null, closedOutcome: null, closedReason: null, source: null },
+  client: { id: CLIENT, name: "Tausi Hauliers Ltd" },
+  workItem: { id: WORK, taskStatus: "needs_you", taskParty: null, taskSince: null },
+  requirements: [{ id: "93000000-0000-4000-8000-000000000001", label: "Logbooks", required: true, suppliedAt: "2026-09-30", suppliedByName: "Wanjiru Kamau", evidence: null }],
+  insurers: [{
+    id: APPROACH, insurerId: INS_CIC, insurerName: "CIC General", addedAt: "2026-09-30", removedAt: null, removedReason: null,
+    request: oppStage === "not_asked" ? null : { id: "94000000-0000-4000-8000-000000000001", subject: "Quotation request", body: "Please quote.", preparedAt: "2026-09-30", preparedByName: null, approvedAt: oppStage === "request_prepared" ? null : "2026-09-30", approvedByName: null, sentAt: null, sentEmailMessageId: null, delivery: oppStage === "with_insurer" ? { method: "own_email", reference: "Emailed 10:02", deliveredAt: "2026-09-30T07:02:00Z", recordedByName: null, evidenceDocumentId: null } : null },
+    stage: oppStage, stageLabel: { not_asked: "Not asked yet", request_prepared: "Request prepared — awaiting approval", approved_to_deliver: "Approved — not yet delivered", with_insurer: "With CIC General since 30 Sept" }[oppStage],
+    response: null,
+  }],
+  availableInsurers: [{ id: INS_CIC, name: "CIC General" }, { id: "92000000-0000-4000-8000-000000000002", name: "Jubilee Insurance" }],
+  documents: [],
+  permissions: { canEdit: true, canApprove: true, canRecordResponse: true },
+  sending: { available: false, reason: "Sending from ASAP is not connected yet." },
+  next: { what: { not_asked: "Prepare the request to CIC General", request_prepared: "Review and approve the request to CIC General", approved_to_deliver: "Deliver the approved request to CIC General and record how", with_insurer: "Chase CIC General for terms" }[oppStage], holder: oppStage === "with_insurer" ? "outside_party" : "brokerage", party: oppStage === "with_insurer" ? "CIC General" : null, since: null, missing: [], checkAt: null, why: "Because.", record: { type: "opportunity", id: OPP, label: "Tausi — Motor fleet" }, action: null, stage: oppStage },
+});
+const opportunityAction = vi.fn(async () => ({ outcome: "done", reason: null, opportunity: oppDetail() }));
+// Owner and due date, answered as the server's /manage contract would; a preview changes nothing.
+let workOwner = ME;
+let workDue: string | null = null;
+const manageWork = vi.fn(async (_id: string, input: { version: number; ownerId?: string; dueOn?: string; preview?: boolean }) => {
+  const item = { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: workOwner, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, due_on: workDue, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 };
+  const name = (id: string) => (id === BARAKA ? "Baraka Otieno" : "Wanjiru Kamau");
+  const changes = [
+    ...(input.ownerId && input.ownerId !== workOwner ? [{ field: "owner", label: "Owner", from: name(workOwner), to: name(input.ownerId) }] : []),
+    ...(input.dueOn && input.dueOn !== workDue ? [{ field: "due", label: "Due", from: workDue ?? "No date", to: "15 Oct 2026" }] : []),
+  ];
+  if (!changes.length) return { outcome: "already_done", item, changes: [] };
+  if (input.preview) return { outcome: "preview", item, changes, externalEffect: "No message is sent to anyone. The new owner sees it in their Work." };
+  if (input.ownerId) workOwner = input.ownerId;
+  if (input.dueOn) workDue = input.dueOn;
+  return { outcome: "applied", item: { ...item, owner_id: workOwner, due_on: workDue }, changes, auditAction: changes.length === 1 && changes[0]!.field === "owner" ? "work_item.assigned" : "work_item.due_changed" };
+});
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
@@ -67,33 +138,48 @@ vi.mock("../lib/api.js", () => ({
   describeApiError: (e: unknown) => (e instanceof Error ? e.message : "failed"),
   api: {
     members: async () => ({
-      members: [{ membership_id: ME, user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null, last_seen_at: null }, role: { id: ME, key: "owner", name: "Owner" }, is_owner: true, status: "active", joined_at: "2026-09-01" }],
+      members: [
+        { membership_id: ME, user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null, last_seen_at: null }, role: { id: ME, key: "owner", name: "Owner" }, is_owner: true, status: "active", joined_at: "2026-09-01" },
+        { membership_id: BARAKA, user: { id: BARAKA, email: "baraka@example.test", full_name: "Baraka Otieno", display_name: null, last_seen_at: null }, role: { id: BARAKA, key: "account_executive", name: "Account executive" }, is_owner: false, status: "active", joined_at: "2026-09-01" },
+      ],
     }),
     mailboxes: async () => ({ mailboxes: [], providers: [] }),
     automations: async () => ({
       automations: [{ id: AUTO, organization_id: ORG, name: "Renewal preparation", description: "Prepare the renewal pack", trigger_event: "renewal.approaching", conditions: [], skill: "renewal.prepare", prepared_verb: "prepare", approval: "always", sends_externally: false, enabled: false, created_by: ME, created_at: "2026-09-01", updated_at: "2026-09-01" }],
     }),
-    audit: async () => ({ recordId: null, entries: [{ id: "a1", actorType: "user", actorName: "Wanjiru Kamau", action: "client.created", objectType: "client", objectId: CLIENT, result: "success", failureReason: null, changed: [], evidence: [], occurredAt: "2026-09-02T09:00:00Z" }], visible: 1, returned: 1 }),
-    opportunities: async () => ({ opportunities: [] }),
+    audit: async () => ({ recordId: null, entries: [
+      { id: "a1", actorType: "user", actorName: "Wanjiru Kamau", actorId: ME, actorLabel: "A person", action: "client.created", objectType: "client", objectId: CLIENT, result: "success", failureReason: null, changed: [], evidence: [], occurredAt: "2026-09-02T09:00:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "client", id: CLIENT, label: "Tausi Hauliers Ltd" }, workItemId: null, external: false, coverOrMoney: false },
+      { id: "a2", actorType: "user", actorName: "Baraka Otieno", actorId: BARAKA, actorLabel: "A person", action: "work_item.assigned", objectType: "work_item", objectId: WORK, result: "success", failureReason: null, changed: ["owner_id: Wanjiru → Baraka"], evidence: [], occurredAt: "2026-09-30T08:00:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, workItemId: WORK, external: false, coverOrMoney: false },
+      { id: "a3", actorType: "user", actorName: "Baraka Otieno", actorId: BARAKA, actorLabel: "A person", action: "work_item.manage", objectType: "work_item", objectId: WORK, result: "denied", failureReason: "permission_denied", changed: [], evidence: [], occurredAt: "2026-09-30T08:05:00Z", client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, workItemId: WORK, external: false, coverOrMoney: false },
+    ], visible: 3, returned: 3 }),
+    opportunities: async () => ({ opportunities: [{ id: OPP, clientId: CLIENT, title: "Motor fleet", classOfBusiness: "Commercial motor", createdAt: "2026-09-30", closedAt: null }] }),
     workList: async (view: string) => ({
       items:
         view === "needs"
-          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: ME, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
-          : [],
+          ? [{ rank: 1, reason: "Renewal is 30 days away and no terms are in.", priority: "high", next: { what: "Request renewal terms from the insurer", holder: "brokerage", party: null, since: null, missing: ["Renewal terms"], checkAt: "2026-10-05T09:00:00Z", why: "Cover ends on its expiry date.", record: { type: "work_item", id: WORK, label: "Renew Tausi Hauliers motor fleet" }, action: null, stage: "first" }, item: { id: WORK, organization_id: ORG, title: "Renew Tausi Hauliers motor fleet", kind: "renewal", client_id: CLIENT, policy_period_id: PER_OK, insurer_id: null, class_of_business: "Motor", owner_id: workOwner, task_status: "needs_you", task_party: null, task_since: "2026-09-20", task_next_check: null, due_on: workDue, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
+          : view === "with" && claimMade
+            ? [{ rank: 1, reason: "A new claim.", priority: "high", next: { what: "Collect the claim form and supporting documents", holder: "brokerage", party: null, since: null, missing: ["Claim form"], checkAt: "2026-10-02T09:00:00Z", why: "An insurer can refuse a late claim.", record: { type: "work_item", id: CLAIM_WORK, label: "Claim — Tausi Hauliers Ltd" }, action: null, stage: "derived" }, item: { id: CLAIM_WORK, organization_id: ORG, title: "Claim — Tausi Hauliers Ltd", kind: "claim", client_id: CLIENT, policy_period_id: null, insurer_id: null, class_of_business: null, owner_id: ME, task_status: "with_party", task_party: "Tausi Hauliers Ltd", task_since: "2026-09-30", task_next_check: "2026-10-02T09:00:00Z", due_on: null, cover_status: null, cover_inception_at: null, money_status: null, reason: null, steps: [], exception: null, version: 1 } }]
+            : [],
     }),
     clientFiles: async (view: string) => ({
       view,
       counts: {},
-      items: view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
+      items: view === "blocking" && twoClients ? [clientB()] : view === "not_started" ? created.map((c) => ({ client: { id: c.id, organization_id: ORG, name: c.name, kind: "corporate", source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-30", updated_at: "2026-09-30", deleted_at: null }, effective_status: "not_started", blocking: [], in_state_since: "2026-09-30", documents_held: 0 })) : view === "cleared" ? [{ client: { id: CLIENT, organization_id: ORG, name: "Tausi Hauliers Ltd", kind: "corporate", source: "manual", file_status: "cleared", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-09-01", updated_at: "2026-09-01", deleted_at: null }, effective_status: "cleared", blocking: [], in_state_since: "2026-09-01", documents_held: 0 }] : [],
     }),
-    clientSpace: async () => ({
+    clientSpace: async (id: string) => id === CLIENT_B ? ({
+      client: { id: CLIENT_B, name: "Tausi Farms Ltd", kind: "corporate", fileStatus: "cleared", createdAt: "2026-09-01" },
+      contacts: [],
+      policies: [{ id: POL_B, policyNumber: "TF-FIRE-009", classOfBusiness: "Fire", insurerName: "Jubilee Insurance", periods: [{ id: PER_B, periodStart: "2026-03-01", periodEnd: "2027-02-28", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] }],
+      work: [], claims: [], endorsements: [], documents: [], threads: [], fileMissing: [], mailboxConnected: false,
+      permissions: { canEdit: true, canUploadDocuments: true, canStartWork: true },
+    }) : ({
       client: { id: CLIENT, name: "Tausi Hauliers Ltd", kind: "corporate", fileStatus: "cleared", createdAt: "2026-09-01" },
       contacts: [{ id: "c1", fullName: "Otieno Were", roleLabel: "Finance", email: "otieno@example.test", phone: null, isPrimary: true }],
       policies: [
         { id: POL_OK, policyNumber: "TH-MTR-001", classOfBusiness: "Motor", insurerName: "First Insurer", periods: [{ id: PER_OK, periodStart: "2026-01-01", periodEnd: "2026-12-31", premiumAmount: "1200000.00", premiumCurrency: "KES", premiumBasis: "gross", commissionAmount: null, premiumSource: "document", premiumVerifiedAt: "2026-01-02", premiumEvidenceDocumentId: null, current: true }] },
         { id: POL_UNVERIFIED, policyNumber: null, classOfBusiness: "Fire", insurerName: null, periods: [{ id: PER_UNVERIFIED, periodStart: "2026-02-01", periodEnd: "2027-01-31", premiumAmount: null, premiumCurrency: null, premiumBasis: null, commissionAmount: null, premiumSource: "manual", premiumVerifiedAt: null, premiumEvidenceDocumentId: null, current: true }] },
       ],
-      work: [], claims: [], endorsements: [], documents: [{ id: DOC, filename: "schedule.pdf", kind: "policy_schedule", createdAt: "2026-09-02", extractionState: "extracted" }], threads: [], fileMissing: [], mailboxConnected: false,
+      work: [], claims: claimMade ? [{ id: CLAIM, workItemId: CLAIM_WORK, policyId: claimMade.policyId, insurerReference: null, incidentSummary: claimMade.incidentSummary, incidentOn: claimMade.incidentOn, status: "draft" }] : [], endorsements: [], documents: [{ id: DOC, filename: "schedule.pdf", kind: "policy_schedule", createdAt: "2026-09-02", extractionState: "extracted" }], threads: [], fileMissing: [], mailboxConnected: false,
       permissions: { canEditContacts: true, canUploadDocuments: true, canStartWork: true },
     }),
     policySpace: async (id: string) => ({
@@ -103,8 +189,17 @@ vi.mock("../lib/api.js", () => ({
           ? { state: "active", label: "Active cover", reason: "Insurer confirmation on file.", verified: true, evidence: [{ label: "Insurer confirmation, 20 Dec 2025", documentId: null, recordedAt: "2025-12-20" }], asOf: "2026-09-29" }
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
+    manageWork,
+    testAutomation,
+    automationRuns: async () => ({ runs: [{ id: "72000000-0000-4000-8000-000000000001", automation_id: AUTO, event_id: "73000000-0000-4000-8000-000000000001", event_name: "document.received", work_item_id: WORK, outcome: "could_not_finish", condition_results: [], prepared_action: null, reason: "The step had nothing to prepare from.", decided_by: null, decided_at: null, decision: null, started_at: "2026-09-29T10:00:00Z", finished_at: "2026-09-29T10:00:01Z" }] }),
+    automationLastTest: async () => ({ lastTest: { testedAt: "2026-09-28T10:00:00Z", checked: 4, wouldFire: 1, problems: [] } }),
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
-    opportunity: async () => null,
+    opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
+    opportunityAction,
+    workItem: async (id: string) => (id === CLAIM_WORK && claimMade ? {
+      item: { id: CLAIM_WORK, steps: [{ id: "docs", label: "Collect the claim form and supporting documents", actor: "client", state: "now", guards: [], evidence: [{ kind: "document", label: "Claim form" }], actions: [], party: null, reason: null, recorded: [], runId: null }] },
+      claim: { claim: { id: CLAIM, organization_id: ORG, work_item_id: CLAIM_WORK, client_id: CLIENT, policy_id: claimMade.policyId, policy_period_id: null, status: "draft", source: "manual", incident_on: claimMade.incidentOn, incident_summary: claimMade.incidentSummary, reported_on: null, insurer_reference: null }, documents: [], notes: [], clock: null, candidatePeriods: [] },
+    } : null),
     askStatus: async () => ({ modelConfigured: false }),
     conversations: async () => ({ conversations: [] }),
     conversationMessages: async () => ({ messages: [] }),
@@ -118,14 +213,14 @@ const me = {
   user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null },
   memberships: [],
   active_organization: { id: ORG, name: "Tausi Brokers", country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
-  permissions: ["placement:approve", "organization:edit"],
+  permissions: ["placement:approve", "organization:edit", "client:create", "client:edit", "claim:create", "space:create", "job:edit", "automation:create", "automation:edit", "audit:view"],
 };
 
-async function live() {
+async function live(who: typeof me = me) {
   const { loadLiveAdapters } = await import("./live.js");
-  return (await loadLiveAdapters({ me, switchToDemo: () => {} })) as {
+  return (await loadLiveAdapters({ me: who, switchToDemo: () => {} })) as {
     records: { actor(): { name: string }; act(t: string, p: unknown, id?: string): unknown; demo: boolean; sel: { clients(): { name: string }[] } };
-    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }> };
+    ai: { workspace(ref: unknown): { title: string; statusLabel: string; blocks: unknown[]; filters?: { label: string }[] }; route(t: string, c: unknown): Promise<{ lead?: string; ref?: { ws: string }; plan?: { action: string } | null }>; context(): { organizationId: string; previousSubject: unknown; pendingClarification: unknown; pendingAction: unknown; latestReceipt: unknown } };
     documents: { read(f: File): Promise<unknown> };
     greetingChips: string[];
   };
@@ -134,7 +229,19 @@ async function live() {
 const text = (v: unknown) => JSON.stringify(v);
 
 describe("live mode", () => {
-  beforeEach(() => setAutomationEnabled.mockClear());
+  beforeEach(() => {
+    setAutomationEnabled.mockClear();
+    created.length = 0;
+    claimMade = null;
+    workOwner = ME;
+    workDue = null;
+    manageWork.mockClear();
+    opportunityAction.mockClear();
+    createOpportunity.mockClear();
+    createClient.mockClear();
+    createWorkItem.mockClear();
+    oppStage = "not_asked";
+  });
 
   it("reads the brokerage's own people, clients and work — and no demo records", async () => {
     const A = await live();
@@ -240,8 +347,13 @@ describe("live mode", () => {
     const other = await A.ai.route("Summarise the market mood", {});
     expect(askQuestion).toHaveBeenCalled();
     expect(other.lead).toMatch(/assistant isn’t switched on/);
-    const add = await A.ai.route("add Simba Traders as a client", {});
-    expect(add.plan?.action).toBe("client.create");
+    // A write proposed in Ask waits for the person: a pending card, never a plan that runs itself.
+    const add = (await A.ai.route("add Simba Traders as a client", {})) as { plan?: unknown; pending?: { action: string; title: string; external: string; sections: { label: string; items: string[] }[] } };
+    expect(add.plan).toBeUndefined();
+    expect(add.pending?.action).toBe("client.create");
+    expect(add.pending?.title).toBe("Add Simba Traders");
+    expect(add.pending?.external).toBe("No message is sent to anyone.");
+    expect(add.pending?.sections.find((x) => x.label === "MISSING")?.items).toEqual(["Primary contact", "Phone", "Email"]);
   });
 
   it("uses the accepted Work views and shows no simulated connection controls", async () => {
@@ -338,5 +450,579 @@ describe("live mode", () => {
     S.getDb().clients.push({ id: "30000000-0000-4000-8000-0000000000aa", name: "A" });
     expect(S.sel.clientByName("Is cover active on this policy?")).toBeNull();
     expect(S.sel.clientByName("Open Tausi Hauliers")?.name).toBe("Tausi Hauliers Ltd");
+  });
+
+  it("adds a client from Ask: preview, confirm through the + New handler, read back, receipt, next steps", async () => {
+    const A = await live();
+    const r = (await A.ai.route("Add Kifaru Traders as a client.", {})) as { lead: string; pending: { action: string; payload: Record<string, unknown>; actionId: string; editRef: { ws: string; name: string } } };
+    expect(r.lead).toBe("I can add Kifaru Traders as a company. I found no close matches.");
+    // Nothing was written by asking.
+    expect(createClient).toHaveBeenLastCalledWith({ name: "Kifaru Traders", kind: "corporate", preview: true });
+    const first = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; text: string; nav: { ws: string; clientId: string }; next: { label: string }[] };
+    expect(first.ok).toBe(true);
+    expect(first.text).toBe("Kifaru Traders added as a client");
+    expect(first.nav).toEqual({ ws: "client", clientId: "30000000-0000-4000-8000-0000000000ff" });
+    expect(first.next.map((n) => n.label)).toEqual(["Add contact", "Record insurance need", "Start quotation", "Upload document"]);
+    expect(createClient).toHaveBeenLastCalledWith({ name: "Kifaru Traders", kind: "corporate", confirmNew: true });
+    // A second press of the same Confirm is recognised, not written again.
+    const calls = createClient.mock.calls.length;
+    const again = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; duplicate?: boolean };
+    expect(again.duplicate).toBe(true);
+    expect(createClient.mock.calls.length).toBe(calls);
+    // Edit opens the form with the name, company chosen.
+    expect(r.pending.editRef).toEqual({ ws: "newclient", name: "Kifaru Traders", kind: "corporate" });
+  });
+
+  it("asks company or person when the name does not say, and drops a duplicate result for a different name", async () => {
+    const A = await live();
+    const ask = (await A.ai.route("Add Wanjiru Kamau as a client", {})) as { lead: string; pending?: unknown; clarify?: { options: { text: string }[] } };
+    expect(ask.lead).toBe("Is Wanjiru Kamau a company or a person?");
+    expect(ask.pending).toBeUndefined();
+    expect(ask.clarify?.options.map((o) => o.text)).toEqual(["Add Wanjiru Kamau as a company client", "Add Wanjiru Kamau as a person client"]);
+    const person = (await A.ai.route("Add Wanjiru Kamau as a person client", {})) as { pending: { payload: { kind: string } } };
+    expect(person.pending.payload.kind).toBe("individual");
+    // A duplicate check for one name is not shown against another.
+    await A.records.act("client.create", { name: "Tausi Haulier", kind: "Company" });
+    expect(text(A.ai.workspace({ ws: "newclient", name: "Tausi Haulier" }))).toContain("Tausi Hauliers Ltd");
+    expect(text(A.ai.workspace({ ws: "newclient", name: "Kifaru Traders" }))).not.toContain("Tausi Hauliers Ltd");
+  });
+
+  it("quotation: the Space shows each insurer's stage and the next action, and no reply form before delivery", async () => {
+    oppStage = "approved_to_deliver";
+    const A = await live();
+    const ws = text(A.ai.workspace({ ws: "quote", opportunityId: OPP }));
+    expect(ws).toContain("Next: Deliver the approved request to CIC General and record how");
+    expect(ws).toContain("Approved — not yet delivered");
+    expect(ws).toContain('"a":"copy"');
+    expect(ws).toContain("Record how it reached CIC General");
+    expect(ws).not.toContain("Record CIC General’s reply");
+    // Only as an explicit manual record.
+    expect(ws).toContain("Manual record: CIC General replied without a delivered request");
+    oppStage = "not_asked";
+  });
+
+  it("quotation: Ask prepares and approves through the same opp.action contract, as pending cards", async () => {
+    oppStage = "not_asked";
+    const A = await live();
+    const ctx = { ws: "quote", opportunityId: OPP, clientId: CLIENT };
+    const prep = (await A.ai.route("Prepare the request to CIC", ctx)) as { pending: { action: string; payload: { action: string; opportunityInsurerId: string; body: string }; external: string } };
+    expect(prep.pending.action).toBe("opp.action");
+    expect(prep.pending.payload.action).toBe("prepare_request");
+    expect(prep.pending.payload.opportunityInsurerId).toBe(APPROACH);
+    expect(prep.pending.payload.body).toContain("Tausi Hauliers Ltd");
+    expect(prep.pending.external).toMatch(/Nothing is sent/);
+    expect(opportunityAction).not.toHaveBeenCalled();
+    const done = (await A.records.act(prep.pending.action, prep.pending.payload, "t1")) as { ok: boolean; text: string };
+    expect(done.text).toBe("Request prepared for approval — nothing was sent");
+    expect(opportunityAction).toHaveBeenLastCalledWith(OPP, expect.objectContaining({ action: "prepare_request", opportunityInsurerId: APPROACH }));
+    const next = (await A.ai.route("What's next on this quotation?", ctx)) as { lead: string };
+    expect(next.lead).toBe("Next: Prepare the request to CIC General.");
+  });
+
+  it("shows the server's next action for a work item, the same on Today and in its Work Space", async () => {
+    const A = await live();
+    const today = text(A.ai.workspace({ ws: "today" }));
+    expect(today).toContain("Next: Request renewal terms from the insurer · Missing: Renewal terms · Look again 5 Oct");
+    const ws = text(A.ai.workspace({ ws: "workitem", workItemId: WORK }));
+    expect(ws).toContain("Next: Request renewal terms from the insurer");
+    expect(ws).toContain("Missing: Renewal terms.");
+    expect(ws).not.toContain("Decide the first step");
+  });
+
+  describe("typed conversational context and resolution order (D-121)", () => {
+    beforeEach(() => {
+      twoClients = true;
+    });
+    afterEach(() => {
+      twoClients = false;
+    });
+    type Answer = { lead: string; ref?: { ws: string; clientId?: string; policyYearId?: string } | null; clarify?: { options: { label: string }[] } };
+    const policyA = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+    const policyB = { ws: "policy", clientId: CLIENT_B, policyYearId: PER_B };
+    const clientA = { ws: "client", clientId: CLIENT };
+    const clientBref = { ws: "client", clientId: CLIENT_B };
+    const route = async (A: Awaited<ReturnType<typeof live>>, q: string, ref: object, chip: object | null = null) =>
+      (await A.ai.route(q, { ...ref, ref, chip })) as Answer;
+
+    it("an explicit client name wins over the Space in front", async () => {
+      const A = await live();
+      const r = await route(A, "Which policies does Tausi Farms Ltd have?", clientA);
+      expect(r.lead).toMatch(/Tausi Farms Ltd/);
+      expect(r.lead).not.toMatch(/Hauliers/);
+    });
+
+    it("'No, I meant the other Tausi' switches between the two similar clients", async () => {
+      const A = await live();
+      await route(A, "Which policies does Tausi Hauliers Ltd have?", {});
+      const r = await route(A, "No, I meant the other Tausi. Which policies does it have?", {});
+      expect(r.lead).toMatch(/Tausi Farms Ltd/);
+    });
+
+    it("'this claim' and 'this quotation' with nothing of that kind in front are said so, not guessed", async () => {
+      const A = await live();
+      expect((await route(A, "What's next on this claim?", clientA)).lead).toBe("No claim is open in front of you.");
+      expect((await route(A, "What's next on this quotation?", clientBref)).lead).toBe("No quotation is open in front of you.");
+    });
+
+    it("'this quotation' and 'this work' read the record in front", async () => {
+      const A = await live();
+      const q = await route(A, "What's next on this quotation?", { ws: "quote", opportunityId: OPP });
+      expect(q.lead).toBe("Next: Prepare the request to CIC General.");
+      const w = await route(A, "What's next on this work?", { ws: "workitem", workItemId: WORK });
+      expect(w.lead).toBe("Next: Request renewal terms from the insurer.");
+    });
+
+    it("removing the context chip stops it applying; the Space in front is used instead", async () => {
+      const A = await live();
+      const withChip = await route(A, "When does this client's policy expire?", clientA, { clientId: CLIENT_B });
+      expect(withChip.lead).toMatch(/TF-FIRE-009/);
+      const B = await live();
+      const without = await route(B, "When does this client's policy expire?", clientBref, null);
+      expect(without.lead).toMatch(/TF-FIRE-009/);
+      const C = await live();
+      const other = await route(C, "Which policies does this client have?", clientA, null);
+      expect(other.lead).toMatch(/Tausi Hauliers/);
+    });
+
+    it("a subject from another client does not leak into a question asked in front of a different client", async () => {
+      const A = await live();
+      await route(A, "When does TF-FIRE-009 expire?", clientBref);
+      const r = await route(A, "When does it expire?", clientA);
+      expect(r.lead).not.toMatch(/TF-FIRE-009/);
+    });
+
+    it("a refresh starts a clean context: nothing resolved before it is carried over", async () => {
+      const A = await live();
+      await route(A, "When does TF-FIRE-009 expire?", clientBref);
+      expect(A.ai.context().previousSubject).not.toBeNull();
+      const B = await live();
+      expect(B.ai.context().previousSubject).toBeNull();
+      expect(B.ai.context().pendingAction).toBeNull();
+    });
+
+    it("an explicit policy number wins over the Space in front, and never takes the vehicle path", async () => {
+      const A = await live();
+      const r = await route(A, "Is cover active on TH-MTR-001?", clientBref);
+      expect(r.lead).toBe("TH-MTR-001 has active cover.");
+      expect(r.ref).toMatchObject({ ws: "policy", policyYearId: PER_OK });
+      expect(JSON.stringify(r)).not.toContain('"ws":"coverage"');
+    });
+
+    it("'this policy' and 'this client' mean the Space in front", async () => {
+      const A = await live();
+      expect((await route(A, "Is cover active on this policy?", policyB)).lead).toMatch(/^TF-FIRE-009/);
+      expect((await route(A, "Which policies does this client have?", clientA)).lead).toBe("Tausi Hauliers Ltd has 2 policies.");
+    });
+
+    it("switching between two clients and two policies follows the Space, with no identity carried over", async () => {
+      const A = await live();
+      expect((await route(A, "When does this policy expire?", policyA)).lead).toMatch(/^TH-MTR-001 ends on /);
+      // Now the other client's policy is in front: the previous subject belongs to another client and is dropped.
+      expect((await route(A, "When does it expire?", policyB)).lead).toMatch(/^TF-FIRE-009 ends on /);
+      expect((await route(A, "Which policies does this client have?", clientBref)).lead).toBe("Tausi Farms Ltd has 1 policy.");
+      expect((await route(A, "Which policies does this client have?", clientA)).lead).toBe("Tausi Hauliers Ltd has 2 policies.");
+    });
+
+    it("a follow-up uses the subject just resolved; a corrected follow-up switches to what it names", async () => {
+      const A = await live();
+      await route(A, "Is cover active on TH-MTR-001?", clientA);
+      expect(A.ai.context().previousSubject).toMatchObject({ type: "policy", label: "TH-MTR-001" });
+      expect((await route(A, "When does it expire?", clientA)).lead).toMatch(/^TH-MTR-001 ends on /);
+      const corrected = await route(A, "No — I meant TF-FIRE-009. When does it expire?", clientA);
+      expect(corrected.lead).toMatch(/^TF-FIRE-009 ends on /);
+    });
+
+    it("an ambiguous client name asks which, and opens nothing", async () => {
+      const A = await live();
+      const r = await route(A, "Which policies does Tausi have?", {});
+      expect(r.lead).toBe("Which client do you mean?");
+      expect(r.ref).toBeNull();
+      expect(r.clarify?.options.map((o) => o.label).sort()).toEqual(["Tausi Farms Ltd", "Tausi Hauliers Ltd"]);
+      expect(A.ai.context().pendingClarification).not.toBeNull();
+    });
+
+    it("a missing vehicle identity is asked for, never answered about 'null'", async () => {
+      const A = await live();
+      const r = await route(A, "Is the vehicle covered?", clientA);
+      expect(JSON.stringify(r)).not.toMatch(/null is not|"ws":"coverage"/);
+    });
+
+    it("a client with several policies is asked which, not given the first", async () => {
+      const A = await live();
+      const r = await route(A, "Is cover active?", {}, { clientId: CLIENT });
+      expect(r.lead).toBe("Which policy?");
+    });
+
+    it("records the pending action and, once confirmed, the latest receipt", async () => {
+      const A = await live();
+      const add = (await A.ai.route("Add Kifaru Traders as a client", {})) as { pending: { action: string; payload: object; actionId: string } };
+      expect(A.ai.context().pendingAction).toMatchObject({ action: "client.create" });
+      await A.records.act(add.pending.action, add.pending.payload, add.pending.actionId);
+      expect(A.ai.context().pendingAction).toBeNull();
+      expect(A.ai.context().latestReceipt).toMatchObject({ text: "Kifaru Traders added as a client" });
+      expect(A.ai.context().organizationId).toBe(ORG);
+    });
+  });
+
+  describe("the claim vertical slice", () => {
+    const yesterday = () => { const d = new Date(Date.now() - 864e5); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+
+    it("reports a claim from the policy in front: kept values, a draft, one create, read back, its Space", async () => {
+      const A = await live();
+      const ref = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+      const r = (await A.ai.route("Report a claim for the accident yesterday", { ...ref, ref })) as { pending: { action: string; payload: Record<string, string>; actionId: string; external: string; sections: { label: string; items: string[] }[] } };
+      expect(r.pending.action).toBe("claim.open");
+      expect(r.pending.payload).toEqual({ clientId: CLIENT, policyId: POL_OK, incidentOn: yesterday(), incidentSummary: "The accident yesterday" });
+      expect(r.pending.external).toMatch(/^No message is sent to the insurer/);
+      expect(r.pending.sections[0]!.items[0]).toBe("A draft claim — not registered");
+      expect(createWorkItem).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "claim" }));
+      const done = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { ok: boolean; text: string; nav: { ws: string; claimId: string } };
+      expect(done.text).toBe("Claim reported as a draft — not registered");
+      expect(done.nav).toEqual({ ws: "claim", clientId: CLIENT, claimId: CLAIM });
+      const again = (await A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)) as { duplicate?: boolean };
+      expect(again.duplicate).toBe(true);
+      expect(createWorkItem.mock.calls.filter((c) => (c[0] as { kind: string }).kind === "claim")).toHaveLength(1);
+      const space = text(A.ai.workspace(done.nav));
+      expect(space).toContain("Draft — not registered");
+      expect(space).toContain("Claim form");
+      expect(space).toContain("Nothing is sent from here");
+      expect(space).not.toMatch(/@|undefined|\bnull\b|Review and send|"t":"email"/);
+    });
+
+    it("asks which policy only when the client has several, offering 'not known'; asks the date when it is missing", async () => {
+      const A = await live();
+      const which = (await A.ai.route("Report a claim for the accident yesterday", { chip: { clientId: CLIENT } })) as { lead: string; clarify: { options: { label: string }[] } };
+      expect(which.lead).toBe("Which policy does this claim relate to?");
+      expect(which.clarify.options.map((o) => o.label)).toContain("Policy not known yet");
+      const when = (await A.ai.route("Report a claim on TH-MTR-001", {})) as { lead: string };
+      expect(when.lead).toBe("When did it happen?");
+    });
+  });
+
+  /*
+   * Chat/Space parity (D-122). Each action is reached two ways — Ask's confirmed pending card and
+   * the Space's own control — and both must arrive at the same live action and the same server
+   * call. Ask's preview writes nothing; a repeat of a confirmed action is not sent twice.
+   */
+  describe("chat and Space reach the same contract", () => {
+    type Pending = { action: string; payload: Record<string, unknown>; actionId: string; sections: { label: string; items: string[] }[] };
+    type Routed = { pending?: Pending; lead?: string };
+    const blocks = (ws: { blocks: unknown[] }) => ws.blocks as Record<string, unknown>[];
+    const control = (ws: { blocks: unknown[] }, action: string, pick?: (o: Record<string, unknown>) => boolean) => {
+      const found: Record<string, unknown>[] = [];
+      const walk = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === "object") {
+          const o = v as Record<string, unknown>;
+          if (o["action"] === action && (!pick || pick(o))) found.push(o);
+          Object.values(o).forEach(walk);
+        }
+      };
+      walk(blocks(ws));
+      return found[0] ?? null;
+    };
+
+    it("1 · add client", async () => {
+      const A = await live();
+      const r = (await A.ai.route("add Simba Traders as a company client", {})) as Routed;
+      expect(r.pending!.action).toBe("client.create");
+      expect(createClient.mock.calls.every((c) => c[0].preview === true)).toBe(true);
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = createClient.mock.calls.at(-1)![0];
+      createClient.mockClear();
+      const form = control(A.ai.workspace({ ws: "newclient" }), "client.create")!;
+      expect(form).not.toBeNull();
+      await A.records.act("client.create", { ...(form["payload"] as object), name: "Simba Traders", kind: "Company", confirmNew: "yes" });
+      const fromSpace = createClient.mock.calls.at(-1)![0];
+      expect({ name: fromSpace.name, kind: fromSpace.kind }).toEqual({ name: fromAsk.name, kind: fromAsk.kind });
+    });
+
+    it("2 · start quotation", async () => {
+      const A = await live();
+      const r = (await A.ai.route("Start a quotation for Tausi Hauliers for a motor fleet of five vans", {})) as Routed;
+      expect(r.pending!.action).toBe("opportunity.create");
+      expect(createOpportunity).not.toHaveBeenCalled();
+      await Promise.all([A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId), A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)]);
+      expect(createOpportunity).toHaveBeenCalledTimes(1);
+      const fromAsk = (createOpportunity.mock.calls as unknown as Record<string, unknown>[][])[0]![0]!;
+      const form = control(A.ai.workspace({ ws: "quote", clientId: CLIENT }), "opportunity.create")!;
+      await A.records.act("opportunity.create", { ...(form["payload"] as object), title: r.pending!.payload["title"], cls: r.pending!.payload["cls"] });
+      const fromSpace = (createOpportunity.mock.calls as unknown as Record<string, unknown>[][])[1]![0]!;
+      for (const k of ["clientId", "title", "classOfBusiness"]) expect(fromSpace[k]).toEqual(fromAsk[k]);
+    });
+
+    const oppAsk = async (A: Awaited<ReturnType<typeof live>>, q: string) => (await A.ai.route(q, { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } })) as Routed;
+    const lastOpp = () => opportunityAction.mock.calls.at(-1) as unknown as [string, Record<string, unknown>];
+
+    it("3 · add insurer", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Add Jubilee as an insurer to this quotation");
+      expect(r.pending!.action).toBe("opp.action");
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const add = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "add_insurer")!;
+      await A.records.act("opp.action", add["payload"]);
+      expect(lastOpp()).toEqual(fromAsk);
+    });
+
+    it("4 · add requirement", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Add a requirement: Driver licences");
+      expect(r.pending!.payload).toMatchObject({ action: "add_requirement", label: "Driver licences" });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "add_requirement")!;
+      await A.records.act("opp.action", { ...(form["payload"] as object), label: "Driver licences" });
+      expect(lastOpp()).toEqual(fromAsk);
+    });
+
+    it("5 · supply requirement", async () => {
+      const A = await live();
+      const d = oppDetail();
+      d.requirements[0]!.suppliedAt = null as unknown as string;
+      opportunityAction.mockClear();
+      const detail = { ...d };
+      const api = (await import("../lib/api.js")).api as unknown as { opportunity: (id: string) => Promise<unknown> };
+      const spy = vi.spyOn(api, "opportunity").mockResolvedValue(detail);
+      const B = await live();
+      const r = (await B.ai.route("We received the logbooks from the client by email today", { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } })) as Routed;
+      expect(r.pending!.payload).toMatchObject({ action: "supply_requirement", requirementId: d.requirements[0]!.id });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await B.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(B.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "supply_requirement")!;
+      expect(form).not.toBeNull();
+      // The Space's select supplies the requirement; its text box the note.
+      const choice = ((form["fields"] as { key: string; options?: { value: string }[] }[]).find((f) => f.key === "requirementId")!.options!)[0]!.value;
+      await B.records.act("opp.action", { ...(form["payload"] as object), requirementId: choice, note: r.pending!.payload["note"] });
+      expect(lastOpp()[1]).toMatchObject({ action: "supply_requirement", requirementId: fromAsk[1]["requirementId"], note: fromAsk[1]["note"] });
+      spy.mockRestore();
+      void A;
+    });
+
+    it("6 · prepare request", async () => {
+      const A = await live();
+      const r = await oppAsk(A, "Prepare the request to CIC");
+      expect(r.pending!.payload).toMatchObject({ action: "prepare_request", opportunityInsurerId: APPROACH });
+      expect(opportunityAction).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
+      const form = control(A.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "prepare_request")!;
+      await A.records.act("opp.action", { ...(form["payload"] as object), subject: fromAsk[1]["subject"], body: fromAsk[1]["body"] });
+      expect(lastOpp()[1]).toEqual(fromAsk[1]);
+      expect(JSON.stringify(fromAsk)).not.toMatch(/\bsent\b/i);
+    });
+
+    it("7 · report claim", async () => {
+      const A = await live();
+      const ref = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK };
+      const r = (await A.ai.route("Report a claim: van rear-ended on 28 Sep", { ...ref, ref })) as Routed;
+      expect(r.pending!.action).toBe("claim.open");
+      expect(createWorkItem).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = createWorkItem.mock.calls.at(-1)![0];
+      claimMade = null;
+      const form = control(A.ai.workspace({ ws: "claim", clientId: CLIENT }), "claim.open")!;
+      expect(form).not.toBeNull();
+      await A.records.act("claim.open", { ...(form["payload"] as object), policyId: POL_OK, incidentOn: r.pending!.payload["incidentOn"], incidentSummary: r.pending!.payload["incidentSummary"] });
+      const fromSpace = createWorkItem.mock.calls.at(-1)![0];
+      expect(fromSpace).toEqual(fromAsk);
+    });
+
+    it("8 · assign Work: Ask previews from the server, both confirm through /manage", async () => {
+      const A = await live();
+      const ref = { ws: "workitem", workItemId: WORK };
+      const r = (await A.ai.route("Assign this to Baraka", { ...ref, ref })) as Routed;
+      expect(r.pending!.action).toBe("work.assign");
+      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Owner: Wanjiru Kamau → Baraka Otieno");
+      expect(manageWork.mock.calls.every((c) => c[1].preview === true)).toBe(true);
+      const [a, b] = await Promise.all([A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId), A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)]);
+      expect(manageWork.mock.calls.filter((c) => !c[1].preview)).toHaveLength(1);
+      expect((a as { receipt: { audit: string } }).receipt.audit).toBe("work_item.assigned");
+      expect(a).toEqual(b);
+      const fromAsk = manageWork.mock.calls.filter((c) => !c[1].preview).at(-1)!;
+      workOwner = ME;
+      manageWork.mockClear();
+      const B = await live();
+      await B.records.act("work.assign", { workItemId: WORK, userId: BARAKA, dueAt: null });
+      expect(manageWork.mock.calls.at(-1)).toEqual(fromAsk);
+      const again = (await B.records.act("work.assign", { workItemId: WORK, userId: BARAKA, dueAt: null }, "space-second-click")) as { already?: boolean };
+      expect(again.already).toBe(true);
+    });
+
+    it("9 · change Work due date", async () => {
+      const A = await live();
+      const ref = { ws: "workitem", workItemId: WORK };
+      const r = (await A.ai.route("Make this due 15 Oct 2026", { ...ref, ref })) as Routed;
+      expect(r.pending!.sections.find((x) => x.label === "CHANGE")!.items[0]).toBe("Due: No date → 15 Oct 2026");
+      expect(workDue).toBeNull();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = manageWork.mock.calls.filter((c) => !c[1].preview).at(-1)!;
+      expect(fromAsk[1]).toMatchObject({ dueOn: "2026-10-15" });
+      workDue = null;
+      manageWork.mockClear();
+      const B = await live();
+      await B.records.act("work.assign", { workItemId: WORK, dueAt: "2026-10-15" });
+      expect(manageWork.mock.calls.at(-1)).toEqual(fromAsk);
+      // After a refresh, Work reads the saved date back from the server.
+      const C = await live();
+      expect(text(C.ai.workspace({ ws: "work" }))).toMatch(/15 Oct/);
+    });
+
+    it("a refusal from the server is a blocked receipt, not a success", async () => {
+      manageWork.mockResolvedValueOnce({ outcome: "blocked", item: {} as never, guard: "permission", reason: "Your role can view Work but not change its owner or dates. Nothing was changed." } as never);
+      const A = await live();
+      const res = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied?: boolean; reason?: string };
+      expect(res.ok).toBe(false);
+      expect(res.denied).toBe(true);
+    });
+  });
+
+  describe("the quotation lifecycle, without Gmail", () => {
+    it("Space and Ask show the same stage at each step; a reply is recorded normally only once delivered", async () => {
+      for (const stage of ["not_asked", "request_prepared", "approved_to_deliver", "with_insurer"] as const) {
+        oppStage = stage;
+        const A = await live();
+        const ws = A.ai.workspace({ ws: "quote", opportunityId: OPP });
+        const all = text(ws);
+        const next = oppDetail().next.what;
+        expect(all).toContain(next);
+        const asked = await A.ai.route("What's next on this quotation?", { ws: "quote", opportunityId: OPP, ref: { ws: "quote", opportunityId: OPP } });
+        expect(asked.lead).toBe("Next: " + next + ".");
+        // Never "sent"; the ordinary reply form only once someone has delivered the request.
+        expect(all).not.toMatch(/"(Request )?[Ss]ent\b/);
+        expect(all.includes("Record CIC General’s reply")).toBe(stage === "with_insurer");
+        if (stage !== "with_insurer") expect(all).toContain("Manual record: CIC General replied without a delivered request");
+        const stages = (ws.blocks as { t: string; label?: string; rows?: { title: string; badge: string }[] }[]).find((b) => b.label === "Where this quotation stands")!;
+        const done = stages.rows!.filter((r) => r.badge === "Done").map((r) => r.title);
+        expect(done.includes("Delivered by a person, with evidence")).toBe(stage === "with_insurer");
+        expect(done.includes("Reviewed and approved")).toBe(stage === "approved_to_deliver" || stage === "with_insurer");
+        if (stage === "approved_to_deliver") {
+          expect(all).toMatch(/"a":"copy"/);
+          expect(all).toMatch(/"a":"download"/);
+          expect(all).toContain("Record how it reached CIC General");
+        }
+        if (stage === "with_insurer") expect(stages.rows!.map((r) => r.title)).toContain("With CIC General");
+      }
+    });
+  });
+
+  describe("claim cases", () => {
+    const ask = async (A: Awaited<ReturnType<typeof live>>, q: string, ref: object = {}) =>
+      (await A.ai.route(q, { ...ref, ref })) as { lead?: string; clarify?: { options: { label: string; text: string }[] }; pending?: { action: string; payload: Record<string, string>; actionId: string; sections: { label: string; items: string[] }[] } };
+
+    it("a client with one policy: the policy is taken, not asked; an explicit date and the words are kept", async () => {
+      twoClients = true;
+      const A = await live();
+      const r = await ask(A, "Report a claim: fire in the store on 12 Sep", { ws: "client", clientId: CLIENT_B });
+      expect(r.pending!.payload).toMatchObject({ clientId: CLIENT_B, policyId: POL_B, incidentSummary: "Fire in the store on 12 Sep" });
+      expect(r.pending!.payload["incidentOn"]).toMatch(/-09-12$/);
+      twoClients = false;
+    });
+
+    it("several policies: asked, with 'not known' — choosing it reports the claim with the policy unknown", async () => {
+      const A = await live();
+      const which = await ask(A, "Report a claim for the van hit yesterday", { ws: "client", clientId: CLIENT });
+      const unknown = which.clarify!.options.find((o) => o.label === "Policy not known yet")!;
+      const r = await ask(A, unknown.text, { ws: "client", clientId: CLIENT });
+      expect(r.pending!.payload["policyId"]).toBe("unknown");
+      expect(r.pending!.sections.find((x) => x.label === "MISSING")!.items).toContain("The policy the loss falls under");
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      expect(createWorkItem).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "claim", policyUnknown: true }));
+      expect(createWorkItem.mock.lastCall![0]).not.toHaveProperty("policyId");
+    });
+
+    it("an unclear date is asked for, never guessed", async () => {
+      const A = await live();
+      const r = await ask(A, "Report a claim on TH-MTR-001 for damage recently");
+      expect(r.lead).toBe("When did it happen?");
+      expect(r.pending).toBeUndefined();
+    });
+
+    it("the Claim Space after refresh: draft, policy, owner, next action, documents, next check — no placeholder text", async () => {
+      const A = await live();
+      const r = await ask(A, "Report a claim for the accident yesterday", { ws: "policy", clientId: CLIENT, policyYearId: PER_OK });
+      const done = (await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)) as { nav: object };
+      const B = await live();
+      const space = B.ai.workspace(done.nav) as { statusLabel: string; blocks: unknown[] };
+      const all = text(space);
+      expect(space.statusLabel).toBe("Draft — not registered");
+      expect(all).toContain("TH-MTR-001");
+      expect(all).toContain("Wanjiru Kamau");
+      expect(all).toContain("Collect the claim form and supporting documents");
+      expect(all).toContain("Claim form");
+      expect(all).toMatch(/Next check","2 Oct/);
+      expect(all).not.toMatch(/undefined|\bnull\b|NaN|\.demo|@example|Review and send/);
+    });
+  });
+
+  describe("Activity for a manager (D-124)", () => {
+    it("names the person who acted, the client, the record, the outcome — and answers the manager's questions", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "activity" }) as { blocks: { t: string; items?: string[][]; rows?: { title: string; note: string; badge: string; action: { ref: object } | null }[] }[] };
+      const all = text(ws);
+      expect(all).not.toMatch(/· system\b|"system"/);
+      const list = ws.blocks.find((b) => b.t === "rows")!.rows!;
+      const assigned = list.find((r) => r.title.startsWith("Work assigned"))!;
+      expect(assigned.note).toMatch(/^Baraka Otieno · Tausi Hauliers Ltd · Done/);
+      expect(assigned.action!.ref).toEqual({ ws: "workitem", workItemId: WORK });
+      expect(list.find((r) => r.badge === "Refused")!.note).toContain("Refused: permission denied");
+      const facts = Object.fromEntries(ws.blocks.find((b) => b.t === "facts")!.items!);
+      expect(facts["Sent outside the brokerage"]).toBe("Nothing — no message left ASAP");
+      expect(facts["Cover or money"]).toBe("No change to cover or money");
+      expect(facts["Blocked or refused"]).toMatch(/^1 attempt/);
+      expect(facts["Next actions held by"]).toContain("Wanjiru Kamau (1)");
+    });
+  });
+
+  describe("automations are honest (D-125)", () => {
+    it("the saved renewal automation, whose trigger nothing emits, reads as unable to run and cannot be switched on", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "automation", automationId: AUTO }) as { statusLabel: string; blocks: unknown[] };
+      expect(ws.statusLabel).toBe("Cannot run");
+      const all = text(ws);
+      expect(all).toContain("does not fire yet");
+      expect(all).not.toContain("Switch this automation on");
+      expect(all).toContain("Run in test mode");
+      expect(all).toContain("Could not finish");
+      expect(all).toContain("would act on 1 item of 4");
+      expect(all).not.toMatch(/Force a failure|Simulate/);
+    });
+
+    it("the builder offers only executable triggers; Ask offers Save only when every part runs", async () => {
+      const A = await live();
+      const list = A.ai.workspace({ ws: "automation" }) as { blocks: { t: string; fields?: { key: string; options?: { value: string }[] }[] }[] };
+      const builder = list.blocks.find((b) => b.t === "builder")!;
+      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received"]);
+      const bad = (await A.ai.route("Create an automation: when a renewal is approaching, email the client automatically", {})) as { pending?: unknown; lead: string; text: string };
+      expect(bad.pending).toBeUndefined();
+      expect(bad.lead).toBe("That cannot be saved as a working automation.");
+      expect(bad.text).toMatch(/not available yet|does not fire yet/);
+      expect(bad.text).toMatch(/never sends/);
+      const good = (await A.ai.route("Create an automation: whenever a document arrives on a claim, prepare it for review", {})) as { pending: { action: string; payload: Record<string, unknown>; actionId: string } };
+      expect(good.pending.action).toBe("automation.create");
+      expect(good.pending.payload).toMatchObject({ trigger: "document.received", verb: "prepare", conditions: [{ fact: "kind", operator: "equals", value: "claim" }] });
+      expect(createAutomation).not.toHaveBeenCalled();
+      const saved = (await A.records.act(good.pending.action, good.pending.payload, good.pending.actionId)) as { ok: boolean };
+      expect(saved.ok).toBe(true);
+      expect(createAutomation).toHaveBeenCalledWith(expect.objectContaining({ triggerEvent: "document.received", enabled: false, approval: "always", conditions: [{ fact: "kind", operator: "equals", value: "claim" }] }));
+      const tested = (await A.records.act("automation.test", { id: AUTO })) as { text: string };
+      expect(tested.text).toBe("Test mode: it would act on 1 open item of 3 checked");
+    });
+  });
+
+  it("a read-only member is refused plainly, before any request, from Ask and from a Space", async () => {
+    const A = await live({ ...me, permissions: ["client:view", "job:view"] });
+    const r = (await A.ai.route("add Simba Traders as a company client", {})) as { lead: string; pending?: unknown };
+    expect(r.lead).toBe("Your role cannot add clients.");
+    expect(r.pending).toBeUndefined();
+    expect(createClient).not.toHaveBeenCalled();
+    const w = (await A.ai.route("Assign this to Baraka", { ws: "workitem", workItemId: WORK, ref: { ws: "workitem", workItemId: WORK } })) as { lead: string };
+    expect(w.lead).toBe("Your role cannot change who owns Work or when it is due.");
+    const space = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied: boolean };
+    expect(space).toMatchObject({ ok: false, denied: true });
+    expect(manageWork).not.toHaveBeenCalled();
   });
 });

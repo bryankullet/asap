@@ -24,6 +24,18 @@
     .asap-tabs{max-width:52vw!important}
   }
 
+.asap-mobileonly{display:none}
+.asap-body[data-space="closed"] .asap-pane{display:none!important}
+.asap-body[data-space="closed"] .asap-ask{width:100%;max-width:860px;margin:0 auto;border-left:0!important}
+@media(max-width:980px){
+  .asap-mobileonly{display:block}
+  .asap-desktoponly{display:none!important}
+  .asap-body{overflow:hidden!important}
+  .asap-body[data-view="ask"] .asap-pane{display:none!important}
+  .asap-body[data-view="space"] .asap-ask{display:none!important}
+  .asap-ask{min-height:0!important;border-right:0!important;border-top:0!important}
+}
+
 /* hover rules (style-hover) */
 .dch0:hover{border-color:#c4cfc6 !important}
 .dch1:hover{filter:brightness(.97) !important}

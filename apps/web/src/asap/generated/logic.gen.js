@@ -15,7 +15,7 @@ class Component extends DCLogic {
     sheet: null, toast: '', busy: false, tick: 0, contextRef: null, selection: null, lastPlan: null,
     staged: [], progress: [], why: {}, filter: {}, assignDraft: {}, builder: {}, search: '', mail: null,
     sideCollapsed: typeof window !== 'undefined' && window.innerWidth < 1180,
-    sideTouched: false, askWidth: 400, dragging: false
+    sideTouched: false, askWidth: (() => { try { const v = Number(localStorage.getItem('asap.askWidth')); return v >= 360 && v <= 900 ? v : 560; } catch { return 560; } })(), dragging: false, mobileView: 'ask'
   };
 
   onResize = () => {
@@ -28,14 +28,16 @@ class Component extends DCLogic {
     e.preventDefault();
     this.setState({ dragging: true });
     const move = (ev) => {
-      const w = Math.min(760, Math.max(300, window.innerWidth - ev.clientX));
+      const left = (document.querySelector('.asap-ask') || { getBoundingClientRect: () => ({ left: 0 }) }).getBoundingClientRect().left;
+      const w = Math.min(900, Math.max(360, ev.clientX - left));
+      try { localStorage.setItem('asap.askWidth', String(w)); } catch { /* interface preference only */ }
       this.setState({ askWidth: w });
     };
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); this.setState({ dragging: false }); };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
-  resetWidth = () => this.setState({ askWidth: 400 });
+  resetWidth = () => { try { localStorage.removeItem('asap.askWidth'); } catch { /* ignore */ } this.setState({ askWidth: 560 }); };
   inputRef = React.createRef();
   searchRef = React.createRef();
   sheetCloseRef = React.createRef();
@@ -74,8 +76,10 @@ class Component extends DCLogic {
     if (!el) return;
     if (!el.dataset.watched) { el.dataset.watched = '1'; el.addEventListener('scroll', () => { this._pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }); }
     const grew = !prev || prev.thread !== this.state.thread || prev.thinking !== this.state.thinking;
-    if (grew && this._pinned !== false) el.scrollTop = el.scrollHeight;
+    if (grew && this._pinned !== false) { el.scrollTop = el.scrollHeight; if (this.state.newBelow) this.setState({ newBelow: false }); }
+    else if (grew && prev && prev.thread !== this.state.thread && !this.state.newBelow) this.setState({ newBelow: true });
   }
+  jumpToNew = () => { const el = document.querySelector('.asap-thread'); if (el) el.scrollTop = el.scrollHeight; this._pinned = true; this.setState({ newBelow: false }); };
   saveThread(thread) {
     this.A.records.act('conversation.save', { id: 'cnv_main', messages: thread.slice(-40), contextId: this.state.contextRef?.clientId || null }, 'conv:' + Date.now());
   }
@@ -90,14 +94,24 @@ class Component extends DCLogic {
     const existing = this.state.tabs.find(t => ident(t.ref) === ident(ref));
     if (existing) { this.setState({ activeId: existing.id, sheet: null, contextRef: ref }); return; }
     const id = 'tab' + (this.state.tabs.length + 1) + '_' + Date.now().toString(36);
-    const tabs = [...this.state.tabs.filter(t => t.pinned || t.id !== this.state.activeId || opts.keep), { id, ref, pinned: false }];
-    this.setState({ tabs, activeId: id, sheet: null, contextRef: ref,
-      recent: [{ ref, at: Date.now() }, ...this.state.recent.filter(r => JSON.stringify(r.ref) !== key)].slice(0, 12) });
+    // A record never replaces another record's tab; only a transient form or a 'nothing opened'
+    // tab in front is replaced. Recent holds records, once each, never forms or failed steps.
+    const transient = (r) => ['nothing', 'newclient', 'newcontact', 'import'].includes(r.ws) || (r.ws === 'claim' && !r.claimId) || (r.ws === 'quote' && !r.opportunityId);
+    let tabs = this.state.tabs.filter(t => !(t.id === this.state.activeId && !t.pinned && !opts.keep && transient(t.ref)));
+    tabs = [...tabs, { id, ref, pinned: false }];
+    while (tabs.filter(t => !t.pinned).length > 8) tabs.splice(tabs.findIndex(t => !t.pinned && t.id !== id), 1);
+    const recent = transient(ref) ? this.state.recent : [{ ref, at: Date.now() }, ...this.state.recent.filter(r => ident(r.ref) !== ident(ref))].slice(0, 12);
+    void key;
+    this.setState({ tabs, activeId: id, sheet: null, contextRef: ref, recent });
   };
   closeTab = (id) => {
     const tabs = this.state.tabs.filter(t => t.id !== id);
-    this.setState({ tabs: tabs.length ? tabs : [{ id: 't1', ref: { ws: 'today' }, pinned: true }],
-      activeId: (tabs[tabs.length - 1] || { id: 't1' }).id });
+    // Closing a tab removes the tab, never the record; context follows the tab now in front.
+    // Closing the last tab leaves Ask alone in the centre (D-118); opening anything brings a Space back.
+    if (!tabs.length) { try { sessionStorage.removeItem('asap.openRef'); } catch { /* storage blocked */ } this.setState({ tabs: [], activeId: null, contextRef: null }); return; }
+    const front = id === this.state.activeId ? tabs[tabs.length - 1] : tabs.find(t => t.id === this.state.activeId) || tabs[tabs.length - 1];
+    try { sessionStorage.setItem('asap.openRef', JSON.stringify(front.ref)); } catch { /* storage blocked */ }
+    this.setState({ tabs, activeId: front.id, contextRef: front.ref });
   };
 
   // ---------------- actions
@@ -114,7 +128,7 @@ class Component extends DCLogic {
       if (res.duplicate) { this.flash('Already done — nothing was recorded twice.'); this.bump({ sheet: null }); return; }
       if (opts.after) this.A.records.act(opts.after.action, opts.after.payload, actionId + ':after');
       const receipt = res.text || 'Recorded';
-      const thread = [...this.state.thread, { role: 'ai', lead: receipt, text: 'Written to the records with an audit entry against your name.', receipt: receipt + ' · ' + this.A.records.actor().name, chips: [] }];
+      const thread = [...this.state.thread, this.receiptMessage(res, receipt)];
       this.saveThread(thread);
       this.setState({ sheet: null, thread, staged: opts.clearStaged ? [] : this.state.staged });
       this.flash(receipt);
@@ -125,6 +139,48 @@ class Component extends DCLogic {
     }, 320);
   };
 
+  // ---------------- pending actions
+  // One receipt, from Ask or from a Space: action, record, actor, time, outcome, audit reference,
+  // what changed, what did not, and the next action (D-122).
+  receiptMessage = (res, lead) => {
+    const r = res.receipt || null;
+    const when = new Date();
+    const lines = r ? [r.changed && r.changed.length ? 'Changed: ' + r.changed.join('; ') + '.' : 'Nothing changed.', r.unchanged && r.unchanged.length ? 'Not changed: ' + r.unchanged.join('; ') + '.' : '', r.next ? 'Next: ' + r.next + '.' : ''].filter(Boolean).join(' ') : '';
+    const stamp = [r ? r.action : null, r ? r.record : null, this.A.records.actor().name, when.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), r ? r.outcome : (res.duplicate || res.already ? 'Already done' : 'Done'), r && r.audit ? 'Audit: ' + r.audit : null].filter(Boolean).join(' \u00b7 ');
+    return { role: 'ai', lead, text: [res.detail || 'Written to your brokerage\u2019s records with an audit entry against your name.', lines].filter(Boolean).join(' '), receipt: stamp, chips: res.next || [] };
+  };
+  updatePending = (i, patch) => {
+    const thread = this.state.thread.map((m, j) => (j === i && m.pending ? { ...m, pending: { ...m.pending, ...patch } } : m));
+    this.setState({ thread });
+    return thread;
+  };
+  confirmPending = async (i) => {
+    const m = this.state.thread[i];
+    if (!m || !m.pending || !['open', 'failed'].includes(m.pending.status)) return;
+    this.updatePending(i, { status: 'running', statusText: m.pending.progress || 'Saving to your brokerage\u2019s records\u2026' });
+    let res;
+    try { res = await this.A.records.act(m.pending.action, m.pending.payload, m.pending.actionId); }
+    catch (e) { res = { ok: false, error: 'That could not be saved just now. Nothing was changed \u2014 you can retry.' }; }
+    if (res.denied) { this.updatePending(i, { status: 'blocked', statusText: res.reason || 'Your role cannot do this.' }); return; }
+    if (!res.ok) { this.updatePending(i, { status: 'failed', statusText: res.error || 'That failed. Nothing was changed \u2014 you can retry.' }); return; }
+    const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
+    const thread = this.updatePending(i, { status: res.partial ? 'partial' : res.duplicate || res.already ? 'already' : 'done', statusText: res.partial ? 'Partly written — ' + (res.partial === true ? 'some of it could not be saved; the receipt says which.' : res.partial) : receipt });
+    const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const next = [...thread, this.receiptMessage(res, receipt)];
+    this.saveThread(next);
+    this.setState({ thread: next });
+    this.bump();
+    if (res.nav) this.openRef(res.nav);
+  };
+  cancelPending = (i) => this.updatePending(i, { status: 'cancelled', statusText: 'Cancelled \u2014 nothing was written.' });
+  editPending = (i) => {
+    const m = this.state.thread[i];
+    if (!m || !m.pending) return;
+    // An edit replaces this preview: its matches and checks no longer describe what will be written.
+    this.updatePending(i, { status: 'replaced', statusText: 'Replaced by your edit \u2014 nothing was written from this preview.' });
+    if (m.pending.editRef) this.openRef(m.pending.editRef);
+  };
+
   // ---------------- Ask
   ask = (text) => {
     if (!text || !text.trim()) return;
@@ -133,11 +189,17 @@ class Component extends DCLogic {
     this.setState({ thread, thinking: true });
     setTimeout(async () => {
       const tab = this.activeTab();
-      const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref };
+      const ctx = { ...(tab ? tab.ref : {}), selection: this.state.selection, lastPlan: this.state.lastPlan, ref: tab?.ref, chip: this.state.contextRef || null };
       if (!this.state.contextRef) { delete ctx.clientId; }
-      const r = (await this.A.ai.route(text, ctx)) || {};
+      let r;
+      try { r = (await this.A.ai.route(text, ctx)) || {}; }
+      catch (e) {
+        r = { lead: 'ASAP could not answer just now.', text: 'Nothing was changed. Your message is back in the box \u2014 send it again, or try in a moment.', keepWorkspace: true, clarify: { options: [{ label: 'Try again', text }] }, failed: true };
+        if (this.inputRef.current && !this.inputRef.current.value) this.inputRef.current.value = text;
+      }
       const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
+      if (r.pending) msg.pending = { ...r.pending, status: 'open' };
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
       if (r.keepWorkspace) msg.panelNote = '';
       else if (r.nothing || !r.ref) msg.panelNote = 'Nothing opened for this request.';
@@ -153,7 +215,7 @@ class Component extends DCLogic {
         this.openRef(r.ref);
         if (r.ref.clientId) this.setState({ contextRef: r.ref });
       }
-      if (r.plan) this.act(r.plan.action, r.plan.payload, { actionId: r.plan.actionId });
+      if (r.plan && !r.pending) this.act(r.plan.action, r.plan.payload, { actionId: r.plan.actionId });
     }, this.A.ai.latencyMs);
   };
   send = () => { const el = this.inputRef.current; if (!el) return; const v = el.value; el.value = ''; this.ask(v); };
@@ -295,7 +357,7 @@ class Component extends DCLogic {
         const ns = b.formId || 'form';
         const opts = (x) => (x.options || []).map(v => (typeof v === 'string' ? { value: v, label: v } : v));
         const val = (x) => (d[ns + ':' + x.key] ?? x.value ?? (x.options ? (opts(x)[0] || {}).value ?? '' : ''));
-        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options, options: opts(x),
+        o.fields = b.fields.map(x => ({ label: x.label, placeholder: x.placeholder || '', type: x.type, value: val(x), isSelect: !!x.options, isInput: !x.options && !x.multiline, isTextarea: !!x.multiline, options: opts(x),
           onChange: (e) => this.setState({ builder: { ...this.state.builder, [ns + ':' + x.key]: e.target.value } }) }));
         o.saveLabel = b.saveLabel || 'Save'; o.saveNote = b.saveNote || '';
         o.save = () => this.act(b.action, { ...(b.payload || {}), ...Object.fromEntries(b.fields.map(x => [x.key, String(val(x)).trim()])) });
@@ -347,6 +409,8 @@ class Component extends DCLogic {
       return this.bump();
     }
     if (a.a === 'link') { if (a.url) window.open(a.url, '_blank', 'noopener'); else this.flash('The file could not be opened just now. Refresh records and try again.'); return; }
+    if (a.a === 'copy') { const done = () => this.flash('Copied. Paste it where it should go \u2014 ASAP has not sent it.'); try { navigator.clipboard.writeText(a.text || '').then(done, () => this.flash('Copying was blocked by the browser. Download it instead.')); } catch { this.flash('Copying was blocked by the browser. Download it instead.'); } return; }
+    if (a.a === 'download') { try { const url = URL.createObjectURL(new Blob([a.text || ''], { type: 'text/plain' })); const el = document.createElement('a'); el.href = url; el.download = a.filename || 'ASAP.txt'; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); this.flash('Downloaded. ASAP has not sent it.'); } catch { this.flash('The download could not start.'); } return; }
     if (a.a === 'unstage') { const staged = [...this.state.staged]; staged.splice(a.index, 1); return this.setState({ staged }); }
     if (a.a === 'retry') { return this.flash('Pick the file again — the read failed and nothing was saved.'); }
   }
@@ -460,15 +524,16 @@ class Component extends DCLogic {
 
   renderVals() {
     const base = {
-      inputRef: this.inputRef, searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
+      inputRef: this.inputRef, newBelow: !!this.state.newBelow, jumpToNew: this.jumpToNew, spaceState: this.state.tabs.length ? 'open' : 'closed', searchRef: this.searchRef, sheetCloseRef: this.sheetCloseRef,
       onKeyDown: this.onKeyDown, send: this.send, closeSheet: this.closeSheet,
       openSearch: () => this.openSearch(), openNew: () => this.openNew(), openProfile: () => this.openProfile(),
       openReset: () => this.openReset(), openSweep: () => this.openSweep(), openHistory: () => this.openHistory(),
       openRecent: () => this.openRecent(), brokerageName: (this.A?.records.all('brokerages')[0] || {}).name || '', onSearchInput: (e) => this.setState({ search: e.target.value, sheet: this.state.sheet ? { ...this.state.sheet, query: e.target.value } : null }), toast: this.state.toast, busy: this.state.busy,
       sheetOpen: !!this.state.sheet, thinking: this.state.thinking,
-      askOpen: this.state.askOpen, toggleAsk: () => this.setState({ askOpen: !this.state.askOpen }),
+      askOpen: this.state.askOpen, toggleAsk: () => (window.innerWidth <= 980 ? this.setState({ askOpen: true, mobileView: this.state.mobileView === 'ask' ? 'space' : 'ask' }) : this.setState({ askOpen: !this.state.askOpen })),
       askToggleLabel: this.state.askOpen ? 'Collapse Ask' : 'Open Ask ASAP',
-      bodyCols: this.state.askOpen ? 'minmax(0,1fr) ' + this.state.askWidth + 'px' : 'minmax(0,1fr)',
+      bodyCols: this.state.askOpen ? 'minmax(360px,' + this.state.askWidth + 'px) minmax(0,1fr)' : 'minmax(0,1fr)',
+      mobileView: this.state.mobileView, showSpace: () => this.setState({ mobileView: 'space' }), showAsk: () => this.setState({ mobileView: 'ask' }),
       sideWidth: this.state.sideCollapsed ? '68px' : '228px',
       labelDisplay: this.state.sideCollapsed ? 'none' : 'block',
       navJustify: this.state.sideCollapsed ? 'center' : 'flex-start',
@@ -512,7 +577,7 @@ class Component extends DCLogic {
       userOptions: R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] })),
       onSwitchUser: (e) => { R.setUser(e.target.value); this.flash('Signed in as ' + R.byId('users', e.target.value).name + ' — permissions change with the role.'); this.bump(); },
       navItems: nav.map(([w, icon, label, count]) => ({ icon, label, count,
-        go: () => this.openRef({ ws: w }),
+        go: () => { this.openRef({ ws: w }); if (window.innerWidth <= 980) this.setState({ mobileView: 'space' }); },
         bg: tab && tab.ref.ws === w ? '#fff' : 'transparent',
         fg: tab && tab.ref.ws === w ? '#18231c' : '#566058',
         shadow: tab && tab.ref.ws === w ? '0 1px 3px rgba(0,0,0,.05)' : 'none' })),
@@ -546,7 +611,9 @@ class Component extends DCLogic {
         hasPanelNote: !!m.panelNote, panelNote: m.panelNote,
         hasReceipt: !!m.receipt, receipt: m.receipt, openAudit: () => this.openRef({ ws: 'audit', clientId: this.state.contextRef?.clientId }),
         hasChips: (m.chips || []).length > 0,
-        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => this.ask(c.text || c.label || c) })) })),
+        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
+        hasPending: !!m.pending,
+        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },

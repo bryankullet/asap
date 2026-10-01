@@ -46,3 +46,6 @@ apps/extractor/.venv/
 # Visual parity captures (scripts/visual). Large, regenerable, and an app capture would
 # contain a brokerage's own records.
 .local-visual/
+
+# Browser end-to-end captures (scripts/test-e2e.sh): regenerable, and they show records.
+apps/web/.e2e-shots/

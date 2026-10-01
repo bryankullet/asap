@@ -83,7 +83,7 @@ describe("the placement lifecycle, connected to a real database", () => {
     const byInsurer = (id: string) => opp.insurers.find((i: { insurerId: string }) => i.insurerId === id);
     for (const [insurerId, premium] of [[JUBILEE, "5310000.00"], [CIC, "5620000.00"]] as const) {
       const res = await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, {
-        action: "record_response", opportunityInsurerId: byInsurer(insurerId).id, outcome: "quoted",
+        action: "record_response", withoutRequest: true, opportunityInsurerId: byInsurer(insurerId).id, outcome: "quoted",
         receivedAt: "2026-09-05T09:00:00.000Z", premiumAmount: premium, premiumCurrency: "KES", validUntil: "2027-06-30",
         sourceNote: "Quotation letter received by email.",
       });

@@ -33,6 +33,7 @@ import {
   acceptInvitationResponseSchema,
   apiErrorSchema,
   actResponseSchema,
+  manageWorkResponseSchema,
   agreementResponseSchema,
   agreementsResponseSchema,
   clientFileActionResponseSchema,
@@ -86,6 +87,7 @@ import {
   membersResponseSchema,
   rolesResponseSchema,
   type ActRequest,
+  type ManageWorkRequest,
   type AgreementAction,
   type ClaimAction,
   type ClientFileAction,
@@ -99,6 +101,7 @@ import {
   automationsResponseSchema,
   automationRunsResponseSchema,
   automationResponseSchema,
+  automationTestResponseSchema,
   type CreateAutomationRequest,
   pinsResponseSchema,
   setPinResponseSchema,
@@ -197,6 +200,9 @@ async function request<S extends z.ZodTypeAny>(
   return parsed.data as z.infer<S>;
 }
 
+/** What a caller sends; `preview` has a default. */
+type ManageWorkInput = Omit<ManageWorkRequest, "preview"> & { preview?: boolean };
+
 export const api = {
   me: () => request("GET", "/me", meResponseSchema),
   ask: (q: string) => request("GET", `/ask?q=${encodeURIComponent(q)}`, askResponseSchema),
@@ -227,6 +233,10 @@ export const api = {
   automationRuns: (id: string) =>
     request("GET", `/automations/${id}/runs`, automationRunsResponseSchema),
   /** A new standing instruction. Created switched off, and never able to send by itself. */
+  /** Test mode: conditions checked against open work; nothing prepared or written but its audit. */
+  testAutomation: (id: string) => request("POST", `/automations/${id}/test`, automationTestResponseSchema, {}),
+  automationLastTest: (id: string) =>
+    request("GET", `/automations/${id}/last-test`, z.object({ lastTest: z.object({ testedAt: z.string(), checked: z.number(), wouldFire: z.number(), problems: z.array(z.string()) }).nullable() })),
   createAutomation: (input: CreateAutomationRequest) =>
     request("POST", "/automations", automationResponseSchema, input),
   setAutomationEnabled: (id: string, enabled: boolean) =>
@@ -255,6 +265,9 @@ export const api = {
   audit: () => request("GET", "/audit", historyResponseSchema),
   search: (q: string) => request("GET", `/search?q=${encodeURIComponent(q)}`, searchResponseSchema),
   history: (id: string) => request("GET", `/work-items/${id}/history`, historyResponseSchema),
+  /** Owner, due date, next check (D-122): the one contract Ask and the Work Space both call. */
+  manageWork: (id: string, input: ManageWorkInput) =>
+    request("POST", `/work-items/${id}/manage`, manageWorkResponseSchema, input, { auth: true, allow: [403, 409, 422] }),
   act: (id: string, input: ActRequest) =>
     request("POST", `/work-items/${id}/actions`, actResponseSchema, input, {
       auth: true,
