@@ -112,6 +112,13 @@ async function hydrate(me) {
   const clientListsP = Promise.all(CLIENT_VIEWS.map((v) => api.clientFiles(v).catch(() => ({ items: [] }))));
   const convoP = loadConversation();
   const modelConfiguredP = api.askStatus().then((r) => r.modelConfigured).catch(() => null);
+  // Renewal Autopilot runs (D-129), each in full — progress, evidence, the approval bundle, messages.
+  const renewalsP = (typeof api.renewalRuns === "function" ? api.renewalRuns() : Promise.resolve({ runs: [] }))
+    .then(async (list) => {
+      const details = await pool(list.runs.slice(0, 30), 6, (r) => api.workflowRun(r.id).catch(() => null));
+      return details.filter(Boolean);
+    })
+    .catch(() => []);
 
   const [members, mailboxes, automations, audit, opportunities, ...workViews] = await Promise.all([
     api.members().catch(() => ({ members: [] })),
@@ -433,7 +440,8 @@ async function hydrate(me) {
   db.meta.docsDegraded = docsDegraded;
   const modelConfigured = await modelConfiguredP;
 
-  return { db, extras: { members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
+  const renewals = new Map((await renewalsP).map((r) => [r.id, r]));
+  return { db, extras: { renewals, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -503,14 +511,13 @@ const NOT_CONNECTED_WS = {
   money: "Invoices and payments",
   reconciliation: "Reconciliation",
   commission: "Commission",
-  renewal: "Renewal",
   report: "Reports",
   investigation: "Investigations",
   onboarding: "Setup",
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation", "renewal"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -604,14 +611,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   const refresh = async () => {
     const thread = db.conversations.find((c) => c.id === "cnv_main");
     loaded = await hydrate(me);
     db = loaded.db;
     if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, modelConfigured: loaded.extras.modelConfigured });
+    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, modelConfigured: loaded.extras.modelConfigured });
     S.useBackend({ db, dispatch });
   };
 
@@ -798,6 +805,65 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (!a.on && a.legacyConditions)
         return { ok: false, error: "Cannot enable — conditions are not supported. This automation was saved with conditions in words that ASAP cannot apply, so switching it on would fire where it was told not to. Save a new one without conditions." };
       return write(() => api.setAutomationEnabled(a.id, !a.on), a.name + (a.on ? " is paused" : " is on"));
+    },
+    /*
+     * Renewal Autopilot (D-129). Each is one server contract; Ask's pending card and the Renewal
+     * Space's buttons both land here. The run continues on the server after each.
+     */
+    "renewal.start": async (p) => {
+      try {
+        const res = await api.startRenewal(p.policyPeriodId);
+        if (res.outcome === "blocked") return { ok: false, error: res.reason || "The renewal could not be started. Nothing was changed." };
+        await refresh();
+        const r = res.run;
+        return ok(res.outcome === "already" ? "That renewal is already in hand" : "Renewal started — ASAP is preparing it", {
+          already: res.outcome === "already",
+          nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
+          detail: r ? r.stateLabel + ". " + r.progress.done + " of " + r.progress.steps + " steps done." : "",
+          receipt: { action: "Renewal started", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : ["A renewal run and its Work item"], unchanged: ["Nothing was sent", "No cover or money changed"], next: r?.state === "waiting_approval" ? "Review and approve the renewal bundle" : r?.stateLabel ?? null, audit: "workflow.renewal.started" },
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "renewal.decide": async (p) => {
+      if (p.decision === "reject" && (p.note || "").trim().length < 3) return { ok: false, error: "Say why it is not approved, so it can be put right. Nothing was changed." };
+      try {
+        const res = await api.decideApproval(p.approvalId, { decision: p.decision, bundleSha256: p.bundleSha256, ...(p.note ? { note: p.note } : {}) });
+        if (res.outcome === "blocked") return /role/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason };
+        await refresh();
+        const r = res.run;
+        const approved = p.decision === "approve";
+        return ok(res.outcome === "already" ? "Already decided — nothing recorded twice" : approved ? "Renewal bundle approved — ASAP carried on" : "Renewal bundle not approved", {
+          already: res.outcome === "already",
+          nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
+          detail: approved ? "The insurer request is recorded as approved — not sent. Nothing leaves ASAP: deliver it yourself and record how." : "The run stopped with your reason. Put it right on the records, then resume.",
+          receipt: { action: approved ? "Renewal bundle approved" : "Renewal bundle rejected", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : [approved ? "Pack and both messages approved" : "Bundle rejected with your reason"], unchanged: ["Nothing was sent to the client or the insurer", "No cover or money changed"], next: r?.state === "waiting_party" ? "Deliver the approved request to the insurer and record how" : r?.exception?.needs ?? r?.stateLabel ?? null, audit: approved ? "workflow.bundle_approved" : "workflow.bundle_rejected" },
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "renewal.deliver": async (p) => {
+      if ((p.reference || "").trim().length < 3) return { ok: false, error: "Say what proves it — the email subject and time, or who received it. Nothing was recorded." };
+      try {
+        const res = await api.recordCommunicationDelivery(p.communicationId, { method: p.method || "own_email", reference: p.reference.trim() });
+        if (res.outcome === "blocked") return { ok: false, error: res.reason };
+        await refresh();
+        return ok(res.outcome === "already" ? "Already recorded — nothing twice" : "Delivery recorded — delivered by you, not sent by ASAP", { already: res.outcome === "already", nav: { ws: "renewal", runId: res.run?.id, workItemId: res.run?.workItemId } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "renewal.resume": async (p) => {
+      try {
+        const res = await api.resumeWorkflow(p.runId);
+        if (res.outcome === "blocked") return { ok: false, denied: true, reason: res.reason };
+        await refresh();
+        return ok("Renewal resumed — " + (res.run?.stateLabel ?? "ASAP carried on").toLowerCase(), { nav: { ws: "renewal", runId: p.runId, workItemId: res.run?.workItemId } });
+      } catch (e) {
+        return fail(e);
+      }
     },
     /*
      * A new automation from the registry (D-125): structured parts, each validated against the
@@ -1436,6 +1502,83 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * Renewal Autopilot from Ask (D-129): what is coming up, where one stands, start one now, and
+   * approve its bundle — each answered from the runs the server returned, each write a pending card
+   * on the same contract the Renewal Space uses.
+   */
+  function renewalFromAsk(raw, t, ctx) {
+    if (!/\brenew(al|als|ing)?\b/i.test(t)) return null;
+    const runs = [...(state.renewals?.values?.() ?? [])];
+    const ref = ctx.ref || ctx;
+    const inFront = ref.ws === "renewal" ? runs.find((r) => r.id === ref.runId || r.workItemId === ref.workItemId) : ref.workItemId ? runs.find((r) => r.workItemId === ref.workItemId) : null;
+    if (/\b(what|which|show|list|any|upcoming|coming up|due)\b/i.test(t) && /\brenewals\b|coming up|upcoming|due/i.test(t) && !/\b(approve|start|prepare)\b/i.test(t)) {
+      const waiting = runs.filter((r) => r.state === "waiting_approval");
+      const stopped = runs.filter((r) => r.state === "exception");
+      return {
+        lead: runs.length ? plural(runs.length, "renewal", "renewals") + " in hand." : "No renewals in the window yet.",
+        text: runs.length ? [waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for your approval." : null, stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null, "ASAP looks for renewals every day and prepares them on its own."].filter(Boolean).join(" ") : "ASAP looks every day; a policy period nearing its end appears here with its pack prepared.",
+        ref: { ws: "renewal" },
+      };
+    }
+    const sub = resolveSubject(t, ctx);
+    const target = inFront ?? (sub?.clientId ? runs.find((r) => r.client?.id === sub.clientId && r.state !== "done") : null);
+    if (/\bapprove\b/i.test(t)) {
+      if (!target) return { lead: "Which renewal?", text: "Open the renewal, or name the client, and ask again. Nothing was approved.", ref: { ws: "renewal" } };
+      const ap = target.approval;
+      if (!ap || ap.state !== "pending") return { lead: "Nothing is waiting for approval on this renewal.", text: target.stateLabel + ".", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
+      const msgs = ap.bundle.filter((b) => b.kind === "communication");
+      return {
+        lead: "Approve the renewal bundle for " + (target.client?.name ?? "this client") + "?",
+        text: "You approve this exact pack and these exact messages. Nothing is sent.",
+        ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId },
+        pending: {
+          title: ap.title,
+          sections: [{ label: "BUNDLE", items: ["Renewal pack", ...msgs.map((m) => m.label + " — " + m.subject)] }, { label: "NOT DONE", items: ["Nothing is sent: no mailbox is connected", "No cover is bound and no money moves"] }],
+          external: "No message is sent to anyone. You deliver the approved messages yourself and record how.",
+          action: "renewal.decide",
+          payload: { approvalId: ap.id, bundleSha256: ap.bundleSha256, decision: "approve" },
+          actionId: "renewal.decide:" + ap.id + ":approve",
+          confirmLabel: "Approve bundle",
+          progress: "Recording your approval…",
+        },
+      };
+    }
+    if (/\b(start|prepare|begin|do|handle)\b/i.test(t)) {
+      if (target) return { lead: "That renewal is already in hand.", text: target.stateLabel + " — " + target.progress.done + " of " + target.progress.steps + " steps done.", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
+      if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, raw);
+      const pol = asPolicy(sub);
+      if (pol.ambiguous) return clarifyClient(pol.ambiguous, raw);
+      if (pol.several) return clarifyPolicy(pol.several, raw);
+      if (pol.none || pol.noPolicy) return { lead: "Which policy?", text: "Name the client or the policy number. Nothing was started.", ref: null, keepWorkspace: true };
+      const p = pol.policy;
+      const year = db.policyYears.filter((y) => y.policyId === p.id).sort((a, b) => (a.to < b.to ? 1 : -1))[0];
+      if (!year) return { lead: "There is no period on file for " + p.number + ".", text: "Record the policy's current period first. Nothing was started.", ref: null, keepWorkspace: true };
+      const client = db.clients.find((c) => c.id === p.clientId);
+      return {
+        lead: "Start the renewal for " + (client?.name ?? "this client") + " now?",
+        text: "ASAP checks the file, reads the schedule, prepares the pack and both messages, then asks you once. Nothing is sent.",
+        ref: { ws: "renewal" },
+        pending: {
+          title: "Start the renewal of " + p.number,
+          sections: [{ label: "UNDERSTOOD", items: [raw.trim()] }, { label: "RECORD", items: [(client?.name ?? "Client") + " — " + p.number + ", cover ends " + S.fmtDate(year.to)] }, { label: "ASAP WILL", items: ["Check the client, policy and documents", "Read the schedule's confirmed values", "Prepare the renewal pack, the client letter and the insurer request", "Ask you for one approval"] }],
+          external: "No message is sent to anyone.",
+          action: "renewal.start",
+          payload: { policyPeriodId: year.id },
+          actionId: "renewal.start:" + year.id,
+          confirmLabel: "Start renewal",
+          progress: "ASAP is preparing the renewal…",
+        },
+      };
+    }
+    if (target || inFront) {
+      const r = target ?? inFront;
+      const n = r.exception ? "Stopped: " + r.exception.message + " What is needed: " + r.exception.needs : r.state === "waiting_approval" ? "Waiting for your approval of the pack and both messages." : r.state === "waiting_party" ? (db.workItems.find((w) => w.id === r.workItemId)?.next?.what ?? "Waiting on the insurer.") : r.stateLabel + ".";
+      return { lead: r.title + ": " + r.stateLabel.toLowerCase() + ".", text: n + " " + r.progress.done + " of " + r.progress.steps + " steps done.", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } };
+    }
+    return null;
+  }
+
+  /**
    * Ask helps build an automation (D-125): each part of the sentence is matched to the registry,
    * and Save is offered only when every part is executable. A part that is not — a trigger nothing
    * emits yet, a condition ASAP cannot check, an action an automation may not take — is shown as
@@ -1819,7 +1962,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * never supplied). Used only to refuse early and plainly; every write is still checked by the
    * server, which is the authority.
    */
-  const NEEDS = { "client.create": ["client:create", "add clients"], "claim.open": ["claim:create", "report claims"], "opportunity.create": ["space:create", "start quotation work"], "opp.action": ["space:create", "change quotation work"], "work.assign": ["job:edit", "change who owns Work or when it is due"], "automation.create": ["automation:create", "create automations"], "contact.create": ["client:edit", "add contacts"] };
+  const NEEDS = { "renewal.start": ["policy:edit", "start renewal work"], "renewal.decide": ["email:approve", "approve what leaves the brokerage"], "client.create": ["client:create", "add clients"], "claim.open": ["claim:create", "report claims"], "opportunity.create": ["space:create", "start quotation work"], "opp.action": ["space:create", "change quotation work"], "work.assign": ["job:edit", "change who owns Work or when it is due"], "automation.create": ["automation:create", "create automations"], "contact.create": ["client:edit", "add contacts"] };
   const perms = new Set(me.permissions ?? []);
   const refusal = (action) => {
     const need = NEEDS[action];
@@ -1871,6 +2014,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ];
     const go = GO.find(([re]) => re.test(t.trim()));
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
+    const renewal = renewalFromAsk(text.trim(), t, ctx);
+    if (renewal) return renewal;
     const automation = automationFromAsk(text.trim(), t);
     if (automation) return automation;
     const started = quoteStartFromAsk(text.trim(), t, ctx);

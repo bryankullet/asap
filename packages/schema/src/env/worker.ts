@@ -31,6 +31,8 @@ export const workerEnvSchema = z
     API_INTERNAL_KEY: z.string().min(16),
     /** How often the dispatcher looks for events nobody has handled. */
     EVENT_POLL_MS: z.coerce.number().int().min(250).max(60_000).default(2_000),
+    /** How often the workflow sweep detects due work and advances runs (D-129). Default 15 minutes. */
+    WORKFLOW_SWEEP_MS: z.coerce.number().int().min(10_000).max(86_400_000).default(900_000),
     ...monitoringShape,
     /**
      * Optional, including in staging and production.

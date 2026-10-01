@@ -216,6 +216,31 @@ const expectText = async (page, re, where = page.locator("body")) => {
     if (!/Activity/.test(body)) throw new Error("activity not shown");
   });
 
+  // Renewal Autopilot (D-129): start from Ask, ASAP prepares everything, one approval, then it carries on.
+  await step(page, "27-renewal-start-preview", async () => {
+    await ask(page, "Prepare the renewal of JUB/MC/2026/0142");
+    await expectText(page, "ASAP WILL", lastPending(page));
+    await expectText(page, "No message is sent to anyone", lastPending(page));
+  });
+  await step(page, "28-renewal-bundle-waiting-approval", async () => {
+    await confirm(page, "Start renewal");
+    await settle(page, 1500);
+    await expectText(page, /Renewal started|already in hand/);
+    await expectText(page, "One approval: the pack and both messages");
+    await expectText(page, "What ASAP did");
+    await expectText(page, /no verified address|No verified address/i);
+  });
+  await step(page, "29-renewal-approved-carries-on", async () => {
+    await page.locator(".asap-pane").getByRole("button", { name: /Approve the renewal bundle|Approve/ }).first().click();
+    await settle(page, 2000);
+    await expectText(page, /Renewal bundle approved/);
+    await expectText(page, /Approved, not sent|approved, not sent/);
+    await expectText(page, "Deliver and track the insurer request");
+    const body = await page.locator("body").innerText();
+    const claimsSent = body.split("\n").filter((l) => /\bsent\b/i.test(l) && !/\b(no|not|nothing|never|isn’t|isn't)\b/i.test(l));
+    if (claimsSent.length) throw new Error("something is called sent: " + claimsSent[0]);
+  });
+
   // Refresh: the same records, the tab restored, nothing from browser storage but a tab address.
   await step(page, "20-refresh-persists", async () => {
     await page.reload();

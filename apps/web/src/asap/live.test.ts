@@ -129,6 +129,31 @@ const manageWork = vi.fn(async (_id: string, input: { version: number; ownerId?:
   if (input.dueOn) workDue = input.dueOn;
   return { outcome: "applied", item: { ...item, owner_id: workOwner, due_on: workDue }, changes, auditAction: changes.length === 1 && changes[0]!.field === "owner" ? "work_item.assigned" : "work_item.due_changed" };
 });
+// A renewal run as the server returns it, waiting for its one approval (D-129).
+const RUN = "a7000000-0000-4000-8000-000000000001";
+const APPROVAL = "a8000000-0000-4000-8000-000000000001";
+let runState: "waiting_approval" | "waiting_party" | "exception" = "waiting_approval";
+const renewalRun = () => ({
+  id: RUN, workflow: "renewal", subjectId: PER_OK, workItemId: WORK, state: runState,
+  stateLabel: { waiting_approval: "Waiting for your approval", waiting_party: "Waiting on an outside party", exception: "Stopped — needs a person" }[runState],
+  currentStep: runState === "waiting_approval" ? "approval" : "await_terms",
+  exception: runState === "exception" ? { code: "no_terms_near_expiry", message: "No renewal terms from First Insurer with 5 days to expiry.", needs: "Call the underwriter at First Insurer today.", stepLabel: "Insurer terms awaited and chased" } : null,
+  nextRunAt: "2026-10-02T09:00:00Z", startedAt: "2026-10-01T09:00:00Z", finishedAt: null, title: "Tausi Hauliers Ltd — Motor renewal",
+  client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, periodEnd: "2026-12-31", progress: { done: runState === "waiting_approval" ? 6 : 8, steps: 11 },
+  steps: [
+    { key: "completeness", position: 2, label: "Client, policy and documents checked", state: "done", attempts: 0, nextAttemptAt: null, finishedAt: "2026-10-01", output: {}, evidence: [{ label: "5 items on file, 1 missing", kind: "record" }], error: null },
+    { key: "approval", position: 7, label: "One approval for the pack and messages", state: runState === "waiting_approval" ? "waiting" : "done", attempts: 0, nextAttemptAt: null, finishedAt: null, output: {}, evidence: [], error: null },
+  ],
+  approval: { id: APPROVAL, title: "Approve Tausi Hauliers Ltd's renewal", state: runState === "waiting_approval" ? "pending" : "approved", bundleSha256: "c".repeat(64), decidedByName: runState === "waiting_approval" ? null : "Wanjiru Kamau", decidedAt: null, note: null,
+    bundle: [
+      { kind: "pack", label: "Renewal pack", pack: { client: "Tausi Hauliers Ltd", policyNumber: "TH-MTR-001", insurer: "First Insurer", expiringPeriod: { start: "2026-01-01", end: "2026-12-31" }, expiringPremium: { amount: "1200000.00", currency: "KES", basis: "gross" }, missing: ["The expiring policy schedule"], scheduleFindings: [] } },
+      { kind: "communication", audience: "client", label: "Letter to Otieno Were", to: "otieno@tausi.co.ke", subject: "Renewal of your Motor policy TH-MTR-001", body: "Dear Otieno Were, your policy ends on 31 Dec 2026." },
+      { kind: "communication", audience: "insurer", label: "Terms request to First Insurer", to: null, subject: "Renewal terms request — Tausi Hauliers Ltd, TH-MTR-001", body: "Dear Underwriter, please provide renewal terms." },
+    ] },
+  communications: [],
+  permissions: { canApprove: true, canAct: true },
+});
+const decideApproval = vi.fn(async () => { runState = "waiting_party"; return { outcome: "done", reason: null, run: renewalRun() }; });
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
@@ -190,6 +215,9 @@ vi.mock("../lib/api.js", () => ({
           : { state: null, label: "Cover not verified", reason: "No insurer confirmation is on file.", verified: false, evidence: [], asOf: "2026-09-29" },
     }),
     manageWork,
+    renewalRuns: async () => ({ runs: [renewalRun()] }),
+    workflowRun: async () => renewalRun(),
+    decideApproval,
     testAutomation,
     automationRuns: async () => ({ runs: [{ id: "72000000-0000-4000-8000-000000000001", automation_id: AUTO, event_id: "73000000-0000-4000-8000-000000000001", event_name: "document.received", work_item_id: WORK, outcome: "could_not_finish", condition_results: [], prepared_action: null, reason: "The step had nothing to prepare from.", decided_by: null, decided_at: null, decision: null, started_at: "2026-09-29T10:00:00Z", finished_at: "2026-09-29T10:00:01Z" }] }),
     automationLastTest: async () => ({ lastTest: { testedAt: "2026-09-28T10:00:00Z", checked: 4, wouldFire: 1, problems: [] } }),
@@ -213,7 +241,7 @@ const me = {
   user: { id: ME, email: "wanjiru@example.test", full_name: "Wanjiru Kamau", display_name: null },
   memberships: [],
   active_organization: { id: ORG, name: "Tausi Brokers", country: "KE", currency: "KES", timezone: "Africa/Nairobi" },
-  permissions: ["placement:approve", "organization:edit", "client:create", "client:edit", "claim:create", "space:create", "job:edit", "automation:create", "automation:edit", "audit:view"],
+  permissions: ["placement:approve", "organization:edit", "client:create", "client:edit", "claim:create", "space:create", "job:edit", "automation:create", "automation:edit", "audit:view", "email:approve", "policy:edit"],
 };
 
 async function live(who: typeof me = me) {
@@ -235,6 +263,8 @@ describe("live mode", () => {
     claimMade = null;
     workOwner = ME;
     workDue = null;
+    runState = "waiting_approval";
+    decideApproval.mockClear();
     manageWork.mockClear();
     opportunityAction.mockClear();
     createOpportunity.mockClear();
@@ -266,7 +296,7 @@ describe("live mode", () => {
 
   it("shows what is not connected instead of example content", async () => {
     const A = await live();
-    for (const ws of ["compare", "money", "reconciliation", "commission", "renewal"]) {
+    for (const ws of ["compare", "money", "reconciliation", "commission"]) {
       const w = A.ai.workspace({ ws, clientId: CLIENT });
       expect(w.statusLabel).toBe("Not connected");
       expect(text(w)).not.toMatch(/APA|CIC|Jubilee/);
@@ -1024,5 +1054,44 @@ describe("live mode", () => {
     const space = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied: boolean };
     expect(space).toMatchObject({ ok: false, denied: true });
     expect(manageWork).not.toHaveBeenCalled();
+  });
+
+  describe("Renewal Autopilot in the interface (D-129)", () => {
+    it("the Renewal Space shows what ASAP did, the one bundle and its approval — nothing sent", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "renewal", runId: RUN, workItemId: WORK });
+      const all = text(ws);
+      expect(ws.statusLabel).toBe("Waiting for your approval");
+      expect(all).toContain("One approval: the pack and both messages");
+      expect(all).toContain("Renewal of your Motor policy TH-MTR-001");
+      expect(all).toContain("No verified address on file — you deliver it");
+      expect(all).toContain("Approve the renewal bundle");
+      expect(all).toContain("5 items on file, 1 missing");
+      expect(all).not.toMatch(/was sent|has been sent/i);
+    });
+
+    it("Ask lists renewals, approves the bundle through the same contract, and the Space then says waiting on the insurer", async () => {
+      const A = await live();
+      const list = (await A.ai.route("What renewals are coming up?", {})) as { lead: string; text: string };
+      expect(list.lead).toBe("1 renewal in hand.");
+      expect(list.text).toMatch(/1 bundle is waiting for your approval/);
+      const ref = { ws: "renewal", runId: RUN, workItemId: WORK };
+      const r = (await A.ai.route("Approve the renewal", { ...ref, ref })) as { pending: { action: string; payload: Record<string, string>; actionId: string } };
+      expect(r.pending.action).toBe("renewal.decide");
+      expect(decideApproval).not.toHaveBeenCalled();
+      await Promise.all([A.records.act(r.pending.action, r.pending.payload, r.pending.actionId), A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)]);
+      expect(decideApproval).toHaveBeenCalledTimes(1);
+      expect(decideApproval).toHaveBeenCalledWith(APPROVAL, { decision: "approve", bundleSha256: "c".repeat(64) });
+    });
+
+    it("the Work item shows ASAP is handling the renewal; an exception says what stopped and what is needed", async () => {
+      runState = "exception";
+      const A = await live();
+      expect(text(A.ai.workspace({ ws: "workitem", workItemId: WORK }))).toContain("ASAP is handling this renewal");
+      const ws = text(A.ai.workspace({ ws: "renewal", runId: RUN }));
+      expect(ws).toContain("Stopped: No renewal terms from First Insurer with 5 days to expiry.");
+      expect(ws).toContain("What is needed: Call the underwriter at First Insurer today.");
+      expect(ws).toContain("Resume the renewal");
+    });
   });
 });

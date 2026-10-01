@@ -66,7 +66,8 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
     supabase: createSupabaseFactory({
       url: SUPABASE,
       anonKey: jwt({ role: "anon" }),
-      serviceRoleKey: "not-a-key: the connected test never uses the service role",
+      // The engine's own connection (internal routes, D-129): a service_role token for local PostgREST only.
+      serviceRoleKey: jwt({ role: "service_role" }),
       apiInternalKey: apiKey,
       fetch: transport,
     }),
@@ -77,6 +78,8 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
     executor: () => async () => {},
     bootToken: "connected",
     aiProvider: fakeProvider(askScript),
+    // The worker's surface (sweeps, event dispatch), reachable with the same server key.
+    apiInternalKey: apiKey,
   });
 
 // Test-only: bodies are asserted field by field against the contracts.
@@ -108,3 +111,7 @@ export async function browser(who: Person | "anon", method: string, path: string
   const text = await res.text();
   return { status: res.status, body: text === "" ? null : (JSON.parse(text) as Json) };
 }
+
+/** The engine's connection, for driving a workflow at a chosen moment in tests. Local PostgREST only. */
+export const serviceClient = () =>
+  createSupabaseFactory({ url: SUPABASE, anonKey: jwt({ role: "anon" }), serviceRoleKey: jwt({ role: "service_role" }), apiInternalKey: "unused", fetch: transport }).service();

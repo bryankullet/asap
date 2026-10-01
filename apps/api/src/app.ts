@@ -9,6 +9,7 @@ import { HttpError, sendError } from "./errors.js";
 import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
+import { workflowRoutes } from "./routes/workflows.js";
 import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
@@ -182,6 +183,9 @@ export function createApp(deps: AppDeps) {
     "/pins",
     "/automations",
     "/automations/*",
+    "/workflows/*",
+    "/workflow-approvals/*",
+    "/prepared-communications/*",
     "/documents",
     "/documents/*",
     "/mailboxes",
@@ -250,6 +254,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
+  app.route("/", workflowRoutes({ logger, service: () => supabase.service() }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
   app.route("/", clientRoutes());
