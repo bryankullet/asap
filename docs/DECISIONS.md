@@ -2125,6 +2125,6 @@ waits, resumes and never repeats. Built only as far as one workflow needs.
 
 `company_rules` key `renewal.window` ({leadDays 7–180, followUpDays 1–30,
 escalateDaysBeforeExpiry 1–60}, with its source and verified-at date). Without it, ASAP uses 60 days
-ahead, a chase every 5 days and escalation at 7 days before expiry, and every run shows that basis
+ahead, a chase every 5 days and escalation at 14 days before expiry, and every run shows that basis
 as "ASAP's default … because this brokerage has not set a renewal rule". These are operating
 cadences, not Kenyan legal values; they are configurable for that reason.

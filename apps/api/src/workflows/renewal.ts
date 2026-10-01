@@ -16,7 +16,7 @@ import { advanceRun, auditAutomation, sha256, startRun, type Evidence, type Step
  * Nothing here sends, binds cover, records a client instruction or moves money.
  */
 
-export const RENEWAL_DEFAULTS = { leadDays: 60, followUpDays: 5, escalateDaysBeforeExpiry: 7 } as const;
+export const RENEWAL_DEFAULTS = { leadDays: 60, followUpDays: 5, escalateDaysBeforeExpiry: 14 } as const;
 export const RENEWAL_DEFAULT_BASIS =
   "ASAP's default — 60 days before expiry, chase after 5 days — because this brokerage has not set a renewal rule.";
 

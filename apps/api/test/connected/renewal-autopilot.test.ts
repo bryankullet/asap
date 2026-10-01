@@ -198,11 +198,16 @@ describe("Renewal Autopilot", () => {
     expect(resumed.body.run.state).toBe("waiting_approval");
   });
 
-  it("11 · no terms near expiry escalates as an exception naming the insurer and what to do", async () => {
+  it("11 · no terms 14 days before expiry escalates as an exception naming the insurer and what to do", async () => {
     const [r] = await runFor(periodNoInsurer);
     const run = (await call(AMINA, "GET", `/workflows/runs/${r!.id}`)).body;
     await call(AMINA, "POST", `/workflow-approvals/${run.approval.id}/decide`, { decision: "approve", bundleSha256: run.approval.bundleSha256 });
-    await advanceRun(serviceClient(), log, RENEWAL, r!.id, new Date(Date.now() + 15 * DAY));
+    // The period ends in 20 days. With 16 days left it still waits; inside 14 days it escalates.
+    await advanceRun(serviceClient(), log, RENEWAL, r!.id, new Date(Date.now() + 4 * DAY));
+    expect((await runFor(periodNoInsurer))[0]!.state).toBe("waiting_party");
+    const step = (await call(AMINA, "GET", `/workflows/runs/${r!.id}`)).body.steps.find((s: Json) => s.key === "detect");
+    expect(step.output.windowBasis).toMatch(/60 days before expiry, chase after 5 days/);
+    await advanceRun(serviceClient(), log, RENEWAL, r!.id, new Date(Date.now() + 8 * DAY));
     const [after] = await runFor(periodNoInsurer);
     expect(after!.state).toBe("exception");
     expect(after!.exception.code).toBe("no_terms_near_expiry");
