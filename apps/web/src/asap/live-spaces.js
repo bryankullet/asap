@@ -556,6 +556,89 @@ function claimSpace(ref, state) {
   };
 }
 
+/* ---------------------------------------------------------------- renewal autopilot */
+
+/**
+ * The Renewal Space (D-129): what ASAP did, with its evidence; the one approval it needs; what it
+ * is waiting on; and the exception, in plain words, when it stopped. Every value comes from the
+ * run the server returned — nothing is composed here.
+ */
+const STEP_BADGE = { done: ["Done", ok], running: ["Working", warn], waiting: ["Waiting", warn], pending: ["Later", "neutral"], failed: ["Stopped", bad], skipped: ["Skipped", "neutral"] };
+export function findRenewal(state, ref) {
+  const runs = [...(state.renewals?.values?.() ?? [])];
+  if (ref.runId) return runs.find((r) => r.id === ref.runId) ?? null;
+  if (ref.workItemId) return runs.find((r) => r.workItemId === ref.workItemId) ?? null;
+  return null;
+}
+function renewalSpace(ref, state) {
+  const run = findRenewal(state, ref);
+  if (!run) {
+    const runs = [...(state.renewals?.values?.() ?? [])];
+    return {
+      kind: "Renewals",
+      title: "Renewals ASAP is handling",
+      status: "live",
+      statusLabel: plural(runs.length, "renewal", "renewals"),
+      blocks: [
+        note("green", "ASAP looks for renewals every day", "Policy periods ending within the renewal window are picked up on their own. ASAP checks the file, prepares the pack and the messages, and asks you once."),
+        rows("In hand", runs.length ? runs.map((r) => ({ title: r.title, note: [r.client?.name, r.periodEnd ? "Cover ends " + date(r.periodEnd) : null, r.progress.done + " of " + r.progress.total + " steps", r.exception ? r.exception.message : null].filter(Boolean).join(" · "), badge: r.stateLabel, badgeTone: r.state === "exception" ? bad : r.state === "waiting_approval" ? warn : ok, action: { a: "open", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } } })) : [{ title: "No renewals in the window", note: "When a policy period nears its end, its renewal appears here.", badge: "None", badgeTone: warn }]),
+      ],
+    };
+  }
+  const blocks = [];
+  if (run.exception)
+    blocks.push(
+      note("red", "Stopped: " + run.exception.message, "What is needed: " + run.exception.needs),
+      ...(run.permissions.canAct ? [gate("Resume the renewal", "After putting it right on the records. ASAP starts again from the step that stopped.", "renewal.resume", { runId: run.id })] : []),
+    );
+  const ap = run.approval;
+  if (ap && ap.state === "pending") {
+    const pack = ap.bundle.find((b) => b.kind === "pack")?.pack ?? {};
+    blocks.push(
+      note("amber", "One approval: the pack and both messages", "Approving records them as approved — it sends nothing. ASAP then opens the insurer request and watches for terms."),
+      facts([
+        ["Client", pack.client ?? "not recorded"],
+        ["Policy", pack.policyNumber ?? "number not recorded"],
+        ["Insurer", pack.insurer ?? "not recorded"],
+        ["Cover ends", pack.expiringPeriod?.end ? date(pack.expiringPeriod.end) : "not recorded"],
+        ["Expiring premium", pack.expiringPremium ? money(pack.expiringPremium.amount, pack.expiringPremium.currency) + (pack.expiringPremium.basis ? " (" + pack.expiringPremium.basis + ")" : "") : "not recorded"],
+      ]),
+      ...(pack.missing?.length ? [rows("Still missing", pack.missing.map((m) => ({ title: m, note: "Not on file — listed in the pack and, where the client holds it, asked for in the letter", badge: "Missing", badgeTone: bad })))] : []),
+      ...(pack.scheduleFindings?.length ? [rows("Schedule differs from the record", pack.scheduleFindings.map((f) => ({ title: f, note: "Check before approving", badge: "Check", badgeTone: bad })))] : []),
+      ...ap.bundle.filter((b) => b.kind === "communication").map((b) => rows(b.label, [{ title: b.subject, note: (b.to ? "To " + b.to : "No verified address on file — you deliver it") + " · " + b.body.replace(/\n+/g, " ").slice(0, 400), badge: "Prepared", badgeTone: warn }])),
+      ...(run.permissions.canApprove
+        ? [gate("Approve the renewal bundle", "You approve this exact pack and these exact messages. Nothing is sent.", "renewal.decide", { approvalId: ap.id, bundleSha256: ap.bundleSha256, decision: "approve" }),
+           form("reject:" + ap.id, "Not approved — say why", [{ key: "note", label: "WHAT IS WRONG", placeholder: "The premium on the record is last year's" }], "renewal.decide", { approvalId: ap.id, bundleSha256: ap.bundleSha256, decision: "reject" }, "Reject bundle", "The run stops with your reason until it is put right.")]
+        : [note("amber", "Waiting for approval", "Someone whose role may approve messages leaving the brokerage needs to approve this bundle.")]),
+    );
+  } else if (ap && ap.state === "approved") {
+    blocks.push(note("green", "Approved by " + (ap.decidedByName || "a person") + " " + (ap.decidedAt ? date(ap.decidedAt) : ""), "Approved means approved — not sent. ASAP has no mailbox connected."));
+  }
+  const comms = run.communications.filter((m) => m.state !== "prepared");
+  for (const m of comms) {
+    const text = m.subject + "\n\n" + m.bodyText;
+    blocks.push(rows((m.audience === "client" ? "Letter to " : "Request to ") + m.partyName, [
+      { title: m.subject, note: m.state === "delivered" ? "Delivered " + date(m.deliveredAt) + " · " + m.deliveryReference : m.toAddress ? "To " + m.toAddress + " — approved, not sent" : "Approved, not sent — no verified address; you deliver it", badge: m.state === "delivered" ? "Delivered" : "Approved", badgeTone: m.state === "delivered" ? ok : warn, action: { a: "copy", text } },
+      { title: "Download as a text file", note: "For printing or attaching.", badge: "Download", badgeTone: ok, action: { a: "download", filename: m.subject + ".txt", text } },
+    ]));
+    if (m.state === "approved" && m.audience === "client" && run.permissions.canAct)
+      blocks.push(form("deliver:" + m.id, "Record how the letter reached " + m.partyName, [{ key: "method", label: "HOW IT WENT", options: [{ value: "own_email", label: "From my own email" }, { value: "printed", label: "Printed and handed over" }, { value: "phone", label: "Read out on the phone" }, { value: "other", label: "Another way" }] }, { key: "reference", label: "WHAT PROVES IT", placeholder: "Emailed from Outlook 30 Sep, 10:02" }], "renewal.deliver", { communicationId: m.id }, "Record delivery", "Recorded as delivered by you — never as sent."));
+    if (m.audience === "insurer" && m.quoteRequestId) {
+      const opp = run.steps.find((st) => st.key === "open_terms")?.output?.opportunityId;
+      if (opp) blocks.push(nav("Deliver and track the insurer request", "Record how the request reached the insurer, and the terms when they arrive, in the renewal quotation.", { ws: "quote", opportunityId: opp }));
+    }
+  }
+  const cmp = run.steps.find((st) => st.key === "compare" && st.state === "done")?.output;
+  if (cmp) blocks.push(rows("Terms against the expiring premium", cmp.terms.map((t) => ({ title: money(t.premium, t.currency), note: (t.changePercent !== null ? (t.changePercent > 0 ? "+" : "") + t.changePercent + "% on the expiring premium" : "Expiring premium not recorded") + (t.validUntil ? " · valid to " + date(t.validUntil) : "") + (t.expiresBeforeCover ? " · expires before cover ends" : ""), badge: "Terms", badgeTone: ok }))), note("amber", "Recommendation", cmp.recommendation));
+  blocks.push(rows("What ASAP did", run.steps.map((st) => {
+    const [badge, tone] = STEP_BADGE[st.state] ?? [st.state, "neutral"];
+    const ev = (st.evidence || []).map((e) => e.label).slice(0, 3).join(" · ");
+    return { title: st.label, note: ev || (st.state === "waiting" && st.nextAttemptAt ? "Looked at again " + date(st.nextAttemptAt) : st.error || (st.state === "done" ? "Done" : "Not yet")), badge, badgeTone: tone };
+  })));
+  if (run.workItemId) blocks.push(nav("Open the Work item", "Who owns it, its due date and its next check.", { ws: "workitem", workItemId: run.workItemId }));
+  return { kind: "Renewal", title: run.title, status: run.state === "exception" ? "draft" : "live", statusLabel: run.stateLabel, recordRef: { ws: "renewal", runId: run.id, workItemId: run.workItemId }, blocks };
+}
+
 /* ---------------------------------------------------------------- automations */
 
 /**
@@ -648,6 +731,13 @@ const ACTION_WORDS = {
   "opportunity.requirement_added": "Requirement added", "opportunity.requirement_supplied": "Requirement supplied",
   "work_item.assigned": "Work assigned", "work_item.due_changed": "Due date changed", "work_item.managed": "Work owner or dates changed",
   "work_item.state_derived": "Work's next step updated", "work_item.draft": "Message preparation attempted",
+  "workflow.renewal.started": "ASAP found a renewal and started it", "workflow.renewal.completeness": "ASAP checked the client, policy and documents",
+  "workflow.renewal.read_schedule": "ASAP read the schedule's confirmed values", "workflow.renewal.assign_work": "ASAP created and assigned the renewal Work",
+  "workflow.renewal.pack": "ASAP prepared the renewal pack", "workflow.renewal.communications": "ASAP prepared the client and insurer messages (not sent)",
+  "workflow.renewal.approval_requested": "ASAP asked for one approval", "workflow.bundle_approved": "Renewal bundle approved", "workflow.bundle_rejected": "Renewal bundle rejected",
+  "workflow.renewal.open_terms": "ASAP recorded the insurer request as approved (not sent)", "workflow.renewal.follow_up": "ASAP chased the insurer for renewal terms",
+  "workflow.renewal.compare": "ASAP compared the terms with the expiring premium", "workflow.renewal.hand_over": "ASAP handed the renewal to a person to present",
+  "workflow.renewal.exception": "Renewal stopped — needs a person", "workflow.communication_delivered": "Message delivered by a person", "workflow.resumed": "Renewal resumed",
 };
 const actionWords = (a) => ACTION_WORDS[a] || a.replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 function refForRecord(rec, client) {
@@ -657,6 +747,7 @@ function refForRecord(rec, client) {
   if (rec.type === "claim") return { ws: "claim", clientId: client?.id, claimId: rec.id };
   if (rec.type === "document") return { ws: "document", documentId: rec.id };
   if (rec.type === "client") return { ws: "client", clientId: rec.id };
+  if (rec.type === "workflow_run") return { ws: "renewal", runId: rec.id };
   return client ? { ws: "client", clientId: client.id } : null;
 }
 function activitySpace(ref) {
@@ -705,7 +796,7 @@ function activitySpace(ref) {
 
 /* ---------------------------------------------------------------- work items */
 
-function workItemSpace(ref) {
+function workItemSpace(ref, state) {
   const w = S.byId("workItems", ref.workItemId);
   if (!w) return { kind: "Work", title: "This item is no longer open", status: "draft", statusLabel: "Unavailable", blocks: [note("amber", "Not found", "It may have been completed or moved. Your Work list shows everything open.")] };
   const client = w.clientId ? S.sel.client(w.clientId) : null;
@@ -717,6 +808,10 @@ function workItemSpace(ref) {
     status: w.state === "Completed" ? "draft" : "live",
     statusLabel: w.state === "Completed" ? "Done" : w.statusLabel || "In progress",
     blocks: [
+      ...(() => {
+        const run = state ? findRenewal(state, { workItemId: w.id }) : null;
+        return run ? [note(run.state === "exception" ? "red" : "green", "ASAP is handling this renewal — " + run.stateLabel.toLowerCase(), run.progress.done + " of " + run.progress.total + " steps done." + (run.exception ? " Stopped: " + run.exception.message : "")), nav("Open the renewal", "What ASAP did, the evidence, and the approval it needs.", { ws: "renewal", runId: run.id, workItemId: w.id })] : [];
+      })(),
       facts([
         ["Client", client ? client.name : "Brokerage-wide"],
         ["Kind", w.kind],
@@ -1033,11 +1128,13 @@ export function liveSpace(ref, state) {
     case "claim":
       return ref.claimId ? claimSpace(ref, state) : newClaimSpace(ref);
     case "workitem":
-      return workItemSpace(ref);
+      return workItemSpace(ref, state);
     case "document":
       return documentSpace(ref, state);
     case "automation":
       return automationSpace(ref);
+    case "renewal":
+      return renewalSpace(ref, state);
     case "activity":
     case "audit":
       return activitySpace(ref);

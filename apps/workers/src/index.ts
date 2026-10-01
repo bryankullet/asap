@@ -3,6 +3,7 @@ import { loadWorkerEnv } from "@asap/schema/env/worker";
 import { createLogger } from "./logger.js";
 import { dispatchPending, httpDispatcher } from "./events/dispatcher.js";
 import { initObservability } from "./observability.js";
+import { httpSweeper, sweepOnce } from "./workflows/sweep.js";
 
 // Fails immediately, naming the variable, if the environment is incomplete.
 const env = loadWorkerEnv();
@@ -58,8 +59,21 @@ async function loop(): Promise<void> {
   }
 }
 
-logger.info({ app_env: env.APP_ENV, poll_ms: env.EVENT_POLL_MS }, "workers started: event dispatcher");
+// The workflow schedule: detects due renewals and advances runs (D-129).
+const sweep = httpSweeper({ apiBaseUrl: env.API_BASE_URL, internalKey: env.API_INTERNAL_KEY, timeoutMs: 120_000 });
+let sweeping: Promise<unknown> = Promise.resolve();
+async function sweepLoop(): Promise<void> {
+  while (running) {
+    sweeping = sweepOnce(sweep, logger);
+    await sweeping;
+    if (!running) break;
+    await new Promise((resolve) => setTimeout(resolve, env.WORKFLOW_SWEEP_MS));
+  }
+}
+
+logger.info({ app_env: env.APP_ENV, poll_ms: env.EVENT_POLL_MS, sweep_ms: env.WORKFLOW_SWEEP_MS }, "workers started: event dispatcher and workflow sweep");
 void loop();
+void sweepLoop();
 
 async function shutdown(signal: string) {
   logger.info({ signal }, "shutting down");
@@ -67,6 +81,7 @@ async function shutdown(signal: string) {
   // Let the tick in progress finish: an event mid-dispatch would otherwise be retried, and a
   // consumer that is not idempotent would notice. They all are, but finishing is still cheaper.
   await inFlight.catch(() => {});
+  await sweeping.catch(() => {});
   await db.$client.end({ timeout: 5 });
   process.exit(0);
 }

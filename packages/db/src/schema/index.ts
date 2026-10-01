@@ -22,3 +22,4 @@ export * from "./automations.js";
 export * from "./contacts.js";
 export * from "./imports.js";
 export * from "./issuance.js";
+export * from "./workflows.js";

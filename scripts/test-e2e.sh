@@ -26,7 +26,7 @@ do \$\$ begin
   if not exists (select 1 from pg_roles where rolname = 'authenticator') then create role authenticator login noinherit; end if;
 end \$\$;
 alter role authenticator with login noinherit password '$AUTH_PASSWORD';
-grant anon, authenticated to authenticator;
+grant anon, authenticated, service_role to authenticator;
 SQL
 HOSTPART="$(printf '%s' "$DATABASE_URL" | sed -E 's#^postgres(ql)?://[^@]*@##')"
 cat > "$WORK/postgrest.conf" <<CONF

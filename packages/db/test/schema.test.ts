@@ -160,6 +160,7 @@ describe("Drizzle schema conventions", () => {
       "policy_periods",
       "policy_versions",
       "prepared_actions",
+      "prepared_communications",
       "quote_comparison_inputs",
       "quote_comparison_terms",
       "quote_comparisons",
@@ -179,6 +180,9 @@ describe("Drizzle schema conventions", () => {
       "users",
       "work_item_pins",
       "work_items",
+      "workflow_approvals",
+      "workflow_runs",
+      "workflow_steps",
     ]);
   });
 });

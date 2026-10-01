@@ -1751,8 +1751,12 @@ async function resolveRecords(db: SupabaseClient, rows: AuditRow[]): Promise<Map
     read("policies", "id, client_id, policy_number", ids("policy")),
     read("clients", "id, name", ids("client")),
   ]);
+  // A workflow run (D-129) is about its Work item and the client named in its facts.
+  const wfIds = ids("workflow_run");
+  const wfRuns = wfIds.length ? (((await db.from("workflow_runs").select("id, work_item_id, facts").in("id", wfIds)).data ?? []) as { id: string; work_item_id: string | null; facts: { clientId?: string } }[]) : [];
   const clientIds = new Set<string>([...clientsDirect.map((c) => c.id)]);
   for (const r of [...work, ...opps, ...placements, ...claims, ...docs, ...policies]) if (r.client_id) clientIds.add(r.client_id);
+  for (const r of wfRuns) if (r.facts?.clientId) clientIds.add(r.facts.clientId);
   const clientNames = new Map<string, string>();
   for (const c of await read("clients", "id, name", [...clientIds])) clientNames.set(c.id, c.name ?? "");
   const client = (id: string | null | undefined) => (id && clientNames.has(id) ? { id, name: clientNames.get(id)! } : null);
@@ -1766,6 +1770,8 @@ async function resolveRecords(db: SupabaseClient, rows: AuditRow[]): Promise<Map
   for (const r of docs) put("document", r, r.filename ?? "Document", r.work_item_id ?? null);
   for (const r of policies) put("policy", r, r.policy_number ?? "Policy (number not recorded)", null);
   for (const r of clientsDirect) put("client", r, r.name ?? "Client", null);
+  for (const r of wfRuns)
+    out.set(`workflow_run:${r.id}`, { client: client(r.facts?.clientId), record: { type: "workflow_run", id: r.id, label: (r.work_item_id && work.find((w) => w.id === r.work_item_id)?.title) || "Renewal" }, workItemId: r.work_item_id });
   return out;
 }
 

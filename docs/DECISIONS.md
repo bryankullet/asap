@@ -2100,3 +2100,31 @@ scan rightly flagged. The fixture now joins safe fragments at runtime; the scann
 patterns are unchanged, with no allowlist entry. The test still proves a configured key is
 recognised, never logged, and never serialised with the provider object that responses are built
 from; logs carry only provider, model and presence booleans.
+
+## D-129 — Durable workflow runs, proved by Renewal Autopilot
+
+`workflow_runs`, `workflow_steps`, `workflow_approvals` and `prepared_communications` (0062). A run
+is one piece of multi-step work for one subject; its steps are rows done once; a lease
+(`workflow_run_claim`) lets one advancer act at a time and expires by itself, so a restart
+resumes rather than repeats; a transient failure retries with back-off up to a limit, then raises
+a plain-words exception (what stopped, what is needed) onto the run and its Work item. The worker
+owns time — a new sweep loop calls `POST /internal/workflows/sweep` every `WORKFLOW_SWEEP_MS`
+(15 min) — and the API is the engine, writing with the service connection as the event
+consumers do. People read runs under RLS and act only through security-definer functions that need
+the server key and permission and write the audit row: `workflow_approval_decide` (one bundle,
+exact digest, reason to reject) and `prepared_communication_record_delivery`. Each emits a
+`workflow.*` event, so the run continues even if the API stops before advancing it. Prepared
+messages are content: "sent" needs a provider id, "delivered" needs a person and evidence; the
+provider boundary (`sendThroughMailbox`) is untouched, so connecting Gmail later changes delivery,
+not the workflow. Renewal Autopilot reuses the quotation records after approval — the insurer
+request becomes an approved `quote_request` on a renewal opportunity — so delivery, responses and
+comparison are the existing contracts. Reason: the parts existed; what was missing was a run that
+waits, resumes and never repeats. Built only as far as one workflow needs.
+
+## D-130 — The renewal window is a brokerage rule, with a documented default
+
+`company_rules` key `renewal.window` ({leadDays 7–180, followUpDays 1–30,
+escalateDaysBeforeExpiry 1–60}, with its source and verified-at date). Without it, ASAP uses 60 days
+ahead, a chase every 5 days and escalation at 7 days before expiry, and every run shows that basis
+as "ASAP's default … because this brokerage has not set a renewal rule". These are operating
+cadences, not Kenyan legal values; they are configurable for that reason.

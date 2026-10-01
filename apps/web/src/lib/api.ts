@@ -102,6 +102,9 @@ import {
   automationRunsResponseSchema,
   automationResponseSchema,
   automationTestResponseSchema,
+  workflowListSchema,
+  workflowDetailSchema,
+  workflowActionResponseSchema,
   type CreateAutomationRequest,
   pinsResponseSchema,
   setPinResponseSchema,
@@ -233,6 +236,16 @@ export const api = {
   automationRuns: (id: string) =>
     request("GET", `/automations/${id}/runs`, automationRunsResponseSchema),
   /** A new standing instruction. Created switched off, and never able to send by itself. */
+  /** Renewal Autopilot (D-129): the runs, one run in full, and a person's decisions on them. */
+  renewalRuns: () => request("GET", "/workflows/renewals", workflowListSchema),
+  workflowRun: (id: string) => request("GET", `/workflows/runs/${id}`, workflowDetailSchema),
+  startRenewal: (policyPeriodId: string) =>
+    request("POST", "/workflows/renewals", workflowActionResponseSchema, { policyPeriodId }, { auth: true, allow: [403, 409] }),
+  decideApproval: (id: string, input: { decision: "approve" | "reject"; bundleSha256: string; note?: string }) =>
+    request("POST", `/workflow-approvals/${id}/decide`, workflowActionResponseSchema, input, { auth: true, allow: [403, 409, 422] }),
+  recordCommunicationDelivery: (id: string, input: { method: string; reference: string; deliveredAt?: string }) =>
+    request("POST", `/prepared-communications/${id}/delivery`, workflowActionResponseSchema, input, { auth: true, allow: [403, 409, 422] }),
+  resumeWorkflow: (id: string) => request("POST", `/workflows/runs/${id}/resume`, workflowActionResponseSchema, undefined, { auth: true, allow: [403] }),
   /** Test mode: conditions checked against open work; nothing prepared or written but its audit. */
   testAutomation: (id: string) => request("POST", `/automations/${id}/test`, automationTestResponseSchema, {}),
   automationLastTest: (id: string) =>

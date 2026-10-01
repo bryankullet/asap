@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
+import { advanceRun, RENEWAL, sweepWorkflows } from "../workflows/renewal.js";
 import { extractDocument } from "../documents/extraction.js";
 import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
 import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
@@ -64,6 +65,15 @@ export function internalRoutes(deps: {
    * processed: that is the worker's bookkeeping, and doing it in both places is how an event ends
    * up half-delivered with nobody able to say which half.
    */
+  /**
+   * The scheduled pass (D-129): the worker calls this on its timer. Detects renewals in every
+   * brokerage and advances every run that is due. Safe to call twice at once: runs are leased.
+   */
+  app.post("/internal/workflows/sweep", async (c) => {
+    const out = await sweepWorkflows(deps.service(), deps.logger);
+    return c.json({ started: out.started, advanced: out.advanced, states: out.outcomes.map((o) => ({ runId: o.runId, state: o.state, stoppedAt: o.stoppedAt, skipped: o.skipped ?? null })) });
+  });
+
   app.post("/internal/events/:id/dispatch", async (c) => {
     const id = c.req.param("id");
     const db = deps.service();
@@ -188,6 +198,19 @@ export function internalRoutes(deps: {
             });
           }
         }
+      }
+    }
+
+    /*
+     * Workflow runs (D-129): a person's approval or a recorded delivery continues the run. If the
+     * API instance that recorded it stopped before advancing, this is where the run picks up.
+     */
+    if (event.event_type.startsWith("workflow.") && event.entity_type === "workflow_run" && event.entity_id) {
+      try {
+        const out = await advanceRun(db, deps.logger, RENEWAL, event.entity_id);
+        results.push({ consumer: "workflow", result: "success", detail: out.skipped ? `run ${out.skipped}` : `run ${out.state}${out.stoppedAt ? ` at ${out.stoppedAt}` : ""}` });
+      } catch (e) {
+        results.push({ consumer: "workflow", result: "failure", detail: (e as Error).message ?? "the run could not be advanced" });
       }
     }
 
