@@ -581,7 +581,7 @@ function renewalSpace(ref, state) {
       statusLabel: plural(runs.length, "renewal", "renewals"),
       blocks: [
         note("green", "ASAP looks for renewals every day", "Policy periods ending within the renewal window are picked up on their own. ASAP checks the file, prepares the pack and the messages, and asks you once."),
-        rows("In hand", runs.length ? runs.map((r) => ({ title: r.title, note: [r.client?.name, r.periodEnd ? "Cover ends " + date(r.periodEnd) : null, r.progress.done + " of " + r.progress.total + " steps", r.exception ? r.exception.message : null].filter(Boolean).join(" · "), badge: r.stateLabel, badgeTone: r.state === "exception" ? bad : r.state === "waiting_approval" ? warn : ok, action: { a: "open", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } } })) : [{ title: "No renewals in the window", note: "When a policy period nears its end, its renewal appears here.", badge: "None", badgeTone: warn }]),
+        rows("In hand", runs.length ? runs.map((r) => ({ title: r.title, note: [r.client?.name, r.periodEnd ? "Cover ends " + date(r.periodEnd) : null, r.progress.done + " of " + r.progress.steps + " steps", r.exception ? r.exception.message : null].filter(Boolean).join(" · "), badge: r.stateLabel, badgeTone: r.state === "exception" ? bad : r.state === "waiting_approval" ? warn : ok, action: { a: "open", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } } })) : [{ title: "No renewals in the window", note: "When a policy period nears its end, its renewal appears here.", badge: "None", badgeTone: warn }]),
       ],
     };
   }
@@ -810,7 +810,7 @@ function workItemSpace(ref, state) {
     blocks: [
       ...(() => {
         const run = state ? findRenewal(state, { workItemId: w.id }) : null;
-        return run ? [note(run.state === "exception" ? "red" : "green", "ASAP is handling this renewal — " + run.stateLabel.toLowerCase(), run.progress.done + " of " + run.progress.total + " steps done." + (run.exception ? " Stopped: " + run.exception.message : "")), nav("Open the renewal", "What ASAP did, the evidence, and the approval it needs.", { ws: "renewal", runId: run.id, workItemId: w.id })] : [];
+        return run ? [note(run.state === "exception" ? "red" : "green", "ASAP is handling this renewal — " + run.stateLabel.toLowerCase(), run.progress.done + " of " + run.progress.steps + " steps done." + (run.exception ? " Stopped: " + run.exception.message : "")), nav("Open the renewal", "What ASAP did, the evidence, and the approval it needs.", { ws: "renewal", runId: run.id, workItemId: w.id })] : [];
       })(),
       facts([
         ["Client", client ? client.name : "Brokerage-wide"],

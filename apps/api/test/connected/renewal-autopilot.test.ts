@@ -180,7 +180,7 @@ describe("Renewal Autopilot", () => {
     expect(compare.recommendation).toMatch(/does not recommend/);
     const [w] = await sql<{ task_status: string; required_action: string }[]>`select task_status, required_action from work_items where id = ${workItemId}`;
     expect(w!.required_action).toMatch(/^Present the renewal terms to Acme/);
-    expect(done.progress).toEqual({ done: 11, total: 11 });
+    expect(done.progress).toEqual({ done: 11, steps: 11 });
   });
 
   it("13 · a policy whose insurer is no longer on file stops with a precise exception; putting it right and resuming continues", async () => {

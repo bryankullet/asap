@@ -819,7 +819,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return ok(res.outcome === "already" ? "That renewal is already in hand" : "Renewal started — ASAP is preparing it", {
           already: res.outcome === "already",
           nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
-          detail: r ? r.stateLabel + ". " + r.progress.done + " of " + r.progress.total + " steps done." : "",
+          detail: r ? r.stateLabel + ". " + r.progress.done + " of " + r.progress.steps + " steps done." : "",
           receipt: { action: "Renewal started", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : ["A renewal run and its Work item"], unchanged: ["Nothing was sent", "No cover or money changed"], next: r?.state === "waiting_approval" ? "Review and approve the renewal bundle" : r?.stateLabel ?? null, audit: "workflow.renewal.started" },
         });
       } catch (e) {
@@ -1544,7 +1544,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     if (/\b(start|prepare|begin|do|handle)\b/i.test(t)) {
-      if (target) return { lead: "That renewal is already in hand.", text: target.stateLabel + " — " + target.progress.done + " of " + target.progress.total + " steps done.", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
+      if (target) return { lead: "That renewal is already in hand.", text: target.stateLabel + " — " + target.progress.done + " of " + target.progress.steps + " steps done.", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
       if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, raw);
       const pol = asPolicy(sub);
       if (pol.ambiguous) return clarifyClient(pol.ambiguous, raw);
@@ -1573,7 +1573,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (target || inFront) {
       const r = target ?? inFront;
       const n = r.exception ? "Stopped: " + r.exception.message + " What is needed: " + r.exception.needs : r.state === "waiting_approval" ? "Waiting for your approval of the pack and both messages." : r.state === "waiting_party" ? (db.workItems.find((w) => w.id === r.workItemId)?.next?.what ?? "Waiting on the insurer.") : r.stateLabel + ".";
-      return { lead: r.title + ": " + r.stateLabel.toLowerCase() + ".", text: n + " " + r.progress.done + " of " + r.progress.total + " steps done.", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } };
+      return { lead: r.title + ": " + r.stateLabel.toLowerCase() + ".", text: n + " " + r.progress.done + " of " + r.progress.steps + " steps done.", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } };
     }
     return null;
   }

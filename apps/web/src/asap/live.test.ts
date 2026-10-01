@@ -139,7 +139,7 @@ const renewalRun = () => ({
   currentStep: runState === "waiting_approval" ? "approval" : "await_terms",
   exception: runState === "exception" ? { code: "no_terms_near_expiry", message: "No renewal terms from First Insurer with 5 days to expiry.", needs: "Call the underwriter at First Insurer today.", stepLabel: "Insurer terms awaited and chased" } : null,
   nextRunAt: "2026-10-02T09:00:00Z", startedAt: "2026-10-01T09:00:00Z", finishedAt: null, title: "Tausi Hauliers Ltd — Motor renewal",
-  client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, periodEnd: "2026-12-31", progress: { done: runState === "waiting_approval" ? 6 : 8, total: 11 },
+  client: { id: CLIENT, name: "Tausi Hauliers Ltd" }, periodEnd: "2026-12-31", progress: { done: runState === "waiting_approval" ? 6 : 8, steps: 11 },
   steps: [
     { key: "completeness", position: 2, label: "Client, policy and documents checked", state: "done", attempts: 0, nextAttemptAt: null, finishedAt: "2026-10-01", output: {}, evidence: [{ label: "5 items on file, 1 missing", kind: "record" }], error: null },
     { key: "approval", position: 7, label: "One approval for the pack and messages", state: runState === "waiting_approval" ? "waiting" : "done", attempts: 0, nextAttemptAt: null, finishedAt: null, output: {}, evidence: [], error: null },

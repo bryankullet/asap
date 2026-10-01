@@ -52,7 +52,7 @@ export const workflowRunSchema = z.object({
   title: z.string(),
   client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
   periodEnd: z.string().nullable(),
-  progress: z.object({ done: z.number().int(), total: z.number().int() }),
+  progress: z.object({ done: z.number().int(), steps: z.number().int() }),
 });
 export const workflowDetailSchema = workflowRunSchema.extend({
   steps: z.array(workflowStepSchema),

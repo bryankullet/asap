@@ -58,7 +58,7 @@ async function summaries(db: SupabaseClient, runs: RunDb[]) {
       title: (r.work_item_id && titles.get(r.work_item_id)) || "Renewal",
       client: clientId && names.has(clientId) ? { id: clientId, name: names.get(clientId)! } : null,
       periodEnd: r.facts?.periodEnd ?? null,
-      progress: { done: mine.filter((s) => s.state === "done" || s.state === "skipped").length, total: mine.length },
+      progress: { done: mine.filter((s) => s.state === "done" || s.state === "skipped").length, steps: mine.length },
     };
   });
 }
