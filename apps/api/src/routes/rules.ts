@@ -1,4 +1,8 @@
 import {
+  AUTONOMY_CAP,
+  AUTONOMY_LEVELS,
+  autonomyRuleSchema,
+  renewalWindowRuleSchema,
   companyRulesResponseSchema,
   recommendationRuleSchema,
   setCompanyRuleRequestSchema,
@@ -41,9 +45,37 @@ const DEFAULTS: { key: CompanyRuleKey; summary: string; basis: string }[] = [
     summary: `A quote is "expiring soon" within ${DEFAULT_EXPIRING_SOON_DAYS} days of its expiry.`,
     basis: DEFAULT_EXPIRING_SOON_BASIS,
   },
+  {
+    key: "renewal.window",
+    summary: "ASAP starts renewal work 60 days before expiry, follows up 5 days after the insurer request is delivered, and escalates 14 days before expiry.",
+    basis: "ASAP's default (D-130) until this brokerage sets its own.",
+  },
+  {
+    key: "workflow.autonomy",
+    summary: "ASAP starts and prepares renewals and follows up on its own; every external message waits for a person's approval; it never names a recommended quote; new work goes to the client file's owner.",
+    basis: "ASAP's default (D-131) until this brokerage sets its own. Binding cover, client instructions, money and claims decisions are never automatic, whatever is set.",
+  },
 ];
 
 function validate(key: CompanyRuleKey, value: unknown): string | null {
+  if (key === "renewal.window") {
+    return renewalWindowRuleSchema.safeParse(value).success
+      ? null
+      : "A renewal window is {leadDays 7–180, followUpDays 1–30, escalateDaysBeforeExpiry 1–60}, each a whole number of days.";
+  }
+  if (key === "workflow.autonomy") {
+    const r = autonomyRuleSchema.safeParse(value);
+    if (!r.success) return "An autonomy rule gives each action a level on the ladder, an approver and an assignment rule.";
+    // External messages always wait for a person; a quote recommendation is never acted on.
+    for (const [action, level] of Object.entries(r.data.actions) as [keyof typeof AUTONOMY_CAP, (typeof AUTONOMY_LEVELS)[number]][]) {
+      if (AUTONOMY_LEVELS.indexOf(level) > AUTONOMY_LEVELS.indexOf(AUTONOMY_CAP[action])) {
+        return action === "external_messages"
+          ? "Messages to clients and insurers always wait for a person's approval — they cannot be set above “Act after approval”."
+          : `“${action.replaceAll("_", " ")}” cannot be set above “${AUTONOMY_CAP[action].replaceAll("_", " ")}”.`;
+      }
+    }
+    return null;
+  }
   const result =
     key === "quote.recommendation"
       ? recommendationRuleSchema.safeParse(value)
@@ -147,7 +179,7 @@ export function ruleRoutes(deps: { logger: Logger }) {
   return app;
 }
 
-async function load(
+export async function load(
   db: SupabaseClient,
   ctx: Awaited<ReturnType<typeof resolveContext>>,
   organizationId: string,
@@ -179,6 +211,12 @@ async function load(
     }
   }
 
+  // The version in force: how many values the rule has held (company_rule_versions, 0052).
+  const versions = new Map<string, number>();
+  if (rows.length > 0) {
+    const { data: vs } = await db.from("company_rule_versions").select("key").eq("organization_id", organizationId);
+    for (const v of (vs ?? []) as { key: string }[]) versions.set(v.key, (versions.get(v.key) ?? 0) + 1);
+  }
   const known = new Set(DEFAULTS.map((d) => d.key as string));
   return {
     rules: rows
@@ -191,6 +229,7 @@ async function load(
         note: r.note,
         setByName: names.get(r.set_by) ?? null,
         updatedAt: r.updated_at,
+        version: versions.get(r.key) ?? null,
       })),
     /* Only the ones nobody has set. A default shown beside the rule replacing it is noise. */
     defaults: DEFAULTS.filter((d) => !rows.some((r) => r.key === d.key)),

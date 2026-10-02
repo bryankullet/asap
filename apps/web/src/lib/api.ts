@@ -7,6 +7,8 @@ import {
   applyPreviewSchema,
   policySpaceResponseSchema,
   startRenewalResponseSchema,
+  supervisionResponseSchema,
+  companyRulesResponseSchema,
   creationContextSchema,
   type IssuanceAction,
   type ApplyPreviewRequest,
@@ -246,6 +248,25 @@ export const api = {
   recordCommunicationDelivery: (id: string, input: { method: string; reference: string; deliveredAt?: string }) =>
     request("POST", `/prepared-communications/${id}/delivery`, workflowActionResponseSchema, input, { auth: true, allow: [403, 409, 422] }),
   resumeWorkflow: (id: string) => request("POST", `/workflows/runs/${id}/resume`, workflowActionResponseSchema, undefined, { auth: true, allow: [403] }),
+  /** The brokerage's own rules, each with its source, check date and version (D-131). */
+  rules: () => request("GET", "/rules", companyRulesResponseSchema),
+  setRule: (input: { key: string; value: unknown; source: string; verifiedAt: string; note?: string }) =>
+    request("PUT", "/rules", z.object({ outcome: z.string(), reason: z.string().optional(), rules: companyRulesResponseSchema.optional() }), input, { auth: true, allow: [403, 422] }),
+  /** Supervision (D-131): every workflow, grouped and ranked, with Upcoming and the governing rules. */
+  supervision: () => request("GET", "/supervision", supervisionResponseSchema),
+  pauseWorkflow: (id: string, reason?: string) =>
+    request("POST", `/workflows/runs/${id}/pause`, workflowActionResponseSchema, reason ? { reason } : {}, { auth: true, allow: [403, 409] }),
+  escalateWorkflow: (id: string, reason: string) =>
+    request("POST", `/workflows/runs/${id}/escalate`, workflowActionResponseSchema, { reason }, { auth: true, allow: [403, 409] }),
+  followUpNow: (id: string) => request("POST", `/workflows/runs/${id}/follow-up-now`, workflowActionResponseSchema, {}, { auth: true, allow: [403, 409] }),
+  moveFollowUp: (id: string, on: string) =>
+    request("POST", `/workflows/runs/${id}/follow-up`, workflowActionResponseSchema, { on }, { auth: true, allow: [403, 409, 422] }),
+  setChasing: (id: string, stop: boolean, reason?: string) =>
+    request("POST", `/workflows/runs/${id}/chasing`, workflowActionResponseSchema, { stop, ...(reason ? { reason } : {}) }, { auth: true, allow: [403, 409] }),
+  stopWorkflow: (id: string, reason: string) =>
+    request("POST", `/workflows/runs/${id}/stop`, workflowActionResponseSchema, { reason }, { auth: true, allow: [403, 409] }),
+  workflowReceipt: (id: string) =>
+    request("GET", `/workflows/runs/${id}/receipt`, z.object({ title: z.string(), outcome: z.string(), completedAt: z.string(), receipt: z.record(z.string(), z.unknown()) })),
   /** Test mode: conditions checked against open work; nothing prepared or written but its audit. */
   testAutomation: (id: string) => request("POST", `/automations/${id}/test`, automationTestResponseSchema, {}),
   automationLastTest: (id: string) =>
@@ -500,7 +521,19 @@ export const api = {
 
 /** Human-readable text for the stable error codes the API returns. */
 export function describeApiError(err: unknown): string {
-  if (!(err instanceof ApiRequestError)) return "Something went wrong. Please try again.";
+  if (!(err instanceof ApiRequestError)) {
+    // Not an answer from the service: the browser itself failed (a file it could not read, a
+    // network drop). Say which, rather than a category that hides it.
+    const m = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+    if (/fetch|network/i.test(m)) return "The request did not reach the ASAP service — check your connection and retry.";
+    return m ? `This browser could not complete it: ${m}` : "Something went wrong in this browser. Please try again.";
+  }
+  if (err.code === "validation_failed") {
+    // Name the field the service refused, so the person knows what to correct.
+    const issues = err.details as { path?: string; message?: string }[] | undefined;
+    const first = Array.isArray(issues) ? issues[0] : undefined;
+    if (first?.message) return `Please check ${first.path || "the details"}: ${first.message}.`;
+  }
   const messages: Record<string, string> = {
     api_unreachable:
       "We cannot reach the ASAP service. It may be starting up, offline, or configured with the wrong address.",

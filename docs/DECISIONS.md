@@ -2128,3 +2128,39 @@ escalateDaysBeforeExpiry 1–60}, with its source and verified-at date). Without
 ahead, a chase every 5 days and escalation at 14 days before expiry, and every run shows that basis
 as "ASAP's default … because this brokerage has not set a renewal rule". These are operating
 cadences, not Kenyan legal values; they are configurable for that reason.
+
+## D-131 — Supervision: one operational view per workflow, controls on the run, autonomy as a rule
+Every workflow run exposes one server-computed operational view (`apps/api/src/workflows/renewal-view.ts`):
+plain status, current work, a one-sentence summary of what is done, at most three blockers
+(blocking / non-blocking), what it needs from a person, who it waits for and since when, next
+follow-up, escalation date and owner, primary action, prepared outputs, Upcoming actions, and every
+intervention with the reason it is unavailable. Ask, Today, Work, the Space and `GET /supervision`
+all read it, so they cannot disagree.
+- Blocking information: a missing policy number or client contact stops a renewal before an approval
+  is requested — the bundle could not be used. Everything else missing is disclosed and the run goes
+  on. Resuming continues the same run from the step that stopped. (A product choice, not an insurance
+  rule; it is narrow on purpose and can be widened per brokerage later.)
+- Runs record their origin (`facts.origin`: the renewal window, or a named person).
+- Interventions write the run (`facts.paused`, `escalated`, `chasing`, `followUpOn`, `stopped`) and
+  audit the person: pause/resume, follow-up date, follow up now, stop or restart chasing, escalate,
+  stop automation. Escalation is never switched off by stopping the chasing.
+- Autonomy is the `company_rules` key `workflow.autonomy` on a six-step ladder (observe → manage
+  exceptions), versioned by the existing `company_rule_versions` trigger (0052). External messages are
+  capped at "act after approval"; binding cover, client instructions, money and claims decisions are
+  never automatic. ASAP never derives a rule from behaviour.
+- A finished run writes one completion receipt (`workflow_receipts`, 0063): intended and achieved
+  outcome, dates, approvals, people, evidence, delivery evidence, unresolved items and links;
+  searchable; never edited.
+
+## D-132 — Onboarding and book ingestion happen in the conversation
+After a brokerage is created there is no separate onboarding dashboard: Ask welcomes it ("Your
+brokerage is ready…") with four ways to start, and it can skip and come back. The hand-off screen
+watches the account and opens the workspace as soon as the brokerage exists; after 15 s it explains
+and offers Retry (same request key, so never a second brokerage) and Continue to workspace.
+Files are added with the + beside the box, by picker or drop, several at once: documents are hashed
+and filed straight to storage (the same bytes are recognised, not stored twice) and their card reads
+each file's state from the server — never "read" before extraction finishes; spreadsheets become a
+creation preview on the existing import, so nothing becomes a record without confirmation. The Setup
+Space shows progress, files, records found, what needs confirmation and one next action. Not yet: a
+filed document cannot be moved to another client, and the chat card's live state is per session (the
+Setup Space and the document records are the persisted view).

@@ -37,6 +37,10 @@ beforeAll(async () => {
   sql = postgres(OWNER, { max: 2, onnotice: () => {} });
   await sql`insert into app.api_keys (key_hash, label) values (encode(extensions.digest(${API_KEY}, 'sha256'), 'hex'), 'connected-renewal')`;
   app = buildApp(API_KEY);
+  // The client letter needs somebody to go to: without a contact the renewal stops before approval (D-131).
+  await sql`insert into client_contacts (organization_id, client_id, full_name, email, is_primary)
+    select ${ORG_A}, ${ACME}, 'Wanjiru Kamau', 'wanjiru@acme.test', true
+    where not exists (select 1 from client_contacts where client_id = ${ACME} and email is not null and deleted_at is null)`;
   const end = iso(new Date(Date.now() + 30 * DAY));
   const start = iso(new Date(Date.now() - 335 * DAY));
   const [pol] = await sql<{ id: string }[]>`insert into policies (organization_id, client_id, insurer_id, class_of_business, policy_number)
@@ -216,7 +220,7 @@ describe("Renewal Autopilot", () => {
 
   it("14 · Work, Activity and the renewal list read the run; the client message can be recorded as delivered", async () => {
     const list = (await call(AMINA, "GET", "/workflows/renewals")).body;
-    expect(list.runs.find((x: Json) => x.id === runId).stateLabel).toBe("Handed over");
+    expect(list.runs.find((x: Json) => x.id === runId).stateLabel).toBe("Ready to present to the client");
     const byWork = (await call(AMINA, "GET", `/work-items/${workItemId}/workflow`)).body;
     expect(byWork.run.id).toBe(runId);
     const audit = (await call(AMINA, "GET", "/audit")).body.entries as Json[];

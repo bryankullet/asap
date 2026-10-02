@@ -152,7 +152,7 @@ export async function startRun(
   return { runId, created: true };
 }
 
-export type AdvanceOutcome = { runId: string; state: string; stepsDone: string[]; stoppedAt: string | null; skipped?: "leased" | "terminal" | "not_due" };
+export type AdvanceOutcome = { runId: string; state: string; stepsDone: string[]; stoppedAt: string | null; skipped?: "leased" | "terminal" | "not_due" | "paused" };
 
 /**
  * Advances one run as far as it can go now. Safe to call from a sweep, an event and a person's
@@ -174,6 +174,11 @@ export async function advanceRun(
   }
   const run = claimed.data as RunRow;
   const stepsDone: string[] = [];
+  // A person paused it: hold the lease only long enough to say so, and keep its place (D-131).
+  if ((run.facts as { paused?: { at?: string } } | null)?.paused) {
+    await db.from("workflow_runs").update({ lease_until: null }).eq("id", run.id);
+    return { runId: run.id, state: run.state, stepsDone, stoppedAt: run.current_step, skipped: "paused" };
+  }
   const release = async (patch: Record<string, unknown>) => {
     await db.from("workflow_runs").update({ ...patch, lease_until: null, updated_at: new Date().toISOString() }).eq("id", run.id);
   };

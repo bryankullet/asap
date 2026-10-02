@@ -45,6 +45,7 @@ class Component extends DCLogic {
   async componentDidMount() {
     const A = await this.props.loadAdapters();
     this.A = A;
+    if (A.onChange) this.offChange = A.onChange(() => this.bump());
     A.persistence.init();
     const conv = A.records.sel.conversation('cnv_main');
     const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];
@@ -55,8 +56,8 @@ class Component extends DCLogic {
     if (back) tabs.push({ id: 't2', ref: reopen, pinned: false });
     this.setState({ ready: true, tabs, activeId: back ? 't2' : 't1', contextRef: back ? reopen : undefined,
       thread: (conv && conv.messages && conv.messages.length) ? conv.messages : [{
-        role: 'ai', lead: 'Good morning. Tell me what you need.',
-        text: 'I read your records, prepare the next step and show my evidence. I never send, place, change cover or move money without your click.',
+        role: 'ai', lead: A.greetingLead || 'Good morning. Tell me what you need.',
+        text: A.greetingText || 'I read your records, prepare the next step and show my evidence. I never send, place, change cover or move money without your click.',
         chips: A.greetingChips
       }] });
     this.onKey = (e) => {
@@ -66,7 +67,7 @@ class Component extends DCLogic {
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('resize', this.onResize);
   }
-  componentWillUnmount() { window.removeEventListener('keydown', this.onKey); window.removeEventListener('resize', this.onResize); }
+  componentWillUnmount() { if (this.offChange) this.offChange(); window.removeEventListener('keydown', this.onKey); window.removeEventListener('resize', this.onResize); }
 
   bump(extra) { this.setState({ tick: this.state.tick + 1, ...(extra || {}) }); }
   flash(toast) { this.setState({ toast }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 3200); }
@@ -121,8 +122,10 @@ class Component extends DCLogic {
     this.setState({ busy: true });
     if (this.A.savingNote && !/^(conversation|draft)\./.test(action)) this.flash(this.A.savingNote);
     setTimeout(async () => {
-      const res = await this.A.records.act(action, payload, actionId);
-      this.setState({ busy: false });
+      let res;
+      try { res = await this.A.records.act(action, payload, actionId); }
+      catch (e) { res = { ok: false, error: 'That could not be completed. Nothing was changed \u2014 you can retry.' }; }
+      finally { this.setState({ busy: false }); }
       if (res.denied) { this.setState({ sheet: { type: 'denied', kicker: 'PERMISSION', title: 'You cannot do this yourself', reason: res.reason, path: res.path } }); return; }
       if (!res.ok) { this.flash(res.error || 'That failed. Nothing was changed — you can retry.'); this.bump(); return; }
       if (res.duplicate) { this.flash('Already done — nothing was recorded twice.'); this.bump({ sheet: null }); return; }
@@ -166,17 +169,18 @@ class Component extends DCLogic {
     const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
     const thread = this.updatePending(i, { status: res.partial ? 'partial' : res.duplicate || res.already ? 'already' : 'done', statusText: res.partial ? 'Partly written — ' + (res.partial === true ? 'some of it could not be saved; the receipt says which.' : res.partial) : receipt });
     const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const next = [...thread, this.receiptMessage(res, receipt)];
+    const next = [...thread, this.receiptMessage(res, receipt), ...(res.nextPending && !res.duplicate ? [{ role: 'ai', lead: res.nextPending.lead, text: res.nextPending.text, pending: { ...res.nextPending.pending, status: 'open' } }] : [])];
     this.saveThread(next);
     this.setState({ thread: next });
     this.bump();
     if (res.nav) this.openRef(res.nav);
   };
-  cancelPending = (i) => this.updatePending(i, { status: 'cancelled', statusText: 'Cancelled \u2014 nothing was written.' });
+  cancelPending = (i) => { const m = this.state.thread[i]; this.updatePending(i, { status: 'cancelled', statusText: m && m.pending && m.pending.cancelLabel === 'Not now' ? 'Not now \u2014 it is waiting for you in Work.' : 'Cancelled \u2014 nothing was written.' }); };
   editPending = (i) => {
     const m = this.state.thread[i];
     if (!m || !m.pending) return;
     // An edit replaces this preview: its matches and checks no longer describe what will be written.
+    if (m.pending.editLabel) { if (m.pending.editRef) this.openRef(m.pending.editRef); return; }
     this.updatePending(i, { status: 'replaced', statusText: 'Replaced by your edit \u2014 nothing was written from this preview.' });
     if (m.pending.editRef) this.openRef(m.pending.editRef);
   };
@@ -197,7 +201,7 @@ class Component extends DCLogic {
         r = { lead: 'ASAP could not answer just now.', text: 'Nothing was changed. Your message is back in the box \u2014 send it again, or try in a moment.', keepWorkspace: true, clarify: { options: [{ label: 'Try again', text }] }, failed: true };
         if (this.inputRef.current && !this.inputRef.current.value) this.inputRef.current.value = text;
       }
-      const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
+      const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => (typeof c === 'string' ? { label: c } : c)) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
       if (r.pending) msg.pending = { ...r.pending, status: 'open' };
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
@@ -243,6 +247,31 @@ class Component extends DCLogic {
     const payload = { ...b.send.payload, subject: m.subject, body: m.body, signature: this.A.records.actor().name };
     if (!this.A.email.connected()) { this.flash('Send failed — the mailbox connection is not live. Your draft is saved; reconnect in Connections and retry.'); return; }
     this.act(b.send.action, payload, { after: b.after, actionId: b.send.action + ':' + payload.subject + ':' + (payload.recipients || []).map(r => r.email).join(',') });
+  };
+
+  // ---------------- chat attachments
+  openPicker = () => { const el = document.querySelector('.asap-attach-input'); if (el) el.click(); };
+  chatPick = (ev) => { const files = [...(ev.target.files || [])]; try { ev.target.value = ''; } catch { /* already copied */ } this.chatFiles(files); };
+  chatDragOver = (ev) => { ev.preventDefault(); };
+  chatDrop = (ev) => { ev.preventDefault(); this.chatFiles([...((ev.dataTransfer && ev.dataTransfer.files) || [])]); };
+  openAttachMenu = () => {
+    const chips = (this.A.attachMenu || [{ label: 'Upload documents', pick: true }]);
+    const thread = [...this.state.thread, { role: 'ai', lead: 'Add what you already have.', text: 'Drop files here, or choose what to add. PDFs, photos, CSV and Excel are read on ASAP\u2019s own service.', chips }];
+    this.setState({ thread });
+  };
+  chatFiles = async (files) => {
+    if (!files.length || !this.A.ingest) return;
+    const thread = [...this.state.thread, { role: 'user', text: 'Attached ' + files.map(f => f.name).join(', ') }];
+    this.setState({ thread, thinking: true });
+    let r;
+    try { r = await this.A.ingest(files); }
+    catch (e) { r = { lead: 'Those files could not be added.', text: 'Nothing was filed \u2014 you can try again.' }; }
+    const msg = { role: 'ai', lead: r.lead, text: r.text, chips: r.chips || [], pending: r.pending ? { ...r.pending, status: 'open' } : undefined, ingest: r.ingest };
+    const next = [...thread, msg];
+    this.saveThread(next);
+    this.setState({ thread: next, thinking: false });
+    if (r.ref) this.openRef(r.ref);
+    this.bump();
   };
 
   // ---------------- uploads
@@ -344,8 +373,8 @@ class Component extends DCLogic {
       if (o.isAssign) {
         const w = R.byId('workItems', b.workItemId);
         const draft = this.state.assignDraft[b.workItemId] || {};
-        o.users = R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }));
-        o.assigneeId = draft.userId || w?.assigneeId;
+        o.users = [{ value: '', label: 'Unassigned — choose a person' }, ...R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }))];
+        o.assigneeId = draft.userId || w?.assigneeId || '';
         o.dueAt = draft.dueAt || w?.dueAt || '';
         o.onAssignee = (e) => this.setState({ assignDraft: { ...this.state.assignDraft, [b.workItemId]: { ...draft, userId: e.target.value } } });
         o.onDue = (e) => this.setState({ assignDraft: { ...this.state.assignDraft, [b.workItemId]: { ...draft, dueAt: e.target.value } } });
@@ -375,7 +404,7 @@ class Component extends DCLogic {
       }
       if (o.isGate) {
         const blocked = (b.permission && !R.can(b.permission)) || !!b.requires;
-        o.gateHeading = b.kind === 'send' ? 'A human must send this' : b.nav ? (b.heading || 'Related') : 'A human must approve this';
+        o.gateHeading = b.heading || (b.kind === 'send' ? 'A human must send this' : b.nav ? 'Related' : 'A human must approve this');
         o.detail = b.detail; o.label2 = b.label;
         o.disabled = this.state.busy;
         o.blocked = !!blocked;
@@ -542,8 +571,8 @@ class Component extends DCLogic {
       toggleSide: () => this.setState({ sideCollapsed: !this.state.sideCollapsed, sideTouched: true }),
       startDrag: this.startDrag, resetWidth: this.resetWidth,
       dragBg: this.state.dragging ? 'rgba(31,108,73,.25)' : 'transparent',
-      activityBg: '#fff', voice: () => this.flash('Voice input is not available in this build — no speech capture is wired, so ASAP will not pretend to listen.'),
-      askAttach: () => this.flash('Use the upload area in the workspace — files there are read from your device and become evidence.')
+      activityBg: '#fff', activityDot: this.A && this.A.activityLive && this.A.activityLive() ? '#1f6c49' : 'transparent', activityTitle: this.A && this.A.activityLive && this.A.activityLive() ? 'ASAP is working — open Activity' : 'Activity — what ASAP and your team did', voice: () => this.flash('Voice input is not available in this build — no speech capture is wired, so ASAP will not pretend to listen.'),
+      askAttach: () => this.openAttachMenu(), chatPick: this.chatPick, chatDragOver: this.chatDragOver, chatDrop: this.chatDrop
     };
     if (!this.state.ready) return { ...base, ws: { blocks: [], kind: 'ASAP', title: 'Loading records…', statusLabel: '', statusBg: '#f5f7f4', statusFg: '#4c564e' },
       tabs: [], navItems: [], thread: [], suggestions: [], userOptions: [], sheet: this.sheetVals(),
@@ -611,9 +640,9 @@ class Component extends DCLogic {
         hasPanelNote: !!m.panelNote, panelNote: m.panelNote,
         hasReceipt: !!m.receipt, receipt: m.receipt, openAudit: () => this.openRef({ ws: 'audit', clientId: this.state.contextRef?.clientId }),
         hasChips: (m.chips || []).length > 0,
-        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
-        hasPending: !!m.pending,
-        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
+        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.pick ? this.openPicker() : c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
+        hasPending: !!(m.ingest && this.A.ingestCard ? this.A.ingestCard(m.ingest, m.pending) : m.pending),
+        pending: (m.ingest && this.A.ingestCard ? (m = { ...m, pending: this.A.ingestCard(m.ingest, m.pending) }) : m).pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, editLabel: m.pending.editLabel || 'Edit details', cancelLabel: m.pending.cancelLabel || 'Cancel', hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },

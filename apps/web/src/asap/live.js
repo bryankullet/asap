@@ -14,6 +14,7 @@ import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
 import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
+import { createRefresher, lifecycleOf, runMutation } from "./mutation.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -113,9 +114,12 @@ async function hydrate(me) {
   const convoP = loadConversation();
   const modelConfiguredP = api.askStatus().then((r) => r.modelConfigured).catch(() => null);
   // Renewal Autopilot runs (D-129), each in full — progress, evidence, the approval bundle, messages.
+  // Supervision (D-131): the same runs, grouped and ranked, with Upcoming and the rules behind it.
+  const supervisionP = (typeof api.supervision === "function" ? api.supervision() : Promise.resolve(null)).catch(() => null);
+  const rulesP = (typeof api.rules === "function" ? api.rules() : Promise.resolve(null)).catch(() => null);
   const renewalsP = (typeof api.renewalRuns === "function" ? api.renewalRuns() : Promise.resolve({ runs: [] }))
     .then(async (list) => {
-      const details = await pool(list.runs.slice(0, 30), 6, (r) => api.workflowRun(r.id).catch(() => null));
+      const details = await pool(list.runs.slice(0, 30), 12, (r) => api.workflowRun(r.id).catch(() => null));
       return details.filter(Boolean);
     })
     .catch(() => []);
@@ -183,7 +187,7 @@ async function hydrate(me) {
   }
 
   // Each client's own record: contacts, policies and periods, claims, documents, threads.
-  const spaces = await pool(db.clients, 6, (c) => api.clientSpace(c.id));
+  const spaces = await pool(db.clients, 12, (c) => api.clientSpace(c.id));
   // A client whose record could not be read is said to be unreadable, never shown as empty.
   db.meta.unreadableClients = db.clients.filter((_, i) => !spaces[i]).map((c) => c.id);
   const policyIds = [];
@@ -278,8 +282,8 @@ async function hydrate(me) {
   // Cover, as the server derives it — the only source allowed to say "Active cover".
   // Cover checks and document details depend only on the client records, so they run together.
   const [covers, docDetails] = await Promise.all([
-    pool(policyIds, 6, (id) => api.policySpace(id)),
-    pool(db.documents.slice(0, 60), 6, (d) => api.document(d.id)),
+    pool(policyIds, 12, (id) => api.policySpace(id)),
+    pool(db.documents.slice(0, 60), 12, (d) => api.document(d.id)),
   ]);
   covers.forEach((ps) => {
     if (!ps) return;
@@ -411,7 +415,7 @@ async function hydrate(me) {
 
   // Each claim in full — its documents, notes and clock — so its Space reads the record, not a template.
   const claimDetails = new Map();
-  const claimRows = await pool(db.claims.slice(0, 40), 4, (c) => (c.workItemId ? api.workItem(c.workItemId) : null));
+  const claimRows = await pool(db.claims.slice(0, 40), 8, (c) => (c.workItemId ? api.workItem(c.workItemId) : null));
   db.claims.slice(0, 40).forEach((c, i) => claimRows[i]?.claim && claimDetails.set(c.id, { ...claimRows[i].claim, item: claimRows[i].item }));
 
   // A claim's work item opens the claim.
@@ -432,7 +436,7 @@ async function hydrate(me) {
   // Where each fully reviewed document could be applied, so the choice is ready when it opens.
   const applyTargets = new Map();
   const reviewed = [...documents.values()].filter((d) => d.fields.length && d.fields.every((f) => f.state !== "proposed") && d.fields.some((f) => f.state === "accepted" || f.state === "corrected"));
-  const targets = await pool(reviewed, 4, (d) => api.applyTargets(d.document.id));
+  const targets = await pool(reviewed, 8, (d) => api.applyTargets(d.document.id));
   reviewed.forEach((d, i) => targets[i] && applyTargets.set(d.document.id, targets[i]));
 
   // Documents count as working only when every client's documents and every document read back.
@@ -441,7 +445,10 @@ async function hydrate(me) {
   const modelConfigured = await modelConfiguredP;
 
   const renewals = new Map((await renewalsP).map((r) => [r.id, r]));
-  return { db, extras: { renewals, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
+  const [supervision, rules] = await Promise.all([supervisionP, rulesP]);
+  // Completion receipts are read when one is opened, not on every load.
+  const receipts = new Map();
+  return { db, extras: { renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -517,7 +524,7 @@ const NOT_CONNECTED_WS = {
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation", "renewal"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation", "renewal", "autonomy", "setup"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -601,6 +608,9 @@ async function base64File(file) {
 const present = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== "" && v != null));
 
 /** Build the adapters the approved interface talks to, over this brokerage's records. */
+/** The welcome's choices for a brokerage with nothing on file yet. */
+const WELCOME_CHIPS = [{ label: "Upload documents", pick: true }, { label: "Import spreadsheet", pick: true }, { label: "Add a client manually", ref: { ws: "newclient" } }, { label: "Explore an empty workspace", ref: { ws: "today" } }];
+
 export async function loadLiveAdapters({ me, switchToDemo }) {
   let loaded = await hydrate(me);
   let db = loaded.db;
@@ -611,16 +621,25 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
-  const refresh = async () => {
-    const thread = db.conversations.find((c) => c.id === "cnv_main");
-    loaded = await hydrate(me);
-    db = loaded.db;
-    if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, modelConfigured: loaded.extras.modelConfigured });
-    S.useBackend({ db, dispatch });
-  };
+  // The re-read after a write runs in the background (mutation.js): a write settles when the
+  // server answers it, and the interface re-renders when the fresh records land.
+  const refresher = createRefresher(
+    () => hydrate(me),
+    (next) => {
+      const thread = db.conversations.find((c) => c.id === "cnv_main");
+      const ledger = db.meta.ledger;
+      loaded = next;
+      db = loaded.db;
+      // What this session already did stays done: a re-read must not make a finished action clickable again.
+      db.meta.ledger = { ...db.meta.ledger, ...ledger };
+      if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
+      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, modelConfigured: loaded.extras.modelConfigured });
+      S.useBackend({ db, dispatch });
+    },
+  );
+  const refresh = () => refresher.refresh();
 
   const ok = (text, extra = {}) => ({ ok: true, text, at: d0(), ...extra });
   const fail = (err) => ({ ok: false, error: describeApiError(err).replace(/\.?\s*$/, ".") + " Nothing was changed — you can retry." });
@@ -662,6 +681,255 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     }
   };
 
+  /** The brokerage's follow-up cadence, from its rule or ASAP's stated default (D-130). */
+  const followUpDays = () => Number(state.rules?.rules?.find((r) => r.key === "renewal.window")?.value?.followUpDays ?? 5);
+  /**
+   * The approval card ASAP puts in the conversation when a renewal is ready (D-131): what it
+   * checked and prepared, what approval allows, and three real actions — approve, review in the
+   * Space, or not now. Rejecting needs a reason, so it lives in the Space's review.
+   */
+  const approvalCard = (r) => {
+    const ap = r?.approval;
+    if (!ap || ap.state !== "pending") return null;
+    const msgs = ap.bundle.filter((b) => b.kind === "communication");
+    const policy = ap.bundle.find((b) => b.kind === "pack")?.pack?.policyNumber;
+    return {
+      title: "Renewal pack ready",
+      sections: [
+        { label: "ASAP CHECKED " + (policy ?? "THE POLICY") + " AND PREPARED", items: ["the renewal pack", ...msgs.map((m) => (m.audience === "client" ? "the client letter" : "the insurer terms request") + " — " + m.subject)] },
+        ...(r.operational?.blockers?.length ? [{ label: "NOT BLOCKING, BUT MISSING", items: r.operational.blockers.filter((b) => !b.blocking).map((b) => b.label) }] : []),
+      ],
+      external: "Approval allows ASAP to continue to delivery preparation. Nothing will be sent automatically.",
+      action: "renewal.decide",
+      payload: { approvalId: ap.id, bundleSha256: ap.bundleSha256, decision: "approve" },
+      actionId: "renewal.decide:" + ap.id + ":approve",
+      confirmLabel: "Approve bundle",
+      editLabel: "Review in Space",
+      cancelLabel: "Not now",
+      editRef: { ws: "renewal", runId: r.id, workItemId: r.workItemId, view: "review" },
+      progress: "Recording your approval…",
+    };
+  };
+  /** A renewal that stopped for missing information: what is missing and how to resume. */
+  const blockerCard = (r) => {
+    if (r?.state !== "exception") return null;
+    return {
+      title: r.operational?.currentWork?.title ?? "Stopped — needs a person",
+      sections: [
+        { label: "WHAT STOPPED IT", items: [r.exception?.message ?? r.operational?.status] },
+        { label: "WHAT IS NEEDED", items: (r.operational?.blockers ?? []).filter((b) => b.blocking).map((b) => b.label + (b.fix ? " — " + b.fix : "")) },
+      ],
+      external: r.operational?.afterYouAct ?? "ASAP resumes this same renewal from the step that stopped.",
+      action: "renewal.resume",
+      payload: { runId: r.id },
+      actionId: "renewal.resume:" + r.id + ":" + (r.exception?.code ?? "x"),
+      confirmLabel: "I've fixed it — resume",
+      editLabel: "Open the renewal",
+      cancelLabel: "Not now",
+      editRef: { ws: "renewal", runId: r.id, workItemId: r.workItemId },
+      progress: "Resuming the renewal…",
+    };
+  };
+
+  /**
+   * A workflow action's response carries the run in full: show it at once — Space, Work and the
+   * chat all read it — and let the background re-read bring everything else up to date.
+   */
+  const applyRun = (run) => {
+    if (!run) return;
+    if (state.renewals?.set) state.renewals.set(run.id, run);
+    const items = state.supervision?.items;
+    if (items) {
+      const i = items.findIndex((x) => x.id === run.id);
+      if (i >= 0) items[i] = { ...items[i], ...run };
+    }
+    const w = run.workItemId ? db.workItems.find((x) => x.id === run.workItemId) : null;
+    if (w && run.operational) w.statusLine = run.operational.status;
+  };
+  const runAction = async (call, text, action, changed, unchanged) => {
+    try {
+      const res = await call();
+      if (res.outcome === "blocked") return /role/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason || "That could not be done. Nothing was changed." };
+      applyRun(res.run);
+      void refresh();
+      const r = res.run;
+      const already = res.outcome === "already";
+      return ok(already ? "Already so — nothing recorded twice" : text, {
+        already,
+        nav: r ? { ws: "renewal", runId: r.id, workItemId: r.workItemId } : undefined,
+        detail: r?.operational ? r.operational.status + (r.operational.nextFollowUpAt ? ". Next follow-up: " + S.fmtDate(r.operational.nextFollowUpAt) : "") + "." : "",
+        receipt: { action, record: r?.title ?? "Renewal", outcome: already ? "Already done" : "Done", changed: already ? [] : changed, unchanged, next: r?.operational?.needsFromYou ?? r?.operational?.currentWork?.title ?? null, audit: null },
+      });
+    } catch (e) {
+      return fail(e);
+    }
+  };
+
+  const saveRule = async (key, value, source, text) => {
+    try {
+      const res = await api.setRule({ key, value, source, verifiedAt: new Date().toISOString().slice(0, 10) });
+      if (res.outcome !== "done") return /may not/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: (res.reason || "The rule was not saved.") + " Nothing was changed." };
+      if (res.rules) state.rules = res.rules;
+      void refresh();
+      const v = res.rules?.rules?.find((r) => r.key === key)?.version;
+      return ok(text + (v ? " — version " + v : ""), { detail: "Recorded with its source and your name; the previous version is kept. It applies to the next step of every workflow.", nav: { ws: "autonomy" }, receipt: { action: "Rule changed", record: key, outcome: "Done", changed: ["A new version of the rule"], unchanged: ["Nothing already done changes", "Binding cover, client instructions, money and claims decisions stay with people"], next: null, audit: "organization.rule_set" } });
+    } catch (e) {
+      return fail(e);
+    }
+  };
+
+  /** The operational hand-off once a book is in: what exists now and what needs attention first. */
+  const handoff = (b) => {
+    const horizon = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    const renewalsSoon = db.policyYears.filter((y) => y.to && y.to >= today && y.to <= horizon).length;
+    const incomplete = db.clients.filter((c) => !db.contacts?.some?.((k) => k.clientId === c.id)).length;
+    return [
+      "ASAP organized " + plural(db.clients.length, "client", "clients") + ", " + plural(db.policies.length, "policy", "policies") + " and " + plural(db.documents.length, "document", "documents") + ".",
+      b ? "From " + b.filename + ": " + plural(b.clientsCreated ?? 0, "new client", "new clients") + ", " + plural(b.policiesCreated ?? 0, "policy", "policies") + "." : "",
+      incomplete ? plural(incomplete, "client has", "clients have") + " no contact yet." : "",
+      renewalsSoon ? plural(renewalsSoon, "renewal falls", "renewals fall") + " in the next 60 days — ASAP starts " + (renewalsSoon === 1 ? "it" : "them") + " on its own." : "No renewals fall in the next 60 days.",
+      "Gmail is optional and not connected; nothing was sent.",
+    ].filter(Boolean).join(" ");
+  };
+
+  /* ------------------------------------------------------------------ chat attachments (D-132) */
+
+  const SHEET = /\.(csv|xlsx|xls)$/i;
+  const DOC = /\.(pdf|png|jpe?g)$/i;
+  /**
+   * Files added in the conversation, by document id, with their state as the server reports it.
+   * Kept in memory for this session; the documents themselves — and their reading state — are the
+   * server's, so a refresh reads them again from there (the Setup Space lists them).
+   */
+  const ingested = new Map();
+  state.ingested = ingested;
+  // "This is Acme's motor policy": the client the next files are filed under, until changed.
+  let uploadClient = null;
+  /** Onboarding and attachments from Ask (D-132): typed requests open the same picker and Spaces. */
+  const onboardingFromAsk = (raw, t) => {
+    if (/^(upload (documents|files)|import (a |the )?(spreadsheet|records|client\/policy records)|import these|create the clients and policies|add (my|our) (book|records|documents))\b/i.test(t))
+      return { lead: "Choose the files.", text: "Drop them on the conversation, or choose them here. PDFs, photos, CSV and Excel; several at once is fine.", chips: [{ label: "Choose files", pick: true }], ref: { ws: "setup" } };
+    if (/^(add a client manually|add client manually)$/i.test(t)) return { lead: "Opening a new client.", text: "", ref: { ws: "newclient" } };
+    if (/^explore an empty workspace$/i.test(t)) return { lead: "Here is your workspace.", text: "Add records whenever you are ready — the + beside the box is always there.", ref: { ws: "today" } };
+    if (/\b(set ?up|onboarding|continue setup|my book)\b/i.test(t) && !/\brenew/i.test(t)) return { lead: "Here is where your setup stands.", text: "", ref: { ws: "setup" } };
+    // Only a possessive or "for": "This is Acme's motor policy", "These are for Acme Limited".
+    const own = /^(?:this is|these are|they are)\s+(?:for\s+(.+?)|(.+?)(?:'s|’s)\s+(?:[a-z ]*?)(?:policy|policies|documents?|schedules?|files?))\s*\.?$/i.exec(raw.trim());
+    if (own) {
+      own[1] = own[1] ?? own[2];
+      const name = own[1].trim().toLowerCase();
+      const c = db.clients.find((x) => x.name.toLowerCase() === name) ?? db.clients.find((x) => x.name.toLowerCase().startsWith(name));
+      if (!c) return { lead: "Which client is that?", text: "No client called " + own[1].trim() + " is on file. Add them first — say “add " + own[1].trim() + " as a client”.", chips: ["Add client manually"] };
+      uploadClient = c;
+      return { lead: "Files you add next are filed under " + c.name + ".", text: "Files already added stay where they are — ASAP cannot move a filed document to another client yet. Drop the files now, or use the +.", chips: [{ label: "Choose files", pick: true }], ref: { ws: "client", clientId: c.id } };
+    }
+    return null;
+  };
+  const PHASE = { not_started: "Uploaded — waiting to be read", queued: "Waiting to be read", working: "Reading", extracted: "Read", failed: "Could not read", not_applicable: "Filed — nothing to read" };
+  let polling = null;
+  const pollIngested = () => {
+    if (polling) return;
+    polling = setInterval(async () => {
+      const open = [...ingested.values()].filter((x) => x.id && !["extracted", "failed", "not_applicable"].includes(x.extractionState));
+      if (!open.length) {
+        clearInterval(polling);
+        polling = null;
+        void refresh();
+        return;
+      }
+      await Promise.all(open.map(async (x) => {
+        const d = await api.document(x.id).catch(() => null);
+        if (!d) return;
+        Object.assign(x, { extractionState: d.document.extractionState, error: d.document.extractionError ?? null, kind: d.document.kind, proposed: d.fields.filter((f) => f.state === "proposed").length, accepted: d.fields.filter((f) => f.state === "accepted" || f.state === "corrected").length });
+      }));
+      refresher.notify();
+    }, 3000);
+  };
+  /** One file: hashed, asked for a place, sent straight to storage, then marked as filed. */
+  const fileOne = async (file) => {
+    const entry = { id: null, name: file.name, extractionState: "uploading", error: null, kind: null, proposed: 0, accepted: 0, already: false };
+    try {
+      const asked = await api.uploadDocument({ filename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, contentSha256: await sha256File(file), clientId: uploadClient?.id ?? null });
+      entry.id = asked.document.id;
+      entry.already = asked.outcome === "already_on_file";
+      if (asked.outcome === "ready") {
+        const res = await fetch(asked.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: await file.arrayBuffer() });
+        if (!res.ok) throw new Error("The file store would not accept " + file.name);
+        await api.documentFiled(asked.document.id);
+      }
+      entry.extractionState = asked.document.extractionState ?? "queued";
+    } catch (e) {
+      entry.extractionState = "failed";
+      entry.error = describeApiError(e);
+    }
+    entry.key = entry.id ?? "local:" + file.name + ":" + file.size;
+    ingested.set(entry.key, entry);
+    return entry;
+  };
+  /** The card for files added in chat, read fresh each render from what the server last said. */
+  const ingestCard = (ids, base) => {
+    const xs = ids.map((id) => ingested.get(id)).filter(Boolean);
+    if (!xs.length) return base ?? null;
+    const done = xs.filter((x) => ["extracted", "not_applicable"].includes(x.extractionState));
+    const failed = xs.filter((x) => x.extractionState === "failed");
+    const reading = xs.length - done.length - failed.length;
+    const confirm = xs.filter((x) => x.proposed > 0);
+    return {
+      title: reading ? "Reading " + plural(xs.length, "file", "files") + "…" : failed.length === xs.length ? "Could not read " + plural(xs.length, "file", "files") : plural(done.length, "file", "files") + " read" + (failed.length ? " · " + failed.length + " could not be read" : ""),
+      sections: [
+        { label: "FILES", items: xs.map((x) => x.name + " — " + (x.already ? "already on file" : x.proposed ? "Needs confirmation (" + plural(x.proposed, "value", "values") + ")" : PHASE[x.extractionState] ?? "Uploading") + (x.error ? ": " + x.error : "")) },
+        ...(confirm.length ? [{ label: "NEEDS CONFIRMATION", items: confirm.map((x) => x.name + ": " + plural(x.proposed, "value ASAP read", "values ASAP read") + " — nothing is used until you confirm it against the page") }] : []),
+      ],
+      external: "Values ASAP reads are proposals: each links to its page, and nothing becomes a record until you confirm it.",
+      action: confirm.length ? null : null,
+      status: base?.status ?? "open",
+      editRef: { ws: "setup" },
+      editLabel: "Review in Space",
+      cancelLabel: "Not now",
+      confirmLabel: "Review values",
+      statusText: reading ? "ASAP is reading on its own service — this card updates as each file moves." : "",
+      ...(confirm.length ? { action: "nav.open", payload: { ref: { ws: "document", documentId: confirm[0].id } }, actionId: "nav.open:" + confirm[0].id } : {}),
+    };
+  };
+  /** Files dropped or picked in the conversation: spreadsheets are imported, documents filed. */
+  const ingest = async (files) => {
+    const sheets = files.filter((f) => SHEET.test(f.name));
+    const docs = files.filter((f) => DOC.test(f.name));
+    const other = files.filter((f) => !SHEET.test(f.name) && !DOC.test(f.name));
+    const notes = other.length ? [other.map((f) => f.name).join(", ") + (other.length === 1 ? " is" : " are") + " not a file ASAP reads — PDF, JPG, PNG, CSV or Excel. Nothing was filed from " + (other.length === 1 ? "it" : "them") + "."] : [];
+    if (sheets.length) {
+      state.importFile = sheets[0];
+      const res = await previewImport(null);
+      if (sheets.length > 1) notes.push("Only " + sheets[0].name + " was read; add the others one at a time so each is previewed on its own.");
+      if (!res.ok) return { lead: res.error, text: notes.join(" "), ref: { ws: "import" } };
+      const p = state.importPreview;
+      const clients = new Set(p.rows.filter((r) => r.clientName).map((r) => r.clientName)).size;
+      const policies = p.rows.filter((r) => r.policyNumber).length;
+      const needs = [...p.blocking.map((b) => b.message ?? String(b)), ...(p.summary.needsReview ? [plural(p.summary.needsReview, "row needs", "rows need") + " your decision (possible duplicates)"] : [])];
+      const docsPart = docs.length ? await Promise.all(docs.map(fileOne)) : [];
+      if (docsPart.length) pollIngested();
+      return {
+        lead: "I found " + plural(clients, "client", "clients") + " and " + plural(policies, "policy", "policies"),
+        text: [sheets[0].name + ": " + plural(p.summary.rows, "row", "rows") + " read." + (docsPart.length ? " " + plural(docsPart.length, "document", "documents") + " filed alongside." : ""), ...notes].join(" "),
+        ref: { ws: "import" },
+        pending: p.blocking.length
+          ? { title: "Needs correcting before import", sections: [{ label: "NEEDS CONFIRMATION", items: needs }], external: "Nothing is created until this is put right.", editRef: { ws: "import" }, editLabel: "Review in Space", cancelLabel: "Not now", confirmLabel: "Correct", action: "nav.open", payload: { ref: { ws: "import" } }, actionId: "nav.open:import:" + p.batch.id }
+          : { title: "I found " + plural(clients, "client", "clients") + " and " + plural(policies, "policy", "policies"), sections: [{ label: "FROM " + sheets[0].name.toUpperCase(), items: p.rows.slice(0, 6).map((r) => [r.clientName, r.policyNumber].filter(Boolean).join(" · ") + (r.outcome === "match" ? " (existing client)" : r.outcome === "create" ? " (new)" : " (needs your decision)")) }, ...(needs.length ? [{ label: "NEEDS CONFIRMATION", items: needs }] : [])], external: "Confirming creates these records with an audit entry against your name. Nothing is sent to anyone.", action: "import.commit", payload: { batchId: p.batch.id }, actionId: "import.commit:" + p.batch.id, confirmLabel: "Confirm records", editRef: { ws: "import" }, editLabel: "Review in Space", cancelLabel: "Not now", progress: "Creating the records…" },
+        ingest: docsPart.map((x) => x.key),
+      };
+    }
+    if (!docs.length) return { lead: "Nothing to add.", text: notes.join(" ") || "Choose PDF, JPG, PNG, CSV or Excel files." };
+    const entries = await Promise.all(docs.map(fileOne));
+    pollIngested();
+    const okN = entries.filter((x) => x.extractionState !== "failed").length;
+    return {
+      lead: okN ? plural(okN, "file", "files") + " received — ASAP is reading " + (okN === 1 ? "it" : "them") : "Those files could not be filed.",
+      text: [okN ? "Each moves from Reading to Read; anything ASAP reads waits for your confirmation before it becomes a record." : "", ...notes].filter(Boolean).join(" "),
+      ref: { ws: "setup" },
+      ingest: entries.map((x) => x.key),
+    };
+  };
+
   /** Writes the API can perform. Everything else is refused honestly. */
   const LIVE = {
     // The conversation stays in this browser for this brokerage and person; it is not a record.
@@ -689,6 +957,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       return ok("Saved");
     },
+    "nav.open": (p) => ok("Opened", { nav: p.ref }),
     "draft.save": (p) => {
       const d = db.drafts.find((x) => x.id === p.id);
       if (d) Object.assign(d, p);
@@ -763,7 +1032,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         state.importPreview = null;
         state.importFile = null;
         state.importResolutions = new Map();
-        await refresh();
+        // Verification needs the records as they are now, so this one waits for the full re-read.
+        await refresher.refreshFully();
         // Success is claimed only for what can be read back: every imported policy must now be on file.
         const onFile = new Set(db.policies.map((x) => x.number));
         const missing = expected.filter((n) => !onFile.has(n));
@@ -774,7 +1044,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const failed = (res.failures ?? []).length;
         if (missing.length || failed)
           return ok("Imported " + parts.join("; ") + " from " + b.filename, { partial: [failed ? plural(failed, "line was", "lines were") + " not imported" : null, missing.length ? plural(missing.length, "policy is", "policies are") + " not readable yet: " + missing.join(", ") : null].filter(Boolean).join("; ") + ".", detail: "What was written is on file with an audit entry; the rest was not written." });
-        return ok("Imported " + parts.join("; ") + " from " + b.filename);
+        return ok("Your book is ready", { detail: handoff(b), next: [{ label: "Review problems", ref: { ws: "setup" } }, { label: "Open Today", ref: { ws: "today" } }, { label: "Ask ASAP", text: "What needs attention today?" }], nav: { ws: "setup" } });
       } catch (e) {
         return fail(e);
       }
@@ -785,13 +1055,23 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     },
     "import.template": () => {
       const header = IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(",");
-      const blob = new Blob([header + "\n"], { type: "text/csv" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "asap-import-template.csv";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      return ok("Template downloaded — one row per policy; only client_name is required");
+      const blob = new Blob([header + "\n"], { type: "text/csv;charset=utf-8" });
+      try {
+        // The link must be in the page for every browser to honour the download; it is removed after.
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "asap-import-template.csv";
+        a.rel = "noopener";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+      } catch {
+        return { ok: false, error: "Your browser did not allow the download. The columns are: " + IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(", ") + "." };
+      }
+      // A browser can still decline silently, so say what to look for rather than claim it arrived.
+      return ok("Template download started: asap-import-template.csv", { detail: "Check your browser's downloads. One row per policy; only client_name is required. Columns: " + IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(", ") + "." });
     },
     "import.clear": () => {
       state.importPreview = null;
@@ -814,10 +1094,13 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.startRenewal(p.policyPeriodId);
         if (res.outcome === "blocked") return { ok: false, error: res.reason || "The renewal could not be started. Nothing was changed." };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         const r = res.run;
-        return ok(res.outcome === "already" ? "That renewal is already in hand" : "Renewal started — ASAP is preparing it", {
+        const card = approvalCard(r) ?? blockerCard(r);
+        return ok(res.outcome === "already" ? "That renewal is already in hand" : r?.state === "exception" ? "Renewal started — ASAP stopped safely: information is missing" : "Renewal started — ASAP prepared it", {
           already: res.outcome === "already",
+          nextPending: card ? { lead: card.title, text: r?.operational?.completed ?? "", pending: card } : null,
           nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
           detail: r ? r.stateLabel + ". " + r.progress.done + " of " + r.progress.steps + " steps done." : "",
           receipt: { action: "Renewal started", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : ["A renewal run and its Work item"], unchanged: ["Nothing was sent", "No cover or money changed"], next: r?.state === "waiting_approval" ? "Review and approve the renewal bundle" : r?.stateLabel ?? null, audit: "workflow.renewal.started" },
@@ -831,13 +1114,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.decideApproval(p.approvalId, { decision: p.decision, bundleSha256: p.bundleSha256, ...(p.note ? { note: p.note } : {}) });
         if (res.outcome === "blocked") return /role/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         const r = res.run;
         const approved = p.decision === "approve";
-        return ok(res.outcome === "already" ? "Already decided — nothing recorded twice" : approved ? "Renewal bundle approved — ASAP carried on" : "Renewal bundle not approved", {
+        return ok(res.outcome === "already" ? "Already decided — nothing recorded twice" : approved ? "Approved — not sent" : "Renewal bundle not approved", {
           already: res.outcome === "already",
           nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
-          detail: approved ? "The insurer request is recorded as approved — not sent. Nothing leaves ASAP: deliver it yourself and record how." : "The run stopped with your reason. Put it right on the records, then resume.",
+          next: approved && r ? [{ label: "Open next step", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } }] : [],
+          detail: approved ? "ASAP opened the next step: deliver the insurer request and record how it was delivered. Next follow-up after delivery: " + followUpDays() + " days." : "The run stopped with your reason. Put it right on the records, then resume.",
           receipt: { action: approved ? "Renewal bundle approved" : "Renewal bundle rejected", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : [approved ? "Pack and both messages approved" : "Bundle rejected with your reason"], unchanged: ["Nothing was sent to the client or the insurer", "No cover or money changed"], next: r?.state === "waiting_party" ? "Deliver the approved request to the insurer and record how" : r?.exception?.needs ?? r?.stateLabel ?? null, audit: approved ? "workflow.bundle_approved" : "workflow.bundle_rejected" },
         });
       } catch (e) {
@@ -849,17 +1134,52 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.recordCommunicationDelivery(p.communicationId, { method: p.method || "own_email", reference: p.reference.trim() });
         if (res.outcome === "blocked") return { ok: false, error: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         return ok(res.outcome === "already" ? "Already recorded — nothing twice" : "Delivery recorded — delivered by you, not sent by ASAP", { already: res.outcome === "already", nav: { ws: "renewal", runId: res.run?.id, workItemId: res.run?.workItemId } });
       } catch (e) {
         return fail(e);
       }
     },
+    "renewal.pause": (p) => runAction(() => api.pauseWorkflow(p.runId, p.reason), "Paused — ASAP will not act on this renewal until it is resumed", "Paused", ["ASAP takes no further step"], ["Nothing already done is undone", "Escalation dates are kept"]),
+    "renewal.escalate": (p) => {
+      if ((p.reason || "").trim().length < 3) return { ok: false, error: "Say why it is escalated. Nothing was changed." };
+      return runAction(() => api.escalateWorkflow(p.runId, p.reason.trim()), "Escalated — the owner is asked to act", "Escalated", ["Work and Today ask the owner to act"], ["Nothing was sent"]);
+    },
+    "renewal.followUpNow": (p) => runAction(() => api.followUpNow(p.runId), "Follow-up raised now", "Follow up now", ["The follow-up is due today"], ["Nothing was sent — ASAP has no mailbox; a person chases"]),
+    "renewal.moveFollowUp": (p) => {
+      const when = p.on ? (/^\d{4}-\d{2}-\d{2}$/.test(p.on) ? p.on : parseDate(String(p.on))?.date) : null;
+      if (!when) return { ok: false, error: "Say the date to follow up — for example Friday, or 7 October. Nothing was changed." };
+      return runAction(() => api.moveFollowUp(p.runId, when), "Next follow-up moved to " + S.fmtDate(when), "Follow-up date changed", ["Next follow-up: " + S.fmtDate(when)], ["The escalation date", "Nothing was sent"]);
+    },
+    "renewal.chasing": (p) => runAction(() => api.setChasing(p.runId, Boolean(p.stop), p.reason), p.stop ? "ASAP stopped chasing — it still escalates on schedule" : "ASAP is chasing again on the schedule", p.stop ? "Chasing stopped" : "Chasing restarted", [p.stop ? "No automatic follow-ups" : "Follow-ups on the schedule"], ["Escalation is kept"]),
+    "renewal.stop": (p) => {
+      if ((p.reason || "").trim().length < 3) return { ok: false, error: "Say why ASAP should stop. Nothing was changed." };
+      return runAction(() => api.stopWorkflow(p.runId, p.reason.trim()), "ASAP stopped working on this renewal — its Work stays with a person", "Automation stopped", ["The run is cancelled", "Work asks a person to carry it"], ["Nothing already done is undone", "Nothing was sent"]);
+    },
+    /*
+     * Autonomy and cadence rules (D-131): each save is a new version on the server, with its source
+     * and the person's name. The server validates the ladder (external messages always wait for a
+     * person) and says why when it refuses.
+     */
+    "rules.autonomy": async (p) => {
+      const source = (p.source || "").trim();
+      if (source.length < 3) return { ok: false, error: "Say where this rule comes from — a partners' meeting, a circular. Nothing was saved." };
+      const value = { actions: Object.fromEntries(["detect_renewals", "prepare_renewal", "external_messages", "follow_up", "escalate", "recommend_quote"].map((k) => [k, p["lvl_" + k]])), approver: p.approver, assignment: p.assignment, alsoNever: [] };
+      return saveRule("workflow.autonomy", value, source, "Autonomy rule saved as a new version");
+    },
+    "rules.window": async (p) => {
+      const source = (p.source || "").trim();
+      if (source.length < 3) return { ok: false, error: "Say where this rule comes from. Nothing was saved." };
+      const value = { leadDays: Number(p.leadDays), followUpDays: Number(p.followUpDays), escalateDaysBeforeExpiry: Number(p.escalateDaysBeforeExpiry) };
+      return saveRule("renewal.window", value, source, "Renewal cadence saved as a new version");
+    },
     "renewal.resume": async (p) => {
       try {
         const res = await api.resumeWorkflow(p.runId);
         if (res.outcome === "blocked") return { ok: false, denied: true, reason: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         return ok("Renewal resumed — " + (res.run?.stateLabel ?? "ASAP carried on").toLowerCase(), { nav: { ws: "renewal", runId: p.runId, workItemId: res.run?.workItemId } });
       } catch (e) {
         return fail(e);
@@ -1128,7 +1448,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           await api.documentFiled(asked.document.id);
         }
         pendingFiles.delete(p.name);
-        await refresh();
+        await refresher.refreshFully();
         // The receipt is given only once the document can be read back, and it opens there.
         if (!db.documents.some((x) => x.id === asked.document.id))
           return { ok: false, error: file.name + " was stored but is not readable yet. Refresh records; if it is still missing, tell your administrator." };
@@ -1161,7 +1481,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return { ok: false, error: what + " is not connected to your brokerage's records yet. Nothing was changed." };
     }
     // Only writes that created or changed a record are remembered as done; reads and refusals are not.
-    const REPEATABLE = new Set(["conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template", "doc.applyPreview"]);
+    const REPEATABLE = new Set(["nav.open", "conversation.save", "draft.save", "import.preview", "import.basis", "import.clear", "import.resolve", "import.template", "doc.applyPreview"]);
     const settle = (res) => {
       if (res.ok && !REPEATABLE.has(type)) db.meta.ledger[key] = { ...res, actionId: key };
       // The action a card was waiting on is done: it is no longer pending, and its receipt is the latest.
@@ -1171,9 +1491,17 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       return res;
     };
-    const out = handler(payload, requestKeyFor(key));
-    if (!(out && typeof out.then === "function")) return settle(out);
-    const p = out.then(settle).finally(() => inflight.delete(key));
+    let out;
+    try {
+      out = handler(payload, requestKeyFor(key));
+    } catch (e) {
+      return { ...fail(e), status: "failed" };
+    }
+    if (!(out && typeof out.then === "function")) return settle({ ...out, status: lifecycleOf(out) });
+    // Every write settles inside the deadline — succeeded, blocked or failed — never pending.
+    const p = runMutation(() => out, { describe: (e) => describeApiError(e) })
+      .then(settle)
+      .finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }
@@ -1193,12 +1521,23 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         ],
       };
     }
+    state.db = db;
+    if (ref?.ws === "renewal" && ref.view === "receipt" && ref.runId && !state.receipts.has(ref.runId))
+      void api.workflowReceipt(ref.runId).then((x) => { state.receipts.set(ref.runId, x); refresher.notify(); }).catch(() => {});
     const own = liveSpace(ref, state);
     if (own) {
       own.ref = ref;
       return own;
     }
-    return guardLive(buildWorkspace(ref));
+    const built = guardLive(buildWorkspace(ref));
+    // Work and Today point at the supervision board: every workflow ASAP is running, grouped.
+    if (built && Array.isArray(built.blocks) && (ref?.ws === "work" || ref?.ws === "today") && state.supervision) {
+      const c = state.supervision.counts;
+      built.blocks.push({ t: "gate", kind: "approve", heading: "Work ASAP is doing", label: "Open", detail: (c.needs_me ?? 0) + " need you · " + (c.asap_handling ?? 0) + " ASAP is handling · " + (c.waiting_on_others ?? 0) + " waiting on others · " + (c.upcoming ?? 0) + " with planned actions", nav: { ws: "renewal", view: ref.ws === "today" ? "needs_me" : "asap_handling" } });
+      if (ref.ws === "today" && state.supervision.upcoming.length)
+        built.blocks.push({ t: "gate", kind: "approve", heading: "Upcoming", label: "See what ASAP plans", detail: state.supervision.upcoming.slice(0, 3).map((u) => u.label + " — " + S.fmtDate(u.at)).join(" · "), nav: { ws: "renewal", view: "upcoming" } });
+    }
+    return built;
   }
 
   /**
@@ -1502,6 +1841,85 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * Supervision from Ask (D-131): what ASAP is doing, what needs approval, what is overdue, what is
+   * waiting on whom, what is planned — and, for the workflow in front, where it is, what it waits
+   * for, when it follows up, and the controls (move the follow-up, stop chasing, pause, resume,
+   * escalate, follow up now). Every answer reads the same supervision state Work and the Space show;
+   * every change is a pending card on the same endpoint the Space calls.
+   */
+  function supervisionFromAsk(raw, t, ctx) {
+    // Brokerage-wide questions read the supervision list; the workflow in front reads its own run.
+    const sup = state.supervision ?? { items: [], upcoming: [], counts: {} };
+    const items = sup.items;
+    const live = items.filter((i) => !i.views.includes("done"));
+    const line = (i) => i.title + " — " + i.operational.status + (i.operational.nextFollowUpAt ? " (next follow-up " + S.fmtDate(i.operational.nextFollowUpAt) + ")" : "");
+    const list = (xs) => xs.slice(0, 5).map(line).join("; ") + (xs.length > 5 ? "; and " + (xs.length - 5) + " more." : ".");
+    if (/\b(autonomy|what (may|can) asap do (on its own|automatically)|asap'?s rules|automation rules)\b/i.test(t)) return { lead: "Here is what ASAP may do on its own.", text: "Each action sits on the six-step ladder; external messages always wait for a person.", ref: { ws: "autonomy" } };
+    if (/\bwhat (is|'s) asap (doing|working on)|what are you (doing|working on)\b/i.test(t)) {
+      const handling = items.filter((i) => i.views.includes("asap_handling"));
+      return { lead: live.length ? "ASAP has " + plural(live.length, "workflow", "workflows") + " open." : "ASAP has nothing open right now.", text: [handling.length ? "Handling on its own: " + list(handling) : null, sup.counts.needs_me ? plural(sup.counts.needs_me, "needs", "need") + " you." : "Nothing needs you."].filter(Boolean).join(" "), ref: { ws: "renewal", view: "asap_handling" } };
+    }
+    if (/\b(needs?|waiting for|awaiting) (my |an? )?approvals?\b|\bwhat (do i|should i) approve\b|\bapprovals? (pending|waiting)\b/i.test(t)) {
+      const xs = live.filter((i) => i.state === "waiting_approval");
+      return { lead: xs.length ? plural(xs.length, "renewal is", "renewals are") + " waiting for approval." : "Nothing is waiting for approval.", text: xs.length ? list(xs) : "ASAP puts a bundle here the moment one is ready.", ref: { ws: "renewal", view: "needs_me" } };
+    }
+    if (/\boverdue\b|\blate\b|\bbehind\b/i.test(t)) {
+      const xs = live.filter((i) => /overdue|cover ends in ([0-9]|1[0-4]) days|escalated/.test(i.priorityReason));
+      return { lead: xs.length ? plural(xs.length, "item is", "items are") + " overdue or close to the deadline." : "Nothing is overdue.", text: xs.length ? list(xs) : "No insurer response is overdue and no renewal is within 14 days of expiry without terms.", ref: { ws: "renewal", view: "needs_me" } };
+    }
+    const waitingOn = /\b(?:waiting on|waiting for|with)\s+([a-z][\w&.' -]{1,40}?)\s*\??$/i.exec(raw.trim());
+    if (/\b(everything|all|show)\b/i.test(t) && waitingOn && !/\b(me|you|approval|terms)\b/i.test(waitingOn[1])) {
+      const who = waitingOn[1].trim().toLowerCase();
+      const xs = live.filter((i) => i.operational.waitingFor && i.operational.waitingFor.party.toLowerCase().includes(who));
+      return { lead: xs.length ? plural(xs.length, "item is", "items are") + " waiting on " + waitingOn[1].trim() + "." : "Nothing is waiting on " + waitingOn[1].trim() + ".", text: xs.length ? list(xs) : "Only work handed to an outside party is counted.", ref: { ws: "renewal", view: "waiting_on_others" } };
+    }
+    if (/\b(upcoming|what will asap do next|what('?s| is) (planned|scheduled)|scheduled (actions|follow-?ups))\b/i.test(t)) {
+      const ups = sup.upcoming;
+      return { lead: ups.length ? "ASAP has " + plural(ups.length, "action", "actions") + " planned." : "Nothing is planned.", text: ups.slice(0, 5).map((u) => u.label + " — " + S.fmtDate(u.at) + " (" + u.title + ")").join("; "), ref: { ws: "renewal", view: "upcoming" } };
+    }
+
+    // The workflow in front, or the one named.
+    const ref = ctx.ref || ctx;
+    const runs = [...(state.renewals?.values?.() ?? [])];
+    const sub = resolveSubject(t, ctx);
+    const target = (ref.ws === "renewal" && ref.runId ? runs.find((r) => r.id === ref.runId) : null)
+      ?? (ref.workItemId ? runs.find((r) => r.workItemId === ref.workItemId) : null)
+      ?? (sub?.clientId ? runs.find((r) => r.client?.id === sub.clientId && r.state !== "done" && r.state !== "cancelled") : null);
+    const ABOUT = /\bwhere is (this|the|it)|what are we waiting (for|on)|when will asap follow|next follow-?up|move the (next )?follow-?up|stop chasing|start chasing|chase again|follow up now|\bpause\b|\bresume\b|\bescalate\b|\bwhy\b|open next step/i;
+    if (!ABOUT.test(t)) return null;
+    if (!target) return { lead: "Which workflow?", text: "Open it from Work, or name the client, and ask again. Nothing was changed.", ref: { ws: "renewal" } };
+    const o = target.operational;
+    const at = { ws: "renewal", runId: target.id, workItemId: target.workItemId };
+    const card = (title, items, action, payload, label, progress) => ({ lead: title + "?", text: o.status + ".", ref: at, pending: { title, sections: [{ label: "WILL DO", items }, { label: "NOT DONE", items: ["Nothing is sent to anyone", "No cover or money changes"] }], external: "Recorded against your name; Work, Today and the Space change at once.", action, payload, actionId: action + ":" + target.id + ":" + JSON.stringify(payload), confirmLabel: label, progress } });
+    const can = (k) => o.interventions.find((i) => i.key === k);
+    const refuse = (k) => ({ lead: can(k)?.label + " isn't available.", text: (can(k)?.why ?? "") + " Nothing was changed.", ref: at });
+    if (/open next step/i.test(t)) return { lead: "Opening the next step.", text: o.needsFromYou ?? o.currentWork.title, ref: at };
+    if (/move the (next )?follow-?up|follow-?up (to|on)\b/i.test(t)) {
+      if (!can("follow_up_date")?.available) return refuse("follow_up_date");
+      const when = parseDate(t.replace(/^.*?\b(to|on)\b/i, ""));
+      if (!when) return { lead: "To when?", text: "Say a day — Friday, or 7 October. Nothing was changed.", ref: at };
+      return card("Move the next follow-up to " + S.fmtDate(when.date), ["Next follow-up: " + S.fmtDate(when.date) + " (used once; the schedule resumes after it)", "Escalation stays " + (o.escalatesAt ? S.fmtDate(o.escalatesAt) : "as it is")], "renewal.moveFollowUp", { runId: target.id, on: when.date }, "Move follow-up", "Rescheduling…");
+    }
+    if (/stop chasing/i.test(t)) return o.chasing === "active" ? card("Stop chasing " + (o.waitingFor?.party ?? "the insurer"), ["No automatic follow-ups", "ASAP still escalates " + (o.escalatesAt ? "on " + S.fmtDate(o.escalatesAt) : "on schedule")], "renewal.chasing", { runId: target.id, stop: true }, "Stop chasing", "Recording…") : { lead: "ASAP is not chasing anyone on this one.", text: o.status + ".", ref: at };
+    if (/start chasing|chase again/i.test(t)) return o.chasing === "stopped" ? card("Start chasing again", ["Follow-ups resume on the brokerage's schedule"], "renewal.chasing", { runId: target.id, stop: false }, "Start chasing", "Recording…") : { lead: "Chasing is not stopped.", text: o.status + ".", ref: at };
+    if (/follow up now/i.test(t)) return can("follow_up_now")?.available ? card("Follow up now", ["The follow-up becomes due today; Work asks the owner to chase"], "renewal.followUpNow", { runId: target.id }, "Follow up now", "Raising the follow-up…") : refuse("follow_up_now");
+    if (/\bpause\b/i.test(t)) return can("pause")?.available ? card("Pause this renewal", ["ASAP takes no further step until someone resumes it"], "renewal.pause", { runId: target.id }, "Pause", "Pausing…") : refuse("pause");
+    if (/\bresume\b/i.test(t)) return can("resume")?.available ? card("Resume this renewal", ["ASAP continues this same run from where it stopped"], "renewal.resume", { runId: target.id }, "Resume", "Resuming…") : refuse("resume");
+    if (/\bescalate\b/i.test(t)) {
+      if (!can("escalate")?.available) return refuse("escalate");
+      const reason = raw.replace(/^.*?\bescalate\b( (this|it))?( because)?/i, "").trim() || "Escalated from the conversation";
+      return card("Escalate to " + (o.escalatesTo ?? "the work owner"), ["Work and Today ask the owner to act", "Reason: " + reason], "renewal.escalate", { runId: target.id, reason }, "Escalate", "Escalating…");
+    }
+    if (/when will asap follow|next follow-?up/i.test(t))
+      return { lead: o.nextFollowUpAt ? "ASAP follows up on " + S.fmtDate(o.nextFollowUpAt) + "." : "No follow-up is scheduled yet.", text: o.nextFollowUpAt ? "With " + (o.waitingFor?.party ?? "the insurer") + (o.escalatesAt ? "; it escalates to " + (o.escalatesTo ?? "the work owner") + " on " + S.fmtDate(o.escalatesAt) : "") + "." : o.status + (o.needsFromYou ? ". " + o.needsFromYou : "."), ref: at };
+    if (/what are we waiting/i.test(t))
+      return { lead: o.waitingFor ? "Waiting for " + o.waitingFor.party + (o.waitingFor.since ? " since " + S.fmtDate(o.waitingFor.since) : "") + "." : o.needsFromYou ? "It is waiting for you." : "Nothing outside the brokerage.", text: o.needsFromYou ?? o.currentWork.title + ".", ref: at };
+    if (/\bwhy\b/i.test(t))
+      return { lead: o.status + ".", text: [o.completed, o.blockers.length ? "In the way: " + o.blockers.map((b) => b.label + (b.blocking ? " (blocking)" : "")).join("; ") + "." : null, target.steps?.find((st) => st.key === "detect")?.output?.windowBasis ?? null].filter(Boolean).join(" "), ref: { ...at, view: "history" } };
+    return { lead: target.title + ": " + o.status + ".", text: [o.currentWork.title + ".", o.needsFromYou, o.nextFollowUpAt ? "Next follow-up " + S.fmtDate(o.nextFollowUpAt) + "." : null].filter(Boolean).join(" ") + " " + target.progress.done + " of " + target.progress.steps + " steps complete.", ref: at };
+  }
+
+  /**
    * Renewal Autopilot from Ask (D-129): what is coming up, where one stands, start one now, and
    * approve its bundle — each answered from the runs the server returned, each write a pending card
    * on the same contract the Renewal Space uses.
@@ -1512,11 +1930,21 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const ref = ctx.ref || ctx;
     const inFront = ref.ws === "renewal" ? runs.find((r) => r.id === ref.runId || r.workItemId === ref.workItemId) : ref.workItemId ? runs.find((r) => r.workItemId === ref.workItemId) : null;
     if (/\b(what|which|show|list|any|upcoming|coming up|due)\b/i.test(t) && /\brenewals\b|coming up|upcoming|due/i.test(t) && !/\b(approve|start|prepare)\b/i.test(t)) {
-      const waiting = runs.filter((r) => r.state === "waiting_approval");
-      const stopped = runs.filter((r) => r.state === "exception");
+      // The automatic window and work a person started are different things, and said apart.
+      const open = runs.filter((r) => r.state !== "done" && r.state !== "cancelled");
+      const lead = Number(state.rules?.rules?.find((r) => r.key === "renewal.window")?.value?.leadDays ?? 60);
+      const windowed = open.filter((r) => r.operational?.origin !== "manual");
+      const manual = open.filter((r) => r.operational?.origin === "manual");
+      const waiting = open.filter((r) => r.state === "waiting_approval");
+      const stopped = open.filter((r) => r.state === "exception");
       return {
-        lead: runs.length ? plural(runs.length, "renewal", "renewals") + " in hand." : "No renewals in the window yet.",
-        text: runs.length ? [waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for your approval." : null, stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null, "ASAP looks for renewals every day and prepares them on its own."].filter(Boolean).join(" ") : "ASAP looks every day; a policy period nearing its end appears here with its pack prepared.",
+        lead: windowed.length ? plural(windowed.length, "policy period ends", "policy periods end") + " within the " + lead + "-day renewal window — ASAP started " + (windowed.length === 1 ? "it" : "them") + " on its own." : "No policy period ends within the " + lead + "-day renewal window.",
+        text: [
+          manual.length ? plural(manual.length, "renewal was", "renewals were") + " started by a person, outside the automatic window" + (manual.length <= 3 ? ": " + manual.map((r) => r.title).join("; ") : "") + "." : null,
+          waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for approval." : null,
+          stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null,
+          "ASAP checks the window every day.",
+        ].filter(Boolean).join(" "),
         ref: { ws: "renewal" },
       };
     }
@@ -1544,14 +1972,17 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     if (/\b(start|prepare|begin|do|handle)\b/i.test(t)) {
-      if (target) return { lead: "That renewal is already in hand.", text: target.stateLabel + " — " + target.progress.done + " of " + target.progress.steps + " steps done.", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
+      // The renewal of the policy named — not any open renewal for the same client.
       if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, raw);
       const pol = asPolicy(sub);
       if (pol.ambiguous) return clarifyClient(pol.ambiguous, raw);
-      if (pol.several) return clarifyPolicy(pol.several, raw);
+      if (pol.several && !inFront) return clarifyPolicy(pol.several, raw);
+      if ((pol.none || pol.noPolicy || pol.several) && inFront) return { lead: "That renewal is already in hand.", text: inFront.stateLabel + " — " + inFront.progress.done + " of " + inFront.progress.steps + " steps done.", ref: { ws: "renewal", runId: inFront.id, workItemId: inFront.workItemId } };
       if (pol.none || pol.noPolicy) return { lead: "Which policy?", text: "Name the client or the policy number. Nothing was started.", ref: null, keepWorkspace: true };
       const p = pol.policy;
       const year = db.policyYears.filter((y) => y.policyId === p.id).sort((a, b) => (a.to < b.to ? 1 : -1))[0];
+      const existing = year ? runs.find((r) => r.subjectId === year.id && r.state !== "done" && r.state !== "cancelled") : null;
+      if (existing) return { lead: "That renewal is already in hand.", text: existing.stateLabel + " — " + existing.progress.done + " of " + existing.progress.steps + " steps done.", ref: { ws: "renewal", runId: existing.id, workItemId: existing.workItemId } };
       if (!year) return { lead: "There is no period on file for " + p.number + ".", text: "Record the policy's current period first. Nothing was started.", ref: null, keepWorkspace: true };
       const client = db.clients.find((c) => c.id === p.clientId);
       return {
@@ -2014,6 +2445,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ];
     const go = GO.find(([re]) => re.test(t.trim()));
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
+    const onboarding = onboardingFromAsk(text.trim(), t);
+    if (onboarding) return onboarding;
+    const supervised = supervisionFromAsk(text.trim(), t, ctx);
+    if (supervised) return supervised;
     const renewal = renewalFromAsk(text.trim(), t, ctx);
     if (renewal) return renewal;
     const automation = automationFromAsk(text.trim(), t);
@@ -2053,8 +2488,25 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   S.useBackend({ db, dispatch });
 
   return {
-    greetingChips: LIVE_CHIPS,
+    greetingChips: db.clients.length === 0 ? WELCOME_CHIPS : LIVE_CHIPS,
     savingNote: "Saving to your brokerage's records…",
+    // A brand-new brokerage is welcomed with somewhere to start; it can skip and come back (D-132).
+    ...(db.clients.length === 0
+      ? { greetingLead: "Your brokerage is ready.", greetingText: "Add the records you already have and I’ll organize them for you. You can do this now or any time later with the + beside the box." }
+      : {}),
+    attachMenu: [
+      { label: "Upload documents", pick: true },
+      { label: "Import client/policy records", pick: true },
+      { label: "Add client manually", ref: { ws: "newclient" } },
+      { label: "Connect email (optional, not needed yet)", ref: { ws: "connections" } },
+    ],
+    ingest,
+    ingestCard,
+    /** Re-render when a background re-read lands; returns the unsubscribe. */
+    onChange: (fn) => refresher.onChange(fn),
+    freshness: () => refresher.status,
+    /** True only while ASAP has a run actually in progress — the Activity chip's dot. */
+    activityLive: () => [...(state.renewals?.values?.() ?? [])].some((r) => r.state === "running" || r.state === "queued"),
     suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
     historyNote: "Saved with your brokerage, so it follows you to any device. It’s a record of what you asked, not a business record.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },
@@ -2072,7 +2524,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       actor: S.actor,
       setUser: () => {},
       modeLinks: [
-        { title: "Refresh records", note: "Read your brokerage's records again", go: () => void refresh() },
+        { title: "Refresh records", note: "Read your brokerage's records again", go: () => void refresher.refreshFully() },
         { title: "Open the demo", note: "Fictional records, kept in this browser only", go: switchToDemo },
         { title: "Sign out", note: me.user.email, go: () => void supabase.auth.signOut().then(() => window.location.assign("/sign-in")) },
       ],
