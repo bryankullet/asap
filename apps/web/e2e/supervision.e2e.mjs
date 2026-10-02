@@ -81,7 +81,7 @@ await approve(S.completed);
 const out = await deliver(S.completed.id);
 await api("POST", `/opportunities/${out.opportunityId}/actions`, { action: "record_response", opportunityInsurerId: out.opportunityInsurerId, outcome: "quoted", receivedAt: new Date().toISOString(), premiumAmount: "1260000.00", premiumCurrency: "KES", validUntil: iso(new Date(Date.now() + 120 * DAY)), sourceNote: "Renewal terms letter." });
 await api("POST", `/workflows/runs/${S.completed.id}/follow-up-now`);
-const fresh = period("SUPN", 102);
+period("SUPN", 102);
 const freshNumber = `SUPN-${TAG}`;
 
 /* ------------------------------------------------------------------------------ the browser */
@@ -311,9 +311,9 @@ for (const w of [1360, 390]) {
 
 // Nothing left the building.
 const sends = Number(sql("select count(*) from email_send_attempts"));
-if (sends !== 0) { failures += 1; console.log(`✗ ${sends} email send attempts recorded`); }
-else console.log("✓ no email send attempts — nothing was sent");
+if (sends !== 0) { failures += 1; process.stdout.write(`✗ ${sends} email send attempts recorded\n`); }
+else process.stdout.write("✓ no email send attempts — nothing was sent\n");
 
 await browser.close();
-console.log(`\n${results.length - failures} of ${results.length} steps passed; screenshots in ${OUT}`);
+process.stdout.write(`\n${results.length - failures} of ${results.length} steps passed; screenshots in ${OUT}\n`);
 process.exit(failures ? 1 : 0);
