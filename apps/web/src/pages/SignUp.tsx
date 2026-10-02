@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { Link, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
-import { supabase } from "../lib/supabase.js";
+import { supabase, supabaseHost } from "../lib/supabase.js";
 
 const schema = z
   .object({
@@ -35,11 +35,26 @@ export function SignUp() {
     const next = params.next;
     const redirect = new URL("/auth/callback", window.location.origin);
     if (next) redirect.searchParams.set("next", next);
-    const { error } = await supabase.auth.signUp({
-      email: values.email,
-      password: values.password,
-      options: { data: { full_name: values.full_name }, emailRedirectTo: redirect.toString() },
-    });
+    let error: { message: string; status?: number | undefined } | null;
+    try {
+      ({ error } = await supabase.auth.signUp({
+        email: values.email,
+        password: values.password,
+        options: { data: { full_name: values.full_name }, emailRedirectTo: redirect.toString() },
+      }));
+    } catch (err) {
+      error = { message: err instanceof Error ? err.message : String(err) };
+    }
+    // supabase-js reports a network failure as status 0 / "Failed to fetch". Name the host the
+    // browser could not reach, so the failure is diagnosable without opening DevTools.
+    if (error && (!error.status || /fetch|network/i.test(error.message))) {
+      console.warn(`ASAP sign-up: could not reach ${supabaseHost}`, error.message);
+      setError(
+        `Could not reach the sign-in service (${supabaseHost}): ${error.message}. ` +
+          "Check your connection, or try without browser extensions that block requests.",
+      );
+      return;
+    }
     if (error) {
       setError(
         error.message.includes("registered")
