@@ -2174,3 +2174,30 @@ cloud test browser reached asap-web but not `*.supabase.co` (Supabase edge logs 
 the failure time). Only the anon key and the user's own session pass through — the same requests as
 direct. The auth storage key stays keyed to the project, so turning the proxy on or off keeps
 sessions. Unset the variable and redeploy to go back to direct.
+
+## D-134
+
+**Acceptance batch: insurers and drafts from Ask, client contacts, requirement state.**
+- *Insurers by name.* `approach_insurers` adds one or more insurers to an existing quotation by id
+  or name, and optionally prepares one draft request to each. A name not on file is put on file
+  (`insurer_create`, idempotent on the name); a name matching more than one insurer is refused with
+  the matches, and nothing is written. Drafts are composed by the server from the quotation's records,
+  list outstanding client information as "to follow", and are never overwritten once they exist (an
+  edit or approval is kept). Nothing is sent: drafts wait for approval, and with no mailbox a person
+  copies or downloads the approved text and records delivery. Ask reads a clear list ("APA, CIC and
+  Jubilee") without asking which one; it asks only on a real ambiguity, and the reply to "which
+  insurers?" is read against that quote on the next turn only.
+- *Requirements no longer silently block.* An outstanding requirement is named in the next action
+  but does not stop choosing insurers, preparing or approving drafts; it stands in front of delivery
+  (`quotationNext`). The Space says what is missing, why, how to provide it, and its state.
+- *The quote view shows what the server answered at once.* A write's returned quotation is applied
+  immediately and an older in-flight re-read cannot put the previous state back — the cause of the
+  receipt shown beside "no requirements".
+- *Contacts.* A contact given while adding a client is saved with it as the primary (or the response
+  says exactly why not); `PATCH /contacts/:id` corrects one (audited by field, without the address);
+  the client record lists contacts, each opening an edit form. Reserved `.test` addresses are valid.
+- *Quotation titles.* The engine finds work by title (0026), so the same title for a second client
+  returned the first client's quotation. The API now refuses it (409 `title_in_use`) rather than
+  merging clients; keying `work_item_create` by client needs a migration and is left for approval.
+- *Opening a client by name* matches the whole name first, so a client whose first word is short
+  ("UX TEST Karibu Logistics Ltd") is found.

@@ -28,14 +28,27 @@ import {
   type ClientCandidate,
   effectiveFileStatus,
   type ClientFileResponse,
+  type CreateClientRequest,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
+
+type GivenContact = NonNullable<CreateClientRequest["contact"]>;
+
+/** What a preview still lacks: the contact itself, or the parts of it the person left out. */
+function contactMissing(contact: GivenContact | undefined): string[] {
+  if (!contact) return ["Primary contact", "Phone", "Email"];
+  return [...(contact.email ? [] : ["Email"]), ...(contact.phone ? [] : ["Phone"])];
+}
+
+function contactWords(contact: GivenContact): string {
+  return [contact.fullName, contact.roleLabel, contact.email, contact.phone].filter(Boolean).join(" · ");
+}
 
 /** Client files (K01–K03) and insurer agreements (G01–G02). Reads under RLS; writes through 0026's functions. */
 export function complianceRoutes(deps: { logger: Logger }) {
@@ -153,11 +166,19 @@ export function complianceRoutes(deps: { logger: Logger }) {
           kind: input.kind,
           candidates,
           exact,
-          // A new client has no contact yet; saying so is what makes the next step obvious.
-          missing: ["Primary contact", "Phone", "Email"],
+          // What the person did not give is said; what they gave is written with the client.
+          missing: exact ? [] : contactMissing(input.contact),
           writes: exact
-            ? [`Nothing new: ${exact.name} is already on file and would be opened`]
-            : [`One client record: ${input.name.trim()}, a ${kindWord}`, "Its client file, started as not yet begun", "An audit entry against your name"],
+            ? [
+                `Nothing new: ${exact.name} is already on file and would be opened`,
+                ...(input.contact ? [`The contact given is not saved — add it on ${exact.name}'s record`] : []),
+              ]
+            : [
+                `One client record: ${input.name.trim()}, a ${kindWord}`,
+                ...(input.contact ? [`Primary contact: ${contactWords(input.contact)}`] : []),
+                "Its client file, started as not yet begun",
+                "An audit entry against your name",
+              ],
           externalEffect: "No message is sent to anyone.",
         }),
       );
@@ -190,14 +211,77 @@ export function complianceRoutes(deps: { logger: Logger }) {
     });
     if (error) return sendError(c, mapDatabaseError(error));
     const made = data as { id: string; created?: boolean };
+    const contact = await saveContactWithClient(c, db, org.id, user.id, made.id, made.created !== false, input.contact);
     return c.json(
       createClientResponseSchema.parse({
         outcome: made.created === false ? "already_on_file" : "created",
         file: await loadFile(db, org.id, made.id),
+        contact,
       }),
       made.created === false ? 200 : 201,
     );
   });
+
+  /**
+   * The contact given with a new client, written as its primary contact. A repeat of the same
+   * create finds the contact already there rather than adding a second; an existing client keeps
+   * whatever contacts it has, and the response says the given one was not saved.
+   */
+  async function saveContactWithClient(
+    c: Context,
+    db: SupabaseClient,
+    orgId: string,
+    userId: string,
+    clientId: string,
+    created: boolean,
+    given: CreateClientRequest["contact"],
+  ): Promise<{ state: "saved" | "already_on_file" | "not_given" | "not_saved"; contactId: string | null; reason: string | null }> {
+    if (!given) return { state: "not_given", contactId: null, reason: null };
+    const existing = await db
+      .from("client_contacts")
+      .select("id, full_name, email, is_primary")
+      .eq("organization_id", orgId)
+      .eq("client_id", clientId)
+      .is("deleted_at", null);
+    if (existing.error) return { state: "not_saved", contactId: null, reason: "The client's contacts could not be read, so the contact was not saved. Add it on the client record." };
+    const rows = (existing.data ?? []) as { id: string; full_name: string; email: string | null; is_primary: boolean }[];
+    const same = rows.find(
+      (r) =>
+        r.full_name.trim().toLowerCase() === given.fullName.trim().toLowerCase() &&
+        (r.email ?? "").toLowerCase() === (given.email ?? "").toLowerCase(),
+    );
+    if (same) return { state: "already_on_file", contactId: same.id, reason: null };
+    if (!created && rows.length > 0)
+      return { state: "not_saved", contactId: null, reason: "This client was already on file with its own contacts, so the one given was not added. Add it on the client record if it is new." };
+    const ins = await db
+      .from("client_contacts")
+      .insert({
+        organization_id: orgId,
+        client_id: clientId,
+        full_name: given.fullName,
+        role_label: given.roleLabel,
+        email: given.email,
+        phone: given.phone,
+        is_primary: !rows.some((r) => r.is_primary),
+        source: "manual",
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    if (ins.error) return { state: "not_saved", contactId: null, reason: "The client was saved, but the contact could not be: " + mapDatabaseError(ins.error).message + " Add it on the client record." };
+    const id = (ins.data as { id: string }).id;
+    await recordAudit(db, deps.logger, c, {
+      organizationId: orgId,
+      actorUserId: userId,
+      action: "client_contact.created",
+      objectType: "client_contact",
+      objectId: id,
+      // Name and role are the record; the address is not copied into the audit row.
+      newState: { client_id: clientId, full_name: given.fullName, role_label: given.roleLabel, has_email: given.email !== null, has_phone: given.phone !== null },
+      result: "success",
+    });
+    return { state: "saved", contactId: id, reason: null };
+  }
 
   async function loadFile(
     db: SupabaseClient,

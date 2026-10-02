@@ -56,9 +56,24 @@ export const createContactRequestSchema = z.object({
 });
 export type CreateContactRequest = z.input<typeof createContactRequestSchema>;
 
-export const updateContactRequestSchema = createContactRequestSchema
-  .omit({ clientId: true })
-  .partial();
+/**
+ * A correction: only the fields sent. Written out rather than derived from the create schema,
+ * whose defaults (null) would otherwise turn a field left out into a field cleared.
+ */
+export const updateContactRequestSchema = z.object({
+  fullName: z.string().trim().min(1).max(200).optional(),
+  roleLabel: z.string().trim().max(120).nullable().optional(),
+  email: z
+    .string()
+    .trim()
+    .max(320)
+    .refine((v) => v === "" || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), { message: "That does not look like an email address" })
+    .nullable()
+    .optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  isPrimary: z.boolean().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+});
 export type UpdateContactRequest = z.input<typeof updateContactRequestSchema>;
 
 export const contactResponseSchema = z.object({ contact: clientContactSchema });

@@ -67,8 +67,8 @@ function makeDb(): FakeDb {
         { id: CLIENT, organization_id: ORG, name: "Acme Ltd", kind: "corporate", file_status: "cleared", created_at: iso, deleted_at: null },
       ],
       insurers: [
-        { id: INS_A, organization_id: ORG, name: "Insurer A" },
-        { id: INS_B, organization_id: ORG, name: "Insurer B" },
+        { id: INS_A, organization_id: ORG, name: "Insurer A", deleted_at: null },
+        { id: INS_B, organization_id: ORG, name: "Insurer B", deleted_at: null },
       ],
       work_items: [
         { id: WORK, organization_id: ORG, client_id: CLIENT, kind: "new_business", title: "Fleet quotation — 2027", task_status: "needs_you", task_party: null, task_since: null, created_at: iso, deleted_at: null },
@@ -204,6 +204,16 @@ describe("starting quotation work", () => {
 
   it("refuses a client of another brokerage", async () => {
     expect((await start({ clientId: "20000000-0000-4000-8000-0000000000ff" })).status).toBe(404);
+  });
+
+  it("the same title for a second client is refused, never handed the first client's quotation", async () => {
+    // The engine finds work by title: here it answers with the work item of Acme's quotation.
+    const OTHER_CLIENT = "20000000-0000-4000-8000-00000000000c";
+    db.tables["clients"]!.push({ id: OTHER_CLIENT, organization_id: ORG, name: "UX TEST Karibu Logistics Ltd", kind: "corporate", file_status: "not_started", created_at: iso, deleted_at: null });
+    const res = await start({ clientId: OTHER_CLIENT, requestKey: "40000000-0000-4000-8000-00000000000c" });
+    expect(res.status).toBe(409);
+    expect(await readJson(res)).toMatchObject({ error: "title_in_use", message: expect.stringMatching(/Another client already has quotation work with this exact title/) });
+    expect(db.tables["opportunities"]!.filter((o) => o["client_id"] === OTHER_CLIENT)).toHaveLength(0);
   });
 });
 
@@ -563,5 +573,138 @@ describe("the quotation request lifecycle (D-119)", () => {
     expect(again.outcome).toBe("already");
     expect(db.tables["quote_request_deliveries"]).toHaveLength(1);
     expect((db.tables["audit_log"] ?? []).filter((a) => a["action"] === "opportunity.request_delivered")).toHaveLength(1);
+  });
+});
+
+/*
+ * Several insurers at once, by name, with a draft request to each (the acceptance-test path:
+ * "add APA Insurance, CIC and Jubilee and prepare each request, but do not send anything").
+ */
+describe("approaching insurers and preparing their requests in one step", () => {
+  const putOnFile = () => {
+    db.rpc["insurer_create"] = (args) => {
+      const name = String(args["p_name"]).trim();
+      const rows = db.tables["insurers"]!;
+      const hit = rows.find((r) => r["organization_id"] === args["p_organization_id"] && r["name"] === name);
+      if (hit) return { data: hit["id"] };
+      const id = `21000000-0000-4000-8000-0000000001${String(rows.length).padStart(2, "0")}`;
+      rows.push({ id, organization_id: args["p_organization_id"], name, deleted_at: null });
+      return { data: id };
+    };
+  };
+  const approach = (names: string[], prepare = true, who = amina) =>
+    act({ action: "approach_insurers", insurers: names.map((name) => ({ name })), prepare }, who);
+
+  beforeEach(() => {
+    putOnFile();
+    db.tables["opportunity_insurers"] = [];
+  });
+
+  it("one insurer: adds it and prepares one unsent draft", async () => {
+    const res = await approach(["Insurer B"]);
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.outcome).toBe("done");
+    expect(body.results).toEqual([expect.objectContaining({ insurerId: INS_B, insurerName: "Insurer B", newOnFile: false, approach: "added", request: "prepared" })]);
+    const reqs = db.tables["quote_requests"]!;
+    expect(reqs).toHaveLength(1);
+    // A draft: nobody approved it, and nothing records it as sent.
+    expect(reqs[0]!["approved_at"]).toBeNull();
+    expect(reqs[0]!["sent_at"]).toBeNull();
+    const i = body.opportunity.insurers.find((x: { insurerId: string }) => x.insurerId === INS_B);
+    expect(i.stage).toBe("request_prepared");
+    expect(i.request.sentAt).toBeNull();
+  });
+
+  it("three insurers by name: puts the new ones on file, one draft each, linked to this quote and client", async () => {
+    const body = await readJson(await approach(["APA Insurance", "CIC", "Jubilee"]));
+    expect(body.outcome).toBe("done");
+    expect(body.results.map((r: { insurerName: string }) => r.insurerName)).toEqual(["APA Insurance", "CIC", "Jubilee"]);
+    expect(body.results.every((r: { newOnFile: boolean; request: string }) => r.newOnFile && r.request === "prepared")).toBe(true);
+    expect(db.tables["opportunity_insurers"]!.every((r) => r["opportunity_id"] === OPP && r["organization_id"] === ORG)).toBe(true);
+    const reqs = db.tables["quote_requests"]!;
+    expect(reqs).toHaveLength(3);
+    expect(reqs.every((r) => r["opportunity_id"] === OPP)).toBe(true);
+    for (const r of reqs) {
+      expect(r["subject"]).toBe("Quotation request — Acme Ltd, Commercial motor");
+      // The outstanding requirement is named as still to follow, not hidden and not claimed enclosed.
+      expect(r["body_text"]).toMatch(/To follow from the client \(not yet supplied\):\n- Vehicle schedule with declared values/);
+      expect(r["body_text"]).not.toMatch(/Enclosed:/);
+    }
+    expect(reqs.map((r) => String(r["body_text"]).split("\n")[0])).toEqual(["Dear APA Insurance underwriting team,", "Dear CIC underwriting team,", "Dear Jubilee underwriting team,"]);
+    // Audited: three on file, three approached, three prepared — none sent.
+    const actions = db.tables["audit_log"]!.map((r) => r["action"]);
+    expect(actions.filter((a) => a === "insurer.created")).toHaveLength(3);
+    expect(actions.filter((a) => a === "opportunity.insurer_added")).toHaveLength(3);
+    expect(actions.filter((a) => a === "opportunity.request_prepared")).toHaveLength(3);
+    expect(actions.some((a) => /sent|deliver/.test(String(a)))).toBe(false);
+    // The outstanding requirement did not block, and still reads as outstanding.
+    expect(body.opportunity.requirements[0].suppliedAt).toBeNull();
+    expect(body.opportunity.next.what).toBe("Review and approve the request to 3 insurers");
+    expect(body.opportunity.next.missing).toEqual(["Vehicle schedule with declared values"]);
+  });
+
+  it("repeated: a retry finds what is there and writes nothing twice", async () => {
+    await approach(["APA Insurance", "CIC"]);
+    const auditBefore = db.tables["audit_log"]!.length;
+    const body = await readJson(await approach(["APA Insurance", "CIC"]));
+    expect(body.outcome).toBe("already");
+    expect(body.results.every((r: { approach: string; request: string; newOnFile: boolean }) => r.approach === "already" && r.request === "already" && !r.newOnFile)).toBe(true);
+    expect(db.tables["opportunity_insurers"]).toHaveLength(2);
+    expect(db.tables["quote_requests"]).toHaveLength(2);
+    expect(db.tables["insurers"]).toHaveLength(4);
+    expect(db.tables["audit_log"]!.length).toBe(auditBefore);
+  });
+
+  it("never overwrites a request a person already edited or approved", async () => {
+    await approach(["CIC"]);
+    const r = db.tables["quote_requests"]![0]!;
+    r["body_text"] = "Edited by a person";
+    r["approved_at"] = iso;
+    await approach(["CIC"]);
+    expect(db.tables["quote_requests"]![0]!["body_text"]).toBe("Edited by a person");
+    expect(db.tables["quote_requests"]![0]!["approved_at"]).toBe(iso);
+  });
+
+  it("an ambiguous name is refused with the matches, and nothing is written", async () => {
+    db.tables["insurers"]!.push(
+      { id: "21000000-0000-4000-8000-0000000000c1", organization_id: ORG, name: "Jubilee Allianz General", deleted_at: null },
+      { id: "21000000-0000-4000-8000-0000000000c2", organization_id: ORG, name: "Jubilee Health Insurance", deleted_at: null },
+    );
+    const body = await readJson(await approach(["CIC", "Jubilee"]));
+    expect(body.outcome).toBe("blocked");
+    expect(body.reason).toMatch(/“Jubilee” matches Jubilee Allianz General and Jubilee Health Insurance — say which/);
+    expect(db.tables["opportunity_insurers"]).toHaveLength(0);
+    expect(db.tables["quote_requests"]).toHaveLength(0);
+    expect(db.tables["insurers"]).toHaveLength(4);
+  });
+
+  it("a short name resolves to the one insurer on file it identifies", async () => {
+    db.tables["insurers"]!.push({ id: "21000000-0000-4000-8000-0000000000d1", organization_id: ORG, name: "APA Insurance Limited", deleted_at: null });
+    const body = await readJson(await approach(["APA"]));
+    expect(body.results[0]).toMatchObject({ insurerId: "21000000-0000-4000-8000-0000000000d1", newOnFile: false });
+  });
+
+  it("without prepare: approaches only, no draft", async () => {
+    const body = await readJson(await approach(["Insurer B"], false));
+    expect(body.results[0].request).toBe("not_requested");
+    expect(db.tables["quote_requests"]).toHaveLength(0);
+    expect(body.opportunity.next.what).toBe("Prepare the request to Insurer B");
+  });
+
+  it("refuses somebody whose role cannot change quotation work", async () => {
+    const body = await readJson(await approach(["CIC"], true, clerk));
+    expect(body.outcome).toBe("blocked");
+    expect(db.tables["quote_requests"]).toHaveLength(0);
+  });
+
+  it("a reply then attaches to that quote and that insurer", async () => {
+    await approach(["CIC"]);
+    const oi = db.tables["opportunity_insurers"]![0]!;
+    const body = await readJson(await act({ action: "record_response", opportunityInsurerId: oi["id"], outcome: "declined", declineReason: "Outside appetite", withoutRequest: true }));
+    expect(body.outcome).toBe("done");
+    const resp = db.tables["insurer_responses"]![0]!;
+    expect(resp["opportunity_insurer_id"]).toBe(oi["id"]);
+    expect(body.opportunity.insurers[0]).toMatchObject({ insurerName: "CIC", stage: "declined" });
   });
 });

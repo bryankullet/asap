@@ -24,8 +24,17 @@ const request = (over: Record<string, unknown> = {}) => ({ id: REQ, subject: "s"
 describe("quotation next action, derived from the records", () => {
   it("walks the sequence in order, one step at a time", () => {
     const req = [{ id: ID, label: "Logbooks", required: true, suppliedAt: null }];
-    expect(quotationNext(view({ requirements: req })).what).toBe("Collect the outstanding requirement from the client");
-    expect(quotationNext(view({ requirements: req })).missing).toEqual(["Logbooks"]);
+    // An outstanding requirement is named, but it does not stop choosing insurers or drafting.
+    const first = quotationNext(view({ requirements: req }));
+    expect(first.what).toBe("Choose the insurers to approach");
+    expect(first.missing).toEqual(["At least one insurer", "Logbooks"]);
+    expect(first.why).toMatch(/Still outstanding from the client: Logbooks — it does not stop this step, but it must be supplied before a request is delivered/);
+    expect(quotationNext(view({ requirements: req, insurers: [insurer()] })).what).toBe("Prepare the request to CIC General");
+    expect(quotationNext(view({ requirements: req, insurers: [insurer({ request: request() })] })).what).toBe("Review and approve the request to CIC General");
+    // Approved and nothing delivered yet: now the requirement stands in front of delivery.
+    const beforeDelivery = quotationNext(view({ requirements: req, insurers: [insurer({ request: request({ approvedAt: T }) })] }));
+    expect(beforeDelivery).toMatchObject({ what: "Collect the outstanding requirement from the client before delivering", missing: ["Logbooks"], stage: "requirements" });
+    expect(beforeDelivery.action?.name).toBe("supply_requirement");
     expect(quotationNext(view()).what).toBe("Choose the insurers to approach");
     expect(quotationNext(view({ insurers: [insurer()] })).what).toBe("Prepare the request to CIC General");
     expect(quotationNext(view({ insurers: [insurer({ request: request() })] })).what).toBe("Review and approve the request to CIC General");

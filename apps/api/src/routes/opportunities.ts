@@ -159,11 +159,20 @@ export function opportunityRoutes(deps: { logger: Logger }) {
 
     const existing = await db
       .from("opportunities")
-      .select("id")
+      .select("id, client_id")
       .eq("organization_id", org.id)
       .eq("work_item_id", workItemId)
       .maybeSingle();
     if (existing.error) return sendError(c, mapDatabaseError(existing.error));
+    /*
+     * The engine finds work by its title (0026), not its client: the same title for another client
+     * would hand back that client's quotation. Refused, never merged — one client's work must not
+     * collect another's insurers, requirements or requests.
+     */
+    const found = existing.data as { id: string; client_id: string } | null;
+    if (found && found.client_id !== clientRow.id) {
+      throw new HttpError(409, "title_in_use", "Another client already has quotation work with this exact title. Give this one a title of its own — for example with the client's name in it. Nothing was created.");
+    }
 
     let opportunityId = (existing.data as { id: string } | null)?.id ?? null;
     if (opportunityId === null) {
@@ -346,6 +355,48 @@ export function opportunityRoutes(deps: { logger: Logger }) {
 
     const now = new Date().toISOString();
 
+    /**
+     * One insurer approached on this quotation. Already approached is read rather than raced (the
+     * unique index would refuse it); a lost race reads the winner's row.
+     */
+    const addApproach = async (
+      insurerId: string,
+    ): Promise<{ opportunityInsurerId: string; added: boolean; error: null } | { error: HttpError }> => {
+      const read = async () =>
+        (
+          await db
+            .from("opportunity_insurers")
+            .select("id, removed_at")
+            .eq("organization_id", org.id)
+            .eq("opportunity_id", id)
+            .eq("insurer_id", insurerId)
+            .is("removed_at", null)
+            .maybeSingle()
+        ).data as { id: string } | null;
+      const live = await read();
+      if (live) return { opportunityInsurerId: live.id, added: false, error: null };
+      const added = await db
+        .from("opportunity_insurers")
+        .insert({ organization_id: org.id, opportunity_id: id, insurer_id: insurerId, added_by: user.id })
+        .select("id")
+        .maybeSingle();
+      if (added.error || !added.data) {
+        const winner = await read();
+        if (winner) return { opportunityInsurerId: winner.id, added: false, error: null };
+        return { error: mapDatabaseError(added.error ?? { message: "The insurer could not be added" }) };
+      }
+      await recordAudit(db, deps.logger, c, {
+        organizationId: org.id,
+        actorUserId: user.id,
+        action: "opportunity.insurer_added",
+        objectType: "opportunity",
+        objectId: id,
+        result: "success",
+        newState: { insurerId },
+      });
+      return { opportunityInsurerId: (added.data as { id: string }).id, added: true, error: null };
+    };
+
     switch (input.action) {
       case "add_insurer": {
         const insurer = await db
@@ -355,40 +406,110 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           .eq("id", input.insurerId)
           .maybeSingle();
         if (!insurer.data) return blocked("That insurer is not in this brokerage.");
+        const approach = await addApproach(input.insurerId);
+        if (approach.error) return sendError(c, approach.error);
+        return done(approach.added ? "done" : "already");
+      }
 
-        const live = await db
-          .from("opportunity_insurers")
-          .select("id, removed_at")
+      case "approach_insurers": {
+        const on = await db
+          .from("insurers")
+          .select("id, name")
           .eq("organization_id", org.id)
-          .eq("opportunity_id", id)
-          .eq("insurer_id", input.insurerId)
-          .maybeSingle();
-        const row = live.data as { id: string; removed_at: string | null } | null;
-        /* Already approached: the unique index would refuse this, so it is read rather than raced. */
-        if (row && row.removed_at === null) return done("already");
+          .is("deleted_at", null);
+        if (on.error) return sendError(c, mapDatabaseError(on.error));
+        const onFile = (on.data ?? []) as { id: string; name: string }[];
 
-        const added = await db
-          .from("opportunity_insurers")
-          .insert({
-            organization_id: org.id,
-            opportunity_id: id,
-            insurer_id: input.insurerId,
-            added_by: user.id,
-          })
-          .select("id")
-          .maybeSingle();
-        if (added.error || !added.data) return done("already");
+        /* Every name resolves, or nothing is written: a half-applied list is harder to read than a refusal. */
+        const wanted: { id: string | null; name: string }[] = [];
+        for (const item of input.insurers) {
+          if (item.insurerId) {
+            const hit = onFile.find((i) => i.id === item.insurerId);
+            if (!hit) return blocked("That insurer is not in this brokerage.");
+            wanted.push({ id: hit.id, name: hit.name });
+            continue;
+          }
+          const match = matchInsurerName(item.name!, onFile);
+          if (match.outcome === "many")
+            return blocked(`“${item.name}” matches ${match.names.join(" and ")} — say which. Nothing was changed.`);
+          wanted.push(match.outcome === "one" ? { id: match.id, name: match.name } : { id: null, name: item.name! });
+        }
 
-        await recordAudit(db, deps.logger, c, {
-          organizationId: org.id,
-          actorUserId: user.id,
-          action: "opportunity.insurer_added",
-          objectType: "opportunity",
-          objectId: id,
-          result: "success",
-          newState: { insurerId: input.insurerId },
-        });
-        return done();
+        const results: { insurerId: string; insurerName: string; newOnFile: boolean; approach: "added" | "already"; request: "prepared" | "already" | "not_requested" }[] = [];
+        const seen = new Set<string>();
+        for (const w of wanted) {
+          let insurerId = w.id;
+          let newOnFile = false;
+          if (!insurerId) {
+            /* Idempotent on the brokerage and the name (0026): a retry finds the same insurer. */
+            const made = await db.rpc("insurer_create", { p_organization_id: org.id, p_name: w.name });
+            if (made.error || !made.data) return sendError(c, mapDatabaseError(made.error ?? { message: "insurer_create returned nothing" }));
+            insurerId = made.data as string;
+            newOnFile = true;
+            await recordAudit(db, deps.logger, c, {
+              organizationId: org.id,
+              actorUserId: user.id,
+              action: "insurer.created",
+              objectType: "insurer",
+              objectId: insurerId,
+              result: "success",
+              newState: { name: w.name, from: "quotation", opportunityId: id },
+            });
+          }
+          if (seen.has(insurerId)) continue;
+          seen.add(insurerId);
+
+          const approach = await addApproach(insurerId);
+          if (approach.error) return sendError(c, approach.error);
+          let request: "prepared" | "already" | "not_requested" = "not_requested";
+          if (input.prepare) {
+            const existing = await db
+              .from("quote_requests")
+              .select("id")
+              .eq("organization_id", org.id)
+              .eq("opportunity_insurer_id", approach.opportunityInsurerId)
+              .maybeSingle();
+            /* A request already there may hold a person's edits or an approval: it is never overwritten here. */
+            if (existing.data) request = "already";
+            else {
+              const view = await loadOpportunity(db, ctx, org.id, id);
+              const draft = composeQuoteRequest(view, w.name);
+              const inserted = await db
+                .from("quote_requests")
+                .insert({
+                  organization_id: org.id,
+                  opportunity_id: id,
+                  opportunity_insurer_id: approach.opportunityInsurerId,
+                  subject: draft.subject,
+                  body_text: draft.body,
+                  prepared_by: user.id,
+                })
+                .select("id")
+                .maybeSingle();
+              if (inserted.error || !inserted.data) request = "already";
+              else {
+                request = "prepared";
+                await recordAudit(db, deps.logger, c, {
+                  organizationId: org.id,
+                  actorUserId: user.id,
+                  action: "opportunity.request_prepared",
+                  objectType: "opportunity",
+                  objectId: id,
+                  result: "success",
+                  newState: { opportunityInsurerId: approach.opportunityInsurerId, subject: draft.subject, sent: false },
+                });
+              }
+            }
+          }
+          results.push({ insurerId, insurerName: w.name, newOnFile, approach: approach.added ? "added" : "already", request });
+        }
+
+        const opportunity = await loadOpportunity(db, ctx, org.id, id);
+        await syncQuotationWork(db, opportunity);
+        const anything = results.some((r) => r.newOnFile || r.approach === "added" || r.request === "prepared");
+        return c.json(
+          opportunityActionResponseSchema.parse({ outcome: anything ? "done" : "already", reason: null, opportunity, results }),
+        );
       }
 
       case "remove_insurer": {
@@ -1143,4 +1264,58 @@ export async function syncQuotationWork(db: SupabaseClient, o: OpportunityRespon
   const { error } = await db.rpc("work_item_set_state", { p_work_item_id: o.workItem.id, ...workStateFrom(o.next) });
   // A failed sync leaves the previous state; it must not turn a recorded action into an error.
   if (error) return;
+}
+
+/** The words that do not tell one insurer from another. */
+const INSURER_NOISE = /\b(insurance|assurance|company|co|ltd|limited|kenya|general|plc|group|the)\b|[.,&()]/gi;
+const insurerKey = (name: string) => name.toLowerCase().replace(INSURER_NOISE, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * A name a person typed, matched against the brokerage's insurers: exactly, then on the words that
+ * identify it ("APA" is APA Insurance), then on a leading word. More than one match is said, not picked.
+ */
+export function matchInsurerName(
+  name: string,
+  onFile: { id: string; name: string }[],
+): { outcome: "one"; id: string; name: string } | { outcome: "many"; names: string[] } | { outcome: "none" } {
+  const exact = onFile.filter((i) => i.name.trim().toLowerCase() === name.trim().toLowerCase());
+  if (exact.length === 1) return { outcome: "one", id: exact[0]!.id, name: exact[0]!.name };
+  const key = insurerKey(name);
+  if (!key) return { outcome: "none" };
+  const same = onFile.filter((i) => insurerKey(i.name) === key);
+  if (same.length === 1) return { outcome: "one", id: same[0]!.id, name: same[0]!.name };
+  if (same.length > 1) return { outcome: "many", names: same.map((i) => i.name) };
+  const starts = onFile.filter((i) => (" " + insurerKey(i.name) + " ").startsWith(" " + key + " "));
+  if (starts.length === 1) return { outcome: "one", id: starts[0]!.id, name: starts[0]!.name };
+  if (starts.length > 1) return { outcome: "many", names: starts.map((i) => i.name) };
+  return { outcome: "none" };
+}
+
+/**
+ * The request to one insurer, composed from the quotation's own records: the client, the cover
+ * wanted, what the client has supplied (named as enclosed), and what is still to follow. It is a
+ * draft — a person edits and approves it, then delivers it themselves.
+ */
+export function composeQuoteRequest(o: OpportunityResponse, insurerName: string): { subject: string; body: string } {
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Nairobi" });
+  const supplied = o.requirements.filter((r) => r.suppliedAt);
+  const outstanding = o.requirements.filter((r) => !r.suppliedAt);
+  const op = o.opportunity;
+  const period = op.coverStart ? `, from ${day(op.coverStart)}${op.coverEnd ? ` to ${day(op.coverEnd)}` : ""}` : "";
+  const body = [
+    `Dear ${insurerName} underwriting team,`,
+    "",
+    `We invite terms for ${op.classOfBusiness} cover for our client ${o.client.name}${period}.`,
+    `Cover wanted: ${op.title}.`,
+    ...(op.riskSummary ? ["", `The risk: ${op.riskSummary}`] : []),
+    ...(supplied.length
+      ? ["", "Enclosed:", ...supplied.map((r) => `- ${r.label}${r.evidence?.label ? ` (${r.evidence.label})` : ""}`)]
+      : []),
+    ...(outstanding.length
+      ? ["", "To follow from the client (not yet supplied):", ...outstanding.map((r) => `- ${r.label}`)]
+      : []),
+    "",
+    "Please reply with your premium, excess, key conditions and how long the terms are valid.",
+  ].join("\n");
+  return { subject: `Quotation request — ${o.client.name}, ${op.classOfBusiness}`, body };
 }

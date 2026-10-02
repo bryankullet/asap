@@ -89,7 +89,7 @@ function makeDb(): FakeDb {
           },
         },
       ],
-      role_permissions: [],
+      role_permissions: [{ role_id: "30000000-0000-4000-8000-000000000001", permission: { object_type: "client", verb: "edit" } }],
       clients: [
         {
           id: EXISTING,
@@ -467,3 +467,47 @@ describe("POST /contacts", () => {
     expect(JSON.stringify(audit?.row["new_state"])).not.toContain("peter@mara.example");
   });
 });
+
+describe("PATCH /contacts/:id", () => {
+  const CONTACT = "70000000-0000-4000-8000-0000000000a1";
+  const seed = () => {
+    db.tables["client_contacts"] = [
+      { id: CONTACT, organization_id: ORG, client_id: EXISTING, full_name: "UX TEST David Otieno", role_label: "Finance", email: "david.otieno@example.test", phone: null, is_primary: true, source: "manual", notes: null, created_by: null, created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z", deleted_at: null },
+    ];
+  };
+  const patch = (body: Record<string, unknown>, id = CONTACT) =>
+    build().request(`/contacts/${id}`, { method: "PATCH", headers: auth, body: JSON.stringify(body) });
+
+  it("changes only what was sent, keeps .test addresses, and audits what changed without the address", async () => {
+    seed();
+    const res = await patch({ roleLabel: "Finance Manager", phone: "+254 700 000 000" });
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.contact).toMatchObject({ fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test", phone: "+254 700 000 000", isPrimary: true });
+    expect(db.tables["client_contacts"]![0]).toMatchObject({ role_label: "Finance Manager", phone: "+254 700 000 000" });
+    const audit = db.inserts.find((i) => i.table === "audit_log" && i.row["action"] === "client_contact.updated");
+    expect(audit?.row["new_state"]).toMatchObject({ changed: ["role_label", "phone"] });
+    expect(JSON.stringify(audit?.row)).not.toContain("david.otieno@example.test");
+    expect(JSON.stringify(audit?.row)).not.toContain("+254 700 000 000");
+  });
+
+  it("an email change is checked and saved", async () => {
+    seed();
+    expect((await patch({ email: "not an address" })).status).toBe(422);
+    const ok = await readJson(await patch({ email: "d.otieno@karibu.test" }));
+    expect(ok.contact.email).toBe("d.otieno@karibu.test");
+  });
+
+  it("sending the same values again writes nothing", async () => {
+    seed();
+    await patch({ fullName: "UX TEST David Otieno" });
+    expect(db.inserts.filter((i) => i.table === "audit_log" && i.row["action"] === "client_contact.updated")).toHaveLength(0);
+  });
+
+  it("is a 404 for a contact that is not this brokerage's", async () => {
+    seed();
+    db.tables["client_contacts"]![0]!["organization_id"] = "10000000-0000-4000-8000-0000000000ff";
+    expect((await patch({ roleLabel: "x" })).status).toBe(404);
+  });
+});
+
