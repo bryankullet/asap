@@ -63,6 +63,12 @@ export const workflowOperationalSchema = z.object({
   primaryAction: z.object({ kind: z.enum(["approve", "record_delivery", "resume", "present", "none"]), label: z.string() }),
   outputs: z.array(z.object({ label: z.string(), state: z.string() })),
   owner: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+  paused: z.object({ byName: z.string().nullable(), at: z.string().nullable() }).nullable(),
+  escalated: z.boolean(),
+  /** What ASAP plans to do on its own, and when (Upcoming). */
+  upcoming: z.array(z.object({ kind: z.enum(["follow_up", "escalate", "recheck_delivery", "recheck_approval"]), at: z.string(), label: z.string() })),
+  /** Every intervention, available or not; one that is not says why. */
+  interventions: z.array(z.object({ key: z.string(), label: z.string(), available: z.boolean(), why: z.string().nullable() })),
 });
 export type WorkflowOperational = z.infer<typeof workflowOperationalSchema>;
 
@@ -109,6 +115,20 @@ export const recordCommunicationDeliveryRequestSchema = z.object({
 export const moveFollowUpRequestSchema = z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "A date as YYYY-MM-DD") });
 /** "Stop chasing this insurer" / "Start chasing again". Escalation still happens. */
 export const setChasingRequestSchema = z.object({ stop: z.boolean(), reason: z.string().trim().max(500).optional() });
+
+export const pauseRunRequestSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export const escalateRunRequestSchema = z.object({ reason: z.string().trim().min(3, "Say why it is escalated").max(500) });
+export const stopRunRequestSchema = z.object({ reason: z.string().trim().min(3, "Say why ASAP should stop").max(500) });
+
+/** Supervision (D-131): every workflow, grouped and ranked, plus what ASAP plans to do next. */
+export const supervisionViewKey = z.enum(["needs_me", "asap_handling", "waiting_on_others", "upcoming", "done"]);
+export const supervisionResponseSchema = z.object({
+  items: z.array(workflowRunSchema.extend({ views: z.array(supervisionViewKey), priority: z.number(), priorityReason: z.string() })),
+  upcoming: z.array(z.object({ runId: uuidSchema, title: z.string(), kind: z.string(), at: z.string(), label: z.string(), paused: z.boolean() })),
+  counts: z.record(supervisionViewKey, z.number().int()),
+  rules: z.array(z.object({ key: z.string(), summary: z.string(), version: z.number().int().nullable(), setByName: z.string().nullable(), source: z.string() })),
+});
+export type SupervisionResponse = z.infer<typeof supervisionResponseSchema>;
 
 export const workflowActionResponseSchema = z.object({
   outcome: z.enum(["done", "already", "blocked"]),

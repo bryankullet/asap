@@ -13,6 +13,8 @@ const DAY = 86_400_000;
 export type ViewStep = { key: string; state: string; output: Record<string, unknown>; finishedAt: string | null };
 export type ViewInput = {
   now: Date;
+  /** What the person looking may do — an intervention they cannot use says why. */
+  can?: { act: boolean; approve: boolean };
   run: { state: string; currentStep: string | null; exception: { code: string; message: string; needs: string } | null; facts: Record<string, unknown>; startedAt: string };
   steps: ViewStep[];
   approval: { state: string; decidedByName: string | null } | null;
@@ -34,6 +36,9 @@ export type PrimaryAction =
   | { kind: "present"; label: string }
   | { kind: "none"; label: string };
 
+export type Upcoming = { kind: "follow_up" | "escalate" | "recheck_delivery" | "recheck_approval"; at: string; label: string };
+export type Intervention = { key: string; label: string; available: boolean; why: string | null };
+
 export type RenewalOperational = {
   origin: "window" | "manual";
   originLabel: string;
@@ -54,6 +59,10 @@ export type RenewalOperational = {
   attentionReason: string | null;
   primaryAction: PrimaryAction;
   outputs: { label: string; state: string }[];
+  paused: { byName: string | null; at: string | null } | null;
+  escalated: boolean;
+  upcoming: Upcoming[];
+  interventions: Intervention[];
 };
 
 /** What a step is doing, in the words a person reads while it runs. */
@@ -183,6 +192,58 @@ export function renewalOperational(v: ViewInput): RenewalOperational {
     status = "Cancelled";
   }
 
+  // ---------------------------------------------------------------- paused, escalated, upcoming
+  const pausedFacts = v.run.facts["paused"] as { byName?: string; at?: string } | undefined;
+  const paused = pausedFacts ? { byName: pausedFacts.byName ?? null, at: pausedFacts.at ?? null } : null;
+  const escalatedFacts = v.run.facts["escalated"] as { byName?: string; at?: string } | undefined;
+  const escalated = Boolean(escalatedFacts) || v.run.exception?.code === "no_terms_near_expiry";
+  const live = v.run.state !== "done" && v.run.state !== "cancelled";
+  if (escalated && live) {
+    tone = "attention";
+    status = `Escalated to ${ownerName ?? "the work owner"}${v.run.exception?.code === "no_terms_near_expiry" ? ` — no terms from ${insurer} near expiry` : escalatedFacts?.byName ? ` by ${escalatedFacts.byName}` : ""}`;
+    attentionReason = "Escalated";
+  }
+  if (paused && live) {
+    status = `Paused by ${paused.byName ?? "a person"} — ASAP will not act until it is resumed`;
+    tone = "attention";
+    currentWork = { title: "Paused", detail: `${completed} Nothing further happens until a person resumes it.` };
+    primaryAction = { kind: "resume", label: "Resume" };
+    attentionReason = "Paused";
+  }
+  const upcoming: Upcoming[] = [];
+  if (live && !paused && v.run.state !== "exception") {
+    if (nextFollowUpAt) upcoming.push({ kind: "follow_up", at: nextFollowUpAt, label: `Follow up with ${insurer}` });
+    if (v.run.state === "waiting_party" && v.run.currentStep === "await_terms" && !v.delivery)
+      upcoming.push({ kind: "recheck_delivery", at: new Date(v.now.getTime() + DAY).toISOString(), label: `Check again whether the request to ${insurer} was delivered` });
+    if (v.run.state === "waiting_approval") upcoming.push({ kind: "recheck_approval", at: new Date(v.now.getTime() + DAY).toISOString(), label: "Look again for the bundle approval" });
+    if (escalatesAt && !escalated && !done("await_terms")) upcoming.push({ kind: "escalate", at: escalatesAt, label: `Escalate to ${ownerName ?? "the work owner"} if there are no terms from ${insurer}` });
+  }
+  upcoming.sort((a, b) => a.at.localeCompare(b.at));
+
+  // ---------------------------------------------------------------------------- interventions
+  const can = v.can ?? { act: true, approve: true };
+  const noRole = "Your role cannot change renewal work.";
+  const iv = (key: string, label: string, ok: boolean, why: string): Intervention => ({ key, label, available: ok, why: ok ? null : why });
+  const finished = !live ? "The renewal is finished." : null;
+  const waitingApproval = v.run.state === "waiting_approval";
+  const interventions: Intervention[] = [
+    iv("approve", "Approve", waitingApproval && can.approve, finished ?? (!can.approve ? "Your role cannot approve what leaves the brokerage." : "There is no bundle waiting for approval.")),
+    iv("reject", "Reject", waitingApproval && can.approve, finished ?? (!can.approve ? "Your role cannot approve or reject bundles." : "There is no bundle waiting for approval.")),
+    iv("edit", "Edit before approval", false, waitingApproval ? "Edit the records the bundle is built from (policy, contact, premium), then reject this bundle — ASAP rebuilds it from the corrected records." : "There is no bundle waiting for approval."),
+    iv("provide_info", "Provide missing information", v.run.state === "exception" && can.act, finished ?? (v.run.state !== "exception" ? "Nothing is missing that stops the renewal." : noRole)),
+    iv("assign", "Assign", live && can.act, finished ?? noRole),
+    iv("due_date", "Change due date", live && can.act, finished ?? noRole),
+    iv("follow_up_date", "Change follow-up date", live && can.act && v.run.state !== "exception", finished ?? (!can.act ? noRole : "The renewal is stopped — resume it first.")),
+    iv("follow_up_now", "Follow up now", live && can.act && Boolean(v.delivery) && !done("await_terms"), finished ?? (!can.act ? noRole : !v.delivery ? "There is nothing to follow up yet — the insurer request has not been delivered." : "Terms are already in.")),
+    iv("pause", "Pause", live && can.act && !paused, finished ?? (!can.act ? noRole : "It is already paused.")),
+    iv("resume", "Resume", live && can.act && (Boolean(paused) || v.run.state === "exception"), finished ?? (!can.act ? noRole : "It is not paused or stopped.")),
+    iv("stop", "Stop automation", live && can.act, finished ?? noRole),
+    iv("escalate", "Escalate", live && can.act && !escalated, finished ?? (!can.act ? noRole : "It is already escalated.")),
+    iv("why", "Ask why", true, ""),
+    iv("evidence", "Show evidence", true, ""),
+    iv("open", "Open Space", true, ""),
+  ];
+
   const outputs = [
     ...(done("pack") ? [{ label: "Renewal pack", state: v.approval?.state === "approved" ? "Approved" : "Prepared" }] : []),
     ...v.communications.map((c) => ({
@@ -207,9 +268,13 @@ export function renewalOperational(v: ViewInput): RenewalOperational {
     escalatesTo: ownerName,
     chasing,
     afterYouAct,
-    attention: tone === "attention" || v.run.state === "done",
+    attention: (tone === "attention" || v.run.state === "done") && !(paused && live && v.run.state !== "exception"),
     attentionReason,
     primaryAction,
     outputs,
+    paused: live ? paused : null,
+    escalated: live && escalated,
+    upcoming,
+    interventions,
   };
 }

@@ -184,6 +184,7 @@ export function createApp(deps: AppDeps) {
     "/automations",
     "/automations/*",
     "/workflows/*",
+    "/supervision",
     "/workflow-approvals/*",
     "/prepared-communications/*",
     "/documents",

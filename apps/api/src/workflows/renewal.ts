@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
-import { recommendationRuleSchema } from "@asap/schema";
+import { AUTONOMY_DEFAULT, AUTONOMY_LEVELS, autonomyRuleSchema, recommendationRuleSchema, type AutonomyLevel, type AutonomyRule } from "@asap/schema";
 import { quoteRequestDigest } from "../routes/opportunities.js";
 import { advanceRun, auditAutomation, sha256, startRun, type Evidence, type StepContext, type StepResult, type WorkflowDefinition } from "./engine.js";
 
@@ -38,6 +38,18 @@ export async function renewalWindow(db: SupabaseClient, organizationId: string):
   }
   return { ...RENEWAL_DEFAULTS, basis: RENEWAL_DEFAULT_BASIS, configured: false };
 }
+
+/**
+ * The brokerage's autonomy rule (D-131), or ASAP's stated default. Read at the point of use, so a
+ * changed rule applies to the next step without restarting anything.
+ */
+export async function autonomyRule(db: SupabaseClient, organizationId: string): Promise<AutonomyRule & { configured: boolean }> {
+  const { data } = await db.from("company_rules").select("value").eq("organization_id", organizationId).eq("key", "workflow.autonomy").maybeSingle();
+  const parsed = autonomyRuleSchema.safeParse((data as { value: unknown } | null)?.value);
+  return parsed.success ? { ...parsed.data, configured: true } : { ...AUTONOMY_DEFAULT, configured: false };
+}
+/** True when the rule lets ASAP do this on its own (level 5 or 6). */
+export const automatic = (level: AutonomyLevel) => AUTONOMY_LEVELS.indexOf(level) >= AUTONOMY_LEVELS.indexOf("act_within_rules");
 
 const DAY = 86_400_000;
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
@@ -170,8 +182,9 @@ async function assignWork(ctx: StepContext): Promise<StepResult> {
   const s = await subjectOf(ctx);
   const missing = (ctx.done["completeness"]?.["missing"] as string[]) ?? [];
   const findings = (ctx.done["read_schedule"]?.["findings"] as string[]) ?? [];
-  let owner = s.client?.file_owner_id ?? null;
-  if (!owner && ctx.run.work_item_id) {
+  const rule = await autonomyRule(ctx.db, ctx.run.organization_id);
+  let owner = rule.assignment === "client_file_owner" ? (s.client?.file_owner_id ?? null) : null;
+  if (!owner && rule.assignment === "client_file_owner" && ctx.run.work_item_id) {
     const w = await ctx.db.from("work_items").select("owner_id").eq("id", ctx.run.work_item_id).maybeSingle();
     owner = (w.data as { owner_id: string | null } | null)?.owner_id ?? null;
   }
@@ -347,7 +360,8 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
 
   const delivery = del.data as { delivered_at: string; method: string; reference: string } | null;
   const followUps = Number(ctx.step.output["followUps"] ?? 0);
-  if (daysLeft <= window.escalateDaysBeforeExpiry)
+  const rule = await autonomyRule(ctx.db, ctx.run.organization_id);
+  if (daysLeft <= window.escalateDaysBeforeExpiry && automatic(rule.actions.escalate))
     return {
       kind: "exception",
       code: "no_terms_near_expiry",
@@ -365,8 +379,10 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
   const nextDue = override ?? scheduled;
   const escalation = new Date(new Date(s.period.period_end + "T06:00:00Z").getTime() - window.escalateDaysBeforeExpiry * DAY);
   const stopped = ctx.run.facts["chasing"] as { stopped?: boolean; byName?: string } | undefined;
-  if (stopped?.stopped) {
-    await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "with_party", task_party: s.insurer!.name, task_since: delivery.delivered_at, required_action: `Chasing ${s.insurer!.name} is stopped — ASAP escalates on ${human(escalation.toISOString())} if no terms arrive`, reason: `${stopped.byName ?? "A person"} stopped the follow-ups.`, task_next_check: escalation.toISOString() });
+  // Chasing stopped by a person, or the brokerage's rule keeps follow-ups with people.
+  if (stopped?.stopped || !automatic(rule.actions.follow_up)) {
+    const why = stopped?.stopped ? `${stopped.byName ?? "A person"} stopped the follow-ups.` : "This brokerage's autonomy rule keeps insurer follow-ups with people.";
+    await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "with_party", task_party: s.insurer!.name, task_since: delivery.delivered_at, required_action: `ASAP is not chasing ${s.insurer!.name} — ${automatic(rule.actions.escalate) ? `it escalates on ${human(escalation.toISOString())} if no terms arrive` : "follow up when you decide"}`, reason: why, task_next_check: escalation.toISOString() });
     return { kind: "wait", on: "party", until: escalation, output: { followUps, delivered: true, chasingStopped: true } };
   }
   if (ctx.now >= nextDue) {
@@ -412,10 +428,63 @@ async function compare(ctx: StepContext): Promise<StepResult> {
   };
 }
 
+/**
+ * The completion receipt (D-131): what was meant, what was achieved, the dates, approvals, people,
+ * evidence and delivery evidence, and anything left unresolved. Written once; never edited.
+ */
+async function writeReceipt(ctx: StepContext, s: Subject) {
+  const c = ctx.done["completeness"] ?? {};
+  const cmp = ctx.done["compare"] ?? {};
+  const o = ctx.done["open_terms"] ?? {};
+  const appr = await ctx.db.from("workflow_approvals").select("id, decided_by, decided_at").eq("run_id", ctx.run.id).eq("state", "approved").order("decided_at", { ascending: false }).limit(1);
+  const a = ((appr.data ?? []) as { id: string; decided_by: string | null; decided_at: string | null }[])[0] ?? null;
+  const people = [a?.decided_by, s.client?.file_owner_id].filter(Boolean) as string[];
+  const names = people.length ? await ctx.db.from("users").select("id, display_name, full_name").in("id", [...new Set(people)]) : { data: [] };
+  const nameOf = (id: string | null | undefined) => (id ? ((names.data ?? []) as { id: string; display_name: string | null; full_name: string | null }[]).find((u) => u.id === id) : undefined);
+  const nm = (id: string | null | undefined) => nameOf(id)?.display_name ?? nameOf(id)?.full_name ?? null;
+  const del = o["quoteRequestId"] ? await ctx.db.from("quote_request_deliveries").select("delivered_at, method, reference").eq("quote_request_id", o["quoteRequestId"] as string).maybeSingle() : { data: null };
+  const d = del.data as { delivered_at: string; method: string; reference: string } | null;
+  const terms = (cmp["terms"] as { premium: string; currency: string | null; changePercent: number | null; validUntil: string | null }[] | undefined) ?? [];
+  const first = terms[0];
+  const outcome = first
+    ? `Renewal terms ready to present — ${s.insurer!.name} quoted ${money(first.premium, first.currency)}${first.changePercent !== null ? ` (${first.changePercent > 0 ? "+" : ""}${first.changePercent}% on expiring)` : ""}`
+    : "Renewal handed over to present";
+  const receipt = {
+    intendedOutcome: `Renewal terms for ${s.client!.name}'s ${s.policy.class_of_business ?? ""} policy ${s.policy.policy_number ?? ""} before cover ends ${human(s.period.period_end)}`.replace(/ {2,}/g, " "),
+    achievedOutcome: outcome,
+    dates: [
+      { label: "Renewal started", at: (ctx.run as unknown as { started_at?: string }).started_at ?? null },
+      { label: "Bundle approved", at: a?.decided_at ?? null },
+      { label: "Request delivered to the insurer", at: d?.delivered_at ?? null },
+      { label: "Cover ends", at: s.period.period_end },
+    ].filter((x) => x.at),
+    approvals: a ? [{ what: "Renewal pack, client letter and insurer terms request", by: nm(a.decided_by), at: a.decided_at }] : [],
+    people: [{ role: "Responsible", name: nm(s.client?.file_owner_id) ?? "Unassigned" }, ...(a ? [{ role: "Approved by", name: nm(a.decided_by) ?? "A member" }] : [])],
+    evidence: [...((c["present"] as string[]) ?? []), ...(((cmp["recommendation"] as string) ? [cmp["recommendation"] as string] : []))],
+    delivery: d ? [{ to: s.insurer!.name, method: d.method.replaceAll("_", " "), reference: d.reference, at: d.delivered_at }] : [],
+    unresolved: (c["nonBlocking"] as string[]) ?? [],
+    links: [
+      { label: "Client", ref: `client:${s.client!.id}` },
+      { label: "Policy period", ref: `policy_period:${s.period.id}` },
+      ...(ctx.run.work_item_id ? [{ label: "Work", ref: `work_item:${ctx.run.work_item_id}` }] : []),
+      ...(o["opportunityId"] ? [{ label: "Quotation", ref: `opportunity:${o["opportunityId"]}` }] : []),
+    ],
+    nothingSent: "ASAP sent nothing itself: every external message was delivered by a person and recorded.",
+  };
+  // Once per run (run_id is unique): a re-run of this step finds the receipt already written.
+  await ctx.db.from("workflow_receipts").upsert(
+    { organization_id: ctx.run.organization_id, run_id: ctx.run.id, workflow: "renewal", client_id: s.client!.id, work_item_id: ctx.run.work_item_id, title: `Renewal — ${s.client!.name}, ${s.policy.policy_number ?? s.policy.class_of_business ?? "policy"}`, outcome, receipt },
+    { onConflict: "run_id", ignoreDuplicates: true },
+  );
+  await auditAutomation(ctx.db, ctx.run, "workflow.renewal.receipt", { outcome, unresolved: receipt.unresolved.length });
+  return outcome;
+}
+
 async function handOver(ctx: StepContext): Promise<StepResult> {
   const s = await subjectOf(ctx);
+  const outcome = await writeReceipt(ctx, s);
   await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "needs_you", task_party: null, required_action: `Present the renewal terms to ${s.client!.name} and record their instruction`, reason: `Terms are in and compared against the expiring premium. Cover ends ${human(s.period.period_end)}.`, task_next_check: null });
-  return { kind: "done", output: { handedTo: "person" }, evidence: [{ kind: "record", label: "Handed to a person to present — a client instruction is the client's to give" }] };
+  return { kind: "done", output: { handedTo: "person", outcome }, evidence: [{ kind: "record", label: "Handed to a person to present — a client instruction is the client's to give" }, { kind: "record", label: `Completion receipt: ${outcome}`, ref: `workflow_run:${ctx.run.id}` }] };
 }
 
 export const RENEWAL: WorkflowDefinition = {
@@ -442,6 +511,8 @@ export const RENEWAL: WorkflowDefinition = {
  * already has a later period is renewed; a policy with an open renewal Work item adopts it.
  */
 export async function detectRenewals(db: SupabaseClient, logger: Logger, organizationId: string, now = new Date()): Promise<{ started: number; existing: number }> {
+  // A brokerage that set "start renewal work" below automatic starts renewals itself.
+  if (!automatic((await autonomyRule(db, organizationId)).actions.detect_renewals)) return { started: 0, existing: 0 };
   const window = await renewalWindow(db, organizationId);
   const today = isoDay(now);
   const horizon = isoDay(new Date(now.getTime() + window.leadDays * DAY));

@@ -1,6 +1,10 @@
 import {
   decideApprovalRequestSchema,
+  escalateRunRequestSchema,
   moveFollowUpRequestSchema,
+  pauseRunRequestSchema,
+  stopRunRequestSchema,
+  supervisionResponseSchema,
   recordCommunicationDeliveryRequestSchema,
   setChasingRequestSchema,
   startRenewalRequestSchema,
@@ -16,7 +20,8 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
-import { advanceRun, detectRenewalFor, RENEWAL, RENEWAL_DEFAULTS, renewalWindow } from "../workflows/renewal.js";
+import { advanceRun, autonomyRule, detectRenewalFor, RENEWAL, RENEWAL_DEFAULTS, renewalWindow } from "../workflows/renewal.js";
+import { load as loadRules } from "./rules.js";
 import { renewalOperational } from "../workflows/renewal-view.js";
 import { parseBody } from "./_parse.js";
 
@@ -27,14 +32,6 @@ import { parseBody } from "./_parse.js";
  * service connection, like the event consumers — continues the run at once; the event the decision
  * emitted makes it continue even if this process stops first.
  */
-const STATE_LABEL: Record<string, string> = {
-  running: "ASAP is working on it",
-  waiting_approval: "Waiting for your approval",
-  waiting_party: "Waiting on an outside party",
-  exception: "Stopped — needs a person",
-  done: "Handed over",
-  cancelled: "Cancelled",
-};
 
 type RunDb = {
   id: string; organization_id: string; workflow: "renewal"; subject_id: string; work_item_id: string | null; state: string; current_step: string | null;
@@ -42,7 +39,7 @@ type RunDb = {
   facts: { clientId?: string; periodEnd?: string; startedBy?: string; origin?: string; [k: string]: unknown };
 };
 
-async function summaries(db: SupabaseClient, runs: RunDb[], now = new Date()) {
+async function summaries(db: SupabaseClient, runs: RunDb[], can: { act: boolean; approve: boolean } = { act: true, approve: true }, now = new Date()) {
   const ids = runs.map((r) => r.id);
   const workIds = runs.map((r) => r.work_item_id).filter(Boolean) as string[];
   const clientIds = runs.map((r) => r.facts?.clientId).filter(Boolean) as string[];
@@ -84,6 +81,7 @@ async function summaries(db: SupabaseClient, runs: RunDb[], now = new Date()) {
     const completeness = mine.find((s) => s.step_key === "completeness")?.output ?? {};
     const operational = renewalOperational({
       now,
+      can,
       run: { state: r.state, currentStep: r.current_step, exception: r.exception, facts: (r.facts ?? {}) as Record<string, unknown>, startedAt: r.started_at },
       steps: mine.map((s) => ({ key: s.step_key, state: s.state, output: s.output ?? {}, finishedAt: s.finished_at })),
       approval: approval ? { state: approval.state, decidedByName: approval.decided_by ? (userName.get(approval.decided_by) ?? null) : null } : null,
@@ -112,7 +110,7 @@ export async function loadWorkflowDetail(db: SupabaseClient, runId: string, perm
   const r = await db.from("workflow_runs").select("*").eq("id", runId).maybeSingle();
   if (!r.data) return null;
   const run = r.data as RunDb;
-  const [summary] = await summaries(db, [run]);
+  const [summary] = await summaries(db, [run], { act: perms.canAct, approve: perms.canApprove });
   const [steps, approvals, comms] = await Promise.all([
     db.from("workflow_steps").select("step_key, position, label, state, attempts, next_attempt_at, finished_at, output, evidence, error").eq("run_id", runId).order("position"),
     db.from("workflow_approvals").select("id, title, state, bundle, bundle_sha256, decided_by, decided_at, note").eq("run_id", runId).order("created_at", { ascending: false }).limit(1),
@@ -161,7 +159,8 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const org = requireActiveOrganization(ctx);
     const { data, error } = await db.from("workflow_runs").select("*").eq("organization_id", org.id).eq("workflow", "renewal").order("next_run_at").limit(100);
     if (error) return sendError(c, mapDatabaseError(error));
-    return c.json(workflowListSchema.parse({ runs: await summaries(db, (data ?? []) as RunDb[]) }));
+    const p = perms(ctx);
+    return c.json(workflowListSchema.parse({ runs: await summaries(db, (data ?? []) as RunDb[], { act: p.canAct, approve: p.canApprove }) }));
   });
 
   app.get("/workflows/runs/:id", async (c) => {
@@ -211,6 +210,12 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const a = await db.from("workflow_approvals").select("run_id").eq("id", c.req.param("id")).maybeSingle();
     const runId = (a.data as { run_id: string } | null)?.run_id;
     if (!runId) throw new HttpError(404, "not_found", "No approval with that id");
+    // The brokerage's autonomy rule may reserve approvals to administrators and the owner (D-131).
+    const rule = await autonomyRule(db, requireActiveOrganization(ctx).id);
+    if (rule.approver === "admin_or_owner" && !(ctx.activeMembership?.is_owner || ctx.activeMembership?.role.key === "brokerage_admin")) {
+      await recordAudit(db, deps.logger, c, { organizationId: requireActiveOrganization(ctx).id, actorUserId: user.id, action: "workflow.approval.decided", objectType: "workflow_approval", objectId: c.req.param("id"), result: "denied", failureReason: "autonomy_rule_approver" });
+      return respond(c, db, runId, ctx, "blocked", "This brokerage's rule reserves renewal approvals to an administrator or the owner. Nothing was approved.", 403);
+    }
     const { data, error } = await db.rpc("workflow_approval_decide", { p_approval_id: c.req.param("id"), p_decision: input.decision, p_bundle_sha256: input.bundleSha256, p_note: input.note ?? null });
     if (error) {
       const m = error.message ?? "";
@@ -257,9 +262,20 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
       await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.resume", objectType: "workflow_run", objectId: runId, result: "denied", failureReason: "permission_denied" });
       return respond(c, db, runId, ctx, "blocked", "Your role cannot resume renewal work.", 403);
     }
-    if ((r.data as { state: string }).state !== "exception") return respond(c, db, runId, ctx, "already", "The run is not stopped.");
     const service = deps.service();
     const now = new Date().toISOString();
+    const full = await db.from("workflow_runs").select("facts").eq("id", runId).maybeSingle();
+    const facts = ((full.data as { facts: Record<string, unknown> } | null)?.facts ?? {}) as Record<string, unknown>;
+    if (facts["paused"]) {
+      // Resuming a pause continues where it was: the same run, the same step.
+      await service.from("workflow_runs").update({ facts: { ...facts, paused: null }, next_run_at: now, updated_at: now }).eq("id", runId);
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.resumed", objectType: "workflow_run", objectId: runId, result: "success", previousState: { paused: true }, newState: { paused: false } });
+      if ((r.data as { state: string }).state !== "exception") {
+        await advance(runId);
+        return respond(c, db, runId, ctx, "done", null);
+      }
+    }
+    if ((r.data as { state: string }).state !== "exception") return respond(c, db, runId, ctx, "already", "The run is not stopped.");
     await service.from("workflow_steps").update({ state: "pending", attempts: 0, error: null, next_attempt_at: null, updated_at: now }).eq("run_id", runId).eq("state", "failed");
     await service.from("workflow_runs").update({ state: "running", exception: null, next_run_at: now, updated_at: now }).eq("id", runId).eq("state", "exception");
     await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.resumed", objectType: "workflow_run", objectId: runId, result: "success" });
@@ -325,5 +341,158 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     return respond(c, db, run.id, ctx, "done", null);
   });
 
+  /** Pause: ASAP takes no further step on this run until a person resumes it. */
+  app.post("/workflows/runs/:id/pause", async (c) => {
+    const input = await parseBody(c, pauseRunRequestSchema);
+    const got = await controlRun(c, c.req.param("id"), "workflow.paused");
+    if ("blocked" in got) return got.blocked;
+    const { db, user, ctx, org, run } = got;
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to pause.", 409);
+    if (run.facts["paused"]) return respond(c, db, run.id, ctx, "already", null);
+    const byName = await nameOf(db, user.id);
+    await deps.service().from("workflow_runs").update({ facts: { ...run.facts, paused: { by: user.id, byName, at: new Date().toISOString(), reason: input.reason ?? null } }, updated_at: new Date().toISOString() }).eq("id", run.id);
+    await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.paused", objectType: "workflow_run", objectId: run.id, result: "success", newState: { paused: true, reason: input.reason ?? null } });
+    return respond(c, db, run.id, ctx, "done", null);
+  });
+
+  /** Escalate now: the work owner is asked to act, and Work and Today show it. */
+  app.post("/workflows/runs/:id/escalate", async (c) => {
+    const input = await parseBody(c, escalateRunRequestSchema);
+    const got = await controlRun(c, c.req.param("id"), "workflow.escalated");
+    if ("blocked" in got) return got.blocked;
+    const { db, user, ctx, org, run } = got;
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to escalate.", 409);
+    if (run.facts["escalated"]) return respond(c, db, run.id, ctx, "already", null);
+    const byName = await nameOf(db, user.id);
+    const service = deps.service();
+    const at = new Date().toISOString();
+    await service.from("workflow_runs").update({ facts: { ...run.facts, escalated: { by: user.id, byName, at, reason: input.reason } }, updated_at: at }).eq("id", run.id);
+    const w = await service.from("workflow_runs").select("work_item_id").eq("id", run.id).maybeSingle();
+    const workItemId = (w.data as { work_item_id: string | null } | null)?.work_item_id;
+    if (workItemId) {
+      const cur = await service.from("work_items").select("version").eq("id", workItemId).maybeSingle();
+      await service.from("work_items").update({ task_status: "needs_you", task_party: null, required_action: `Escalated by ${byName}: ${input.reason}`, version: ((cur.data as { version: number } | null)?.version ?? 1) + 1, updated_at: at }).eq("id", workItemId);
+    }
+    await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.escalated", objectType: "workflow_run", objectId: run.id, result: "success", newState: { reason: input.reason } });
+    return respond(c, db, run.id, ctx, "done", null);
+  });
+
+  /** Follow up now: the next follow-up becomes due today and ASAP raises it at once. */
+  app.post("/workflows/runs/:id/follow-up-now", async (c) => {
+    const got = await controlRun(c, c.req.param("id"), "workflow.follow_up.now");
+    if ("blocked" in got) return got.blocked;
+    const { db, user, ctx, org, run } = got;
+    if (run.current_step !== "await_terms") return respond(c, db, run.id, ctx, "blocked", "There is nothing to follow up yet — the insurer request has not been delivered.", 409);
+    const service = deps.service();
+    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date(Date.now() - 1000).toISOString();
+    await service.from("workflow_runs").update({ facts: { ...run.facts, followUpOn: today, chasing: { stopped: false } }, next_run_at: now, updated_at: now }).eq("id", run.id);
+    await service.from("workflow_steps").update({ next_attempt_at: now }).eq("run_id", run.id).eq("step_key", "await_terms").eq("state", "waiting");
+    await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.follow_up.now", objectType: "workflow_run", objectId: run.id, result: "success" });
+    await advance(run.id);
+    return respond(c, db, run.id, ctx, "done", null);
+  });
+
+  /** Stop automation: the run is cancelled; its Work stays open for a person, saying so. */
+  app.post("/workflows/runs/:id/stop", async (c) => {
+    const input = await parseBody(c, stopRunRequestSchema);
+    const got = await controlRun(c, c.req.param("id"), "workflow.stopped");
+    if ("blocked" in got) return got.blocked;
+    const { db, user, ctx, org, run } = got;
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "already", null);
+    const byName = await nameOf(db, user.id);
+    const service = deps.service();
+    const at = new Date().toISOString();
+    await service.from("workflow_runs").update({ state: "cancelled", exception: null, finished_at: at, lease_until: null, facts: { ...run.facts, stopped: { by: user.id, byName, at, reason: input.reason } }, updated_at: at }).eq("id", run.id);
+    const w = await service.from("workflow_runs").select("work_item_id").eq("id", run.id).maybeSingle();
+    const workItemId = (w.data as { work_item_id: string | null } | null)?.work_item_id;
+    if (workItemId) {
+      const cur = await service.from("work_items").select("version").eq("id", workItemId).maybeSingle();
+      await service.from("work_items").update({ task_status: "needs_you", task_party: null, required_action: `ASAP stopped working on this (${byName}: ${input.reason}) — a person carries it from here`, task_next_check: null, version: ((cur.data as { version: number } | null)?.version ?? 1) + 1, updated_at: at }).eq("id", workItemId);
+    }
+    await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.stopped", objectType: "workflow_run", objectId: run.id, result: "success", newState: { reason: input.reason } });
+    return respond(c, db, run.id, ctx, "done", null);
+  });
+
+  /** A finished run's completion receipt. */
+  app.get("/workflows/runs/:id/receipt", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    requireActiveOrganization(ctx);
+    const r = await db.from("workflow_receipts").select("title, outcome, receipt, completed_at").eq("run_id", c.req.param("id")).maybeSingle();
+    if (!r.data) throw new HttpError(404, "not_found", "This run has no receipt yet — it is not finished.");
+    const row = r.data as { title: string; outcome: string; receipt: Record<string, unknown>; completed_at: string };
+    return c.json({ title: row.title, outcome: row.outcome, completedAt: row.completed_at, receipt: row.receipt });
+  });
+
+  /**
+   * Supervision (D-131): every workflow in this brokerage, grouped into the views people use, ranked
+   * exception-first, with what ASAP plans to do next. One read of the same state as everything else.
+   */
+  app.get("/supervision", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const { data, error } = await db.from("workflow_runs").select("*").eq("organization_id", org.id).order("started_at", { ascending: false }).limit(200);
+    if (error) return sendError(c, mapDatabaseError(error));
+    const p = perms(ctx);
+    const runs = await summaries(db, (data ?? []) as RunDb[], { act: p.canAct, approve: p.canApprove });
+    const premiums = await premiumsFor(db, runs.map((r) => r.subjectId));
+    const now = Date.now();
+    const items = runs.map((r) => {
+      const o = r.operational;
+      const live = r.state !== "done" && r.state !== "cancelled";
+      const views: ("needs_me" | "asap_handling" | "waiting_on_others" | "upcoming" | "done")[] = [];
+      if (!live) views.push("done");
+      else {
+        if (o.attention && (!o.owner || o.owner.id === user.id)) views.push("needs_me");
+        if (!o.attention && !o.paused && (r.state === "running" || o.tone === "waiting")) views.push("asap_handling");
+        if (o.waitingFor) views.push("waiting_on_others");
+        if (o.upcoming.length) views.push("upcoming");
+      }
+      // Exception-first: deadline, approval, blocked, overdue response, escalation, money at stake.
+      const daysLeft = r.periodEnd ? Math.ceil((new Date(r.periodEnd + "T23:59:59Z").getTime() - now) / 86_400_000) : 999;
+      let priority = 0;
+      const reasons: string[] = [];
+      if (live && daysLeft <= 14) { priority += 50; reasons.push(`cover ends in ${Math.max(daysLeft, 0)} days`); }
+      else if (live && daysLeft <= 30) { priority += 20; reasons.push(`cover ends in ${daysLeft} days`); }
+      if (o.escalated) { priority += 40; reasons.push("escalated"); }
+      if (r.state === "exception") { priority += 35; reasons.push("blocked"); }
+      if (r.state === "waiting_approval") { priority += 30; reasons.push("approval needed"); }
+      if (o.attentionReason === "A follow-up is due") { priority += 25; reasons.push("insurer response overdue"); }
+      if (o.primaryAction.kind === "record_delivery") { priority += 15; reasons.push("approved but not delivered"); }
+      const premium = premiums.get(r.subjectId) ?? 0;
+      if (premium >= 1_000_000) { priority += 10; reasons.push("large premium"); }
+      if (!live) priority = -1;
+      return { ...r, views, priority, priorityReason: reasons.join(" · ") || (live ? "on track" : "finished") };
+    }).sort((a, b) => b.priority - a.priority);
+    const upcoming = items.flatMap((r) => r.operational.upcoming.map((u) => ({ runId: r.id, title: r.title, kind: u.kind, at: u.at, label: u.label, paused: Boolean(r.operational.paused) }))).sort((a, b) => a.at.localeCompare(b.at));
+    const counts = { needs_me: 0, asap_handling: 0, waiting_on_others: 0, upcoming: 0, done: 0 };
+    for (const i of items) for (const v of i.views) counts[v]++;
+    const rulesView = await loadRules(db, ctx, org.id);
+    const rules = [
+      ...rulesView.rules.filter((x) => x.key === "renewal.window" || x.key === "workflow.autonomy").map((x) => ({ key: x.key, summary: x.key === "renewal.window" ? summariseWindow(x.value) : "This brokerage's autonomy rule", version: x.version ?? null, setByName: x.setByName, source: x.source })),
+      ...rulesView.defaults.filter((d) => d.key === "renewal.window" || d.key === "workflow.autonomy").map((d) => ({ key: d.key, summary: d.summary, version: null, setByName: null, source: d.basis })),
+    ];
+    return c.json(supervisionResponseSchema.parse({ items, upcoming, counts, rules }));
+  });
+
   return app;
+}
+
+async function nameOf(db: SupabaseClient, userId: string) {
+  const u = await db.from("users").select("display_name, full_name").eq("id", userId).maybeSingle();
+  const row = u.data as { display_name: string | null; full_name: string | null } | null;
+  return row?.display_name ?? row?.full_name ?? "A member";
+}
+
+async function premiumsFor(db: SupabaseClient, periodIds: string[]) {
+  if (!periodIds.length) return new Map<string, number>();
+  const { data } = await db.from("policy_periods").select("id, premium_amount").in("id", periodIds);
+  return new Map(((data ?? []) as { id: string; premium_amount: string | null }[]).map((p) => [p.id, Number(p.premium_amount ?? 0)]));
+}
+
+function summariseWindow(v: unknown) {
+  const w = v as { leadDays?: number; followUpDays?: number; escalateDaysBeforeExpiry?: number };
+  return `Renewal work starts ${w.leadDays} days before expiry; follow up every ${w.followUpDays} days after delivery; escalate ${w.escalateDaysBeforeExpiry} days before expiry.`;
 }

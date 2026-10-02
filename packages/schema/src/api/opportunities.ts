@@ -538,8 +538,75 @@ export const validityThresholdRuleSchema = z.object({
 });
 export type ValidityThresholdRule = z.infer<typeof validityThresholdRuleSchema>;
 
+/**
+ * The autonomy ladder (D-131): how far ASAP may go on its own, per action. A brokerage chooses;
+ * ASAP never infers a level from what people tend to do.
+ */
+export const AUTONOMY_LEVELS = ["observe", "prepare", "recommend", "act_after_approval", "act_within_rules", "manage_exceptions"] as const;
+export const AutonomyLevel = z.enum(AUTONOMY_LEVELS);
+export type AutonomyLevel = z.infer<typeof AutonomyLevel>;
+export const AUTONOMY_LEVEL_LABEL: Record<AutonomyLevel, string> = {
+  observe: "1 · Observe — notice and report only",
+  prepare: "2 · Prepare — draft, never act",
+  recommend: "3 · Recommend — prepare and say what to do",
+  act_after_approval: "4 · Act after approval",
+  act_within_rules: "5 · Act automatically within rules",
+  manage_exceptions: "6 · Manage exceptions — act, and bring only exceptions to a person",
+};
+/** Actions the ladder governs, in plain words. */
+export const AUTONOMY_ACTIONS = {
+  detect_renewals: "Start renewal work when a period enters the renewal window",
+  prepare_renewal: "Check the file and prepare the renewal pack and messages",
+  external_messages: "Messages to clients and insurers",
+  follow_up: "Follow up with insurers on the schedule",
+  escalate: "Escalate to the work owner",
+  recommend_quote: "Name a recommended quote",
+} as const;
+export type AutonomyAction = keyof typeof AUTONOMY_ACTIONS;
+/** Never automatic, whatever a brokerage sets: a person does these. */
+export const NEVER_AUTOMATIC = ["Bind or cancel cover", "Record a client's instruction", "Move money or record a payment", "Send an external message without a person's approval", "Make a claims or coverage decision"] as const;
+/** The highest level an action may be given. External messages always wait for a person. */
+export const AUTONOMY_CAP: Record<AutonomyAction, AutonomyLevel> = {
+  detect_renewals: "manage_exceptions",
+  prepare_renewal: "manage_exceptions",
+  external_messages: "act_after_approval",
+  follow_up: "manage_exceptions",
+  escalate: "manage_exceptions",
+  recommend_quote: "recommend",
+};
+export const autonomyRuleSchema = z.object({
+  actions: z.object({
+    detect_renewals: AutonomyLevel,
+    prepare_renewal: AutonomyLevel,
+    external_messages: AutonomyLevel,
+    follow_up: AutonomyLevel,
+    escalate: AutonomyLevel,
+    recommend_quote: AutonomyLevel,
+  }),
+  /** Who may approve what leaves the brokerage. */
+  approver: z.enum(["any_approver", "admin_or_owner"]),
+  /** Who new renewal work goes to. */
+  assignment: z.enum(["client_file_owner", "leave_unassigned"]),
+  /** Further things this brokerage never wants automatic, in its own words. */
+  alsoNever: z.array(z.string().trim().min(3).max(120)).max(20).default([]),
+});
+export type AutonomyRule = z.infer<typeof autonomyRuleSchema>;
+export const AUTONOMY_DEFAULT: AutonomyRule = {
+  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare" },
+  approver: "any_approver",
+  assignment: "client_file_owner",
+  alsoNever: [],
+};
+/** Renewal window and cadence (D-130), now set from the rules surface. */
+export const renewalWindowRuleSchema = z.object({
+  leadDays: z.number().int().min(7).max(180),
+  followUpDays: z.number().int().min(1).max(30),
+  escalateDaysBeforeExpiry: z.number().int().min(1).max(60),
+});
+export type RenewalWindowRule = z.infer<typeof renewalWindowRuleSchema>;
+
 /** Every key this deployment understands, and what a value for it must look like. */
-export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity"] as const;
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy"] as const;
 export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
 export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
 
@@ -551,6 +618,8 @@ export const companyRuleSchema = z.object({
   note: z.string().nullable(),
   setByName: z.string().nullable(),
   updatedAt: z.string(),
+  /** Which version of this rule is in force (company_rule_versions, 0052). */
+  version: z.number().int().nullable().optional(),
 });
 export type CompanyRuleView = z.infer<typeof companyRuleSchema>;
 
