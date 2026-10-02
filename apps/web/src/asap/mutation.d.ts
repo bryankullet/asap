@@ -16,6 +16,7 @@ export declare function createRefresher<T>(
   refresh(): Promise<void>;
   refreshFully(): Promise<void>;
   onChange(fn: (status: unknown) => void): () => void;
+  notify(): void;
 };
 export declare function lifecycleOf(res: unknown): MutationStatus;
 export declare function runMutation(

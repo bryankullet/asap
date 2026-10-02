@@ -56,8 +56,8 @@ class Component extends DCLogic {
     if (back) tabs.push({ id: 't2', ref: reopen, pinned: false });
     this.setState({ ready: true, tabs, activeId: back ? 't2' : 't1', contextRef: back ? reopen : undefined,
       thread: (conv && conv.messages && conv.messages.length) ? conv.messages : [{
-        role: 'ai', lead: 'Good morning. Tell me what you need.',
-        text: 'I read your records, prepare the next step and show my evidence. I never send, place, change cover or move money without your click.',
+        role: 'ai', lead: A.greetingLead || 'Good morning. Tell me what you need.',
+        text: A.greetingText || 'I read your records, prepare the next step and show my evidence. I never send, place, change cover or move money without your click.',
         chips: A.greetingChips
       }] });
     this.onKey = (e) => {
@@ -201,7 +201,7 @@ class Component extends DCLogic {
         r = { lead: 'ASAP could not answer just now.', text: 'Nothing was changed. Your message is back in the box \u2014 send it again, or try in a moment.', keepWorkspace: true, clarify: { options: [{ label: 'Try again', text }] }, failed: true };
         if (this.inputRef.current && !this.inputRef.current.value) this.inputRef.current.value = text;
       }
-      const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => ({ label: c })) };
+      const msg = { role: 'ai', lead: r.lead, text: r.text, chips: (r.chips || []).map(c => (typeof c === 'string' ? { label: c } : c)) };
       if (r.clarify) msg.chips = r.clarify.options.map(o => ({ label: o.label, text: o.text }));
       if (r.pending) msg.pending = { ...r.pending, status: 'open' };
       if (r.dateAmbiguous) msg.text += ' I read “' + r.dateAmbiguous + '” as a specific date — correct me if you meant otherwise.';
@@ -247,6 +247,31 @@ class Component extends DCLogic {
     const payload = { ...b.send.payload, subject: m.subject, body: m.body, signature: this.A.records.actor().name };
     if (!this.A.email.connected()) { this.flash('Send failed — the mailbox connection is not live. Your draft is saved; reconnect in Connections and retry.'); return; }
     this.act(b.send.action, payload, { after: b.after, actionId: b.send.action + ':' + payload.subject + ':' + (payload.recipients || []).map(r => r.email).join(',') });
+  };
+
+  // ---------------- chat attachments
+  openPicker = () => { const el = document.querySelector('.asap-attach-input'); if (el) el.click(); };
+  chatPick = (ev) => { const files = [...(ev.target.files || [])]; try { ev.target.value = ''; } catch { /* already copied */ } this.chatFiles(files); };
+  chatDragOver = (ev) => { ev.preventDefault(); };
+  chatDrop = (ev) => { ev.preventDefault(); this.chatFiles([...((ev.dataTransfer && ev.dataTransfer.files) || [])]); };
+  openAttachMenu = () => {
+    const chips = (this.A.attachMenu || [{ label: 'Upload documents', pick: true }]);
+    const thread = [...this.state.thread, { role: 'ai', lead: 'Add what you already have.', text: 'Drop files here, or choose what to add. PDFs, photos, CSV and Excel are read on ASAP\u2019s own service.', chips }];
+    this.setState({ thread });
+  };
+  chatFiles = async (files) => {
+    if (!files.length || !this.A.ingest) return;
+    const thread = [...this.state.thread, { role: 'user', text: 'Attached ' + files.map(f => f.name).join(', ') }];
+    this.setState({ thread, thinking: true });
+    let r;
+    try { r = await this.A.ingest(files); }
+    catch (e) { r = { lead: 'Those files could not be added.', text: 'Nothing was filed \u2014 you can try again.' }; }
+    const msg = { role: 'ai', lead: r.lead, text: r.text, chips: r.chips || [], pending: r.pending ? { ...r.pending, status: 'open' } : undefined, ingest: r.ingest };
+    const next = [...thread, msg];
+    this.saveThread(next);
+    this.setState({ thread: next, thinking: false });
+    if (r.ref) this.openRef(r.ref);
+    this.bump();
   };
 
   // ---------------- uploads
@@ -547,7 +572,7 @@ class Component extends DCLogic {
       startDrag: this.startDrag, resetWidth: this.resetWidth,
       dragBg: this.state.dragging ? 'rgba(31,108,73,.25)' : 'transparent',
       activityBg: '#fff', activityDot: this.A && this.A.activityLive && this.A.activityLive() ? '#1f6c49' : 'transparent', activityTitle: this.A && this.A.activityLive && this.A.activityLive() ? 'ASAP is working — open Activity' : 'Activity — what ASAP and your team did', voice: () => this.flash('Voice input is not available in this build — no speech capture is wired, so ASAP will not pretend to listen.'),
-      askAttach: () => this.flash('Use the upload area in the workspace — files there are read from your device and become evidence.')
+      askAttach: () => this.openAttachMenu(), chatPick: this.chatPick, chatDragOver: this.chatDragOver, chatDrop: this.chatDrop
     };
     if (!this.state.ready) return { ...base, ws: { blocks: [], kind: 'ASAP', title: 'Loading records…', statusLabel: '', statusBg: '#f5f7f4', statusFg: '#4c564e' },
       tabs: [], navItems: [], thread: [], suggestions: [], userOptions: [], sheet: this.sheetVals(),
@@ -615,9 +640,9 @@ class Component extends DCLogic {
         hasPanelNote: !!m.panelNote, panelNote: m.panelNote,
         hasReceipt: !!m.receipt, receipt: m.receipt, openAudit: () => this.openRef({ ws: 'audit', clientId: this.state.contextRef?.clientId }),
         hasChips: (m.chips || []).length > 0,
-        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
-        hasPending: !!m.pending,
-        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, editLabel: m.pending.editLabel || 'Edit details', cancelLabel: m.pending.cancelLabel || 'Cancel', hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
+        chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.pick ? this.openPicker() : c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
+        hasPending: !!(m.ingest && this.A.ingestCard ? this.A.ingestCard(m.ingest, m.pending) : m.pending),
+        pending: (m.ingest && this.A.ingestCard ? (m = { ...m, pending: this.A.ingestCard(m.ingest, m.pending) }) : m).pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, editLabel: m.pending.editLabel || 'Edit details', cancelLabel: m.pending.cancelLabel || 'Cancel', hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },

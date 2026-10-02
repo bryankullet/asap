@@ -89,6 +89,8 @@ export function createRefresher(load, apply, { waitMs = REFRESH_WAIT_MS } = {}) 
     refreshFully() {
       return running ?? run();
     },
+    /** Re-render without a re-read: something already on hand changed (an upload's state). */
+    notify,
     onChange(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

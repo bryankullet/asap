@@ -51,4 +51,4 @@ VITE_PUBLIC_SUPABASE_URL="http://127.0.0.1:9" VITE_PUBLIC_SUPABASE_ANON_KEY="e2e
 for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" && curl -s -o /dev/null "http://127.0.0.1:$WEB_PORT/e2e/live.html" && break; sleep 0.3; done
 curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" || { cat "$WORK/api.log" >&2; exit 1; }
 
-E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html" node apps/web/e2e/journey.e2e.mjs
+E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"

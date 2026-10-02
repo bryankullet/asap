@@ -68,6 +68,13 @@ const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
   blocking: input.premiumBasis ? [] : ["Say whether the premiums are gross or total payable."],
   mappedByModel: [],
 }));
+// Chat attachments (D-132): a new file is stored; the same bytes again are recognised, not re-stored.
+const uploadDocument = vi.fn(async (input: { filename: string; contentSha256: string }) => ({
+  outcome: input.filename.startsWith("again") ? "already_on_file" : "ready",
+  uploadUrl: "https://storage.test/put",
+  document: { id: input.filename.startsWith("again") ? DOC : "d1000000-0000-4000-8000-0000000000" + String(input.filename.length).padStart(2, "0"), kind: "unknown", filename: input.filename, mimeType: "application/pdf", byteSize: 10, pageCount: null, extractionState: "queued", extractionError: null, clientId: null, workItemId: null, createdAt: "2026-10-02" },
+}));
+const documentFiled = vi.fn(async () => ({ outcome: "queued" }));
 const commitImport = vi.fn(async () => ({ batch: { filename: "book.csv", clientsCreated: 1, contactsCreated: 0, policiesCreated: 1, periodsCreated: 1 }, failures: [] }));
 const createOpportunity = vi.fn(async () => ({ opportunityId: "90000000-0000-4000-8000-000000000001", workItemId: WORK }));
 // A claim created in a test is read back through the client's record, as the server would return it.
@@ -253,6 +260,7 @@ vi.mock("../lib/api.js", () => ({
     saveTurns,
     document: async (id: string) => (id === DOC ? docDetail() : null),
     reviewDocumentField, applyTargets, applyPreview, applyToRecord,
+    uploadDocument, documentFiled,
   },
 }));
 
@@ -1073,6 +1081,53 @@ describe("live mode", () => {
     const space = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied: boolean };
     expect(space).toMatchObject({ ok: false, denied: true });
     expect(manageWork).not.toHaveBeenCalled();
+  });
+
+  describe("chat attachments and onboarding (D-132)", () => {
+    it("a new brokerage is welcomed with four ways to start, and can skip", async () => {
+      const A = (await live()) as unknown as { greetingLead?: string; greetingChips: { label: string }[]; attachMenu: { label: string }[] };
+      // This brokerage already has clients, so it is not welcomed as new.
+      expect(A.greetingLead).toBeUndefined();
+      expect(A.attachMenu.map((c) => c.label)).toEqual(["Upload documents", "Import client/policy records", "Add client manually", "Connect email (optional, not needed yet)"]);
+    });
+
+    it("a dropped spreadsheet becomes a creation preview; confirming creates the records through the real import", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true })));
+      const A = (await live()) as unknown as { ingest: (f: File[]) => Promise<{ lead: string; pending: { action: string; title: string; confirmLabel: string; sections: { label: string; items: string[] }[] } }> };
+      const r = await A.ingest([new File(["client_name,policy_number\nSimba Traders,ST-1\n"], "book.csv", { type: "text/csv" })]);
+      expect(previewImport).toHaveBeenCalled();
+      expect(r.lead).toBe("I found 1 client and 1 policy");
+      // Premium basis is unknown, so it is not imported until corrected.
+      expect(r.pending.title).toBe("Needs correcting before import");
+      expect(r.pending.sections[0]!.items).toContain("Say whether the premiums are gross or total payable.");
+      expect(commitImport).not.toHaveBeenCalled();
+    });
+
+    it("dropped documents are filed one by one, the same bytes are not stored twice, and unsupported files are refused", async () => {
+      const put = vi.fn(async () => ({ ok: true }));
+      vi.stubGlobal("fetch", put);
+      const A = (await live()) as unknown as { ingest: (f: File[]) => Promise<{ lead: string; text: string; ingest: string[] }>; ingestCard: (ids: string[]) => { title: string; sections: { items: string[] }[] } };
+      const r = await A.ingest([new File(["%PDF-1"], "schedule-a.pdf", { type: "application/pdf" }), new File(["%PDF-1"], "again.pdf", { type: "application/pdf" }), new File(["x"], "notes.docx")]);
+      expect(uploadDocument).toHaveBeenCalledTimes(2);
+      expect(put).toHaveBeenCalledTimes(1);
+      expect(documentFiled).toHaveBeenCalledTimes(1);
+      expect(r.text).toMatch(/notes\.docx is not a file ASAP reads/);
+      const card = A.ingestCard(r.ingest);
+      // Never "read" before extraction finishes: the new file is waiting, the known one is on file.
+      expect(card.title).toBe("Reading 2 files…");
+      expect(card.sections[0]!.items.join(" ")).toMatch(/schedule-a\.pdf — Waiting to be read/);
+      expect(card.sections[0]!.items.join(" ")).toMatch(/again\.pdf — already on file/);
+    });
+
+    it("typed onboarding requests open the picker or the right Space", async () => {
+      const A = await live();
+      const up = (await A.ai.route("Import these policy schedules", {})) as { chips: { label: string; pick?: boolean }[] };
+      expect(up.chips[0]).toMatchObject({ label: "Choose files", pick: true });
+      const own = (await A.ai.route("This is Tausi Hauliers Ltd's motor policy", {})) as { lead: string };
+      expect(own.lead).toBe("Files you add next are filed under Tausi Hauliers Ltd.");
+      const setup = A.ai.workspace({ ws: "setup" }) as { title: string };
+      expect(setup.title).toBe("Setting up your book");
+    });
   });
 
   describe("Renewal Autopilot in the interface (D-129)", () => {

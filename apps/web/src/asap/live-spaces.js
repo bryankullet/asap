@@ -775,6 +775,46 @@ function renewalReceipt(run, back, state) {
   };
 }
 
+/* ---------------------------------------------------------------- setup (D-132) */
+
+const READ_STATE = { uploading: "Uploading", not_started: "Waiting to be read", queued: "Waiting to be read", working: "Reading", extracted: "Read", failed: "Could not read", not_applicable: "Filed" };
+
+/**
+ * Setup: the same Space a brokerage keeps using, showing how far its book has come in — files
+ * received, records found, what needs confirmation, what was created, and the one next step. Every
+ * count is read from the records; a file is "Read" only when the server says extraction finished.
+ */
+function setupSpace(ref, state, db) {
+  const files = [...(state.ingested?.values?.() ?? [])];
+  const clients = db?.clients?.length ?? 0;
+  const policies = db?.policies?.length ?? 0;
+  const documents = Math.max(db?.documents?.length ?? 0, files.filter((f) => f.id).length);
+  const reading = files.filter((f) => !["extracted", "failed", "not_applicable"].includes(f.extractionState));
+  const confirm = files.filter((f) => f.proposed > 0);
+  const failed = files.filter((f) => f.extractionState === "failed");
+  const imp = state.importPreview;
+  const steps = [
+    ["Brokerage created", true],
+    ["Records added", clients > 0],
+    ["Documents filed", documents > 0],
+    ["Everything confirmed", (clients > 0 || documents > 0) && !confirm.length && !imp],
+  ];
+  const doneN = steps.filter(([, d]) => d).length;
+  const blocks = [
+    note(doneN === steps.length ? "green" : "amber", doneN === steps.length ? "Your book is in" : "Setup · " + doneN + " of " + steps.length + " done", steps.map(([l, d]) => (d ? "✓ " : "○ ") + l).join("   ") + ". You can stop at any point and come back — the + beside the box is always there."),
+  ];
+  // The one primary next action.
+  if (imp) blocks.push(nav("Confirm the records from " + (state.importFile?.name ?? "your spreadsheet"), "Review what ASAP found and create the records.", { ws: "import" }));
+  else if (confirm.length) blocks.push(nav("Confirm what ASAP read", confirm[0].name + " — check each value against its page.", { ws: "document", documentId: confirm[0].id }));
+  else if (!clients && !documents) blocks.push(note("green", "Start with what you have", "Drop policy schedules, a client list or photos of documents on the conversation, or use the + beside the box. Gmail is optional and not needed yet."));
+  else blocks.push(nav("Open Today", "What needs attention now, from your records.", { ws: "today" }));
+  if (files.length)
+    blocks.push(rows("Files received", files.map((f) => ({ title: f.name, note: (f.already ? "Already on file — not stored twice" : READ_STATE[f.extractionState] ?? "Uploading") + (f.proposed ? " · " + plural(f.proposed, "value needs", "values need") + " confirmation" : "") + (f.error ? " · " + f.error : ""), badge: f.extractionState === "failed" ? "Could not read" : f.proposed ? "Needs confirmation" : ["extracted", "not_applicable"].includes(f.extractionState) ? "Filed" : "Reading", badgeTone: f.extractionState === "failed" ? bad : f.proposed || reading.includes(f) ? warn : ok, action: f.id ? { a: "open", ref: { ws: "document", documentId: f.id } } : undefined }))));
+  blocks.push(facts([["Clients", String(clients)], ["Policies", String(policies)], ["Documents", String(documents)], ["Needs confirmation", String(confirm.length + (imp ? 1 : 0))], ["Could not read", String(failed.length)]]));
+  if (failed.length) blocks.push(rows("Could not read", failed.map((f) => ({ title: f.name, note: f.error ?? "The file could not be read. Check it opens on your device, then add it again.", badge: "Failed", badgeTone: bad }))));
+  return { kind: "Setup", title: "Setting up your book", status: "live", statusLabel: doneN + " of " + steps.length, blocks };
+}
+
 /* ---------------------------------------------------------------- autonomy rules */
 
 const LADDER = [
@@ -1349,6 +1389,8 @@ export function liveSpace(ref, state) {
       return renewalSpace(ref, state);
     case "autonomy":
       return autonomySpace(ref, state);
+    case "setup":
+      return setupSpace(ref, state, state.db);
     case "activity":
     case "audit":
       return activitySpace(ref);

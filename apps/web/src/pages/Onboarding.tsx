@@ -1,8 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, describeApiError } from "../lib/api.js";
-import { useInvalidateMe } from "../lib/me.js";
+import { activeMemberships } from "../lib/guards.js";
+import { useInvalidateMe, useMe } from "../lib/me.js";
+
+/** How long the hand-off to the workspace may take before the screen says so and offers a way on. */
+export const OPENING_TIMEOUT_MS = 15_000;
+const FLAG = "asap.brokerage.created";
 
 /**
  * Creating the brokerage — the one step that must happen before the ASAP interface has anything
@@ -36,34 +41,84 @@ export function Onboarding() {
         accepted_terms: true,
         request_key: requestKey,
       }),
-    onSuccess: async () => {
+    onSuccess: () => {
       setCreated(true);
       try {
-        sessionStorage.setItem("asap.brokerage.created", "1");
+        sessionStorage.setItem(FLAG, "1");
       } catch {
         /* storage blocked: the in-memory flag still holds for this mount */
       }
-      await invalidate();
-      void navigate({ to: "/", replace: true });
+      // Re-read the account; the effect below moves on the moment it shows the new brokerage.
+      void invalidate();
     },
   });
+
+  /*
+   * The hand-off (the cause of the screen that never moved on): it used to wait on one re-read and
+   * a navigation, and nothing re-checked after that. A refresh with the "just created" flag set
+   * showed this screen forever. Now it watches the account itself: as soon as the brokerage is
+   * there it opens the workspace; if it is not there in OPENING_TIMEOUT_MS it says so and offers a
+   * retry (the same request key — no second brokerage) and a way on.
+   */
+  const me = useMe();
+  const hasBrokerage = activeMemberships(me.data).length > 0 && Boolean(me.data?.active_organization);
+  const [timedOut, setTimedOut] = useState(false);
+  const [phase, setPhase] = useState("Creating your private workspace");
 
   const canSubmit = name.trim().length >= 2 && accepted && !create.isPending;
   let justCreated = created;
   try {
-    justCreated ||= sessionStorage.getItem("asap.brokerage.created") === "1";
+    justCreated ||= sessionStorage.getItem(FLAG) === "1";
   } catch {
     /* storage blocked */
   }
+
+  useEffect(() => {
+    if (!justCreated) return;
+    if (hasBrokerage) {
+      setPhase("Opening your workspace");
+      void navigate({ to: "/", replace: true });
+      return;
+    }
+    setPhase(me.isFetching ? "Confirming your brokerage" : "Waiting for your brokerage to appear");
+    const poll = setInterval(() => void invalidate(), 2_000);
+    const stop = setTimeout(() => setTimedOut(true), OPENING_TIMEOUT_MS);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(stop);
+    };
+  }, [justCreated, hasBrokerage]);
+
+  const forget = () => {
+    try {
+      sessionStorage.removeItem(FLAG);
+    } catch {
+      /* storage blocked */
+    }
+  };
   const field = { width: "100%", border: "1px solid #d7ded8", borderRadius: 11, padding: "10px 11px", outline: 0, fontSize: 14 } as const;
 
+  const btn = { border: 0, background: "#1f6c49", color: "#fff", borderRadius: 11, padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600 } as const;
+  const ghost = { border: "1px solid #d7ded8", background: "#fff", color: "#18231c", borderRadius: 11, padding: "10px 14px", fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 600 } as const;
   if (justCreated)
     return (
-      <div role="status" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: "var(--font-body)" }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 12, letterSpacing: "0.04em", fontWeight: 400, color: "#1f6c49" }}>BROKERAGE CREATED</div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em", margin: "6px 0 6px" }}>Opening your workspace…</h1>
-          <p style={{ color: "#4c564e", fontSize: 14, margin: 0 }}>Reading your brokerage's records for the first time.</p>
+      <div role="status" aria-live="polite" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 16, background: "#fbfcfa", color: "#18231c", fontFamily: "var(--font-body)" }}>
+        <div style={{ textAlign: "center", maxWidth: 420 }}>
+          <div style={{ fontSize: 12, letterSpacing: "0.04em", fontWeight: 400, color: timedOut ? "#a43b32" : "#1f6c49" }}>{timedOut ? "TAKING LONGER THAN IT SHOULD" : "BROKERAGE CREATED"}</div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: 20, letterSpacing: "-0.02em", margin: "6px 0 6px" }}>{timedOut ? "Your workspace has not opened yet" : phase + "…"}</h1>
+          <p style={{ color: "#4c564e", fontSize: 14, margin: 0, lineHeight: 1.55 }}>
+            {timedOut
+              ? me.isError
+                ? `Your account could not be read: ${describeApiError(me.error)} Retrying is safe — it never creates a second brokerage.`
+                : "The brokerage was created, but your account does not show it yet. Retrying is safe — it never creates a second brokerage."
+              : "This takes a few seconds."}
+          </p>
+          {timedOut && (
+            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16, flexWrap: "wrap" }}>
+              <button type="button" style={btn} onClick={() => { setTimedOut(false); void invalidate(); if (name.trim()) create.mutate(); }}>Retry</button>
+              <button type="button" style={ghost} onClick={() => { forget(); window.location.assign("/"); }}>Continue to workspace</button>
+            </div>
+          )}
         </div>
       </div>
     );
