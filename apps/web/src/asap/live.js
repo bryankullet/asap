@@ -773,7 +773,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         state.importPreview = null;
         state.importFile = null;
         state.importResolutions = new Map();
-        await refresh();
+        // Verification needs the records as they are now, so this one waits for the full re-read.
+        await refresher.refreshFully();
         // Success is claimed only for what can be read back: every imported policy must now be on file.
         const onFile = new Set(db.policies.map((x) => x.number));
         const missing = expected.filter((n) => !onFile.has(n));
@@ -795,13 +796,23 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     },
     "import.template": () => {
       const header = IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(",");
-      const blob = new Blob([header + "\n"], { type: "text/csv" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "asap-import-template.csv";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      return ok("Template downloaded — one row per policy; only client_name is required");
+      const blob = new Blob([header + "\n"], { type: "text/csv;charset=utf-8" });
+      try {
+        // The link must be in the page for every browser to honour the download; it is removed after.
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "asap-import-template.csv";
+        a.rel = "noopener";
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+      } catch (e) {
+        return { ok: false, error: "Your browser did not allow the download. The columns are: " + IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(", ") + "." };
+      }
+      // A browser can still decline silently, so say what to look for rather than claim it arrived.
+      return ok("Template download started: asap-import-template.csv", { detail: "Check your browser's downloads. One row per policy; only client_name is required. Columns: " + IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(", ") + "." });
     },
     "import.clear": () => {
       state.importPreview = null;
@@ -2076,6 +2087,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     /** Re-render when a background re-read lands; returns the unsubscribe. */
     onChange: (fn) => refresher.onChange(fn),
     freshness: () => refresher.status,
+    /** True only while ASAP has a run actually in progress — the Activity chip's dot. */
+    activityLive: () => [...(state.renewals?.values?.() ?? [])].some((r) => r.state === "running" || r.state === "queued"),
     suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
     historyNote: "Saved with your brokerage, so it follows you to any device. It’s a record of what you asked, not a business record.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },

@@ -500,7 +500,19 @@ export const api = {
 
 /** Human-readable text for the stable error codes the API returns. */
 export function describeApiError(err: unknown): string {
-  if (!(err instanceof ApiRequestError)) return "Something went wrong. Please try again.";
+  if (!(err instanceof ApiRequestError)) {
+    // Not an answer from the service: the browser itself failed (a file it could not read, a
+    // network drop). Say which, rather than a category that hides it.
+    const m = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+    if (/fetch|network/i.test(m)) return "The request did not reach the ASAP service — check your connection and retry.";
+    return m ? `This browser could not complete it: ${m}` : "Something went wrong in this browser. Please try again.";
+  }
+  if (err.code === "validation_failed") {
+    // Name the field the service refused, so the person knows what to correct.
+    const issues = err.details as { path?: string; message?: string }[] | undefined;
+    const first = Array.isArray(issues) ? issues[0] : undefined;
+    if (first?.message) return `Please check ${first.path || "the details"}: ${first.message}.`;
+  }
   const messages: Record<string, string> = {
     api_unreachable:
       "We cannot reach the ASAP service. It may be starting up, offline, or configured with the wrong address.",

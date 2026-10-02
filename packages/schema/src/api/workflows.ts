@@ -37,6 +37,35 @@ export const workflowApprovalSchema = z.object({
   decidedAt: z.string().nullable(),
   note: z.string().nullable(),
 });
+/**
+ * The one operational reading of a run (D-131): what ASAP is doing, what it completed, what blocks
+ * it, what it needs from a person, who it waits for, when it follows up, and what happens next.
+ * Computed on the server from persisted steps; Chat, Space, Work and Today all show this.
+ */
+export const workflowOperationalSchema = z.object({
+  origin: z.enum(["window", "manual"]),
+  originLabel: z.string(),
+  status: z.string(),
+  tone: z.enum(["working", "waiting", "attention", "done"]),
+  currentWork: z.object({ title: z.string(), detail: z.string() }),
+  completed: z.string(),
+  blockers: z.array(z.object({ label: z.string(), blocking: z.boolean(), fix: z.string().nullable() })).max(3),
+  moreBlockers: z.number().int(),
+  needsFromYou: z.string().nullable(),
+  waitingFor: z.object({ party: z.string(), since: z.string().nullable() }).nullable(),
+  nextFollowUpAt: z.string().nullable(),
+  escalatesAt: z.string().nullable(),
+  escalatesTo: z.string().nullable(),
+  chasing: z.enum(["not_started", "active", "stopped"]),
+  afterYouAct: z.string().nullable(),
+  attention: z.boolean(),
+  attentionReason: z.string().nullable(),
+  primaryAction: z.object({ kind: z.enum(["approve", "record_delivery", "resume", "present", "none"]), label: z.string() }),
+  outputs: z.array(z.object({ label: z.string(), state: z.string() })),
+  owner: z.object({ id: uuidSchema, name: z.string() }).nullable(),
+});
+export type WorkflowOperational = z.infer<typeof workflowOperationalSchema>;
+
 export const workflowRunSchema = z.object({
   id: uuidSchema,
   workflow: z.literal("renewal"),
@@ -53,6 +82,7 @@ export const workflowRunSchema = z.object({
   client: z.object({ id: uuidSchema, name: z.string() }).nullable(),
   periodEnd: z.string().nullable(),
   progress: z.object({ done: z.number().int(), steps: z.number().int() }),
+  operational: workflowOperationalSchema,
 });
 export const workflowDetailSchema = workflowRunSchema.extend({
   steps: z.array(workflowStepSchema),
@@ -75,6 +105,11 @@ export const recordCommunicationDeliveryRequestSchema = z.object({
   reference: z.string().trim().min(3, "Say what proves it").max(300),
   deliveredAt: z.string().datetime({ offset: true }).optional(),
 });
+/** "Move the next follow-up to Friday": a date, used once; the schedule resumes after it. */
+export const moveFollowUpRequestSchema = z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "A date as YYYY-MM-DD") });
+/** "Stop chasing this insurer" / "Start chasing again". Escalation still happens. */
+export const setChasingRequestSchema = z.object({ stop: z.boolean(), reason: z.string().trim().max(500).optional() });
+
 export const workflowActionResponseSchema = z.object({
   outcome: z.enum(["done", "already", "blocked"]),
   reason: z.string().nullable(),

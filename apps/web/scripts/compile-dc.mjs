@@ -178,6 +178,13 @@ const PATCHES = [
   // An action always leaves "busy": a thrown write becomes a failure the person can retry.
   ["      const res = await this.A.records.act(action, payload, actionId);\n      this.setState({ busy: false });",
    "      let res;\n      try { res = await this.A.records.act(action, payload, actionId); }\n      catch (e) { res = { ok: false, error: 'That could not be completed. Nothing was changed \\u2014 you can retry.' }; }\n      finally { this.setState({ busy: false }); }"],
+  // An unowned item says "Unassigned": a dropdown with no empty option showed the first member as
+  // if they owned it, while saving sent no owner at all.
+  ["        o.users = R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }));\n        o.assigneeId = draft.userId || w?.assigneeId;",
+   "        o.users = [{ value: '', label: 'Unassigned — choose a person' }, ...R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }))];\n        o.assigneeId = draft.userId || w?.assigneeId || '';"],
+  // The Activity chip's dot is lit only while ASAP has a run in progress, never always.
+  ["      activityBg: '#fff', voice:",
+   "      activityBg: '#fff', activityDot: this.A && this.A.activityLive && this.A.activityLive() ? '#1f6c49' : 'transparent', activityTitle: this.A && this.A.activityLive && this.A.activityLive() ? 'ASAP is working — open Activity' : 'Activity — what ASAP and your team did', voice:"],
 ];
 const TEMPLATE_PATCHES = [
   // D-126: a new response arrived while the person was reading older history.
@@ -201,6 +208,9 @@ const TEMPLATE_PATCHES = [
   // company or a person — never whatever was typed).
   ['<input value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px" />',
    '<sc-if value="{{ f.isSelect }}"><select value="{{ f.value }}" onChange="{{ f.onChange }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px;background:#fff"><sc-for list="{{ f.options }}" as="o"><option value="{{ o.value }}">{{ o.label }}</option></sc-for></select></sc-if><sc-if value="{{ f.isInput }}"><input type="{{ f.type }}" value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px" /></sc-if><sc-if value="{{ f.isTextarea }}"><textarea value="{{ f.value }}" onChange="{{ f.onChange }}" placeholder="{{ f.placeholder }}" rows="9" style="width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13.5px;line-height:1.5;resize:vertical"></textarea></sc-if>'],
+  // The Activity chip's dot follows real work in progress (see the logic patch).
+  ['<span style="width:6px;height:6px;border-radius:50%;background:#1f6c49"></span>Activity',
+   '<span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:{{ activityDot }}"></span>Activity'],
 ];
 for (const [from, to] of TEMPLATE_PATCHES) {
   if (!tpl.includes(from)) throw new Error("approved markup changed; patch no longer applies:\n" + from);

@@ -117,9 +117,27 @@ async function completeness(ctx: StepContext): Promise<StepResult> {
   (s.contact?.email ? present : missing).push(s.contact?.email ? `Client contact ${s.contact.full_name}` : "A client contact with an email address");
   (schedule ? present : missing).push(schedule ? `Schedule on file: ${schedule.filename}` : "The expiring policy schedule");
   if (s.client.file_status !== "cleared") missing.push(`Client file is ${s.client.file_status.replaceAll("_", " ")} — it must be cleared before placement`);
+  /*
+   * Blocking: without it the bundle cannot safely be used, so ASAP stops before asking for an
+   * approval (D-131). The insurer cannot identify the policy without its number, and the client
+   * letter has nobody to go to without a contact. Everything else is disclosed and ASAP goes on.
+   */
+  const blocking = [
+    ...(s.policy.policy_number ? [] : [{ label: "Policy number", fix: "Add the policy number to the policy record" }]),
+    ...(s.contact?.email ? [] : [{ label: "A client contact with an email address", fix: `Add a contact with an email address to ${s.client.name}` }]),
+  ];
+  const nonBlocking = missing.filter((m) => !/^Policy number$|client contact/i.test(m));
+  if (blocking.length)
+    return {
+      kind: "exception",
+      code: "missing_information",
+      message: `ASAP cannot prepare a usable renewal bundle for ${s.client.name} — ${blocking.map((b) => b.label.toLowerCase()).join(" and ")} ${blocking.length === 1 ? "is" : "are"} missing.`,
+      needs: blocking.map((b) => b.fix).join("; ") + ". Then resume the renewal — it continues from this step.",
+      output: { missing, present, blocking, nonBlocking, clientName: s.client.name, insurerName: s.insurer.name },
+    };
   return {
     kind: "done",
-    output: { missing, present, scheduleDocumentId: schedule?.id ?? null, clientName: s.client.name, insurerName: s.insurer.name },
+    output: { missing, present, blocking: [], nonBlocking, scheduleDocumentId: schedule?.id ?? null, clientName: s.client.name, insurerName: s.insurer.name },
     evidence: [
       { kind: "record", label: `${present.length} items on file, ${missing.length} missing`, ref: `client:${s.client.id}` },
       ...(schedule ? [{ kind: "document" as const, label: schedule.filename, ref: `document:${schedule.id}` }] : []),
@@ -341,11 +359,22 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
     await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "needs_you", task_party: null, required_action: `Deliver the approved renewal request to ${s.insurer!.name} and record how`, reason: "The request is approved but nothing has been sent — ASAP has no mailbox connected.", task_next_check: new Date(ctx.now.getTime() + DAY).toISOString() });
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY), output: { followUps, delivered: false } };
   }
-  const nextDue = new Date(new Date(delivery.delivered_at).getTime() + (followUps + 1) * window.followUpDays * DAY);
+  const scheduled = new Date(new Date(delivery.delivered_at).getTime() + (followUps + 1) * window.followUpDays * DAY);
+  // A person may move the next follow-up ("move it to Friday") or stop chasing this insurer.
+  const override = typeof ctx.run.facts["followUpOn"] === "string" ? new Date(String(ctx.run.facts["followUpOn"]) + "T06:00:00Z") : null;
+  const nextDue = override ?? scheduled;
+  const escalation = new Date(new Date(s.period.period_end + "T06:00:00Z").getTime() - window.escalateDaysBeforeExpiry * DAY);
+  const stopped = ctx.run.facts["chasing"] as { stopped?: boolean; byName?: string } | undefined;
+  if (stopped?.stopped) {
+    await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "with_party", task_party: s.insurer!.name, task_since: delivery.delivered_at, required_action: `Chasing ${s.insurer!.name} is stopped — ASAP escalates on ${human(escalation.toISOString())} if no terms arrive`, reason: `${stopped.byName ?? "A person"} stopped the follow-ups.`, task_next_check: escalation.toISOString() });
+    return { kind: "wait", on: "party", until: escalation, output: { followUps, delivered: true, chasingStopped: true } };
+  }
   if (ctx.now >= nextDue) {
     const n = followUps + 1;
     await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "needs_you", task_party: null, required_action: `Chase ${s.insurer!.name} for ${s.client!.name}'s renewal terms (follow-up ${n})`, reason: `Requested ${human(delivery.delivered_at)}; no terms after ${n * window.followUpDays} days. Cover ends ${human(s.period.period_end)}.`, task_next_check: new Date(ctx.now.getTime() + window.followUpDays * DAY).toISOString() });
     await auditAutomation(ctx.db, ctx.run, "workflow.renewal.follow_up", { insurer: s.insurer!.name, followUp: n, daysLeft });
+    // A moved follow-up is used once; the schedule resumes from here.
+    if (override) await ctx.db.from("workflow_runs").update({ facts: { ...ctx.run.facts, followUpOn: null } }).eq("id", ctx.run.id);
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + window.followUpDays * DAY), output: { followUps: n, delivered: true, lastFollowUp: ctx.now.toISOString() } };
   }
   // After a chase, the chase stays the next action until terms arrive or the next chase is due.
@@ -431,13 +460,16 @@ export async function detectRenewals(db: SupabaseClient, logger: Logger, organiz
 }
 
 /** One period: renewed already, unreadable, or one run (created now or found). */
-export async function detectRenewalFor(db: SupabaseClient, _logger: Logger, organizationId: string, periodId: string): Promise<{ runId: string; created: boolean } | { blocked: string }> {
+/** How a run began: found by ASAP inside the renewal window, or started by a person. */
+export type RenewalOrigin = { kind: "window" } | { kind: "manual"; by: string };
+
+export async function detectRenewalFor(db: SupabaseClient, _logger: Logger, organizationId: string, periodId: string, origin: RenewalOrigin = { kind: "window" }): Promise<{ runId: string; created: boolean } | { blocked: string }> {
   const s = await loadSubject(db, periodId);
   if (!s || !s.client) return { blocked: "That policy period, its policy or its client cannot be read." };
   const later = await db.from("policy_periods").select("id").eq("policy_id", s.policy.id).gt("period_start", s.period.period_end).limit(1);
   if ((later.data ?? []).length) return { blocked: "This policy already has a later period on file — it has been renewed." };
   const workItemId = await ensureRenewalWork(db, organizationId, s);
-  return startRun(db, RENEWAL, { organizationId, subjectType: "policy_period", subjectId: s.period.id, workItemId, facts: { policyId: s.policy.id, clientId: s.client.id, periodEnd: s.period.period_end } });
+  return startRun(db, RENEWAL, { organizationId, subjectType: "policy_period", subjectId: s.period.id, workItemId, facts: { policyId: s.policy.id, clientId: s.client.id, periodEnd: s.period.period_end, origin: origin.kind, ...(origin.kind === "manual" ? { startedBy: origin.by } : {}) } });
 }
 
 async function ensureRenewalWork(db: SupabaseClient, organizationId: string, s: Subject): Promise<string | null> {

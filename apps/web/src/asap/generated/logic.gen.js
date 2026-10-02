@@ -347,8 +347,8 @@ class Component extends DCLogic {
       if (o.isAssign) {
         const w = R.byId('workItems', b.workItemId);
         const draft = this.state.assignDraft[b.workItemId] || {};
-        o.users = R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }));
-        o.assigneeId = draft.userId || w?.assigneeId;
+        o.users = [{ value: '', label: 'Unassigned — choose a person' }, ...R.sel.users().map(u => ({ value: u.id, label: u.name + ' · ' + R.roles[u.role] }))];
+        o.assigneeId = draft.userId || w?.assigneeId || '';
         o.dueAt = draft.dueAt || w?.dueAt || '';
         o.onAssignee = (e) => this.setState({ assignDraft: { ...this.state.assignDraft, [b.workItemId]: { ...draft, userId: e.target.value } } });
         o.onDue = (e) => this.setState({ assignDraft: { ...this.state.assignDraft, [b.workItemId]: { ...draft, dueAt: e.target.value } } });
@@ -545,7 +545,7 @@ class Component extends DCLogic {
       toggleSide: () => this.setState({ sideCollapsed: !this.state.sideCollapsed, sideTouched: true }),
       startDrag: this.startDrag, resetWidth: this.resetWidth,
       dragBg: this.state.dragging ? 'rgba(31,108,73,.25)' : 'transparent',
-      activityBg: '#fff', voice: () => this.flash('Voice input is not available in this build — no speech capture is wired, so ASAP will not pretend to listen.'),
+      activityBg: '#fff', activityDot: this.A && this.A.activityLive && this.A.activityLive() ? '#1f6c49' : 'transparent', activityTitle: this.A && this.A.activityLive && this.A.activityLive() ? 'ASAP is working — open Activity' : 'Activity — what ASAP and your team did', voice: () => this.flash('Voice input is not available in this build — no speech capture is wired, so ASAP will not pretend to listen.'),
       askAttach: () => this.flash('Use the upload area in the workspace — files there are read from your device and become evidence.')
     };
     if (!this.state.ready) return { ...base, ws: { blocks: [], kind: 'ASAP', title: 'Loading records…', statusLabel: '', statusBg: '#f5f7f4', statusFg: '#4c564e' },
