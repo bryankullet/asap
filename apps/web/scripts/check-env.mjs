@@ -17,8 +17,9 @@ import { loadPublicEnv } from "@asap/schema";
 const { loadEnv } = await import("vite");
 const fileEnv = loadEnv(process.env.NODE_ENV ?? "production", new URL("../../..", import.meta.url).pathname, "VITE_PUBLIC_");
 
+let parsed;
 try {
-  loadPublicEnv({ ...fileEnv, ...process.env });
+  parsed = loadPublicEnv({ ...fileEnv, ...process.env });
 } catch (err) {
   console.error("\ncheck-env: the web build has no usable public environment.\n");
   console.error(err instanceof Error ? err.message : String(err));
@@ -29,3 +30,32 @@ try {
   process.exit(1);
 }
 console.log("check-env: ok — every required VITE_PUBLIC_* is present");
+console.log(`check-env: ${describeSupabase(parsed.VITE_PUBLIC_SUPABASE_URL, parsed.VITE_PUBLIC_SUPABASE_ANON_KEY)}`);
+
+/**
+ * Which Supabase project this bundle talks to: the URL's host and project ref, and the project ref
+ * the anon key itself claims. The key is a public JWT, but only its `ref` and `role` claims are
+ * printed — never the key. A mismatch, localhost or a placeholder host fails the build here.
+ */
+function describeSupabase(url, key) {
+  const host = new URL(url).hostname;
+  const urlRef = host.endsWith(".supabase.co") ? host.split(".")[0] : null;
+  let keyRef = null;
+  let role = null;
+  try {
+    const claims = JSON.parse(Buffer.from(key.split(".")[1], "base64url").toString("utf8"));
+    keyRef = claims.ref ?? null;
+    role = claims.role ?? null;
+  } catch {
+    // New-style publishable keys (sb_publishable_…) are not JWTs and carry no ref.
+  }
+  const problems = [];
+  if (/localhost|127\.0\.0\.1|\.invalid$|example/.test(host)) problems.push(`host ${host} is not a hosted project`);
+  if (urlRef && keyRef && urlRef !== keyRef) problems.push(`the anon key belongs to project ${keyRef}, not ${urlRef}`);
+  if (role && role !== "anon") problems.push(`the browser key has role ${role}, not anon`);
+  if (problems.length) {
+    console.error(`\ncheck-env: Supabase configuration is wrong: ${problems.join("; ")}\n`);
+    process.exit(1);
+  }
+  return `supabase host=${host} ref=${urlRef ?? "n/a"} key_ref=${keyRef ?? "n/a"} key_role=${role ?? "n/a"}`;
+}

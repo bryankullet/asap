@@ -18,3 +18,13 @@ export const supabase = createClient(
     },
   },
 );
+
+/**
+ * The Supabase host this bundle was built against — hostname only, never the key. Shown in
+ * network-failure messages so "Failed to fetch" names where the browser was trying to reach.
+ */
+export const supabaseHost: string = new URL(env.VITE_PUBLIC_SUPABASE_URL).hostname;
+
+// Startup diagnostic: `document.documentElement.dataset.supabaseHost` in the console shows which
+// project the deployed bundle targets, without a log line on every page load.
+if (typeof document !== "undefined") document.documentElement.dataset["supabaseHost"] = supabaseHost;
