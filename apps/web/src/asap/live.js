@@ -119,7 +119,7 @@ async function hydrate(me) {
   const rulesP = (typeof api.rules === "function" ? api.rules() : Promise.resolve(null)).catch(() => null);
   const renewalsP = (typeof api.renewalRuns === "function" ? api.renewalRuns() : Promise.resolve({ runs: [] }))
     .then(async (list) => {
-      const details = await pool(list.runs.slice(0, 30), 6, (r) => api.workflowRun(r.id).catch(() => null));
+      const details = await pool(list.runs.slice(0, 30), 12, (r) => api.workflowRun(r.id).catch(() => null));
       return details.filter(Boolean);
     })
     .catch(() => []);
@@ -187,7 +187,7 @@ async function hydrate(me) {
   }
 
   // Each client's own record: contacts, policies and periods, claims, documents, threads.
-  const spaces = await pool(db.clients, 6, (c) => api.clientSpace(c.id));
+  const spaces = await pool(db.clients, 12, (c) => api.clientSpace(c.id));
   // A client whose record could not be read is said to be unreadable, never shown as empty.
   db.meta.unreadableClients = db.clients.filter((_, i) => !spaces[i]).map((c) => c.id);
   const policyIds = [];
@@ -282,8 +282,8 @@ async function hydrate(me) {
   // Cover, as the server derives it — the only source allowed to say "Active cover".
   // Cover checks and document details depend only on the client records, so they run together.
   const [covers, docDetails] = await Promise.all([
-    pool(policyIds, 6, (id) => api.policySpace(id)),
-    pool(db.documents.slice(0, 60), 6, (d) => api.document(d.id)),
+    pool(policyIds, 12, (id) => api.policySpace(id)),
+    pool(db.documents.slice(0, 60), 12, (d) => api.document(d.id)),
   ]);
   covers.forEach((ps) => {
     if (!ps) return;
@@ -415,7 +415,7 @@ async function hydrate(me) {
 
   // Each claim in full — its documents, notes and clock — so its Space reads the record, not a template.
   const claimDetails = new Map();
-  const claimRows = await pool(db.claims.slice(0, 40), 4, (c) => (c.workItemId ? api.workItem(c.workItemId) : null));
+  const claimRows = await pool(db.claims.slice(0, 40), 8, (c) => (c.workItemId ? api.workItem(c.workItemId) : null));
   db.claims.slice(0, 40).forEach((c, i) => claimRows[i]?.claim && claimDetails.set(c.id, { ...claimRows[i].claim, item: claimRows[i].item }));
 
   // A claim's work item opens the claim.
@@ -436,7 +436,7 @@ async function hydrate(me) {
   // Where each fully reviewed document could be applied, so the choice is ready when it opens.
   const applyTargets = new Map();
   const reviewed = [...documents.values()].filter((d) => d.fields.length && d.fields.every((f) => f.state !== "proposed") && d.fields.some((f) => f.state === "accepted" || f.state === "corrected"));
-  const targets = await pool(reviewed, 4, (d) => api.applyTargets(d.document.id));
+  const targets = await pool(reviewed, 8, (d) => api.applyTargets(d.document.id));
   reviewed.forEach((d, i) => targets[i] && applyTargets.set(d.document.id, targets[i]));
 
   // Documents count as working only when every client's documents and every document read back.
@@ -446,9 +446,8 @@ async function hydrate(me) {
 
   const renewals = new Map((await renewalsP).map((r) => [r.id, r]));
   const [supervision, rules] = await Promise.all([supervisionP, rulesP]);
-  // Completion receipts of finished runs, so the receipt opens without another round trip.
-  const finished = [...renewals.values()].filter((r) => r.state === "done").slice(0, 20);
-  const receipts = new Map((await pool(finished, 6, (r) => api.workflowReceipt(r.id).then((x) => [r.id, x]).catch(() => null))).filter(Boolean));
+  // Completion receipts are read when one is opened, not on every load.
+  const receipts = new Map();
   return { db, extras: { renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
@@ -636,7 +635,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       // What this session already did stays done: a re-read must not make a finished action clickable again.
       db.meta.ledger = { ...db.meta.ledger, ...ledger };
       if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, modelConfigured: loaded.extras.modelConfigured });
+      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, modelConfigured: loaded.extras.modelConfigured });
       S.useBackend({ db, dispatch });
     },
   );
@@ -1522,6 +1521,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     state.db = db;
+    if (ref?.ws === "renewal" && ref.view === "receipt" && ref.runId && !state.receipts.has(ref.runId))
+      void api.workflowReceipt(ref.runId).then((x) => { state.receipts.set(ref.runId, x); refresher.notify(); }).catch(() => {});
     const own = liveSpace(ref, state);
     if (own) {
       own.ref = ref;
