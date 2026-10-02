@@ -68,6 +68,14 @@ const previewImport = vi.fn(async (input: { premiumBasis: string | null }) => ({
   blocking: input.premiumBasis ? [] : ["Say whether the premiums are gross or total payable."],
   mappedByModel: [],
 }));
+// An upload not attached to any client yet — no client page lists it (the hosted QA defect).
+const UNDOC = "d2000000-0000-4000-8000-000000000001";
+let undocState: "queued" | "extracted" = "extracted";
+const undocDetail = () => ({
+  document: { id: UNDOC, kind: "policy_schedule", filename: "ASAP_QA_TEST_20261002.pdf", mimeType: "application/pdf", byteSize: 2000, pageCount: 1, extractionState: undocState, extractionError: null, clientId: null, workItemId: null, createdAt: "2026-10-02" },
+  pages: [], fileUrl: null, fileUrlExpiresAt: null,
+  fields: undocState === "extracted" ? Array.from({ length: 12 }, (_, i) => ({ id: "f2000000-0000-4000-8000-0000000000" + String(i).padStart(2, "0"), fieldKey: "insured_name", label: "Insured " + i, proposedValue: "QA Fictional Ltd", correctedValue: null, state: "proposed", pageNumber: 1, region: null, confidence: 0.9, method: "text" })) : [],
+});
 // Chat attachments (D-132): a new file is stored; the same bytes again are recognised, not re-stored.
 const uploadDocument = vi.fn(async (input: { filename: string; contentSha256: string }) => ({
   outcome: input.filename.startsWith("again") ? "already_on_file" : "ready",
@@ -258,7 +266,8 @@ vi.mock("../lib/api.js", () => ({
     conversations: async () => ({ conversations: [] }),
     conversationMessages: async () => ({ messages: [] }),
     saveTurns,
-    document: async (id: string) => (id === DOC ? docDetail() : null),
+    document: async (id: string) => (id === DOC ? docDetail() : id === UNDOC ? undocDetail() : null),
+    documents: async () => ({ documents: [undocDetail().document], limits: { maxBytes: 1, readableMimeTypes: [] } }),
     reviewDocumentField, applyTargets, applyPreview, applyToRecord,
     uploadDocument, documentFiled,
   },
@@ -1081,6 +1090,47 @@ describe("live mode", () => {
     const space = (await A.records.act("work.assign", { workItemId: WORK, userId: BARAKA })) as { ok: boolean; denied: boolean };
     expect(space).toMatchObject({ ok: false, denied: true });
     expect(manageWork).not.toHaveBeenCalled();
+  });
+
+  describe("onboarding QA regressions (2 Oct hosted test)", () => {
+    it("an unattached upload is read on load, and its review opens that exact document — not Today", async () => {
+      undocState = "extracted";
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "document", documentId: UNDOC }) as unknown as { kind: string; title: string };
+      expect(ws.kind).toBe("Document");
+      expect(text(ws)).toContain("ASAP_QA_TEST_20261002.pdf");
+      expect(text(ws)).not.toContain("What matters now");
+    });
+
+    it("an invalid document or an unknown destination says so instead of opening Today", async () => {
+      const A = await live();
+      expect((A.ai.workspace({ ws: "document", documentId: "not-a-uuid" }) as { title: string }).title).toBe("Document not found");
+      expect((A.ai.workspace({ ws: "nowhere" }) as { title: string }).title).toBe("That page does not exist");
+    });
+
+    it("after a reload the document, its 12 waiting values and a live review card come back from the server", async () => {
+      undocState = "extracted";
+      const A = (await live()) as unknown as { ai: { workspace: (r: unknown) => unknown }; records: { sel: { conversation: (id: string) => { messages: { ingest?: string[]; restored?: boolean; lead?: string }[] } } }; ingestCard: (ids: string[], base?: unknown) => { reviewRef?: { documentId: string }; confirmLabel?: string; sections: { items: string[] }[] } };
+      const setup = text(A.ai.workspace({ ws: "setup" }));
+      expect(setup).toContain("ASAP_QA_TEST_20261002.pdf");
+      expect(setup).toContain("12 values need confirmation");
+      const card = A.records.sel.conversation("cnv_main").messages.find((m) => m.restored);
+      // The card lists every document still awaiting review; the unattached upload must be among them.
+      expect(card?.ingest).toContain(UNDOC);
+      const live2 = A.ingestCard(card!.ingest!, { status: "open" });
+      expect(live2.confirmLabel).toBe("Review values");
+      expect(live2.reviewRef?.documentId).toBe(UNDOC);
+    });
+
+    it("setup never claims everything is reviewed while a file is still being read", async () => {
+      undocState = "queued";
+      const A = await live();
+      const setup = text(A.ai.workspace({ ws: "setup" }));
+      expect(setup).toContain("○ Everything read and reviewed");
+      expect(setup).toContain('["Being read","1"]');
+      expect(setup).toContain("ASAP_QA_TEST_20261002.pdf");
+      undocState = "extracted";
+    });
   });
 
   describe("chat attachments and onboarding (D-132)", () => {

@@ -785,19 +785,24 @@ const READ_STATE = { uploading: "Uploading", not_started: "Waiting to be read", 
  * count is read from the records; a file is "Read" only when the server says extraction finished.
  */
 function setupSpace(ref, state, db) {
-  const files = [...(state.ingested?.values?.() ?? [])];
+  // Read from the server's records (state.uploads): survives a refresh and a new sign-in.
+  const files = state.uploads ? state.uploads() : [...(state.ingested?.values?.() ?? [])];
   const clients = db?.clients?.length ?? 0;
   const policies = db?.policies?.length ?? 0;
-  const documents = Math.max(db?.documents?.length ?? 0, files.filter((f) => f.id).length);
-  const reading = files.filter((f) => !["extracted", "failed", "not_applicable"].includes(f.extractionState));
+  const onFile = files.filter((f) => f.id);
+  const reading = files.filter((f) => f.id && !["extracted", "failed", "not_applicable"].includes(f.extractionState));
   const confirm = files.filter((f) => f.proposed > 0);
   const failed = files.filter((f) => f.extractionState === "failed");
   const imp = state.importPreview;
+  /*
+   * Progress from what is actually true (D-132): a file received is not a record; nothing is
+   * "confirmed" while a file is still being read or failed, or while values wait for review.
+   */
   const steps = [
     ["Brokerage created", true],
-    ["Records added", clients > 0],
-    ["Documents filed", documents > 0],
-    ["Everything confirmed", (clients > 0 || documents > 0) && !confirm.length && !imp],
+    ["Documents or records added", onFile.length > 0 || clients > 0],
+    ["Everything read and reviewed", (onFile.length > 0 || clients > 0) && !reading.length && !confirm.length && !failed.length && !imp],
+    ["Client and policy records created", clients > 0 && policies > 0],
   ];
   const doneN = steps.filter(([, d]) => d).length;
   const blocks = [
@@ -806,11 +811,13 @@ function setupSpace(ref, state, db) {
   // The one primary next action.
   if (imp) blocks.push(nav("Confirm the records from " + (state.importFile?.name ?? "your spreadsheet"), "Review what ASAP found and create the records.", { ws: "import" }));
   else if (confirm.length) blocks.push(nav("Confirm what ASAP read", confirm[0].name + " — check each value against its page.", { ws: "document", documentId: confirm[0].id }));
-  else if (!clients && !documents) blocks.push(note("green", "Start with what you have", "Drop policy schedules, a client list or photos of documents on the conversation, or use the + beside the box. Gmail is optional and not needed yet."));
+  else if (reading.length) blocks.push(note("amber", "ASAP is reading " + plural(reading.length, "file", "files"), "Each moves on as soon as it is read; values it finds wait here for your review."));
+  else if (!clients && !onFile.length) blocks.push(note("green", "Start with what you have", "Drop policy schedules, a client list or photos of documents on the conversation, or use the + beside the box. Gmail is optional and not needed yet."));
+  else if (!clients) blocks.push(note("amber", "No client records yet", "Documents are filed, but no client or policy has been created from them. Open a document's review to create them, or import a client list."));
   else blocks.push(nav("Open Today", "What needs attention now, from your records.", { ws: "today" }));
   if (files.length)
-    blocks.push(rows("Files received", files.map((f) => ({ title: f.name, note: (f.already ? "Already on file — not stored twice" : READ_STATE[f.extractionState] ?? "Uploading") + (f.proposed ? " · " + plural(f.proposed, "value needs", "values need") + " confirmation" : "") + (f.error ? " · " + f.error : ""), badge: f.extractionState === "failed" ? "Could not read" : f.proposed ? "Needs confirmation" : ["extracted", "not_applicable"].includes(f.extractionState) ? "Filed" : "Reading", badgeTone: f.extractionState === "failed" ? bad : f.proposed || reading.includes(f) ? warn : ok, action: f.id ? { a: "open", ref: { ws: "document", documentId: f.id } } : undefined }))));
-  blocks.push(facts([["Clients", String(clients)], ["Policies", String(policies)], ["Documents", String(documents)], ["Needs confirmation", String(confirm.length + (imp ? 1 : 0))], ["Could not read", String(failed.length)]]));
+    blocks.push(rows("Files received", files.map((f) => ({ title: f.name, note: (f.already ? "Already on file — not stored twice" : READ_STATE[f.extractionState] ?? "Uploading") + (f.proposed ? " · " + plural(f.proposed, "value needs", "values need") + " confirmation" : f.extractionState === "extracted" && f.accepted ? " · reviewed" : "") + (f.error ? " · " + f.error : ""), badge: f.extractionState === "failed" ? "Could not read" : f.proposed ? "Needs confirmation" : reading.includes(f) ? "Reading" : f.extractionState === "extracted" ? "Read" : "Filed", badgeTone: f.extractionState === "failed" ? bad : f.proposed || reading.includes(f) ? warn : ok, action: f.id ? { a: "open", ref: { ws: "document", documentId: f.id } } : undefined }))));
+  blocks.push(facts([["Clients", String(clients)], ["Policies", String(policies)], ["Documents", String(onFile.length)], ["Being read", String(reading.length)], ["Needs confirmation", String(confirm.length + (imp ? 1 : 0))], ["Could not read", String(failed.length)]]));
   if (failed.length) blocks.push(rows("Could not read", failed.map((f) => ({ title: f.name, note: f.error ?? "The file could not be read. Check it opens on your device, then add it again.", badge: "Failed", badgeTone: bad }))));
   return { kind: "Setup", title: "Setting up your book", status: "live", statusLabel: doneN + " of " + steps.length, blocks };
 }
@@ -1176,11 +1183,39 @@ function documentSpace(ref, state) {
                   ),
                 ]
               : []),
-            ...(!open.length && settled.length ? applyBlocks(d, state) : []),
+            // A document read before any client exists creates its client and policy (D-132).
+            ...(!open.length && settled.length && !doc.clientId ? createRecordsBlocks(d) : []),
+            ...(!open.length && settled.length && doc.clientId ? applyBlocks(d, state) : []),
           ]
         : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
     ],
   };
+}
+
+/**
+ * Create the client and policy a reviewed document describes (D-132): only from values a person
+ * accepted or corrected, shown before anything is written; anything missing is asked for, never
+ * guessed. Confirming twice creates nothing twice.
+ */
+function createRecordsBlocks(d) {
+  const accepted = (key) => {
+    const f = (d.fields || []).find((x) => x.fieldKey === key && (x.state === "accepted" || x.state === "corrected"));
+    return f ? f.correctedValue ?? f.proposedValue ?? "" : "";
+  };
+  const name = accepted("insured_name");
+  const looksCompany = /\b(ltd|limited|plc|llc|inc|co|company|sacco|group|holdings|enterprises|traders|motors|services)\b/i.test(name);
+  return [
+    note("amber", "Create the client and policy from this document", "ASAP uses only the values you confirmed. Check them, fill in anything missing, then create the records. Nothing is sent to anyone."),
+    form("create:" + d.document.id, "Records to create", [
+      { key: "clientName", label: "CLIENT (INSURED)", value: name, placeholder: "As on the schedule" },
+      { key: "kind", label: "CLIENT IS A", options: [{ value: looksCompany ? "corporate" : "individual", label: looksCompany ? "Company" : "Person" }, { value: looksCompany ? "individual" : "corporate", label: looksCompany ? "Person" : "Company" }] },
+      { key: "insurerName", label: "INSURER", value: accepted("insurer_name"), placeholder: "Insurer on the schedule" },
+      { key: "classOfBusiness", label: "CLASS OF BUSINESS", value: accepted("class_of_business"), placeholder: "Motor, Fire, Medical…" },
+      { key: "policyNumber", label: "POLICY NUMBER", value: accepted("policy_number"), placeholder: "Optional" },
+      { key: "periodStart", label: "COVER STARTS", value: accepted("period_start"), placeholder: "YYYY-MM-DD" },
+      { key: "periodEnd", label: "COVER ENDS", value: accepted("period_end"), placeholder: "YYYY-MM-DD" },
+    ], "doc.createRecords", { documentId: d.document.id }, "Create client and policy", "Recorded with an audit entry against your name; the confirmed values stay linked to this document and their pages."),
+  ];
 }
 
 /** Names compared as a person would: case, punctuation and company suffixes do not matter. */

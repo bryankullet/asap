@@ -1226,6 +1226,25 @@ export function documentRoutes(deps: {
       return sendError(c, mapDatabaseError(rpc.error));
     }
 
+    /*
+     * A document uploaded before its client existed (onboarding, D-132) is filed under the client
+     * of the record its values now evidence — so it appears on that client and not as unattached.
+     */
+    if (!(docRow.data as { client_id: string | null } | null)?.client_id) {
+      let clientId: string | null = null;
+      if (req.targetType === "client") clientId = req.targetId;
+      else if (req.targetType === "policy") clientId = ((await db.from("policies").select("client_id").eq("id", req.targetId).maybeSingle()).data as { client_id: string } | null)?.client_id ?? null;
+      else if (req.targetType === "policy_period") {
+        const per = (await db.from("policy_periods").select("policy_id").eq("id", req.targetId).maybeSingle()).data as { policy_id: string } | null;
+        if (per) clientId = ((await db.from("policies").select("client_id").eq("id", per.policy_id).maybeSingle()).data as { client_id: string } | null)?.client_id ?? null;
+      }
+      if (clientId) {
+        const filed = await db.from("documents").update({ client_id: clientId, updated_at: new Date().toISOString() }).eq("organization_id", org.id).eq("id", id).is("client_id", null);
+        if (!filed.error)
+          await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "document.filed_under_client", objectType: "document", objectId: id, result: "success", newState: { clientId } });
+      }
+    }
+
     const receipt = rpc.data as {
       application_id: string;
       target_type: string;

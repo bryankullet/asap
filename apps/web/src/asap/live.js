@@ -12,7 +12,7 @@ import { AUTOMATION_REGISTRY, automationProblems, draftProblems } from "@asap/sc
 import { api, ApiRequestError, describeApiError } from "../lib/api.js";
 import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
-import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
+import { buildWorkspace, interpret, parseDate, WORKSPACE_NAMES } from "./engine/intent.js";
 import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
 import { createRefresher, lifecycleOf, runMutation } from "./mutation.js";
 
@@ -112,6 +112,9 @@ async function hydrate(me) {
   // database, so each call costs seconds and waves run one after another add up (a 20 s load).
   const clientListsP = Promise.all(CLIENT_VIEWS.map((v) => api.clientFiles(v).catch(() => ({ items: [] }))));
   const convoP = loadConversation();
+  // Every document in the brokerage — including ones not yet attached to a client, which no client
+  // page lists. Without this an upload awaiting review vanished on refresh (D-132).
+  const allDocsP = (typeof api.documents === "function" ? api.documents() : Promise.resolve(null)).catch(() => null);
   const modelConfiguredP = api.askStatus().then((r) => r.modelConfigured).catch(() => null);
   // Renewal Autopilot runs (D-129), each in full — progress, evidence, the approval bundle, messages.
   // Supervision (D-131): the same runs, grouped and ranked, with Upcoming and the rules behind it.
@@ -278,6 +281,15 @@ async function hydrate(me) {
       db.emails.push({ id: t.id, clientId, direction: "in", read: true, from: "", to: "", subject: t.subject, body: t.messageCount + " message(s) in this thread.", at: t.lastMessageAt ?? d0(), threadId: t.id });
     }
   });
+
+  const allDocs = await allDocsP;
+  for (const d of allDocs?.documents ?? []) {
+    if (db.documents.some((x) => x.id === d.id)) continue;
+    db.documents.push({ id: d.id, clientId: d.clientId ?? null, name: d.filename, kind: d.kind, currentVersion: 1, createdAt: d.createdAt, source: "upload", readingState: d.extractionState });
+    db.documentVersions.push({ id: d.id + ":v1", documentId: d.id, version: 1, title: d.filename, lines: [d.filename], note: "Stored privately for this brokerage.", at: d.createdAt, by: "" });
+  }
+  // Unattached documents first: they are the ones waiting for someone to review them.
+  db.documents.sort((a, b) => (a.clientId ? 1 : 0) - (b.clientId ? 1 : 0));
 
   // Cover, as the server derives it — the only source allowed to say "Active cover".
   // Cover checks and document details depend only on the client records, so they run together.
@@ -617,7 +629,16 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   const pendingFiles = new Map();
   let conversationId = loaded.extras.conversationId;
   // How many thread messages the server already holds; new ones are appended after these.
-  let savedCount = (db.conversations.find((c) => c.id === "cnv_main")?.messages || []).length;
+  // Documents still waiting to be read or reviewed come back into the conversation after a
+  // refresh or a new sign-in, as a live card read from the server — never lost with the tab (D-132).
+  {
+    const thread = db.conversations.find((c) => c.id === "cnv_main");
+    const waiting = [...loaded.extras.documents.values()].filter((d) => !["failed", "not_applicable"].includes(d.document.extractionState) && (d.document.extractionState !== "extracted" || d.fields.some((f) => f.state === "proposed")));
+    if (thread && waiting.length)
+      thread.messages = [...(thread.messages || []), { role: "ai", lead: plural(waiting.length, "document is", "documents are") + " waiting for you", text: "Pick up where you left off — nothing needs uploading again.", ingest: waiting.map((d) => d.document.id), pending: { status: "open" }, restored: true }];
+  }
+  // Restored cards are rebuilt from the server on every load, so they are never saved as turns.
+  let savedCount = (db.conversations.find((c) => c.id === "cnv_main")?.messages || []).filter((m) => !m.restored).length;
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
@@ -830,7 +851,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   const pollIngested = () => {
     if (polling) return;
     polling = setInterval(async () => {
-      const open = [...ingested.values()].filter((x) => x.id && !["extracted", "failed", "not_applicable"].includes(x.extractionState));
+      // Every document still being read — added this session or found waiting after a refresh.
+      const open = uploads().filter((x) => x.id && !["extracted", "failed", "not_applicable"].includes(x.extractionState)).map((x) => ingested.get(x.id) ?? (ingested.set(x.id, { ...x }), ingested.get(x.id)));
       if (!open.length) {
         clearInterval(polling);
         polling = null;
@@ -840,6 +862,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       await Promise.all(open.map(async (x) => {
         const d = await api.document(x.id).catch(() => null);
         if (!d) return;
+        state.documents.set(x.id, d);
+        if (!db.documents.some((y) => y.id === x.id)) db.documents.unshift({ id: x.id, clientId: d.document.clientId ?? null, name: d.document.filename, kind: d.document.kind, currentVersion: 1, createdAt: d.document.createdAt, source: "upload", readingState: d.document.extractionState });
         Object.assign(x, { extractionState: d.document.extractionState, error: d.document.extractionError ?? null, kind: d.document.kind, proposed: d.fields.filter((f) => f.state === "proposed").length, accepted: d.fields.filter((f) => f.state === "accepted" || f.state === "corrected").length });
       }));
       refresher.notify();
@@ -866,9 +890,26 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ingested.set(entry.key, entry);
     return entry;
   };
+  /** One file's state: the server's record when it has one, else what this session knows. */
+  const uploadEntry = (id) => {
+    const d = state.documents.get(id);
+    if (d) {
+      const local = ingested.get(id);
+      return { id, key: id, name: local?.already ? local.name : d.document.filename, extractionState: d.document.extractionState, error: d.document.extractionError ?? null, kind: d.document.kind, clientId: d.document.clientId ?? null, proposed: d.fields.filter((f) => f.state === "proposed").length, accepted: d.fields.filter((f) => f.state === "accepted" || f.state === "corrected").length, already: local?.already ?? false };
+    }
+    return ingested.get(id) ?? null;
+  };
+  /** Every upload Setup should show: the brokerage's documents from the server, plus this session's failed ones. */
+  const uploads = () => [
+    ...db.documents.map((d) => uploadEntry(d.id) ?? { id: d.id, key: d.id, name: d.name, extractionState: d.readingState ?? "queued", proposed: 0, accepted: 0, clientId: d.clientId }),
+    ...[...ingested.values()].filter((x) => !x.id),
+  ];
+  state.uploads = uploads;
+  // Documents found still being read after a refresh keep moving on screen.
+  if (uploads().some((x) => x.id && !["extracted", "failed", "not_applicable"].includes(x.extractionState))) setTimeout(pollIngested, 0);
   /** The card for files added in chat, read fresh each render from what the server last said. */
   const ingestCard = (ids, base) => {
-    const xs = ids.map((id) => ingested.get(id)).filter(Boolean);
+    const xs = ids.map((id) => uploadEntry(id)).filter(Boolean);
     if (!xs.length) return base ?? null;
     const done = xs.filter((x) => ["extracted", "not_applicable"].includes(x.extractionState));
     const failed = xs.filter((x) => x.extractionState === "failed");
@@ -881,14 +922,14 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         ...(confirm.length ? [{ label: "NEEDS CONFIRMATION", items: confirm.map((x) => x.name + ": " + plural(x.proposed, "value ASAP read", "values ASAP read") + " — nothing is used until you confirm it against the page") }] : []),
       ],
       external: "Values ASAP reads are proposals: each links to its page, and nothing becomes a record until you confirm it.",
-      action: confirm.length ? null : null,
-      status: base?.status ?? "open",
+      // While files are still being read there is nothing to act on yet: no buttons, just progress.
+      status: base?.status && base.status !== "open" ? base.status : reading && !confirm.length && !done.length ? "running" : "open",
       editRef: { ws: "setup" },
-      editLabel: "Review in Space",
+      editLabel: "Open Setup",
       cancelLabel: "Not now",
-      confirmLabel: "Review values",
+      // "Review values" opens the exact document's review — attached to a client or not.
+      ...(confirm.length || done.length ? { confirmLabel: "Review values", reviewRef: { ws: "document", documentId: (confirm[0] ?? done[0]).id } } : {}),
       statusText: reading ? "ASAP is reading on its own service — this card updates as each file moves." : "",
-      ...(confirm.length ? { action: "nav.open", payload: { ref: { ws: "document", documentId: confirm[0].id } }, actionId: "nav.open:" + confirm[0].id } : {}),
     };
   };
   /** Files dropped or picked in the conversation: spreadsheets are imported, documents filed. */
@@ -936,7 +977,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "conversation.save": (p) => {
       const c = db.conversations.find((x) => x.id === p.id);
       if (c) Object.assign(c, { messages: p.messages, contextId: p.contextId });
-      const messages = p.messages || [];
+      const messages = (p.messages || []).filter((m) => !m.restored);
       if (messages.length < savedCount) savedCount = 0;
       const fresh = messages.slice(savedCount);
       savedCount = messages.length;
@@ -1373,6 +1414,66 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return fail(e);
       }
     },
+    /*
+     * Create the client and policy a reviewed document describes (D-132), then apply its confirmed
+     * values to the new period so each stays linked to its page. Safe to repeat: the same client is
+     * found rather than duplicated, a policy recorded twice is recorded once, and an apply repeats
+     * as a repeat.
+     */
+    "doc.createRecords": async (p) => {
+      const doc = state.documents.get(p.documentId);
+      if (!doc) return { ok: false, error: "That document is not loaded. Open it again. Nothing was written." };
+      const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim()) ? String(v).trim() : parseDate(String(v || ""))?.date ?? null);
+      const name = (p.clientName || "").trim();
+      const periodStart = day(p.periodStart);
+      const periodEnd = day(p.periodEnd);
+      const missing = [!name && "the client's name", !(p.insurerName || "").trim() && "the insurer", !(p.classOfBusiness || "").trim() && "the class of business", !periodStart && "when cover starts", !periodEnd && "when cover ends"].filter(Boolean);
+      if (missing.length) return { ok: false, error: "Add " + missing.join(", ") + " first. Nothing was written." };
+      if (periodEnd <= periodStart) return { ok: false, error: "Cover must end after it starts. Nothing was written." };
+      try {
+        // The client: an exact match already on file is used, never a second one.
+        const same = db.clients.find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+        let clientId = same?.id ?? null;
+        let clientCreated = false;
+        if (!clientId) {
+          let res = await api.createClient({ name, kind: p.kind === "individual" ? "individual" : "corporate" });
+          if (res.outcome === "possible_duplicates") {
+            const exact = res.candidates.find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
+            if (exact) clientId = exact.id;
+            else if (p.confirmNew) res = await api.createClient({ name, kind: p.kind === "individual" ? "individual" : "corporate", confirmNew: true });
+            else return { ok: false, error: "A similar client is already on file: " + res.candidates.map((c) => c.name).join(", ") + ". Use that name exactly to add the policy to them. Nothing was written." };
+          }
+          if (!clientId && res.outcome === "created") { clientId = res.file.client.id; clientCreated = true; }
+        }
+        if (!clientId) return { ok: false, error: "The client could not be created. Nothing else was written." };
+        const pol = await api.createPolicy({ clientId, insurerName: p.insurerName.trim(), classOfBusiness: p.classOfBusiness.trim(), ...(p.policyNumber?.trim() ? { policyNumber: p.policyNumber.trim() } : {}), periodStart, periodEnd });
+        if (pol.outcome !== "recorded") return { ok: false, error: (pol.reason ?? "The policy could not be recorded.") + " The client is on file; nothing else was written." };
+        // Link the confirmed values to the new period, with this document as their evidence.
+        let linked = 0;
+        const targets = await api.applyTargets(p.documentId).catch(() => null);
+        const target = targets?.suggestions.find((t) => t.targetType === "policy_period") ?? targets?.suggestions.find((t) => t.targetType === "policy");
+        if (target) {
+          const preview = await api.applyPreview(p.documentId, target.targetType, target.targetId);
+          const usable = preview.fields.filter((f) => !f.blockedBecause && !f.unchanged && f.proposedValue && f.fieldKey !== "premium");
+          if (usable.length) {
+            await api.applyToRecord(p.documentId, { targetType: target.targetType, targetId: target.targetId, idempotencyKey: "create:" + p.documentId + ":" + target.targetId, fields: usable.map((f) => ({ documentFieldId: f.documentFieldId, fieldKey: f.fieldKey, from: f.currentValue, to: f.proposedValue })) });
+            linked = usable.length;
+          }
+        }
+        await refresher.refreshFully();
+        const fresh = await api.document(p.documentId).catch(() => null);
+        if (fresh) state.documents.set(p.documentId, fresh);
+        const policy = pol.policy;
+        return ok(clientCreated || pol.created ? "Created " + [clientCreated ? name : null, pol.created ? "the policy" + (p.policyNumber ? " " + p.policyNumber.trim() : "") : null].filter(Boolean).join(" and ") : "Already on file — nothing created twice", {
+          already: !clientCreated && !pol.created,
+          nav: { ws: "client", clientId },
+          detail: (linked ? plural(linked, "confirmed value is", "confirmed values are") + " linked to this document as evidence. " : "") + "The document is filed under " + name + ". Premium, if read, is applied from the policy once its basis is confirmed.",
+          receipt: { action: "Records created from a document", record: name + " · " + (policy?.policyNumber ?? p.policyNumber ?? "policy"), outcome: clientCreated || pol.created ? "Done" : "Already done", changed: [clientCreated ? "Client " + name : null, pol.created ? "Policy and its period" : null, linked ? plural(linked, "value", "values") + " linked to the document" : null].filter(Boolean), unchanged: ["Nothing was sent to anyone", "No cover or money changed"], next: "Open the client to check the policy", audit: null },
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
     "doc.apply": async (p) => {
       const preview = state.applyPreviews.get(p.documentId);
       if (!preview) return { ok: false, error: "Preview the change first. Nothing was written." };
@@ -1522,6 +1623,23 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     state.db = db;
+    // A document opens its own review, attached to a client or not. One not read yet in this
+    // session is fetched; one that does not exist says so. Never the Today Space instead.
+    if (ref?.ws === "document" && !state.documents.has(ref.documentId)) {
+      const id = ref.documentId;
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!id || !UUID.test(id) || state.missingDocs?.has(id))
+        return { kind: "Document", title: "Document not found", status: "draft", statusLabel: "Not found", ref, blocks: [note("red", "That document could not be opened", "It is not in your brokerage's records — it may have been removed, or the link is wrong. Nothing was changed. Your uploads are listed in Setup."), { t: "gate", kind: "approve", heading: "Related", label: "Open Setup", detail: "Every file you added, and what each needs.", nav: { ws: "setup" } }] };
+      if (!state.loadingDocs) state.loadingDocs = new Set();
+      if (!state.loadingDocs.has(id)) {
+        state.loadingDocs.add(id);
+        void api.document(id).then((d) => { if (d) state.documents.set(id, d); else (state.missingDocs ??= new Set()).add(id); })
+          // Only "not found" is remembered; a dropped connection is tried again on the next open.
+          .catch((e) => { if (e instanceof ApiRequestError && e.status === 404) (state.missingDocs ??= new Set()).add(id); })
+          .finally(() => { state.loadingDocs.delete(id); refresher.notify(); });
+      }
+      return { kind: "Document", title: "Opening the document…", status: "live", statusLabel: "Loading", ref, blocks: [note("green", "Opening the document", "Reading it and the values ASAP found from your brokerage's records.")] };
+    }
     if (ref?.ws === "renewal" && ref.view === "receipt" && ref.runId && !state.receipts.has(ref.runId))
       void api.workflowReceipt(ref.runId).then((x) => { state.receipts.set(ref.runId, x); refresher.notify(); }).catch(() => {});
     const own = liveSpace(ref, state);
@@ -1529,6 +1647,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       own.ref = ref;
       return own;
     }
+    // An unknown destination says so; it is never quietly replaced by Today.
+    if (ref?.ws && ref.ws !== "today" && !WORKSPACE_NAMES.includes(ref.ws))
+      return { kind: "Not found", title: "That page does not exist", status: "draft", statusLabel: "Not found", ref, blocks: [note("red", "ASAP could not open that", "There is no workspace called “" + ref.ws + "”. Nothing was changed."), { t: "gate", kind: "approve", heading: "Related", label: "Open Today", detail: "What matters now, from your records.", nav: { ws: "today" } }] };
     const built = guardLive(buildWorkspace(ref));
     // Work and Today point at the supervision board: every workflow ASAP is running, grouped.
     if (built && Array.isArray(built.blocks) && (ref?.ws === "work" || ref?.ws === "today") && state.supervision) {
