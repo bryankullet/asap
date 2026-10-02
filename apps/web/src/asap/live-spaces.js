@@ -7,6 +7,7 @@
  */
 import { AUTOMATION_REGISTRY, automationProblems, IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
 import * as S from "./engine/store.js";
+import { throughSupabaseBase } from "../lib/supabase.js";
 
 const ok = "ok";
 const warn = "uncertain";
@@ -1131,7 +1132,7 @@ function documentSpace(ref, state) {
   const reading = { not_started: "Not read yet", queued: "Waiting to be read", working: "Being read now", extracted: "Read", failed: "Could not be read", not_applicable: "This kind of file is not read" }[doc.extractionState] || words(doc.extractionState);
   const valueOf = (f) => f.correctedValue ?? f.proposedValue;
   const focus = ref.fieldId ? fields.find((f) => f.id === ref.fieldId) : null;
-  const fileLink = (page) => (d.fileUrl ? d.fileUrl + (page ? "#page=" + page : "") : null);
+  const fileLink = (page) => (d.fileUrl ? throughSupabaseBase(d.fileUrl) + (page ? "#page=" + page : "") : null);
   const base = { ws: "document", documentId: doc.id };
   return {
     kind: "Document",

@@ -10,7 +10,7 @@
  */
 import { AUTOMATION_REGISTRY, automationProblems, draftProblems } from "@asap/schema";
 import { api, ApiRequestError, describeApiError } from "../lib/api.js";
-import { supabase } from "../lib/supabase.js";
+import { supabase, throughSupabaseBase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate, WORKSPACE_NAMES } from "./engine/intent.js";
 import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
@@ -877,7 +877,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       entry.id = asked.document.id;
       entry.already = asked.outcome === "already_on_file";
       if (asked.outcome === "ready") {
-        const res = await fetch(asked.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: await file.arrayBuffer() });
+        const res = await fetch(throughSupabaseBase(asked.uploadUrl), { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: await file.arrayBuffer() });
         if (!res.ok) throw new Error("The file store would not accept " + file.name);
         await api.documentFiled(asked.document.id);
       }
@@ -1563,7 +1563,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           clientId: p.clientId || null,
         });
         if (asked.outcome === "ready") {
-          const res = await fetch(asked.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: bytes });
+          const res = await fetch(throughSupabaseBase(asked.uploadUrl), { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: bytes });
           if (!res.ok) return { ok: false, error: "The file store would not accept the file. Nothing was filed — you can retry." };
           await api.documentFiled(asked.document.id);
         }

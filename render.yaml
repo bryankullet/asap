@@ -104,6 +104,12 @@ services:
     staticPublishPath: apps/web/dist
     pullRequestPreviewsEnabled: true
     routes:
+      # Same-origin proxy to Supabase (VITE_PUBLIC_SUPABASE_PROXY_PATH=/sb): for browsers whose
+      # network reaches this site but drops *.supabase.co. Carries the anon key and the user's own
+      # session only — the same requests the browser would send direct. Must precede the shell rule.
+      - type: rewrite
+        source: /sb/*
+        destination: https://abdkpcppmlqnwvxloqsb.supabase.co/*
       # Client-side routing: every path serves the app shell (TanStack Router).
       - type: rewrite
         source: /*

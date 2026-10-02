@@ -191,7 +191,7 @@ const decideApproval = vi.fn(async () => { runState = "waiting_party"; return { 
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
 const saveTurns = vi.fn(async () => ({ conversationId: "a0000000-0000-4000-8000-000000000001" }));
 
-vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } } }));
+vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } }, throughSupabaseBase: (u: string) => u }));
 vi.mock("../lib/api.js", () => ({
   ApiRequestError: class ApiRequestError extends Error {},
   describeApiError: (e: unknown) => (e instanceof Error ? e.message : "failed"),

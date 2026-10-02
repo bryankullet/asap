@@ -2164,3 +2164,13 @@ creation preview on the existing import, so nothing becomes a record without con
 Space shows progress, files, records found, what needs confirmation and one next action. Not yet: a
 filed document cannot be moved to another client, and the chat card's live state is per session (the
 Setup Space and the document records are the persisted view).
+
+## D-133
+
+**Same-origin Supabase proxy for restricted browsers.** asap-web rewrites `/sb/*` to the Supabase
+project (render.yaml); with `VITE_PUBLIC_SUPABASE_PROXY_PATH=/sb` the browser client, the
+network-failure probe and API-minted signed URLs all go through the app's own origin. Reason: a
+cloud test browser reached asap-web but not `*.supabase.co` (Supabase edge logs showed no request at
+the failure time). Only the anon key and the user's own session pass through — the same requests as
+direct. The auth storage key stays keyed to the project, so turning the proxy on or off keeps
+sessions. Unset the variable and redeploy to go back to direct.

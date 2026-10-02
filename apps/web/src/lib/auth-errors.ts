@@ -1,4 +1,5 @@
 import { env } from "../env.js";
+import { supabaseBaseUrl, supabaseHost as requestHost } from "./supabase.js";
 
 /**
  * Telling a sign-in that could not reach Supabase apart from one Supabase refused.
@@ -14,13 +15,7 @@ export type AuthFailure =
   | { kind: "already_registered" }
   | { kind: "other"; message: string; status: number | null };
 
-export const supabaseHost = (() => {
-  try {
-    return new URL(env.VITE_PUBLIC_SUPABASE_URL).hostname;
-  } catch {
-    return "the sign-in service";
-  }
-})();
+export const supabaseHost = requestHost;
 
 export function classifyAuthError(error: { message?: string | undefined; status?: number | undefined; name?: string | undefined; code?: string | undefined } | null | undefined): AuthFailure | null {
   if (!error) return null;
@@ -42,7 +37,7 @@ export function classifyAuthError(error: { message?: string | undefined; status?
  */
 export async function probeSupabase(): Promise<"reachable" | "unreachable"> {
   try {
-    const res = await fetch(new URL("/auth/v1/health", env.VITE_PUBLIC_SUPABASE_URL), {
+    const res = await fetch(supabaseBaseUrl + "/auth/v1/health", {
       headers: { apikey: env.VITE_PUBLIC_SUPABASE_ANON_KEY },
       cache: "no-store",
     });
