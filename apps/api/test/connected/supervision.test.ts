@@ -188,7 +188,10 @@ describe("Supervision on Renewal Autopilot", () => {
     expect((await call(AMINA, "POST", `/workflows/runs/${cases.paused.run}/pause`, {})).body.outcome).toBe("already");
     const out = await advanceRun(serviceClient(), log, RENEWAL, cases.paused.run);
     expect(out.skipped).toBe("paused");
-    const r = await call(AMINA, "POST", `/workflows/runs/${cases.paused.run}/resume`);
+    // Two resumes at once resume once.
+    const [r, r2] = await Promise.all([call(AMINA, "POST", `/workflows/runs/${cases.paused.run}/resume`), call(AMINA, "POST", `/workflows/runs/${cases.paused.run}/resume`)]);
+    expect([r.body.outcome, r2.body.outcome].sort()).toEqual(["already", "done"]);
+    expect(await audits(cases.paused.run, "workflow.resumed")).toHaveLength(1);
     expect(r.body.run.id).toBe(cases.paused.run);
     expect(r.body.run.operational.paused).toBeNull();
     expect(await audits(cases.paused.run, "workflow.paused")).toHaveLength(1);

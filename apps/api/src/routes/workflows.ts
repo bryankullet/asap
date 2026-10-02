@@ -267,8 +267,10 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const full = await db.from("workflow_runs").select("facts").eq("id", runId).maybeSingle();
     const facts = ((full.data as { facts: Record<string, unknown> } | null)?.facts ?? {}) as Record<string, unknown>;
     if (facts["paused"]) {
-      // Resuming a pause continues where it was: the same run, the same step.
-      await service.from("workflow_runs").update({ facts: { ...facts, paused: null }, next_run_at: now, updated_at: now }).eq("id", runId);
+      // Resuming a pause continues where it was: the same run, the same step. Only the request that
+      // actually clears the pause records it — two clicks at once resume once.
+      const cleared = await service.from("workflow_runs").update({ facts: { ...facts, paused: null }, next_run_at: now, updated_at: now }).eq("id", runId).not("facts->>paused", "is", null).select("id");
+      if (!(cleared.data ?? []).length) return respond(c, db, runId, ctx, "already", null);
       await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.resumed", objectType: "workflow_run", objectId: runId, result: "success", previousState: { paused: true }, newState: { paused: false } });
       if ((r.data as { state: string }).state !== "exception") {
         await advance(runId);
@@ -350,7 +352,8 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to pause.", 409);
     if (run.facts["paused"]) return respond(c, db, run.id, ctx, "already", null);
     const byName = await nameOf(db, user.id);
-    await deps.service().from("workflow_runs").update({ facts: { ...run.facts, paused: { by: user.id, byName, at: new Date().toISOString(), reason: input.reason ?? null } }, updated_at: new Date().toISOString() }).eq("id", run.id);
+    const set = await deps.service().from("workflow_runs").update({ facts: { ...run.facts, paused: { by: user.id, byName, at: new Date().toISOString(), reason: input.reason ?? null } }, updated_at: new Date().toISOString() }).eq("id", run.id).is("facts->>paused", null).select("id");
+    if (!(set.data ?? []).length) return respond(c, db, run.id, ctx, "already", null);
     await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.paused", objectType: "workflow_run", objectId: run.id, result: "success", newState: { paused: true, reason: input.reason ?? null } });
     return respond(c, db, run.id, ctx, "done", null);
   });
@@ -366,7 +369,8 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const byName = await nameOf(db, user.id);
     const service = deps.service();
     const at = new Date().toISOString();
-    await service.from("workflow_runs").update({ facts: { ...run.facts, escalated: { by: user.id, byName, at, reason: input.reason } }, updated_at: at }).eq("id", run.id);
+    const set = await service.from("workflow_runs").update({ facts: { ...run.facts, escalated: { by: user.id, byName, at, reason: input.reason } }, updated_at: at }).eq("id", run.id).is("facts->>escalated", null).select("id");
+    if (!(set.data ?? []).length) return respond(c, db, run.id, ctx, "already", null);
     const w = await service.from("workflow_runs").select("work_item_id").eq("id", run.id).maybeSingle();
     const workItemId = (w.data as { work_item_id: string | null } | null)?.work_item_id;
     if (workItemId) {
