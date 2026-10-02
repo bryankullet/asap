@@ -169,17 +169,18 @@ class Component extends DCLogic {
     const receipt = res.duplicate ? 'Already done \u2014 nothing was recorded twice.' : (res.text || 'Recorded');
     const thread = this.updatePending(i, { status: res.partial ? 'partial' : res.duplicate || res.already ? 'already' : 'done', statusText: res.partial ? 'Partly written — ' + (res.partial === true ? 'some of it could not be saved; the receipt says which.' : res.partial) : receipt });
     const when = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const next = [...thread, this.receiptMessage(res, receipt)];
+    const next = [...thread, this.receiptMessage(res, receipt), ...(res.nextPending && !res.duplicate ? [{ role: 'ai', lead: res.nextPending.lead, text: res.nextPending.text, pending: { ...res.nextPending.pending, status: 'open' } }] : [])];
     this.saveThread(next);
     this.setState({ thread: next });
     this.bump();
     if (res.nav) this.openRef(res.nav);
   };
-  cancelPending = (i) => this.updatePending(i, { status: 'cancelled', statusText: 'Cancelled \u2014 nothing was written.' });
+  cancelPending = (i) => { const m = this.state.thread[i]; this.updatePending(i, { status: 'cancelled', statusText: m && m.pending && m.pending.cancelLabel === 'Not now' ? 'Not now \u2014 it is waiting for you in Work.' : 'Cancelled \u2014 nothing was written.' }); };
   editPending = (i) => {
     const m = this.state.thread[i];
     if (!m || !m.pending) return;
     // An edit replaces this preview: its matches and checks no longer describe what will be written.
+    if (m.pending.editLabel) { if (m.pending.editRef) this.openRef(m.pending.editRef); return; }
     this.updatePending(i, { status: 'replaced', statusText: 'Replaced by your edit \u2014 nothing was written from this preview.' });
     if (m.pending.editRef) this.openRef(m.pending.editRef);
   };
@@ -378,7 +379,7 @@ class Component extends DCLogic {
       }
       if (o.isGate) {
         const blocked = (b.permission && !R.can(b.permission)) || !!b.requires;
-        o.gateHeading = b.kind === 'send' ? 'A human must send this' : b.nav ? (b.heading || 'Related') : 'A human must approve this';
+        o.gateHeading = b.heading || (b.kind === 'send' ? 'A human must send this' : b.nav ? 'Related' : 'A human must approve this');
         o.detail = b.detail; o.label2 = b.label;
         o.disabled = this.state.busy;
         o.blocked = !!blocked;
@@ -616,7 +617,7 @@ class Component extends DCLogic {
         hasChips: (m.chips || []).length > 0,
         chips: (m.chips || []).map(c => ({ label: c.label || c, go: () => (c.ref ? this.openRef(c.ref) : this.ask(c.text || c.label || c)) })),
         hasPending: !!m.pending,
-        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
+        pending: m.pending ? { title: m.pending.title, sections: (m.pending.sections || []).filter(sc => (sc.items || []).length).map(sc => ({ label: sc.label, items: sc.items.map(t => ({ text: t })) })), external: m.pending.external || '', isOpen: m.pending.status === 'open' || m.pending.status === 'failed', showBody: !['done', 'already', 'cancelled', 'replaced'].includes(m.pending.status), confirmLabel: m.pending.status === 'failed' ? 'Retry' : (m.pending.confirmLabel || 'Confirm'), canEdit: !!m.pending.editRef, editLabel: m.pending.editLabel || 'Edit details', cancelLabel: m.pending.cancelLabel || 'Cancel', hasStatus: !!m.pending.statusText, statusText: m.pending.statusText || '', statusFg: ({ running: '#4c564e', done: '#1f6c49', already: '#1f6c49', partial: '#8a6a12', failed: '#a43b32', blocked: '#a43b32', cancelled: '#6e776f', replaced: '#6e776f' })[m.pending.status] || '#4c564e', confirm: () => this.confirmPending(i), cancel: () => this.cancelPending(i), edit: () => this.editPending(i) } : null })),
       suggestions: (this.A.suggestions || [
         { label: 'What needs attention today?' }, { label: 'Get Acme’s quote ready and approach APA, CIC and Jubilee' },
         { label: 'Is KDN 482Q covered right now?' }, { label: 'What does Acme owe?' },

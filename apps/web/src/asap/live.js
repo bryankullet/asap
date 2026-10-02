@@ -114,6 +114,9 @@ async function hydrate(me) {
   const convoP = loadConversation();
   const modelConfiguredP = api.askStatus().then((r) => r.modelConfigured).catch(() => null);
   // Renewal Autopilot runs (D-129), each in full — progress, evidence, the approval bundle, messages.
+  // Supervision (D-131): the same runs, grouped and ranked, with Upcoming and the rules behind it.
+  const supervisionP = (typeof api.supervision === "function" ? api.supervision() : Promise.resolve(null)).catch(() => null);
+  const rulesP = (typeof api.rules === "function" ? api.rules() : Promise.resolve(null)).catch(() => null);
   const renewalsP = (typeof api.renewalRuns === "function" ? api.renewalRuns() : Promise.resolve({ runs: [] }))
     .then(async (list) => {
       const details = await pool(list.runs.slice(0, 30), 6, (r) => api.workflowRun(r.id).catch(() => null));
@@ -442,7 +445,11 @@ async function hydrate(me) {
   const modelConfigured = await modelConfiguredP;
 
   const renewals = new Map((await renewalsP).map((r) => [r.id, r]));
-  return { db, extras: { renewals, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
+  const [supervision, rules] = await Promise.all([supervisionP, rulesP]);
+  // Completion receipts of finished runs, so the receipt opens without another round trip.
+  const finished = [...renewals.values()].filter((r) => r.state === "done").slice(0, 20);
+  const receipts = new Map((await pool(finished, 6, (r) => api.workflowReceipt(r.id).then((x) => [r.id, x]).catch(() => null))).filter(Boolean));
+  return { db, extras: { renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -518,7 +525,7 @@ const NOT_CONNECTED_WS = {
 };
 
 /** Workspaces live mode builds itself (live-spaces.js); the engine's version would be example content. */
-const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation", "renewal"]);
+const LIVE_WS = new Set(["clients", "newclient", "newcontact", "import", "quote", "settings", "connections", "activity", "audit", "automation", "renewal", "autonomy"]);
 
 function notConnectedWorkspace(ref) {
   const name = NOT_CONNECTED_WS[ref.ws];
@@ -612,7 +619,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   // The re-read after a write runs in the background (mutation.js): a write settles when the
   // server answers it, and the interface re-renders when the fresh records land.
@@ -626,7 +633,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       // What this session already did stays done: a re-read must not make a finished action clickable again.
       db.meta.ledger = { ...db.meta.ledger, ...ledger };
       if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, modelConfigured: loaded.extras.modelConfigured });
+      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, modelConfigured: loaded.extras.modelConfigured });
       S.useBackend({ db, dispatch });
     },
   );
@@ -669,6 +676,103 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         ? { title: file.name + " was already imported", text: "This exact file has been imported before, so nothing was read a second time and nothing changed. To add new rows, save them in a new file." }
         : { title: file.name + " could not be read", text: describeApiError(e) };
       return { ok: false, error: state.importError.title + ". " + state.importError.text };
+    }
+  };
+
+  /** The brokerage's follow-up cadence, from its rule or ASAP's stated default (D-130). */
+  const followUpDays = () => Number(state.rules?.rules?.find((r) => r.key === "renewal.window")?.value?.followUpDays ?? 5);
+  /**
+   * The approval card ASAP puts in the conversation when a renewal is ready (D-131): what it
+   * checked and prepared, what approval allows, and three real actions — approve, review in the
+   * Space, or not now. Rejecting needs a reason, so it lives in the Space's review.
+   */
+  const approvalCard = (r) => {
+    const ap = r?.approval;
+    if (!ap || ap.state !== "pending") return null;
+    const msgs = ap.bundle.filter((b) => b.kind === "communication");
+    const policy = ap.bundle.find((b) => b.kind === "pack")?.pack?.policyNumber;
+    return {
+      title: "Renewal pack ready",
+      sections: [
+        { label: "ASAP CHECKED " + (policy ?? "THE POLICY") + " AND PREPARED", items: ["the renewal pack", ...msgs.map((m) => (m.audience === "client" ? "the client letter" : "the insurer terms request") + " — " + m.subject)] },
+        ...(r.operational?.blockers?.length ? [{ label: "NOT BLOCKING, BUT MISSING", items: r.operational.blockers.filter((b) => !b.blocking).map((b) => b.label) }] : []),
+      ],
+      external: "Approval allows ASAP to continue to delivery preparation. Nothing will be sent automatically.",
+      action: "renewal.decide",
+      payload: { approvalId: ap.id, bundleSha256: ap.bundleSha256, decision: "approve" },
+      actionId: "renewal.decide:" + ap.id + ":approve",
+      confirmLabel: "Approve bundle",
+      editLabel: "Review in Space",
+      cancelLabel: "Not now",
+      editRef: { ws: "renewal", runId: r.id, workItemId: r.workItemId, view: "review" },
+      progress: "Recording your approval…",
+    };
+  };
+  /** A renewal that stopped for missing information: what is missing and how to resume. */
+  const blockerCard = (r) => {
+    if (r?.state !== "exception") return null;
+    return {
+      title: r.operational?.currentWork?.title ?? "Stopped — needs a person",
+      sections: [
+        { label: "WHAT STOPPED IT", items: [r.exception?.message ?? r.operational?.status] },
+        { label: "WHAT IS NEEDED", items: (r.operational?.blockers ?? []).filter((b) => b.blocking).map((b) => b.label + (b.fix ? " — " + b.fix : "")) },
+      ],
+      external: r.operational?.afterYouAct ?? "ASAP resumes this same renewal from the step that stopped.",
+      action: "renewal.resume",
+      payload: { runId: r.id },
+      actionId: "renewal.resume:" + r.id + ":" + (r.exception?.code ?? "x"),
+      confirmLabel: "I've fixed it — resume",
+      editLabel: "Open the renewal",
+      cancelLabel: "Not now",
+      editRef: { ws: "renewal", runId: r.id, workItemId: r.workItemId },
+      progress: "Resuming the renewal…",
+    };
+  };
+
+  /**
+   * A workflow action's response carries the run in full: show it at once — Space, Work and the
+   * chat all read it — and let the background re-read bring everything else up to date.
+   */
+  const applyRun = (run) => {
+    if (!run) return;
+    if (state.renewals?.set) state.renewals.set(run.id, run);
+    const items = state.supervision?.items;
+    if (items) {
+      const i = items.findIndex((x) => x.id === run.id);
+      if (i >= 0) items[i] = { ...items[i], ...run };
+    }
+    const w = run.workItemId ? db.workItems.find((x) => x.id === run.workItemId) : null;
+    if (w && run.operational) w.statusLine = run.operational.status;
+  };
+  const runAction = async (call, text, action, changed, unchanged) => {
+    try {
+      const res = await call();
+      if (res.outcome === "blocked") return /role/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason || "That could not be done. Nothing was changed." };
+      applyRun(res.run);
+      void refresh();
+      const r = res.run;
+      const already = res.outcome === "already";
+      return ok(already ? "Already so — nothing recorded twice" : text, {
+        already,
+        nav: r ? { ws: "renewal", runId: r.id, workItemId: r.workItemId } : undefined,
+        detail: r?.operational ? r.operational.status + (r.operational.nextFollowUpAt ? ". Next follow-up: " + S.fmtDate(r.operational.nextFollowUpAt) : "") + "." : "",
+        receipt: { action, record: r?.title ?? "Renewal", outcome: already ? "Already done" : "Done", changed: already ? [] : changed, unchanged, next: r?.operational?.needsFromYou ?? r?.operational?.currentWork?.title ?? null, audit: null },
+      });
+    } catch (e) {
+      return fail(e);
+    }
+  };
+
+  const saveRule = async (key, value, source, text) => {
+    try {
+      const res = await api.setRule({ key, value, source, verifiedAt: new Date().toISOString().slice(0, 10) });
+      if (res.outcome !== "done") return /may not/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: (res.reason || "The rule was not saved.") + " Nothing was changed." };
+      if (res.rules) state.rules = res.rules;
+      void refresh();
+      const v = res.rules?.rules?.find((r) => r.key === key)?.version;
+      return ok(text + (v ? " — version " + v : ""), { detail: "Recorded with its source and your name; the previous version is kept. It applies to the next step of every workflow.", nav: { ws: "autonomy" }, receipt: { action: "Rule changed", record: key, outcome: "Done", changed: ["A new version of the rule"], unchanged: ["Nothing already done changes", "Binding cover, client instructions, money and claims decisions stay with people"], next: null, audit: "organization.rule_set" } });
+    } catch (e) {
+      return fail(e);
     }
   };
 
@@ -808,7 +912,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
-      } catch (e) {
+      } catch {
         return { ok: false, error: "Your browser did not allow the download. The columns are: " + IMPORT_HEADERS.map((h) => h.header.replace(/ /g, "_")).join(", ") + "." };
       }
       // A browser can still decline silently, so say what to look for rather than claim it arrived.
@@ -835,10 +939,13 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.startRenewal(p.policyPeriodId);
         if (res.outcome === "blocked") return { ok: false, error: res.reason || "The renewal could not be started. Nothing was changed." };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         const r = res.run;
-        return ok(res.outcome === "already" ? "That renewal is already in hand" : "Renewal started — ASAP is preparing it", {
+        const card = approvalCard(r) ?? blockerCard(r);
+        return ok(res.outcome === "already" ? "That renewal is already in hand" : r?.state === "exception" ? "Renewal started — ASAP stopped safely: information is missing" : "Renewal started — ASAP prepared it", {
           already: res.outcome === "already",
+          nextPending: card ? { lead: card.title, text: r?.operational?.completed ?? "", pending: card } : null,
           nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
           detail: r ? r.stateLabel + ". " + r.progress.done + " of " + r.progress.steps + " steps done." : "",
           receipt: { action: "Renewal started", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : ["A renewal run and its Work item"], unchanged: ["Nothing was sent", "No cover or money changed"], next: r?.state === "waiting_approval" ? "Review and approve the renewal bundle" : r?.stateLabel ?? null, audit: "workflow.renewal.started" },
@@ -852,13 +959,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.decideApproval(p.approvalId, { decision: p.decision, bundleSha256: p.bundleSha256, ...(p.note ? { note: p.note } : {}) });
         if (res.outcome === "blocked") return /role/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         const r = res.run;
         const approved = p.decision === "approve";
-        return ok(res.outcome === "already" ? "Already decided — nothing recorded twice" : approved ? "Renewal bundle approved — ASAP carried on" : "Renewal bundle not approved", {
+        return ok(res.outcome === "already" ? "Already decided — nothing recorded twice" : approved ? "Approved — not sent" : "Renewal bundle not approved", {
           already: res.outcome === "already",
           nav: { ws: "renewal", runId: r?.id, workItemId: r?.workItemId },
-          detail: approved ? "The insurer request is recorded as approved — not sent. Nothing leaves ASAP: deliver it yourself and record how." : "The run stopped with your reason. Put it right on the records, then resume.",
+          next: approved && r ? [{ label: "Open next step", ref: { ws: "renewal", runId: r.id, workItemId: r.workItemId } }] : [],
+          detail: approved ? "ASAP opened the next step: deliver the insurer request and record how it was delivered. Next follow-up after delivery: " + followUpDays() + " days." : "The run stopped with your reason. Put it right on the records, then resume.",
           receipt: { action: approved ? "Renewal bundle approved" : "Renewal bundle rejected", record: r?.title ?? "Renewal", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : [approved ? "Pack and both messages approved" : "Bundle rejected with your reason"], unchanged: ["Nothing was sent to the client or the insurer", "No cover or money changed"], next: r?.state === "waiting_party" ? "Deliver the approved request to the insurer and record how" : r?.exception?.needs ?? r?.stateLabel ?? null, audit: approved ? "workflow.bundle_approved" : "workflow.bundle_rejected" },
         });
       } catch (e) {
@@ -870,17 +979,52 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.recordCommunicationDelivery(p.communicationId, { method: p.method || "own_email", reference: p.reference.trim() });
         if (res.outcome === "blocked") return { ok: false, error: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         return ok(res.outcome === "already" ? "Already recorded — nothing twice" : "Delivery recorded — delivered by you, not sent by ASAP", { already: res.outcome === "already", nav: { ws: "renewal", runId: res.run?.id, workItemId: res.run?.workItemId } });
       } catch (e) {
         return fail(e);
       }
     },
+    "renewal.pause": (p) => runAction(() => api.pauseWorkflow(p.runId, p.reason), "Paused — ASAP will not act on this renewal until it is resumed", "Paused", ["ASAP takes no further step"], ["Nothing already done is undone", "Escalation dates are kept"]),
+    "renewal.escalate": (p) => {
+      if ((p.reason || "").trim().length < 3) return { ok: false, error: "Say why it is escalated. Nothing was changed." };
+      return runAction(() => api.escalateWorkflow(p.runId, p.reason.trim()), "Escalated — the owner is asked to act", "Escalated", ["Work and Today ask the owner to act"], ["Nothing was sent"]);
+    },
+    "renewal.followUpNow": (p) => runAction(() => api.followUpNow(p.runId), "Follow-up raised now", "Follow up now", ["The follow-up is due today"], ["Nothing was sent — ASAP has no mailbox; a person chases"]),
+    "renewal.moveFollowUp": (p) => {
+      const when = p.on ? (/^\d{4}-\d{2}-\d{2}$/.test(p.on) ? p.on : parseDate(String(p.on))?.date) : null;
+      if (!when) return { ok: false, error: "Say the date to follow up — for example Friday, or 7 October. Nothing was changed." };
+      return runAction(() => api.moveFollowUp(p.runId, when), "Next follow-up moved to " + S.fmtDate(when), "Follow-up date changed", ["Next follow-up: " + S.fmtDate(when)], ["The escalation date", "Nothing was sent"]);
+    },
+    "renewal.chasing": (p) => runAction(() => api.setChasing(p.runId, Boolean(p.stop), p.reason), p.stop ? "ASAP stopped chasing — it still escalates on schedule" : "ASAP is chasing again on the schedule", p.stop ? "Chasing stopped" : "Chasing restarted", [p.stop ? "No automatic follow-ups" : "Follow-ups on the schedule"], ["Escalation is kept"]),
+    "renewal.stop": (p) => {
+      if ((p.reason || "").trim().length < 3) return { ok: false, error: "Say why ASAP should stop. Nothing was changed." };
+      return runAction(() => api.stopWorkflow(p.runId, p.reason.trim()), "ASAP stopped working on this renewal — its Work stays with a person", "Automation stopped", ["The run is cancelled", "Work asks a person to carry it"], ["Nothing already done is undone", "Nothing was sent"]);
+    },
+    /*
+     * Autonomy and cadence rules (D-131): each save is a new version on the server, with its source
+     * and the person's name. The server validates the ladder (external messages always wait for a
+     * person) and says why when it refuses.
+     */
+    "rules.autonomy": async (p) => {
+      const source = (p.source || "").trim();
+      if (source.length < 3) return { ok: false, error: "Say where this rule comes from — a partners' meeting, a circular. Nothing was saved." };
+      const value = { actions: Object.fromEntries(["detect_renewals", "prepare_renewal", "external_messages", "follow_up", "escalate", "recommend_quote"].map((k) => [k, p["lvl_" + k]])), approver: p.approver, assignment: p.assignment, alsoNever: [] };
+      return saveRule("workflow.autonomy", value, source, "Autonomy rule saved as a new version");
+    },
+    "rules.window": async (p) => {
+      const source = (p.source || "").trim();
+      if (source.length < 3) return { ok: false, error: "Say where this rule comes from. Nothing was saved." };
+      const value = { leadDays: Number(p.leadDays), followUpDays: Number(p.followUpDays), escalateDaysBeforeExpiry: Number(p.escalateDaysBeforeExpiry) };
+      return saveRule("renewal.window", value, source, "Renewal cadence saved as a new version");
+    },
     "renewal.resume": async (p) => {
       try {
         const res = await api.resumeWorkflow(p.runId);
         if (res.outcome === "blocked") return { ok: false, denied: true, reason: res.reason };
-        await refresh();
+        applyRun(res.run);
+        void refresh();
         return ok("Renewal resumed — " + (res.run?.stateLabel ?? "ASAP carried on").toLowerCase(), { nav: { ws: "renewal", runId: p.runId, workItemId: res.run?.workItemId } });
       } catch (e) {
         return fail(e);
@@ -1227,7 +1371,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       own.ref = ref;
       return own;
     }
-    return guardLive(buildWorkspace(ref));
+    const built = guardLive(buildWorkspace(ref));
+    // Work and Today point at the supervision board: every workflow ASAP is running, grouped.
+    if (built && Array.isArray(built.blocks) && (ref?.ws === "work" || ref?.ws === "today") && state.supervision) {
+      const c = state.supervision.counts;
+      built.blocks.push({ t: "gate", kind: "approve", heading: "Work ASAP is doing", label: "Open", detail: (c.needs_me ?? 0) + " need you · " + (c.asap_handling ?? 0) + " ASAP is handling · " + (c.waiting_on_others ?? 0) + " waiting on others · " + (c.upcoming ?? 0) + " with planned actions", nav: { ws: "renewal", view: ref.ws === "today" ? "needs_me" : "asap_handling" } });
+      if (ref.ws === "today" && state.supervision.upcoming.length)
+        built.blocks.push({ t: "gate", kind: "approve", heading: "Upcoming", label: "See what ASAP plans", detail: state.supervision.upcoming.slice(0, 3).map((u) => u.label + " — " + S.fmtDate(u.at)).join(" · "), nav: { ws: "renewal", view: "upcoming" } });
+    }
+    return built;
   }
 
   /**
@@ -1531,6 +1683,85 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   /**
+   * Supervision from Ask (D-131): what ASAP is doing, what needs approval, what is overdue, what is
+   * waiting on whom, what is planned — and, for the workflow in front, where it is, what it waits
+   * for, when it follows up, and the controls (move the follow-up, stop chasing, pause, resume,
+   * escalate, follow up now). Every answer reads the same supervision state Work and the Space show;
+   * every change is a pending card on the same endpoint the Space calls.
+   */
+  function supervisionFromAsk(raw, t, ctx) {
+    // Brokerage-wide questions read the supervision list; the workflow in front reads its own run.
+    const sup = state.supervision ?? { items: [], upcoming: [], counts: {} };
+    const items = sup.items;
+    const live = items.filter((i) => !i.views.includes("done"));
+    const line = (i) => i.title + " — " + i.operational.status + (i.operational.nextFollowUpAt ? " (next follow-up " + S.fmtDate(i.operational.nextFollowUpAt) + ")" : "");
+    const list = (xs) => xs.slice(0, 5).map(line).join("; ") + (xs.length > 5 ? "; and " + (xs.length - 5) + " more." : ".");
+    if (/\b(autonomy|what (may|can) asap do (on its own|automatically)|asap'?s rules|automation rules)\b/i.test(t)) return { lead: "Here is what ASAP may do on its own.", text: "Each action sits on the six-step ladder; external messages always wait for a person.", ref: { ws: "autonomy" } };
+    if (/\bwhat (is|'s) asap (doing|working on)|what are you (doing|working on)\b/i.test(t)) {
+      const handling = items.filter((i) => i.views.includes("asap_handling"));
+      return { lead: live.length ? "ASAP has " + plural(live.length, "workflow", "workflows") + " open." : "ASAP has nothing open right now.", text: [handling.length ? "Handling on its own: " + list(handling) : null, sup.counts.needs_me ? plural(sup.counts.needs_me, "needs", "need") + " you." : "Nothing needs you."].filter(Boolean).join(" "), ref: { ws: "renewal", view: "asap_handling" } };
+    }
+    if (/\b(needs?|waiting for|awaiting) (my |an? )?approvals?\b|\bwhat (do i|should i) approve\b|\bapprovals? (pending|waiting)\b/i.test(t)) {
+      const xs = live.filter((i) => i.state === "waiting_approval");
+      return { lead: xs.length ? plural(xs.length, "renewal is", "renewals are") + " waiting for approval." : "Nothing is waiting for approval.", text: xs.length ? list(xs) : "ASAP puts a bundle here the moment one is ready.", ref: { ws: "renewal", view: "needs_me" } };
+    }
+    if (/\boverdue\b|\blate\b|\bbehind\b/i.test(t)) {
+      const xs = live.filter((i) => /overdue|cover ends in ([0-9]|1[0-4]) days|escalated/.test(i.priorityReason));
+      return { lead: xs.length ? plural(xs.length, "item is", "items are") + " overdue or close to the deadline." : "Nothing is overdue.", text: xs.length ? list(xs) : "No insurer response is overdue and no renewal is within 14 days of expiry without terms.", ref: { ws: "renewal", view: "needs_me" } };
+    }
+    const waitingOn = /\b(?:waiting on|waiting for|with)\s+([a-z][\w&.' -]{1,40}?)\s*\??$/i.exec(raw.trim());
+    if (/\b(everything|all|show)\b/i.test(t) && waitingOn && !/\b(me|you|approval|terms)\b/i.test(waitingOn[1])) {
+      const who = waitingOn[1].trim().toLowerCase();
+      const xs = live.filter((i) => i.operational.waitingFor && i.operational.waitingFor.party.toLowerCase().includes(who));
+      return { lead: xs.length ? plural(xs.length, "item is", "items are") + " waiting on " + waitingOn[1].trim() + "." : "Nothing is waiting on " + waitingOn[1].trim() + ".", text: xs.length ? list(xs) : "Only work handed to an outside party is counted.", ref: { ws: "renewal", view: "waiting_on_others" } };
+    }
+    if (/\b(upcoming|what will asap do next|what('?s| is) (planned|scheduled)|scheduled (actions|follow-?ups))\b/i.test(t)) {
+      const ups = sup.upcoming;
+      return { lead: ups.length ? "ASAP has " + plural(ups.length, "action", "actions") + " planned." : "Nothing is planned.", text: ups.slice(0, 5).map((u) => u.label + " — " + S.fmtDate(u.at) + " (" + u.title + ")").join("; "), ref: { ws: "renewal", view: "upcoming" } };
+    }
+
+    // The workflow in front, or the one named.
+    const ref = ctx.ref || ctx;
+    const runs = [...(state.renewals?.values?.() ?? [])];
+    const sub = resolveSubject(t, ctx);
+    const target = (ref.ws === "renewal" && ref.runId ? runs.find((r) => r.id === ref.runId) : null)
+      ?? (ref.workItemId ? runs.find((r) => r.workItemId === ref.workItemId) : null)
+      ?? (sub?.clientId ? runs.find((r) => r.client?.id === sub.clientId && r.state !== "done" && r.state !== "cancelled") : null);
+    const ABOUT = /\bwhere is (this|the|it)|what are we waiting (for|on)|when will asap follow|next follow-?up|move the (next )?follow-?up|stop chasing|start chasing|chase again|follow up now|\bpause\b|\bresume\b|\bescalate\b|\bwhy\b|open next step/i;
+    if (!ABOUT.test(t)) return null;
+    if (!target) return { lead: "Which workflow?", text: "Open it from Work, or name the client, and ask again. Nothing was changed.", ref: { ws: "renewal" } };
+    const o = target.operational;
+    const at = { ws: "renewal", runId: target.id, workItemId: target.workItemId };
+    const card = (title, items, action, payload, label, progress) => ({ lead: title + "?", text: o.status + ".", ref: at, pending: { title, sections: [{ label: "WILL DO", items }, { label: "NOT DONE", items: ["Nothing is sent to anyone", "No cover or money changes"] }], external: "Recorded against your name; Work, Today and the Space change at once.", action, payload, actionId: action + ":" + target.id + ":" + JSON.stringify(payload), confirmLabel: label, progress } });
+    const can = (k) => o.interventions.find((i) => i.key === k);
+    const refuse = (k) => ({ lead: can(k)?.label + " isn't available.", text: (can(k)?.why ?? "") + " Nothing was changed.", ref: at });
+    if (/open next step/i.test(t)) return { lead: "Opening the next step.", text: o.needsFromYou ?? o.currentWork.title, ref: at };
+    if (/move the (next )?follow-?up|follow-?up (to|on)\b/i.test(t)) {
+      if (!can("follow_up_date")?.available) return refuse("follow_up_date");
+      const when = parseDate(t.replace(/^.*?\b(to|on)\b/i, ""));
+      if (!when) return { lead: "To when?", text: "Say a day — Friday, or 7 October. Nothing was changed.", ref: at };
+      return card("Move the next follow-up to " + S.fmtDate(when.date), ["Next follow-up: " + S.fmtDate(when.date) + " (used once; the schedule resumes after it)", "Escalation stays " + (o.escalatesAt ? S.fmtDate(o.escalatesAt) : "as it is")], "renewal.moveFollowUp", { runId: target.id, on: when.date }, "Move follow-up", "Rescheduling…");
+    }
+    if (/stop chasing/i.test(t)) return o.chasing === "active" ? card("Stop chasing " + (o.waitingFor?.party ?? "the insurer"), ["No automatic follow-ups", "ASAP still escalates " + (o.escalatesAt ? "on " + S.fmtDate(o.escalatesAt) : "on schedule")], "renewal.chasing", { runId: target.id, stop: true }, "Stop chasing", "Recording…") : { lead: "ASAP is not chasing anyone on this one.", text: o.status + ".", ref: at };
+    if (/start chasing|chase again/i.test(t)) return o.chasing === "stopped" ? card("Start chasing again", ["Follow-ups resume on the brokerage's schedule"], "renewal.chasing", { runId: target.id, stop: false }, "Start chasing", "Recording…") : { lead: "Chasing is not stopped.", text: o.status + ".", ref: at };
+    if (/follow up now/i.test(t)) return can("follow_up_now")?.available ? card("Follow up now", ["The follow-up becomes due today; Work asks the owner to chase"], "renewal.followUpNow", { runId: target.id }, "Follow up now", "Raising the follow-up…") : refuse("follow_up_now");
+    if (/\bpause\b/i.test(t)) return can("pause")?.available ? card("Pause this renewal", ["ASAP takes no further step until someone resumes it"], "renewal.pause", { runId: target.id }, "Pause", "Pausing…") : refuse("pause");
+    if (/\bresume\b/i.test(t)) return can("resume")?.available ? card("Resume this renewal", ["ASAP continues this same run from where it stopped"], "renewal.resume", { runId: target.id }, "Resume", "Resuming…") : refuse("resume");
+    if (/\bescalate\b/i.test(t)) {
+      if (!can("escalate")?.available) return refuse("escalate");
+      const reason = raw.replace(/^.*?\bescalate\b( (this|it))?( because)?/i, "").trim() || "Escalated from the conversation";
+      return card("Escalate to " + (o.escalatesTo ?? "the work owner"), ["Work and Today ask the owner to act", "Reason: " + reason], "renewal.escalate", { runId: target.id, reason }, "Escalate", "Escalating…");
+    }
+    if (/when will asap follow|next follow-?up/i.test(t))
+      return { lead: o.nextFollowUpAt ? "ASAP follows up on " + S.fmtDate(o.nextFollowUpAt) + "." : "No follow-up is scheduled yet.", text: o.nextFollowUpAt ? "With " + (o.waitingFor?.party ?? "the insurer") + (o.escalatesAt ? "; it escalates to " + (o.escalatesTo ?? "the work owner") + " on " + S.fmtDate(o.escalatesAt) : "") + "." : o.status + (o.needsFromYou ? ". " + o.needsFromYou : "."), ref: at };
+    if (/what are we waiting/i.test(t))
+      return { lead: o.waitingFor ? "Waiting for " + o.waitingFor.party + (o.waitingFor.since ? " since " + S.fmtDate(o.waitingFor.since) : "") + "." : o.needsFromYou ? "It is waiting for you." : "Nothing outside the brokerage.", text: o.needsFromYou ?? o.currentWork.title + ".", ref: at };
+    if (/\bwhy\b/i.test(t))
+      return { lead: o.status + ".", text: [o.completed, o.blockers.length ? "In the way: " + o.blockers.map((b) => b.label + (b.blocking ? " (blocking)" : "")).join("; ") + "." : null, target.steps?.find((st) => st.key === "detect")?.output?.windowBasis ?? null].filter(Boolean).join(" "), ref: { ...at, view: "history" } };
+    return { lead: target.title + ": " + o.status + ".", text: [o.currentWork.title + ".", o.needsFromYou, o.nextFollowUpAt ? "Next follow-up " + S.fmtDate(o.nextFollowUpAt) + "." : null].filter(Boolean).join(" ") + " " + target.progress.done + " of " + target.progress.steps + " steps complete.", ref: at };
+  }
+
+  /**
    * Renewal Autopilot from Ask (D-129): what is coming up, where one stands, start one now, and
    * approve its bundle — each answered from the runs the server returned, each write a pending card
    * on the same contract the Renewal Space uses.
@@ -1541,11 +1772,21 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const ref = ctx.ref || ctx;
     const inFront = ref.ws === "renewal" ? runs.find((r) => r.id === ref.runId || r.workItemId === ref.workItemId) : ref.workItemId ? runs.find((r) => r.workItemId === ref.workItemId) : null;
     if (/\b(what|which|show|list|any|upcoming|coming up|due)\b/i.test(t) && /\brenewals\b|coming up|upcoming|due/i.test(t) && !/\b(approve|start|prepare)\b/i.test(t)) {
-      const waiting = runs.filter((r) => r.state === "waiting_approval");
-      const stopped = runs.filter((r) => r.state === "exception");
+      // The automatic window and work a person started are different things, and said apart.
+      const open = runs.filter((r) => r.state !== "done" && r.state !== "cancelled");
+      const lead = Number(state.rules?.rules?.find((r) => r.key === "renewal.window")?.value?.leadDays ?? 60);
+      const windowed = open.filter((r) => r.operational?.origin !== "manual");
+      const manual = open.filter((r) => r.operational?.origin === "manual");
+      const waiting = open.filter((r) => r.state === "waiting_approval");
+      const stopped = open.filter((r) => r.state === "exception");
       return {
-        lead: runs.length ? plural(runs.length, "renewal", "renewals") + " in hand." : "No renewals in the window yet.",
-        text: runs.length ? [waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for your approval." : null, stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null, "ASAP looks for renewals every day and prepares them on its own."].filter(Boolean).join(" ") : "ASAP looks every day; a policy period nearing its end appears here with its pack prepared.",
+        lead: windowed.length ? plural(windowed.length, "policy period ends", "policy periods end") + " within the " + lead + "-day renewal window — ASAP started " + (windowed.length === 1 ? "it" : "them") + " on its own." : "No policy period ends within the " + lead + "-day renewal window.",
+        text: [
+          manual.length ? plural(manual.length, "renewal was", "renewals were") + " started by a person, outside the automatic window: " + manual.map((r) => r.title).join("; ") + "." : null,
+          waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for approval." : null,
+          stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null,
+          "ASAP checks the window every day.",
+        ].filter(Boolean).join(" "),
         ref: { ws: "renewal" },
       };
     }
@@ -2043,6 +2284,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ];
     const go = GO.find(([re]) => re.test(t.trim()));
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
+    const supervised = supervisionFromAsk(text.trim(), t, ctx);
+    if (supervised) return supervised;
     const renewal = renewalFromAsk(text.trim(), t, ctx);
     if (renewal) return renewal;
     const automation = automationFromAsk(text.trim(), t);

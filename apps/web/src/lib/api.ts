@@ -7,6 +7,8 @@ import {
   applyPreviewSchema,
   policySpaceResponseSchema,
   startRenewalResponseSchema,
+  supervisionResponseSchema,
+  companyRulesResponseSchema,
   creationContextSchema,
   type IssuanceAction,
   type ApplyPreviewRequest,
@@ -246,6 +248,25 @@ export const api = {
   recordCommunicationDelivery: (id: string, input: { method: string; reference: string; deliveredAt?: string }) =>
     request("POST", `/prepared-communications/${id}/delivery`, workflowActionResponseSchema, input, { auth: true, allow: [403, 409, 422] }),
   resumeWorkflow: (id: string) => request("POST", `/workflows/runs/${id}/resume`, workflowActionResponseSchema, undefined, { auth: true, allow: [403] }),
+  /** The brokerage's own rules, each with its source, check date and version (D-131). */
+  rules: () => request("GET", "/rules", companyRulesResponseSchema),
+  setRule: (input: { key: string; value: unknown; source: string; verifiedAt: string; note?: string }) =>
+    request("PUT", "/rules", z.object({ outcome: z.string(), reason: z.string().optional(), rules: companyRulesResponseSchema.optional() }), input, { auth: true, allow: [403, 422] }),
+  /** Supervision (D-131): every workflow, grouped and ranked, with Upcoming and the governing rules. */
+  supervision: () => request("GET", "/supervision", supervisionResponseSchema),
+  pauseWorkflow: (id: string, reason?: string) =>
+    request("POST", `/workflows/runs/${id}/pause`, workflowActionResponseSchema, reason ? { reason } : {}, { auth: true, allow: [403, 409] }),
+  escalateWorkflow: (id: string, reason: string) =>
+    request("POST", `/workflows/runs/${id}/escalate`, workflowActionResponseSchema, { reason }, { auth: true, allow: [403, 409] }),
+  followUpNow: (id: string) => request("POST", `/workflows/runs/${id}/follow-up-now`, workflowActionResponseSchema, {}, { auth: true, allow: [403, 409] }),
+  moveFollowUp: (id: string, on: string) =>
+    request("POST", `/workflows/runs/${id}/follow-up`, workflowActionResponseSchema, { on }, { auth: true, allow: [403, 409, 422] }),
+  setChasing: (id: string, stop: boolean, reason?: string) =>
+    request("POST", `/workflows/runs/${id}/chasing`, workflowActionResponseSchema, { stop, ...(reason ? { reason } : {}) }, { auth: true, allow: [403, 409] }),
+  stopWorkflow: (id: string, reason: string) =>
+    request("POST", `/workflows/runs/${id}/stop`, workflowActionResponseSchema, { reason }, { auth: true, allow: [403, 409] }),
+  workflowReceipt: (id: string) =>
+    request("GET", `/workflows/runs/${id}/receipt`, z.object({ title: z.string(), outcome: z.string(), completedAt: z.string(), receipt: z.record(z.string(), z.unknown()) })),
   /** Test mode: conditions checked against open work; nothing prepared or written but its audit. */
   testAutomation: (id: string) => request("POST", `/automations/${id}/test`, automationTestResponseSchema, {}),
   automationLastTest: (id: string) =>

@@ -152,6 +152,25 @@ const renewalRun = () => ({
     ] },
   communications: [],
   permissions: { canApprove: true, canAct: true },
+  // The server's operational view (D-131), as GET /workflows/runs/:id returns it for each state.
+  operational: {
+    origin: "manual", originLabel: "Started by Wanjiru Kamau on 1 October",
+    status: { waiting_approval: "Waiting for approval from Wanjiru Kamau", waiting_party: "Approved — not delivered", exception: "Escalated to Wanjiru Kamau — no terms from First Insurer near expiry" }[runState],
+    tone: "attention",
+    currentWork: runState === "waiting_approval" ? { title: "Renewal pack ready", detail: "ASAP prepared the renewal pack, the client letter and the terms request to First Insurer." } : runState === "exception" ? { title: "Stopped — needs a person", detail: "No renewal terms from First Insurer with 5 days to expiry." } : { title: "Deliver the terms request to First Insurer", detail: "The request is approved but has not been sent — ASAP has no mailbox connected." },
+    completed: "ASAP checked the policy, looked for the schedule, prepared the renewal pack and drafted two messages.",
+    blockers: runState === "exception" ? [{ label: "No renewal terms from First Insurer with 5 days to expiry.", blocking: true, fix: "Call the underwriter at First Insurer today." }] : [{ label: "The expiring policy schedule", blocking: false, fix: null }],
+    moreBlockers: 0,
+    needsFromYou: runState === "waiting_approval" ? "Review the pack and both messages, then approve the bundle or say what is wrong." : runState === "exception" ? "Call the underwriter at First Insurer today." : "Send the approved request to First Insurer yourself, then record how it was delivered.",
+    waitingFor: null, nextFollowUpAt: null, escalatesAt: "2026-12-17T06:00:00.000Z", escalatesTo: "Wanjiru Kamau", chasing: "not_started",
+    afterYouAct: runState === "waiting_approval" ? "Approval lets ASAP continue to delivery preparation. Nothing is sent automatically." : "ASAP resumes this same renewal from the step that stopped — nothing already done is done again.",
+    attention: true, attentionReason: "x",
+    primaryAction: { waiting_approval: { kind: "approve", label: "Approve bundle" }, waiting_party: { kind: "record_delivery", label: "Record delivery" }, exception: { kind: "resume", label: "I've fixed it — resume" } }[runState],
+    outputs: [{ label: "Renewal pack", state: "Prepared" }],
+    owner: { id: "a0000000-0000-4000-8000-000000000001", name: "Wanjiru Kamau" },
+    paused: null, escalated: runState === "exception", upcoming: [],
+    interventions: [{ key: "pause", label: "Pause", available: true, why: null }, { key: "follow_up_now", label: "Follow up now", available: false, why: "There is nothing to follow up yet — the insurer request has not been delivered." }, { key: "resume", label: "Resume", available: runState === "exception", why: runState === "exception" ? null : "It is not paused or stopped." }, { key: "escalate", label: "Escalate", available: true, why: null }, { key: "stop", label: "Stop automation", available: true, why: null }, { key: "follow_up_date", label: "Change follow-up date", available: true, why: null }, { key: "assign", label: "Assign", available: true, why: null }],
+  },
 });
 const decideApproval = vi.fn(async () => { runState = "waiting_party"; return { outcome: "done", reason: null, run: renewalRun() }; });
 const askQuestion = vi.fn(async () => ({ state: "not_configured", conversationId: null, message: null, suggestions: [] }));
@@ -1057,41 +1076,72 @@ describe("live mode", () => {
   });
 
   describe("Renewal Autopilot in the interface (D-129)", () => {
-    it("the Renewal Space shows what ASAP did, the one bundle and its approval — nothing sent", async () => {
+    it("the Renewal Space answers the seven questions: one status, current work, blockers, one action, follow-up, outputs", async () => {
       const A = await live();
       const ws = A.ai.workspace({ ws: "renewal", runId: RUN, workItemId: WORK });
       const all = text(ws);
-      expect(ws.statusLabel).toBe("Waiting for your approval");
-      expect(all).toContain("One approval: the pack and both messages");
-      expect(all).toContain("Renewal of your Motor policy TH-MTR-001");
-      expect(all).toContain("No verified address on file — you deliver it");
-      expect(all).toContain("Approve the renewal bundle");
-      expect(all).toContain("5 items on file, 1 missing");
+      expect(ws.statusLabel).toBe("Waiting for approval from Wanjiru Kamau");
+      expect(all).toContain("Started by Wanjiru Kamau on 1 October · 6 of 11 steps complete.");
+      expect(all).toContain("Renewal pack ready");
+      expect(all).toContain("ASAP checked the policy, looked for the schedule, prepared the renewal pack and drafted two messages.");
+      expect(all).toContain("Not blocking — ASAP carries on and says so in the pack");
+      expect(all).toContain("Approve bundle");
+      expect(all).toContain("Escalates to Wanjiru Kamau");
+      // Technical steps and the full bundle are collapsed behind their own views.
+      expect(all).not.toContain("5 items on file, 1 missing");
       expect(all).not.toMatch(/was sent|has been sent/i);
+      const review = text(A.ai.workspace({ ws: "renewal", runId: RUN, workItemId: WORK, view: "review" }));
+      expect(review).toContain("Renewal of your Motor policy TH-MTR-001");
+      expect(review).toContain("No verified address on file — you deliver it");
+      expect(review).toContain("Reject — say what is wrong");
+      const history = text(A.ai.workspace({ ws: "renewal", runId: RUN, view: "history" }));
+      expect(history).toContain("5 items on file, 1 missing");
+      const actions = text(A.ai.workspace({ ws: "renewal", runId: RUN, view: "actions" }));
+      expect(actions).toContain("Pause");
+      expect(actions).toContain("There is nothing to follow up yet — the insurer request has not been delivered.");
     });
 
-    it("Ask lists renewals, approves the bundle through the same contract, and the Space then says waiting on the insurer", async () => {
+    it("Ask separates the automatic window from manual renewals, approves through the same contract, and puts the next step in the receipt", async () => {
       const A = await live();
       const list = (await A.ai.route("What renewals are coming up?", {})) as { lead: string; text: string };
-      expect(list.lead).toBe("1 renewal in hand.");
-      expect(list.text).toMatch(/1 bundle is waiting for your approval/);
+      expect(list.lead).toBe("No policy period ends within the 60-day renewal window.");
+      expect(list.text).toMatch(/1 renewal was started by a person, outside the automatic window/);
       const ref = { ws: "renewal", runId: RUN, workItemId: WORK };
       const r = (await A.ai.route("Approve the renewal", { ...ref, ref })) as { pending: { action: string; payload: Record<string, string>; actionId: string } };
       expect(r.pending.action).toBe("renewal.decide");
       expect(decideApproval).not.toHaveBeenCalled();
-      await Promise.all([A.records.act(r.pending.action, r.pending.payload, r.pending.actionId), A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)]);
+      const [first, second] = await Promise.all([A.records.act(r.pending.action, r.pending.payload, r.pending.actionId), A.records.act(r.pending.action, r.pending.payload, r.pending.actionId)]);
       expect(decideApproval).toHaveBeenCalledTimes(1);
       expect(decideApproval).toHaveBeenCalledWith(APPROVAL, { decision: "approve", bundleSha256: "c".repeat(64) });
+      const res = first as { ok: boolean; text: string; detail: string; status: string; next: { label: string }[] };
+      expect(res).toMatchObject({ ok: true, status: "succeeded", text: "Approved — not sent" });
+      expect(res.detail).toBe("ASAP opened the next step: deliver the insurer request and record how it was delivered. Next follow-up after delivery: 5 days.");
+      expect(res.next[0]!.label).toBe("Open next step");
+      expect(second).toBe(first);
+      // The Space shows the approved state at once — no reload, no wait for the re-read.
+      expect(A.ai.workspace(ref).statusLabel).toBe("Approved — not delivered");
     });
 
-    it("the Work item shows ASAP is handling the renewal; an exception says what stopped and what is needed", async () => {
+    it("Ask answers from the workflow in front and turns controls into confirm cards on the real endpoints", async () => {
+      const A = await live();
+      const ref = { ws: "renewal", runId: RUN, workItemId: WORK };
+      const where = (await A.ai.route("Where is this renewal?", { ...ref, ref })) as { lead: string };
+      expect(where.lead).toBe("Tausi Hauliers Ltd — Motor renewal: Waiting for approval from Wanjiru Kamau.");
+      const pause = (await A.ai.route("Pause this", { ...ref, ref })) as { pending: { action: string; payload: Record<string, unknown> } };
+      expect(pause.pending).toMatchObject({ action: "renewal.pause", payload: { runId: RUN } });
+      const now = (await A.ai.route("Follow up now", { ...ref, ref })) as { lead: string; pending?: unknown };
+      expect(now.pending).toBeUndefined();
+      expect(now.lead).toBe("Follow up now isn't available.");
+    });
+
+    it("the Work item shows ASAP is handling the renewal; a stop says what is needed and offers resume", async () => {
       runState = "exception";
       const A = await live();
       expect(text(A.ai.workspace({ ws: "workitem", workItemId: WORK }))).toContain("ASAP is handling this renewal");
       const ws = text(A.ai.workspace({ ws: "renewal", runId: RUN }));
-      expect(ws).toContain("Stopped: No renewal terms from First Insurer with 5 days to expiry.");
-      expect(ws).toContain("What is needed: Call the underwriter at First Insurer today.");
-      expect(ws).toContain("Resume the renewal");
+      expect(ws).toContain("No renewal terms from First Insurer with 5 days to expiry.");
+      expect(ws).toContain("Call the underwriter at First Insurer today.");
+      expect(ws).toContain("I've fixed it — resume");
     });
   });
 });
