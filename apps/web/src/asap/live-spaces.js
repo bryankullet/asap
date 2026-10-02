@@ -1175,11 +1175,11 @@ function documentSpace(ref, state) {
                   form(
                     "review:" + doc.id,
                     "Confirm what ASAP read",
-                    open.map((f) => ({ key: f.id, label: words(f.fieldKey).toUpperCase() + (f.page ? " (PAGE " + f.page + ")" : ""), value: f.proposedValue ?? "" })),
+                    open.map((f) => ({ key: f.id, label: words(f.fieldKey).toUpperCase() + (f.page ? " (PAGE " + f.page + ")" : f.proposedValue ? "" : " — NOT FOUND"), value: f.proposedValue ?? "", placeholder: f.proposedValue ? "" : "Not found on this document — leave empty, or type it" })),
                     "doc.review",
                     { documentId: doc.id },
                     "Confirm these values",
-                    "Unchanged values are accepted; edited ones are saved as your correction beside what was read. Applying them to a record is the next step, after this.",
+                    "Unchanged values are accepted; edited ones are saved as your correction beside what was read; anything left empty is recorded as not on this document. Creating or updating records is the next step.",
                   ),
                 ]
               : []),
@@ -1214,6 +1214,7 @@ function createRecordsBlocks(d) {
       { key: "policyNumber", label: "POLICY NUMBER", value: accepted("policy_number"), placeholder: "Optional" },
       { key: "periodStart", label: "COVER STARTS", value: accepted("period_start"), placeholder: "YYYY-MM-DD" },
       { key: "periodEnd", label: "COVER ENDS", value: accepted("period_end"), placeholder: "YYYY-MM-DD" },
+      ...(accepted("premium") ? [{ key: "premiumBasis", label: "PREMIUM " + accepted("premium") + " IS", options: [{ value: "", label: "Not sure — don't apply the premium yet" }, { value: "gross", label: "The gross premium" }, { value: "total_payable", label: "Everything payable (with levies)" }] }] : []),
     ], "doc.createRecords", { documentId: d.document.id }, "Create client and policy", "Recorded with an audit entry against your name; the confirmed values stay linked to this document and their pages."),
   ];
 }

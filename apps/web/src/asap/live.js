@@ -1378,6 +1378,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         let corrected = 0;
         let accepted = 0;
+        let notFound = 0;
         for (const f of open) {
           const typed = (p[f.id] ?? "").trim();
           if (typed && typed !== (f.proposedValue ?? "")) {
@@ -1386,6 +1387,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           } else if (typed) {
             await api.reviewDocumentField(d.document.id, f.id, { decision: "accept", value: null });
             accepted++;
+          } else if (!f.proposedValue) {
+            // ASAP found nothing for this key and the person left it empty: recorded as not on this
+            // document, so it no longer waits forever as an unanswerable "proposed" value.
+            await api.reviewDocumentField(d.document.id, f.id, { decision: "reject", value: null });
+            notFound++;
           }
         }
         // Re-read this one document, not every record, so the page changes as soon as it is saved.
@@ -1394,8 +1400,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const targets = await api.applyTargets(fresh.document.id).catch(() => null);
         if (targets) state.applyTargets.set(fresh.document.id, targets);
         state.applyPreviews.delete(fresh.document.id);
-        const skipped = open.length - accepted - corrected;
-        const text = plural(accepted + corrected, "value", "values") + " confirmed" + (corrected ? ", " + corrected + " as your correction" : "") + (skipped ? "; " + plural(skipped, "empty value was", "empty values were") + " left for later" : "");
+        const skipped = open.length - accepted - corrected - notFound;
+        const text = plural(accepted + corrected, "value", "values") + " confirmed" + (corrected ? ", " + corrected + " as your correction" : "") + (notFound ? "; " + plural(notFound, "item", "items") + " not on this document" : "") + (skipped ? "; " + plural(skipped, "value was", "values were") + " left for later" : "");
         state.docNotice = { documentId: fresh.document.id, title: text, text: "Saved against your name. Next, choose the record to apply them to below — nothing on a record changes until you apply." };
         return ok(text);
       } catch (e) {
@@ -1448,17 +1454,30 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         if (!clientId) return { ok: false, error: "The client could not be created. Nothing else was written." };
         const pol = await api.createPolicy({ clientId, insurerName: p.insurerName.trim(), classOfBusiness: p.classOfBusiness.trim(), ...(p.policyNumber?.trim() ? { policyNumber: p.policyNumber.trim() } : {}), periodStart, periodEnd });
         if (pol.outcome !== "recorded") return { ok: false, error: (pol.reason ?? "The policy could not be recorded.") + " The client is on file; nothing else was written." };
-        // Link the confirmed values to the new period, with this document as their evidence.
+        /*
+         * Link every confirmed value to the record it now describes, with this document and page as
+         * its evidence — the period (dates, and the premium once its basis is said), the policy
+         * (number) and the client (name). A value equal to what the record holds is still linked:
+         * the record was made from it. Each apply has a fixed key, so repeating it repeats nothing.
+         */
         let linked = 0;
         const targets = await api.applyTargets(p.documentId).catch(() => null);
-        const target = targets?.suggestions.find((t) => t.targetType === "policy_period") ?? targets?.suggestions.find((t) => t.targetType === "policy");
-        if (target) {
-          const preview = await api.applyPreview(p.documentId, target.targetType, target.targetId);
-          const usable = preview.fields.filter((f) => !f.blockedBecause && !f.unchanged && f.proposedValue && f.fieldKey !== "premium");
-          if (usable.length) {
-            await api.applyToRecord(p.documentId, { targetType: target.targetType, targetId: target.targetId, idempotencyKey: "create:" + p.documentId + ":" + target.targetId, fields: usable.map((f) => ({ documentFieldId: f.documentFieldId, fieldKey: f.fieldKey, from: f.currentValue, to: f.proposedValue })) });
-            linked = usable.length;
-          }
+        const period = (targets?.suggestions ?? []).find((t) => t.targetType === "policy_period");
+        const policyT = (targets?.suggestions ?? []).find((t) => t.targetType === "policy");
+        const chosen = [period, policyT, { targetType: "client", targetId: clientId }].filter(Boolean);
+        const basis = p.premiumBasis === "gross" || p.premiumBasis === "total_payable" ? p.premiumBasis : null;
+        for (const target of chosen) {
+          const preview = await api.applyPreview(p.documentId, target.targetType, target.targetId).catch(() => null);
+          if (!preview) continue;
+          const usable = preview.fields.filter((f) => !f.blockedBecause && f.proposedValue && (f.fieldKey !== "premium" || basis));
+          if (!usable.length) continue;
+          await api.applyToRecord(p.documentId, {
+            targetType: target.targetType,
+            targetId: target.targetId,
+            idempotencyKey: "create:" + p.documentId + ":" + target.targetType + ":" + target.targetId,
+            fields: usable.map((f) => ({ documentFieldId: f.documentFieldId, fieldKey: f.fieldKey, from: f.currentValue, to: f.proposedValue, ...(f.fieldKey === "premium" ? { premiumBasis: basis } : {}) })),
+          });
+          linked += usable.length;
         }
         await refresher.refreshFully();
         const fresh = await api.document(p.documentId).catch(() => null);
@@ -1467,7 +1486,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return ok(clientCreated || pol.created ? "Created " + [clientCreated ? name : null, pol.created ? "the policy" + (p.policyNumber ? " " + p.policyNumber.trim() : "") : null].filter(Boolean).join(" and ") : "Already on file — nothing created twice", {
           already: !clientCreated && !pol.created,
           nav: { ws: "client", clientId },
-          detail: (linked ? plural(linked, "confirmed value is", "confirmed values are") + " linked to this document as evidence. " : "") + "The document is filed under " + name + ". Premium, if read, is applied from the policy once its basis is confirmed.",
+          detail: (linked ? plural(linked, "confirmed value is", "confirmed values are") + " linked to this document as evidence. " : "") + "The document is filed under " + name + "." + (basis ? "" : " The premium was not applied: say whether it is gross or total payable, then apply it from this document."),
           receipt: { action: "Records created from a document", record: name + " · " + (policy?.policyNumber ?? p.policyNumber ?? "policy"), outcome: clientCreated || pol.created ? "Done" : "Already done", changed: [clientCreated ? "Client " + name : null, pol.created ? "Policy and its period" : null, linked ? plural(linked, "value", "values") + " linked to the document" : null].filter(Boolean), unchanged: ["Nothing was sent to anyone", "No cover or money changed"], next: "Open the client to check the policy", audit: null },
         });
       } catch (e) {
