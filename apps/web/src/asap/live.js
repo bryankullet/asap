@@ -14,6 +14,7 @@ import { supabase } from "../lib/supabase.js";
 import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate } from "./engine/intent.js";
 import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
+import { createRefresher, lifecycleOf, runMutation } from "./mutation.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -613,14 +614,23 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   /** Live-only state the live workspaces read. */
   const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
-  const refresh = async () => {
-    const thread = db.conversations.find((c) => c.id === "cnv_main");
-    loaded = await hydrate(me);
-    db = loaded.db;
-    if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-    Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, modelConfigured: loaded.extras.modelConfigured });
-    S.useBackend({ db, dispatch });
-  };
+  // The re-read after a write runs in the background (mutation.js): a write settles when the
+  // server answers it, and the interface re-renders when the fresh records land.
+  const refresher = createRefresher(
+    () => hydrate(me),
+    (next) => {
+      const thread = db.conversations.find((c) => c.id === "cnv_main");
+      const ledger = db.meta.ledger;
+      loaded = next;
+      db = loaded.db;
+      // What this session already did stays done: a re-read must not make a finished action clickable again.
+      db.meta.ledger = { ...db.meta.ledger, ...ledger };
+      if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
+      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, modelConfigured: loaded.extras.modelConfigured });
+      S.useBackend({ db, dispatch });
+    },
+  );
+  const refresh = () => refresher.refresh();
 
   const ok = (text, extra = {}) => ({ ok: true, text, at: d0(), ...extra });
   const fail = (err) => ({ ok: false, error: describeApiError(err).replace(/\.?\s*$/, ".") + " Nothing was changed — you can retry." });
@@ -1171,9 +1181,17 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       return res;
     };
-    const out = handler(payload, requestKeyFor(key));
-    if (!(out && typeof out.then === "function")) return settle(out);
-    const p = out.then(settle).finally(() => inflight.delete(key));
+    let out;
+    try {
+      out = handler(payload, requestKeyFor(key));
+    } catch (e) {
+      return { ...fail(e), status: "failed" };
+    }
+    if (!(out && typeof out.then === "function")) return settle({ ...out, status: lifecycleOf(out) });
+    // Every write settles inside the deadline — succeeded, blocked or failed — never pending.
+    const p = runMutation(() => out, { describe: (e) => describeApiError(e) })
+      .then(settle)
+      .finally(() => inflight.delete(key));
     inflight.set(key, p);
     return p;
   }
@@ -2055,6 +2073,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   return {
     greetingChips: LIVE_CHIPS,
     savingNote: "Saving to your brokerage's records…",
+    /** Re-render when a background re-read lands; returns the unsubscribe. */
+    onChange: (fn) => refresher.onChange(fn),
+    freshness: () => refresher.status,
     suggestions: [{ label: "What needs attention today?" }, { label: "What clients do I have?" }, { label: "Show my work" }, { label: "Search every record" }],
     historyNote: "Saved with your brokerage, so it follows you to any device. It’s a record of what you asked, not a business record.",
     persistence: { init: () => S.init(), reset: () => S.getDb(), resetSummary: () => ({ removes: "", restores: "" }), snapshot: () => S.getDb() },
@@ -2072,7 +2093,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       actor: S.actor,
       setUser: () => {},
       modeLinks: [
-        { title: "Refresh records", note: "Read your brokerage's records again", go: () => void refresh() },
+        { title: "Refresh records", note: "Read your brokerage's records again", go: () => void refresher.refreshFully() },
         { title: "Open the demo", note: "Fictional records, kept in this browser only", go: switchToDemo },
         { title: "Sign out", note: me.user.email, go: () => void supabase.auth.signOut().then(() => window.location.assign("/sign-in")) },
       ],

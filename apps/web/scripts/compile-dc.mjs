@@ -169,6 +169,15 @@ const PATCHES = [
    "    if (grew && this._pinned !== false) { el.scrollTop = el.scrollHeight; if (this.state.newBelow) this.setState({ newBelow: false }); }\n    else if (grew && prev && prev.thread !== this.state.thread && !this.state.newBelow) this.setState({ newBelow: true });\n  }\n  jumpToNew = () => { const el = document.querySelector('.asap-thread'); if (el) el.scrollTop = el.scrollHeight; this._pinned = true; this.setState({ newBelow: false }); };"],
   ["inputRef: this.inputRef, searchRef:", "inputRef: this.inputRef, newBelow: !!this.state.newBelow, jumpToNew: this.jumpToNew, spaceState: this.state.tabs.length ? 'open' : 'closed', searchRef:"],
 
+  // Mutation lifecycle (mutation.js): a background re-read of the records re-renders the interface
+  // when it lands, so a change appears without a reload.
+  ["    this.A = A;\n    A.persistence.init();",
+   "    this.A = A;\n    if (A.onChange) this.offChange = A.onChange(() => this.bump());\n    A.persistence.init();"],
+  ["componentWillUnmount() { window.removeEventListener('keydown', this.onKey);",
+   "componentWillUnmount() { if (this.offChange) this.offChange(); window.removeEventListener('keydown', this.onKey);"],
+  // An action always leaves "busy": a thrown write becomes a failure the person can retry.
+  ["      const res = await this.A.records.act(action, payload, actionId);\n      this.setState({ busy: false });",
+   "      let res;\n      try { res = await this.A.records.act(action, payload, actionId); }\n      catch (e) { res = { ok: false, error: 'That could not be completed. Nothing was changed \\u2014 you can retry.' }; }\n      finally { this.setState({ busy: false }); }"],
 ];
 const TEMPLATE_PATCHES = [
   // D-126: a new response arrived while the person was reading older history.

@@ -45,6 +45,7 @@ class Component extends DCLogic {
   async componentDidMount() {
     const A = await this.props.loadAdapters();
     this.A = A;
+    if (A.onChange) this.offChange = A.onChange(() => this.bump());
     A.persistence.init();
     const conv = A.records.sel.conversation('cnv_main');
     const tabs = [{ id: 't1', ref: { ws: 'today' }, pinned: true }];
@@ -66,7 +67,7 @@ class Component extends DCLogic {
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('resize', this.onResize);
   }
-  componentWillUnmount() { window.removeEventListener('keydown', this.onKey); window.removeEventListener('resize', this.onResize); }
+  componentWillUnmount() { if (this.offChange) this.offChange(); window.removeEventListener('keydown', this.onKey); window.removeEventListener('resize', this.onResize); }
 
   bump(extra) { this.setState({ tick: this.state.tick + 1, ...(extra || {}) }); }
   flash(toast) { this.setState({ toast }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ toast: '' }), 3200); }
@@ -121,8 +122,10 @@ class Component extends DCLogic {
     this.setState({ busy: true });
     if (this.A.savingNote && !/^(conversation|draft)\./.test(action)) this.flash(this.A.savingNote);
     setTimeout(async () => {
-      const res = await this.A.records.act(action, payload, actionId);
-      this.setState({ busy: false });
+      let res;
+      try { res = await this.A.records.act(action, payload, actionId); }
+      catch (e) { res = { ok: false, error: 'That could not be completed. Nothing was changed \u2014 you can retry.' }; }
+      finally { this.setState({ busy: false }); }
       if (res.denied) { this.setState({ sheet: { type: 'denied', kicker: 'PERMISSION', title: 'You cannot do this yourself', reason: res.reason, path: res.path } }); return; }
       if (!res.ok) { this.flash(res.error || 'That failed. Nothing was changed — you can retry.'); this.bump(); return; }
       if (res.duplicate) { this.flash('Already done — nothing was recorded twice.'); this.bump({ sheet: null }); return; }
