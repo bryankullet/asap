@@ -5,7 +5,8 @@ import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
-import { supabase, supabaseHost } from "../lib/supabase.js";
+import { classifyAuthError, networkMessage, probeSupabase } from "../lib/auth-errors.js";
+import { supabase } from "../lib/supabase.js";
 
 const schema = z
   .object({
@@ -49,14 +50,10 @@ export function SignUp() {
     } catch (err) {
       error = { message: err instanceof Error ? err.message : String(err) };
     }
-    // supabase-js reports a network failure as status 0 / "Failed to fetch". Name the host the
-    // browser could not reach, so the failure is diagnosable without opening DevTools.
-    if (error && (!error.status || /fetch|network/i.test(error.message))) {
-      console.warn(`ASAP sign-up: could not reach ${supabaseHost}`, error.message);
-      setError(
-        `Could not reach the sign-in service (${supabaseHost}): ${error.message}. ` +
-          "Check your connection, or try without browser extensions that block requests.",
-      );
+    // "No answer" is a network fault, said as one, with what a probe of the same host found.
+    const f = classifyAuthError(error);
+    if (f?.kind === "network") {
+      setError(networkMessage(f, await probeSupabase()));
       return;
     }
     if (error) {

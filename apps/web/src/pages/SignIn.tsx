@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
+import { classifyAuthError, networkMessage, probeSupabase } from "../lib/auth-errors.js";
 import { supabase } from "../lib/supabase.js";
 
 const schema = z.object({
@@ -22,13 +23,19 @@ export function SignIn() {
 
   async function onSubmit(values: Form) {
     setError(null);
-    const { error } = await supabase.auth.signInWithPassword(values);
-    if (error) {
-      setError(
-        error.message.toLowerCase().includes("confirm")
-          ? "Please confirm your email address first — check your inbox."
-          : "That email and password do not match.",
-      );
+    let error: { message?: string | undefined; status?: number | undefined; name?: string | undefined; code?: string | undefined } | null;
+    try {
+      ({ error } = await supabase.auth.signInWithPassword(values));
+    } catch (e) {
+      error = { message: e instanceof Error ? e.message : String(e), name: e instanceof Error ? e.name : "Error" };
+    }
+    // "No answer" and "wrong password" are different failures and are said differently.
+    const f = classifyAuthError(error);
+    if (f) {
+      if (f.kind === "network") setError(networkMessage(f, await probeSupabase()));
+      else if (f.kind === "unconfirmed") setError("Please confirm your email address first — check your inbox.");
+      else if (f.kind === "credentials") setError("That email and password do not match.");
+      else setError(`Sign-in was refused${f.kind === "other" && f.status ? ` (${f.status})` : ""}: ${f.kind === "other" ? f.message : "try again"}.`);
       return;
     }
     void navigate({ to: next ?? "/", replace: true });
