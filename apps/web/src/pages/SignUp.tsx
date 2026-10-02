@@ -2,7 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button, Card, Field, Input, Notice } from "@asap/ui";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { z } from "zod";
 import { AuthLayout } from "../components/AuthLayout.js";
 import { supabase, supabaseHost } from "../lib/supabase.js";
@@ -22,6 +22,7 @@ type Form = z.infer<typeof schema>;
 
 export function SignUp() {
   const params = useSearch({ strict: false }) as { email?: string; next?: string };
+  const navigate = useNavigate();
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const form = useForm<Form>({
@@ -36,12 +37,15 @@ export function SignUp() {
     const redirect = new URL("/auth/callback", window.location.origin);
     if (next) redirect.searchParams.set("next", next);
     let error: { message: string; status?: number | undefined } | null;
+    let signedIn = false;
     try {
-      ({ error } = await supabase.auth.signUp({
+      let data;
+      ({ data, error } = await supabase.auth.signUp({
         email: values.email,
         password: values.password,
         options: { data: { full_name: values.full_name }, emailRedirectTo: redirect.toString() },
       }));
+      signedIn = !!data.session;
     } catch (err) {
       error = { message: err instanceof Error ? err.message : String(err) };
     }
@@ -61,6 +65,12 @@ export function SignUp() {
           ? "An account with that email already exists. Sign in instead."
           : error.message,
       );
+      return;
+    }
+    // With email confirmation off, Supabase returns a session straight away: go on into the app
+    // (or the invitation in `next`) instead of asking for a confirmation link that never comes.
+    if (signedIn) {
+      void navigate({ to: next ?? "/", replace: true });
       return;
     }
     setDone(values.email);
