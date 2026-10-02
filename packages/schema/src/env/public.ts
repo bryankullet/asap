@@ -17,6 +17,12 @@ export const publicEnvSchema = z.object({
    * a time). "on" renders a renewal through the registry; anything else, including absent, keeps
    * the existing record page. The old renderer stays in place either way, so this is the rollback.
    */
+  /**
+   * Same-origin path the static site proxies to Supabase (render.yaml `/sb/*` rewrite), e.g. "/sb".
+   * Set, the browser talks only to the app's own host — for browsers whose network reaches the app
+   * but drops *.supabase.co. Absent, the browser calls VITE_PUBLIC_SUPABASE_URL directly.
+   */
+  VITE_PUBLIC_SUPABASE_PROXY_PATH: z.string().regex(/^\/[A-Za-z0-9_-]+$/).optional(),
   VITE_PUBLIC_RENEWAL_SPACE: z.enum(["on", "off"]).default("off"),
 });
 

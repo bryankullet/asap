@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } } }));
+vi.mock("../lib/supabase.js", () => ({ supabase: { auth: { signOut: async () => ({}) } }, throughSupabaseBase: (u: string) => u }));
 
 /*
  * The compiled approved interface, rendered whole over its demo records: it boots, draws Today,
