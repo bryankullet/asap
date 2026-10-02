@@ -59,6 +59,7 @@ export function clientRoutes() {
           .select("id, full_name, role_label, email, phone, is_primary")
           .eq("organization_id", org.id)
           .eq("client_id", id)
+          .is("deleted_at", null)
           .order("is_primary", { ascending: false }),
         db
           .from("policies")

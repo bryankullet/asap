@@ -122,6 +122,7 @@ import {
   type ImportPreviewRequest,
   type ImportCommitRequest,
   type CreateContactRequest,
+  type UpdateContactRequest,
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
@@ -296,6 +297,8 @@ export const api = {
     request("GET", `/clients/${clientId}/contacts`, contactsResponseSchema),
   createContact: (input: CreateContactRequest) =>
     request("POST", "/contacts", contactResponseSchema, input),
+  updateContact: (id: string, input: UpdateContactRequest) =>
+    request("PATCH", `/contacts/${id}`, contactResponseSchema, input),
   audit: () => request("GET", "/audit", historyResponseSchema),
   search: (q: string) => request("GET", `/search?q=${encodeURIComponent(q)}`, searchResponseSchema),
   history: (id: string) => request("GET", `/work-items/${id}/history`, historyResponseSchema),

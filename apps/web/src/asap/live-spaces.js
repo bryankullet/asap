@@ -78,17 +78,22 @@ function newClientSpace(state, ref = {}) {
         [
           { key: "name", label: "CLIENT NAME", placeholder: "The name on their documents", value: ref.name || "" },
           { key: "kind", label: "COMPANY OR PERSON", value: ref.kind || undefined, options: [{ value: "corporate", label: "Company" }, { value: "individual", label: "Person" }] },
+          // The primary contact, optional: saved with the client, or left for later — never dropped silently.
+          { key: "contactName", label: "PRIMARY CONTACT (OPTIONAL)", placeholder: "Full name", value: ref.contactName || "" },
+          { key: "contactRole", label: "CONTACT'S ROLE", placeholder: "For example Finance manager", value: ref.contactRole || "" },
+          { key: "contactEmail", label: "CONTACT'S EMAIL", placeholder: "name@company.co.ke", value: ref.contactEmail || "" },
+          { key: "contactPhone", label: "CONTACT'S PHONE", placeholder: "+254…", value: ref.contactPhone || "" },
         ],
         "client.create",
         {},
         "Add client",
-        "Created in your brokerage only, with an audit entry against your name.",
+        "Created in your brokerage only, with an audit entry against your name. A contact given here is saved as the primary contact; no message is sent to them.",
       ),
       ...(dup
         ? [
             note("amber", "A similar client may already exist", "“" + dup.name + "” resembles a client on file. Open it if it is the same one; create it only if it is not."),
             rows("Possible matches", dup.candidates.map((c) => ({ title: c.name, note: c.kind === "individual" ? "Person" : "Company", badge: "Open", badgeTone: warn, action: { a: "open", ref: { ws: "client", clientId: c.id } } }))),
-            gate("Create “" + dup.name + "” anyway", "Only if it is a different client from the matches above.", "client.create", { name: dup.name, kind: dup.kind, confirmNew: "yes" }),
+            gate("Create “" + dup.name + "” anyway", "Only if it is a different client from the matches above." + (dup.contact?.contactName ? " " + dup.contact.contactName + " is saved as its primary contact." : ""), "client.create", { name: dup.name, kind: dup.kind, confirmNew: "yes", ...(dup.contact || {}) }),
           ]
         : []),
     ],
@@ -257,18 +262,24 @@ const DELIVERY_METHODS = [
 const deliveryWords = (m) => (DELIVERY_METHODS.find((x) => x.value === m)?.label || "hand").toLowerCase();
 
 /** The request text a person would send, prepared from the records — edited before approval. */
+/** The draft to one insurer — the same text the server composes (composeQuoteRequest). */
 export function requestDraft(d, insurerName) {
   const o = d.opportunity;
-  const reqs = d.requirements.filter((r) => r.suppliedAt).map((r) => "- " + r.label);
+  const long = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Nairobi" });
+  const supplied = d.requirements.filter((r) => r.suppliedAt);
+  const outstanding = d.requirements.filter((r) => !r.suppliedAt);
+  const period = o.coverStart ? ", from " + long(o.coverStart) + (o.coverEnd ? " to " + long(o.coverEnd) : "") : "";
   return [
     "Dear " + insurerName + " underwriting team,",
     "",
-    "We invite terms for " + o.classOfBusiness + " cover for our client " + d.client.name + (o.coverStart ? ", from " + date(o.coverStart) + (o.coverEnd ? " to " + date(o.coverEnd) : "") : "") + ".",
-    o.riskSummary ? "\nThe risk: " + o.riskSummary : "",
-    reqs.length ? "\nEnclosed:\n" + reqs.join("\n") : "",
+    "We invite terms for " + o.classOfBusiness + " cover for our client " + d.client.name + period + ".",
+    "Cover wanted: " + o.title + ".",
+    ...(o.riskSummary ? ["", "The risk: " + o.riskSummary] : []),
+    ...(supplied.length ? ["", "Enclosed:", ...supplied.map((r) => "- " + r.label + (r.evidence?.label ? " (" + r.evidence.label + ")" : ""))] : []),
+    ...(outstanding.length ? ["", "To follow from the client (not yet supplied):", ...outstanding.map((r) => "- " + r.label)] : []),
     "",
     "Please reply with your premium, excess, key conditions and how long the terms are valid.",
-  ].filter((x) => x !== "").join("\n");
+  ].join("\n");
 }
 
 /**
@@ -319,6 +330,30 @@ function insurerControls(i, d, act) {
         "Saved as a draft for approval. Nothing is sent — ASAP has no mailbox connected.",
       ),
     );
+  if (i.stage === "request_prepared") {
+    // The draft is read, copied or edited before anyone approves it — approval covers exact text.
+    out.push(
+      rows("Draft request to " + i.insurerName + " — not approved, not sent", [
+        { title: i.request.subject, note: i.request.body.replace(/\n+/g, " ").slice(0, 600) + " · To: no insurer address on file — you choose where it goes when you deliver it.", badge: "Copy", badgeTone: warn, action: { a: "copy", text: reqText } },
+        { title: "Download the draft as a text file", note: "To read it or share it inside the brokerage. ASAP has not sent it.", badge: "Download", badgeTone: warn, action: { a: "download", filename: "DRAFT Quotation request - " + i.insurerName + ".txt", text: reqText } },
+      ]),
+    );
+    if (d.permissions.canEdit)
+      out.push(
+        form(
+          "edit:" + i.request.id,
+          "Edit the draft to " + i.insurerName,
+          [
+            { key: "subject", label: "SUBJECT", value: i.request.subject },
+            { key: "body", label: "REQUEST", value: i.request.body, multiline: true },
+          ],
+          "opp.action",
+          act("prepare_request", { opportunityInsurerId: i.id }),
+          "Save draft",
+          "Saved as the draft for approval. Nothing is sent.",
+        ),
+      );
+  }
   if (i.stage === "request_prepared")
     out.push(
       d.permissions.canApprove
@@ -408,8 +443,10 @@ function opportunitySpace(id, state) {
       d.requirements.length
         ? d.requirements.map((r) => ({
             title: r.label,
-            note: r.suppliedAt ? "Supplied " + date(r.suppliedAt) + (r.suppliedByName ? " by " + r.suppliedByName : "") + (r.evidence?.label ? " · " + r.evidence.label : "") : "Outstanding",
-            badge: tooShort(r.label) || weakSupply(r) ? "Legacy — needs correction" : r.suppliedAt ? "Supplied" : "Missing",
+            note: r.suppliedAt
+              ? "Supplied and confirmed " + date(r.suppliedAt) + (r.suppliedByName ? " by " + r.suppliedByName : "") + (r.evidence?.label ? " · evidence: " + r.evidence.label : "")
+              : "Not yet supplied by the client. Insurers quote on it, so it must be in hand before a request is delivered — it does not stop you adding insurers or preparing drafts. To provide it: add the client's document on the client record, then mark it supplied below with what proves it.",
+            badge: tooShort(r.label) || weakSupply(r) ? "Legacy — needs correction" : r.suppliedAt ? "Supplied" : "Outstanding",
             badgeTone: tooShort(r.label) || weakSupply(r) ? bad : r.suppliedAt ? ok : bad,
           }))
         : [{ title: "No requirements recorded", note: "Add what the insurers will need.", badge: "Empty", badgeTone: warn }],
@@ -450,10 +487,26 @@ function opportunitySpace(id, state) {
             badge: i.stageLabel,
             badgeTone: i.stage === "quoted" ? ok : i.stage === "declined" ? bad : warn,
           }))
-        : [{ title: "No insurers yet", note: addable.length ? "Add them from the list below." : "Insurers appear here once they are on file — importing your book adds them.", badge: "Empty", badgeTone: warn }],
+        : [{ title: "No insurers yet", note: "Add them by name below" + (addable.length ? ", or from the insurers already on file." : " — a name not yet on file is put on file."), badge: "Empty", badgeTone: warn }],
     ),
+    ...(d.permissions.canEdit && !o.closedAt
+      ? [
+          form(
+            "approach:" + id,
+            "Add insurers to approach",
+            [
+              { key: "names", label: "INSURERS", placeholder: "APA Insurance, CIC, Jubilee" },
+              { key: "prepare", label: "DRAFT A REQUEST TO EACH", options: [{ value: "yes", label: "Yes — prepare a draft request to each (nothing is sent)" }, { value: "no", label: "No — only add them" }] },
+            ],
+            "opp.approach",
+            { id },
+            "Add insurers",
+            "Each insurer is added to this quotation; a name not yet on file is put on file. Drafts wait for your approval. Nothing is sent." + (outstanding.length ? " Outstanding client information is listed in each draft as to follow." : ""),
+          ),
+        ]
+      : []),
     ...(addable.length && d.permissions.canEdit
-      ? [rows("Insurers you can approach", addable.map((a) => ({ title: a.name, note: "On file in your brokerage", badge: "Available", badgeTone: ok, secondary: { a: "act", action: "opp.action", payload: act("add_insurer", { insurerId: a.id }), label: "Add" } })))]
+      ? [rows("Insurers on file you can approach", addable.map((a) => ({ title: a.name, note: "On file in your brokerage", badge: "Available", badgeTone: ok, secondary: { a: "act", action: "opp.action", payload: act("add_insurer", { insurerId: a.id }), label: "Add" } })))]
       : []),
     // One control per insurer: the one its stage calls for, and nothing ahead of it.
     ...live.flatMap((i) => insurerControls(i, d, act)),
@@ -1091,30 +1144,33 @@ function workItemSpace(ref, state) {
   };
 }
 
-/** A contact for a client, through the same POST /contacts the client record uses. */
+/** A contact for a client: a new one (POST /contacts), or an existing one corrected (PATCH /contacts/:id). */
 function newContactSpace(ref) {
   const c = ref.clientId ? S.sel.client(ref.clientId) : null;
   if (!c) return { kind: "Contact", title: "Choose the client first", status: "draft", statusLabel: "Not saved yet", blocks: [note("amber", "No client chosen", "Open the client, then add the contact from there. Nothing was changed.")] };
+  const k = ref.contactId ? S.sel.contacts(c.id).find((x) => x.id === ref.contactId) : null;
+  if (ref.contactId && !k) return { kind: "Contact", title: "That contact could not be found", status: "draft", statusLabel: "Not found", blocks: [note("red", "Not on this client", "It may have been removed. Refresh records from your profile. Nothing was changed."), nav("Open " + c.name, "Back to the client record.", { ws: "client", clientId: c.id })] };
   return {
     kind: "Contact",
-    title: "Add a contact for " + c.name,
+    title: k ? "Edit " + k.name + " — " + c.name : "Add a contact for " + c.name,
     status: "draft",
-    statusLabel: "Not saved yet",
+    statusLabel: k ? (k.isPrimary ? "Primary contact" : "Contact") : "Not saved yet",
     blocks: [
       form(
-        "newcontact:" + c.id,
+        (k ? "editcontact:" + k.id : "newcontact:" + c.id),
         "Contact",
         [
-          { key: "fullName", label: "FULL NAME", placeholder: "Who ASAP should talk to" },
-          { key: "roleLabel", label: "ROLE", placeholder: "For example Finance manager" },
-          { key: "phone", label: "PHONE", placeholder: "+254…" },
-          { key: "email", label: "EMAIL", placeholder: "name@company.co.ke" },
+          { key: "fullName", label: "FULL NAME", placeholder: "Who ASAP should talk to", value: k?.name || "" },
+          { key: "roleLabel", label: "ROLE", placeholder: "For example Finance manager", value: k?.role || "" },
+          { key: "email", label: "EMAIL", placeholder: "name@company.co.ke", value: k?.email || "" },
+          { key: "phone", label: "PHONE (OPTIONAL)", placeholder: "+254…", value: k?.phone || "" },
         ],
-        "contact.create",
-        { clientId: c.id },
-        "Add contact",
-        "Saved to " + c.name + "’s file as the primary contact. No message is sent to them.",
+        k ? "contact.update" : "contact.create",
+        k ? { contactId: k.id } : { clientId: c.id },
+        k ? "Save changes" : "Add contact",
+        k ? "Saved to " + c.name + "’s record with an audit entry against your name. No message is sent to them." : "Saved to " + c.name + "’s file as the primary contact. No message is sent to them.",
       ),
+      nav("Back to " + c.name, "The client record, with its contacts.", { ws: "client", clientId: c.id }),
     ],
   };
 }

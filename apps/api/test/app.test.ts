@@ -687,6 +687,44 @@ describe("Ask never creates a client (D-050)", () => {
     expect(body.file.client.id).toBe(ACME);
   });
 
+  it("a preview with a contact names it among the writes and only asks for what was left out", async () => {
+    const body = await readJson(
+      await app.request("/clients", json({ name: "UX TEST Karibu Logistics Ltd", kind: "corporate", preview: true, contact: { fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test" } }, "tok-admin")),
+    );
+    expect(body.writes).toContain("Primary contact: UX TEST David Otieno · Finance Manager · david.otieno@example.test");
+    expect(body.missing).toEqual(["Phone"]);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  it("creating with a contact saves it as the primary contact, audited without the address; a retry adds nothing", async () => {
+    const NEW = "20000000-0000-4000-8000-0000000000c1";
+    db.rpc["client_create"] = () => {
+      rpcCalls.push("client_create");
+      if (!(db.tables["clients"] ?? []).some((r) => r["id"] === NEW))
+        db.tables["clients"]!.push({ id: NEW, organization_id: (db.tables["clients"] ?? [])[0]!["organization_id"], name: "UX TEST Karibu Logistics Ltd", kind: "corporate", source: "manual", file_status: "not_started", file_owner_id: null, file_decided_by: null, file_decided_at: null, file_decision_reason: null, refresh_interval_days: null, refresh_due_at: null, created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z", deleted_at: null });
+      return { data: { id: NEW, created: rpcCalls.length === 1 } };
+    };
+    db.rpc["client_file_missing"] = () => ({ data: [] });
+    db.tables["client_file_documents"] = [];
+    db.tables["client_contacts"] = [];
+    // Postgres fills deleted_at with null; the stand-in only does what it is told.
+    db.defaults = { ...(db.defaults ?? {}), client_contacts: { deleted_at: null } };
+    const payload = { name: "UX TEST Karibu Logistics Ltd", kind: "corporate", confirmNew: true, contact: { fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test" } };
+    const res = await app.request("/clients", json(payload, "tok-admin"));
+    if (res.status !== 201) throw new Error(await res.text());
+    const body = await readJson(res);
+    expect(body.contact.state).toBe("saved");
+    const rows = db.tables["client_contacts"]!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ client_id: NEW, full_name: "UX TEST David Otieno", role_label: "Finance Manager", email: "david.otieno@example.test", is_primary: true });
+    const audit = (db.tables["audit_log"] ?? []).find((r) => r["action"] === "client_contact.created");
+    expect(audit).toBeDefined();
+    expect(JSON.stringify(audit)).not.toContain("david.otieno@example.test");
+    const again = await readJson(await app.request("/clients", json(payload, "tok-admin")));
+    expect(again.contact.state).toBe("already_on_file");
+    expect(db.tables["client_contacts"]).toHaveLength(1);
+  });
+
   it("the create path reviews duplicates before creating", async () => {
     const dup = await app.request(
       "/clients",

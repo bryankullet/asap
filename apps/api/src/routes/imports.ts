@@ -9,6 +9,7 @@ import {
   type PremiumBasis,
   contactsResponseSchema,
   createContactRequestSchema,
+  updateContactRequestSchema,
   contactResponseSchema,
   importCommitRequestSchema,
   importCommitResponseSchema,
@@ -27,7 +28,7 @@ import { Hono } from "hono";
 import type { Logger } from "pino";
 import type { AiProvider } from "@asap/schema";
 import { recordAudit } from "../audit.js";
-import { requireActiveOrganization, resolveContext } from "../context.js";
+import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
 
@@ -71,6 +72,10 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
     const input = await parseBody(c, createContactRequestSchema);
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "client", "edit")) {
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "client_contact.create", objectType: "client", objectId: input.clientId, result: "denied", failureReason: "permission_denied" });
+      throw new HttpError(403, "not_permitted", "Your role cannot change a client's contacts. Nothing was saved.");
+    }
 
     // The client must resolve for this caller first: a contact is not a way to discover whether
     // an id belongs to somebody else's brokerage.
@@ -126,6 +131,75 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
       result: "success",
     });
     return c.json(contactResponseSchema.parse({ contact }), 201);
+  });
+
+  /**
+   * Correcting a contact: name, role, email, phone, or making them the primary. Only the fields
+   * sent change; the audit row names what changed, not the address itself.
+   */
+  app.patch("/contacts/:id", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const input = await parseBody(c, updateContactRequestSchema);
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "client", "edit")) {
+      await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "client_contact.update", objectType: "client_contact", objectId: id, result: "denied", failureReason: "permission_denied" });
+      throw new HttpError(403, "not_permitted", "Your role cannot change a client's contacts. Nothing was saved.");
+    }
+    const current = await db
+      .from("client_contacts")
+      .select(CLIENT_CONTACT_COLUMNS)
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (current.error) return sendError(c, mapDatabaseError(current.error));
+    if (!current.data) throw new HttpError(404, "not_found", "No contact with that id");
+    const before = toContact(current.data as ContactRow);
+
+    const patch: Record<string, unknown> = {};
+    if (input.fullName !== undefined) patch["full_name"] = input.fullName;
+    if (input.roleLabel !== undefined) patch["role_label"] = input.roleLabel || null;
+    if (input.email !== undefined) patch["email"] = input.email === "" ? null : input.email;
+    if (input.phone !== undefined) patch["phone"] = input.phone || null;
+    if (input.notes !== undefined) patch["notes"] = input.notes || null;
+    if (input.isPrimary === true && !before.isPrimary) {
+      const cleared = await db
+        .from("client_contacts")
+        .update({ is_primary: false, updated_at: new Date().toISOString() })
+        .eq("organization_id", org.id)
+        .eq("client_id", before.clientId)
+        .eq("is_primary", true);
+      if (cleared.error) return sendError(c, mapDatabaseError(cleared.error));
+      patch["is_primary"] = true;
+    }
+    const changed = Object.keys(patch).filter((k) => {
+      const was = (current.data as Record<string, unknown>)[k] ?? null;
+      return was !== patch[k];
+    });
+    if (changed.length === 0) return c.json(contactResponseSchema.parse({ contact: before }));
+
+    const { data, error } = await db
+      .from("client_contacts")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("organization_id", org.id)
+      .eq("id", id)
+      .select(CLIENT_CONTACT_COLUMNS)
+      .single();
+    if (error) return sendError(c, mapDatabaseError(error));
+    const contact = toContact(data as ContactRow);
+    await recordAudit(db, deps.logger, c, {
+      organizationId: org.id,
+      actorUserId: user.id,
+      action: "client_contact.updated",
+      objectType: "client_contact",
+      objectId: id,
+      previousState: { full_name: before.fullName, role_label: before.roleLabel, is_primary: before.isPrimary },
+      newState: { client_id: contact.clientId, full_name: contact.fullName, role_label: contact.roleLabel, is_primary: contact.isPrimary, changed },
+      result: "success",
+    });
+    return c.json(contactResponseSchema.parse({ contact }));
   });
 
   /** What has been imported into this brokerage, newest first. */

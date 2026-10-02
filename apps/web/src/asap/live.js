@@ -197,7 +197,7 @@ async function hydrate(me) {
   spaces.forEach((sp, i) => {
     if (!sp) return;
     const clientId = db.clients[i].id;
-    for (const ct of sp.contacts) db.contacts.push({ id: ct.id, clientId, name: ct.fullName, role: ct.roleLabel ?? "", email: ct.email ?? "", phone: ct.phone ?? "" });
+    for (const ct of sp.contacts) db.contacts.push({ id: ct.id, clientId, name: ct.fullName, role: ct.roleLabel ?? "", email: ct.email ?? "", phone: ct.phone ?? "", isPrimary: !!ct.isPrimary });
     for (const p of sp.policies) {
       policyIds.push(p.id);
       db.policies.push({ id: p.id, clientId, number: p.policyNumber ?? "Number not recorded", title: p.classOfBusiness, cls: p.classOfBusiness });
@@ -646,8 +646,17 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
 
   // The re-read after a write runs in the background (mutation.js): a write settles when the
   // server answers it, and the interface re-renders when the fresh records land.
+  /*
+   * A quotation the server just answered with, by id, and when. The quotation Space reads it at
+   * once instead of waiting for the re-read; a re-read that started before the write cannot put
+   * the older state back (it would have shown "no requirements" beside the receipt that added one).
+   */
+  const oppPatches = new Map();
   const refresher = createRefresher(
-    () => hydrate(me),
+    () => {
+      const startedAt = Date.now();
+      return hydrate(me).then((l) => Object.assign(l, { startedAt }));
+    },
     (next) => {
       const thread = db.conversations.find((c) => c.id === "cnv_main");
       const ledger = db.meta.ledger;
@@ -657,10 +666,31 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       db.meta.ledger = { ...db.meta.ledger, ...ledger };
       if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
       Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, modelConfigured: loaded.extras.modelConfigured });
+      for (const [id, p] of oppPatches) {
+        if (p.at >= next.startedAt) state.opportunities.set(id, { ...(state.opportunities.get(id) || {}), ...p.d });
+        else oppPatches.delete(id);
+      }
       S.useBackend({ db, dispatch });
     },
   );
   const refresh = () => refresher.refresh();
+  /** A contact as the server stored it, shown now even if the re-read has not caught up. */
+  const applyContact = (k) => {
+    if (!k?.id) return;
+    const row = { id: k.id, clientId: k.clientId, name: k.fullName, role: k.roleLabel ?? "", email: k.email ?? "", phone: k.phone ?? "", isPrimary: !!k.isPrimary };
+    // One primary per client, as the database holds it: a new primary stands the old one down.
+    const others = (db.contacts || []).filter((x) => x.id !== k.id).map((x) => (row.isPrimary && x.clientId === row.clientId ? { ...x, isPrimary: false } : x));
+    db.contacts = [...others, row].sort((a, b) => Number(!!b.isPrimary) - Number(!!a.isPrimary));
+    S.useBackend({ db, dispatch });
+  };
+  /** The quotation as the server returned it from a write, shown now and kept over older re-reads. */
+  const applyOpportunity = (o) => {
+    if (!o?.opportunity?.id) return;
+    const id = o.opportunity.id;
+    state.opportunities.set(id, { ...(state.opportunities.get(id) || {}), ...o });
+    oppPatches.set(id, { at: Date.now(), d: o });
+    refresher.notify();
+  };
 
   const ok = (text, extra = {}) => ({ ok: true, text, at: d0(), ...extra });
   const fail = (err) => ({ ok: false, error: describeApiError(err).replace(/\.?\s*$/, ".") + " Nothing was changed — you can retry." });
@@ -1013,9 +1043,16 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (!kind) return { ok: false, error: "Choose whether the client is a company or a person." };
       if (name.length < 2) return { ok: false, error: "Give the client's name." };
       try {
-        const res = await api.createClient({ name, kind, confirmNew: p.confirmNew === "yes" });
+        // The contact given with the client, if any — saved in the same request, or refused before anything is written.
+        const contactName = (p.contactName || "").trim();
+        const contactEmail = (p.contactEmail || "").trim();
+        if (!contactName && (contactEmail || (p.contactPhone || "").trim() || (p.contactRole || "").trim())) return { ok: false, error: "Give the contact's full name as well, or leave the contact empty and add it later. Nothing was saved." };
+        if (contactName && contactName.length < 2) return { ok: false, error: "Give the contact's full name. Nothing was saved." };
+        if (contactEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(contactEmail)) return { ok: false, error: "That does not look like an email address. Nothing was saved." };
+        const contact = contactName ? { fullName: contactName, roleLabel: (p.contactRole || "").trim() || null, email: contactEmail || null, phone: (p.contactPhone || "").trim() || null } : undefined;
+        const res = await api.createClient({ name, kind, confirmNew: p.confirmNew === "yes", ...(contact ? { contact } : {}) });
         if (res.outcome === "possible_duplicates") {
-          state.duplicate = { name, kind, candidates: res.candidates };
+          state.duplicate = { name, kind, candidates: res.candidates, contact: contact ? { contactName: contact.fullName, contactRole: contact.roleLabel || "", contactEmail: contact.email || "", contactPhone: contact.phone || "" } : null };
           return { ok: false, error: "A similar client is already on file — check the matches before creating another." };
         }
         if (res.outcome !== "created" && res.outcome !== "already_on_file") return { ok: false, error: "That was not saved. Nothing was changed." };
@@ -1025,11 +1062,28 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         // Success is claimed only when the client can be read back.
         if (!db.clients.some((c) => c.id === id)) return { ok: false, error: name + " was saved but is not showing yet. Refresh records to check before trying again." };
         const already = res.outcome === "already_on_file";
-        return ok(already ? name + " was already a client — nothing new was created" : name + " added as a client", {
+        // The contact is claimed saved only when the server said so and it reads back on the client.
+        const cs = res.contact?.state ?? "not_given";
+        if (cs === "saved" && res.contact.contactId) applyContact({ id: res.contact.contactId, clientId: id, fullName: contact.fullName, roleLabel: contact.roleLabel, email: contact.email, phone: contact.phone, isPrimary: true });
+        const contactOnFile = (cs === "saved" || cs === "already_on_file") && (db.contacts || []).some((k) => k.id === res.contact.contactId && k.clientId === id);
+        const contactLine =
+          cs === "not_given" ? null
+          : contactOnFile ? contactName + (cs === "saved" ? " saved as the primary contact" : " was already a contact")
+          : cs === "not_saved" ? "The contact was not saved: " + (res.contact.reason || "add it on the client record.")
+          : contactName + " was saved but is not showing yet — refresh records to check before adding it again";
+        return ok((already ? name + " was already a client — nothing new was created" : name + " added as a client") + (contactOnFile && cs === "saved" ? ", with " + contactName + " as the primary contact" : ""), {
           already,
-          detail: already ? "Opened the existing client file." : "Written to your brokerage’s records with an audit entry against your name. No message was sent.",
+          detail: [already ? "Opened the existing client file." : "Written to your brokerage’s records with an audit entry against your name. No message was sent.", contactLine && !contactOnFile ? contactLine : null].filter(Boolean).join(" "),
           nav: { ws: "client", clientId: id },
-          receipt: { action: already ? "Client already on file" : "Client added", record: name, outcome: already ? "Already done" : "Done", changed: already ? [] : ["One client record and its client file"], unchanged: ["No contact was added yet", "No message was sent to anyone"], next: "Add the primary contact", audit: already ? null : "client.created" },
+          receipt: {
+            action: already ? "Client already on file" : "Client added",
+            record: name,
+            outcome: already ? "Already done" : "Done",
+            changed: [...(already ? [] : ["One client record and its client file"]), ...(contactOnFile && cs === "saved" ? ["Primary contact: " + contactName] : [])],
+            unchanged: [...(contactOnFile ? [] : [contactLine && cs !== "not_given" ? contactLine : "No contact was added yet"]), "No message was sent to anyone"],
+            next: contactOnFile ? "Record the insurance need or start a quotation" : "Add the primary contact",
+            audit: already ? null : "client.created" + (contactOnFile && cs === "saved" ? " · client_contact.created" : ""),
+          },
           next: [
             { label: "Add contact", ref: { ws: "newcontact", clientId: id } },
             { label: "Record insurance need", ref: { ws: "quote", clientId: id } },
@@ -1047,10 +1101,28 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const email = (p.email || "").trim();
       if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, error: "That does not look like an email address. Nothing was saved." };
       try {
-        await api.createContact({ clientId: p.clientId, fullName, roleLabel: (p.roleLabel || "").trim() || null, email: email || null, phone: (p.phone || "").trim() || null, isPrimary: true });
+        const made = await api.createContact({ clientId: p.clientId, fullName, roleLabel: (p.roleLabel || "").trim() || null, email: email || null, phone: (p.phone || "").trim() || null, isPrimary: true });
         await refresh();
+        applyContact(made.contact);
         const c = db.clients.find((x) => x.id === p.clientId);
         return ok(fullName + " added as the primary contact" + (c ? " for " + c.name : ""), { detail: "No message was sent to them.", nav: { ws: "client", clientId: p.clientId } });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "contact.update": async (p) => {
+      const fullName = (p.fullName || "").trim();
+      if (fullName.length < 2) return { ok: false, error: "Give the contact's full name." };
+      const email = (p.email || "").trim();
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { ok: false, error: "That does not look like an email address. Nothing was saved." };
+      try {
+        const res = await api.updateContact(p.contactId, { fullName, roleLabel: (p.roleLabel || "").trim() || null, email: email || "", phone: (p.phone || "").trim() || null });
+        await refresh();
+        applyContact(res.contact);
+        const back = (db.contacts || []).find((k) => k.id === p.contactId);
+        if (!back) return { ok: false, error: "The change was saved but is not showing yet. Refresh records to check before trying again." };
+        const c = db.clients.find((x) => x.id === res.contact.clientId);
+        return ok(fullName + "’s details saved" + (c ? " on " + c.name : ""), { detail: "Written with an audit entry against your name. No message was sent to them.", nav: { ws: "client", clientId: res.contact.clientId } });
       } catch (e) {
         return fail(e);
       }
@@ -1311,6 +1383,16 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return fail(e);
       }
     },
+    /** The quote Space's "Add insurers to approach": names as typed, the same contract Ask uses. */
+    "opp.approach": async (p) => {
+      const names = String(p.names || "")
+        .split(/\s*(?:,|;|\n|\band\b|&)\s*/i)
+        .map((x) => x.trim())
+        .filter((x) => x.length >= 2);
+      if (!names.length) return { ok: false, error: "Name at least one insurer — for example “APA Insurance, CIC, Jubilee”. Nothing was changed." };
+      if (names.length > 10) return { ok: false, error: "Add up to ten insurers at a time. Nothing was changed." };
+      return LIVE["opp.action"]({ id: p.id, action: "approach_insurers", insurers: names.map((name) => ({ name })), prepare: p.prepare !== "no" });
+    },
     "opp.action": async (p) => {
       const { id, ...body } = p;
       const clean = present(body);
@@ -1337,8 +1419,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       try {
         const res = await api.opportunityAction(id, clean);
         if (res.outcome === "blocked") return /may not/i.test(res.reason || "") ? { ok: false, denied: true, reason: res.reason } : { ok: false, error: res.reason || "That couldn’t be done. Nothing was changed." };
+        applyOpportunity(res.opportunity);
         await refresh();
         const o = res.opportunity;
+        if (clean.action === "approach_insurers") return approachReceipt(id, o, res);
         const label = ({ add_insurer: "Insurer added", add_requirement: "Requirement added", supply_requirement: "Requirement marked supplied", prepare_request: "Request prepared", approve_request: "Request approved", record_delivery: "Delivery recorded", record_response: "Insurer's reply recorded" })[clean.action] ?? "Recorded";
         const receipt = { action: label, record: o ? o.client.name + " — " + o.opportunity.title : "Quotation", outcome: res.outcome === "already" ? "Already done" : "Done", changed: res.outcome === "already" ? [] : [label], unchanged: ["Nothing was sent to any insurer from ASAP", "No cover or money changed"], next: o?.next?.what ?? null, audit: res.outcome === "already" ? null : "opportunity." + clean.action };
         return ok(
@@ -1670,6 +1754,30 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (ref?.ws && ref.ws !== "today" && !WORKSPACE_NAMES.includes(ref.ws))
       return { kind: "Not found", title: "That page does not exist", status: "draft", statusLabel: "Not found", ref, blocks: [note("red", "ASAP could not open that", "There is no workspace called “" + ref.ws + "”. Nothing was changed."), { t: "gate", kind: "approve", heading: "Related", label: "Open Today", detail: "What matters now, from your records.", nav: { ws: "today" } }] };
     const built = guardLive(buildWorkspace(ref));
+    // The client record carries its people: each contact opens for editing, and one more can be added.
+    if (built && Array.isArray(built.blocks) && ref?.ws === "client" && ref.clientId && db.clients.some((c) => c.id === ref.clientId)) {
+      const people = (db.contacts || []).filter((k) => k.clientId === ref.clientId);
+      const canEdit = !refusal("contact.update");
+      const at = Math.max(1, built.blocks.findIndex((b) => b.t === "facts") + 1);
+      built.blocks.splice(
+        at,
+        0,
+        {
+          t: "rows",
+          label: "Contacts",
+          rows: people.length
+            ? people.map((k) => ({
+                title: k.name,
+                note: [k.role || "Role not recorded", k.email || "no email on file", k.phone || "no phone on file"].join(" · "),
+                badge: k.isPrimary ? "Primary" : "Contact",
+                badgeTone: "ok",
+                ...(canEdit ? { action: { a: "open", ref: { ws: "newcontact", clientId: ref.clientId, contactId: k.id } } } : {}),
+              }))
+            : [{ title: "No contact recorded", note: "Who ASAP should talk to at this client — add their name, role, email and phone.", badge: "Missing", badgeTone: "uncertain" }],
+        },
+        ...(canEdit ? [{ t: "gate", kind: "approve", heading: "Add a contact", label: people.length ? "Add another contact" : "Add the primary contact", detail: people.length ? "Open a contact above to edit it. No message is sent to anyone." : "Saved to the client record. No message is sent to them.", nav: { ws: "newcontact", clientId: ref.clientId } }] : []),
+      );
+    }
     // Work and Today point at the supervision board: every workflow ASAP is running, grouped.
     if (built && Array.isArray(built.blocks) && (ref?.ws === "work" || ref?.ws === "today") && state.supervision) {
       const c = state.supervision.counts;
@@ -1913,7 +2021,68 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * missing — and put it before the person as a card. Nothing is written until Confirm, and the
    * confirm goes through the same client.create handler + New uses.
    */
-  async function addClientPreview(name, said) {
+  /**
+   * A contact in what was typed: "contact: David Otieno, Finance Manager, david@karibu.test",
+   * "primary contact is Jane Wambui (Director), 0722 000 000". Null when no name is given — an
+   * address alone is not a person.
+   */
+  function contactFrom(raw) {
+    if (!raw) return null;
+    const email = /[^\s@,;()<>]+@[^\s@,;()<>]+\.[^\s@,;()<>.]+/.exec(raw)?.[0] ?? null;
+    const phone = /(?:\+?\d[\d\s-]{7,}\d)/.exec(raw.replace(email || "\u0000", ""))?.[0]?.trim() ?? null;
+    const NAME = "([A-Z][A-Za-z'.-]*(?:\\s+[A-Z][A-Za-z'.-]*){1,4})";
+    const named =
+      new RegExp("\\b(?:primary\\s+)?contact(?:\\s+person)?(?:\\s+is|\\s*:|\\s+-)?\\s+" + NAME).exec(raw) ||
+      new RegExp("\\b(?:with|add|save|record)\\s+" + NAME + "\\s*(?:,|\\(|—|-)").exec(raw);
+    if (!named) return null;
+    const fullName = named[1].trim();
+    const after = raw.slice(named.index + named[0].length);
+    const role = /^\s*(?:,|\(|—|-|as)?\s*(?:the\s+|our\s+|their\s+)?([A-Za-z][A-Za-z &/-]{2,40}?)\s*(?:\)|,|\.|;|$|\s+(?:at|email|phone|on|with)\b)/.exec(after)?.[1]?.trim() ?? null;
+    const roleLabel = role && !/@/.test(role) && !/^(email|phone|the|and|for|contact)$/i.test(role) ? role.replace(/^(as)\s+/i, "") : null;
+    return { fullName, roleLabel, email, phone };
+  }
+
+  /**
+   * "Add David Otieno, Finance Manager, david@… as the contact for Karibu" — or update the one on
+   * file with that name. The client is the one named, or the one open; never guessed.
+   */
+  function contactFromAsk(raw, t, ctx) {
+    if (!/\bcontacts?\b/i.test(t) || !/\b(add|save|record|update|change|edit|correct|set)\b/i.test(t)) return null;
+    const k = contactFrom(raw.replace(/^\s*(add|save|record|update|change|edit|correct|set)\s+/i, "with "));
+    // A client named by its words, without the legal ending: "Tausi Hauliers" is Tausi Hauliers Ltd.
+    const core = (n) => n.replace(/\b(ltd|limited|plc|llc|inc|co)\.?$/i, "").trim().split(/\s+/).slice(0, 3);
+    const esc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const byName = db.clients.filter((c) => new RegExp("\\b" + core(c.name).map(esc).join("\\s+") + "\\b", "i").test(raw));
+    const clientId = byName.length === 1 ? byName[0].id : byName.length === 0 ? ctx.clientId || null : null;
+    if (byName.length > 1) return { lead: "Which client?", text: "More than one client matches. Nothing was changed.", clarify: { question: "Client", options: byName.map((c) => ({ label: c.name, text: raw + " — " + c.name })) }, ref: null, keepWorkspace: true };
+    if (!clientId) return { lead: "Which client is the contact for?", text: "Name the client, or open its record first. Nothing was changed.", ref: null, keepWorkspace: true };
+    const c = db.clients.find((x) => x.id === clientId);
+    if (!k) return { lead: "Opening the contact form for " + c.name + ".", text: "Give the contact's full name, role, email and, if you have it, phone. Nothing is saved until you press Add contact.", ref: { ws: "newcontact", clientId } };
+    if (refusal("contact.create")) return refusal("contact.create");
+    if (k.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(k.email)) return { lead: "That email does not look right.", text: "“" + k.email + "” is not an address. Nothing was changed.", ref: null, keepWorkspace: true };
+    const existing = (db.contacts || []).find((x) => x.clientId === clientId && x.name.trim().toLowerCase() === k.fullName.toLowerCase());
+    const fields = ["Name: " + k.fullName, "Role: " + (k.roleLabel || (existing?.role ? existing.role + " (unchanged)" : "not given")), "Email: " + (k.email || (existing?.email ? existing.email + " (unchanged)" : "not given")), "Phone: " + (k.phone || (existing?.phone ? existing.phone + " (unchanged)" : "not given"))];
+    const title = existing ? "Update " + k.fullName + " on " + c.name : "Add " + k.fullName + " as the primary contact for " + c.name;
+    return {
+      lead: title + "?",
+      text: "Here is exactly what would be saved to the client record. Nothing is written until you confirm.",
+      ref: { ws: "client", clientId },
+      pending: {
+        title,
+        sections: [{ label: "RECORD", items: [c.name] }, { label: "CONTACT", items: fields }, ...(k.phone || existing?.phone ? [] : [{ label: "MISSING", items: ["Phone — optional, add it later"] }])],
+        external: "No message is sent to them.",
+        action: existing ? "contact.update" : "contact.create",
+        payload: existing
+          ? { contactId: existing.id, fullName: k.fullName, roleLabel: k.roleLabel || existing.role || "", email: k.email || existing.email || "", phone: k.phone || existing.phone || "" }
+          : { clientId, fullName: k.fullName, roleLabel: k.roleLabel || "", email: k.email || "", phone: k.phone || "" },
+        actionId: "contact:" + clientId + ":" + k.fullName.toLowerCase() + ":" + (k.email || "") + ":" + (k.roleLabel || "") + ":" + (k.phone || ""),
+        confirmLabel: existing ? "Save changes" : "Add contact",
+        progress: "Saving to the client record…",
+      },
+    };
+  }
+
+  async function addClientPreview(name, said, contact = null) {
     if (refusal("client.create")) return refusal("client.create");
     if (name.length < 2) return { lead: "What is the client's name?", text: "Nothing was changed.", ref: null, keepWorkspace: true };
     const kind = clientKindFrom(name, said);
@@ -1927,7 +2096,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     let p;
     try {
-      p = await api.createClient({ name, kind, preview: true });
+      p = await api.createClient({ name, kind, preview: true, ...(contact ? { contact } : {}) });
     } catch (e) {
       return { lead: "I could not check for similar clients just now.", text: describeApiError(e) + " Nothing was changed.", ref: null, keepWorkspace: true, chips: ["Add " + name + " as a client"] };
     }
@@ -1943,25 +2112,29 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       : "I can add " + name + " as " + kindWord + ". " + (p.candidates.length ? "I found " + p.candidates.length + " similar name" + (p.candidates.length === 1 ? "" : "s") + " — check before confirming." : "I found no close matches.");
     return {
       lead,
-      text: "I still need the primary contact, or you can create the client now and add that later.",
+      text: contact
+        ? p.exact
+          ? "The contact you gave is not saved on an existing client from here — add it on " + p.exact.name + "’s record."
+          : contact.fullName + " is saved as the primary contact with the client." + (p.missing.length ? " Not given: " + p.missing.join(", ").toLowerCase() + " — you can add that later." : "")
+        : "I still need the primary contact, or you can create the client now and add that later.",
       ref: null,
       keepWorkspace: true,
       pending: {
         title: p.exact ? "Open " + p.exact.name : "Add " + name,
         sections: [
-          { label: "UNDERSTOOD", items: ["Create " + kindWord + " client", "Name: " + name, "Owner: " + (me.user.full_name || me.user.email)] },
+          { label: "UNDERSTOOD", items: ["Create " + kindWord + " client", "Name: " + name, ...(contact ? ["Primary contact: " + [contact.fullName, contact.roleLabel, contact.email, contact.phone].filter(Boolean).join(" · ")] : []), "Owner: " + (me.user.full_name || me.user.email)] },
           { label: "FOUND", items: found },
           { label: "MISSING", items: p.exact ? [] : p.missing },
           { label: "CHANGE", items: p.writes },
         ],
         external: p.externalEffect,
         action: "client.create",
-        payload: { name, kind, confirmNew: "yes" },
+        payload: { name, kind, confirmNew: "yes", ...(contact && !p.exact ? { contactName: contact.fullName, contactRole: contact.roleLabel || "", contactEmail: contact.email || "", contactPhone: contact.phone || "" } : {}) },
         // One press of Confirm: a retry or a second press finds the same client (the create is idempotent on the name).
         actionId: "client.create:" + kind + ":" + name.toLowerCase(),
         confirmLabel: p.exact ? "Open client" : "Add client",
         progress: "Checking for similar clients and saving to your brokerage’s records…",
-        editRef: { ws: "newclient", name, kind },
+        editRef: { ws: "newclient", name, kind, ...(contact ? { contactName: contact.fullName, contactRole: contact.roleLabel || "", contactEmail: contact.email || "", contactPhone: contact.phone || "" } : {}) },
       },
     };
   }
@@ -2361,8 +2534,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     // "This claim" or "this work" is about another record; never answered from a quotation.
     if (/\bthis (claim|work|policy)\b/i.test(t)) return null;
     if (/\bthis quotation\b/i.test(t) && !(ctx.ref || ctx).opportunityId && !ctx.opportunityId) return null;
-    if (!/\b(quot(e|ation)|insurer|request|deliver(y|ed)?|next|blocked|stuck|requirements?|received|supplied|got)\b/i.test(t)) return null;
-    let id = ctx.opportunityId || null;
+    // A reply to "which insurers?" names them without saying "insurer" again: it is still about that quote.
+    const followUp = insurerAsk && insurerListFrom(raw).length > 0 ? insurerAsk : null;
+    if (!followUp && !/\b(quot(e|ation)|insurers?|request|deliver(y|ed)?|next|blocked|stuck|requirements?|received|supplied|got)\b/i.test(t)) return null;
+    let id = ctx.opportunityId || followUp?.opportunityId || null;
     if (!id && ctx.clientId) {
       const open = [...state.opportunities.values()].filter((d) => d.client.id === ctx.clientId && !d.opportunity.closedAt);
       if (open.length === 1) id = open[0].opportunity.id;
@@ -2378,13 +2553,69 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       const n = d.next;
       return { lead: "Next: " + n.what + ".", text: [n.why, n.missing.length ? "Missing: " + n.missing.join("; ") + "." : "", n.party ? "With " + n.party + "." : ""].filter(Boolean).join(" "), ref, chips: n.action ? [n.action.label] : [] };
     }
-    const add = /\badd\b/i.test(t) && /\binsurer|to (this|the) quot/i.test(t);
-    if (add) {
-      const avail = d.availableInsurers.filter((a) => !live.some((i) => i.insurerId === a.id));
-      const hit = named(avail);
-      if (hit.length !== 1)
-        return { lead: hit.length ? "Which insurer?" : "Which insurer should I add?", text: "Nothing was changed.", clarify: { question: "Insurer", options: (hit.length ? hit : avail).slice(0, 6).map((a) => ({ label: a.name, text: "Add " + a.name + " as an insurer to this quotation" })) }, ref, keepWorkspace: true };
-      return pendingOpp(d, ref, "Add " + hit[0].name + " to this quotation", ["Approach " + hit[0].name + " for " + d.opportunity.classOfBusiness + " terms"], ["One insurer added to " + d.client.name + "’s quotation"], "add_insurer", { insurerId: hit[0].id }, "Add insurer");
+    const wantsAdd = followUp || (/\b(add|approach|include|invite)\b/i.test(t) && /\binsurers?|to (this|the) quot|\bapproach\b/i.test(t));
+    const listed = insurerListFrom(raw);
+    const prepareToo = followUp ? followUp.prepare : /\bprepare|\bdraft|\brequests?\b/i.test(t);
+    if (wantsAdd || (prepareToo && /\brequests?\b/i.test(t) && listed.some((n) => !live.some((i) => sameInsurer(i.insurerName, n))))) {
+      insurerAsk = null;
+      if (!listed.length) {
+        insurerAsk = { opportunityId: id, prepare: prepareToo, turn: askTurn };
+        const avail = d.availableInsurers.filter((a) => !live.some((i) => i.insurerId === a.id));
+        return {
+          lead: "Which insurers should I add?",
+          text: "Name them — for example “APA Insurance, CIC and Jubilee”. An insurer not yet on file is put on file. Nothing was changed.",
+          clarify: avail.length ? { question: "Insurer", options: avail.slice(0, 6).map((a) => ({ label: a.name, text: "Add " + a.name + " as an insurer to this quotation" + (prepareToo ? " and prepare the request" : "") })) } : undefined,
+          ref,
+          keepWorkspace: true,
+        };
+      }
+      const resolved = listed.map((n) => ({ typed: n, ...resolveInsurer(n, d.availableInsurers) }));
+      const unclear = resolved.find((r) => r.outcome === "many");
+      if (unclear) {
+        insurerAsk = { opportunityId: id, prepare: prepareToo, turn: askTurn };
+        const others = resolved.filter((r) => r !== unclear).map((r) => r.typed);
+        return {
+          lead: "Which “" + unclear.typed + "”?",
+          text: "“" + unclear.typed + "” matches more than one insurer on file. Nothing was changed.",
+          clarify: { question: "Insurer", options: unclear.names.map((nm) => ({ label: nm, text: [...others, nm].join(", ") })) },
+          ref,
+          keepWorkspace: true,
+        };
+      }
+      // One insurer already on file and no draft wanted: the same single action the Space's "Add" sends.
+      if (resolved.length === 1 && resolved[0].outcome === "one" && !prepareToo && !live.some((i) => i.insurerId === resolved[0].id))
+        return pendingOpp(d, ref, "Add " + resolved[0].name + " to this quotation", ["Approach " + resolved[0].name + " for " + d.opportunity.classOfBusiness + " terms"], ["One insurer added to " + d.client.name + "’s quotation"], "add_insurer", { insurerId: resolved[0].id }, "Add insurer");
+      const names = resolved.map((r) => (r.outcome === "one" ? r.name : r.typed));
+      const isNew = resolved.filter((r) => r.outcome === "none").map((r) => r.typed);
+      const onQuote = names.filter((n) => live.some((i) => sameInsurer(i.insurerName, n)));
+      const missing = d.requirements.filter((r) => !r.suppliedAt).map((r) => r.label);
+      const title = (prepareToo ? "Add " : "Add ") + joinNames(names) + (prepareToo ? " and prepare a draft request to each" : " to this quotation");
+      return {
+        lead: title + "?",
+        text: "Here is exactly what would change. Nothing is written until you confirm, and nothing is sent.",
+        ref,
+        pending: {
+          title,
+          sections: [
+            { label: "UNDERSTOOD", items: ["Client: " + d.client.name, "Quote: " + d.opportunity.title + " (" + d.opportunity.classOfBusiness + ")", "Insurers: " + names.join(", ")] },
+            { label: "REQUIREMENTS", items: d.requirements.length ? d.requirements.map((r) => r.label + " — " + (r.suppliedAt ? "supplied" : "outstanding, listed in each draft as to follow")) : ["None recorded"] },
+            ...(missing.length ? [{ label: "MISSING", items: missing.map((m) => m + " — does not stop the drafts; supply it before a request is delivered") }] : []),
+            {
+              label: "CHANGE",
+              items: [
+                ...names.map((n) => n + (isNew.includes(n) ? " — put on file as a new insurer, then added" : onQuote.includes(n) ? " — already on this quotation, not added twice" : " — added to this quotation") + (prepareToo ? "; one draft request (left as it is if one exists)" : "")),
+                "Recipients: no insurer address is on file — you choose where each draft goes when you deliver it",
+              ],
+            },
+          ],
+          external: "Nothing is sent. Each draft waits for your approval; ASAP has no mailbox connected, so after approving you copy or download it and deliver it yourself.",
+          action: "opp.action",
+          payload: { id, action: "approach_insurers", insurers: names.map((n) => { const r = resolved.find((x) => (x.outcome === "one" ? x.name : x.typed) === n); return r?.outcome === "one" ? { insurerId: r.id } : { name: n }; }), prepare: prepareToo },
+          actionId: "opp:" + id + ":approach:" + names.map((n) => n.toLowerCase()).sort().join("|") + ":" + prepareToo,
+          confirmLabel: prepareToo ? "Add and prepare drafts" : "Add insurers",
+          progress: "Saving to your brokerage’s records — nothing is sent…",
+        },
+      };
     }
     // A requirement, in the person's own words (the label is theirs, never corrected).
     const addReq = /\badd\s+(?:a\s+)?requirement(?:\s+for|\s+of|:)?\s+(.+?)[.?!]*$/i.exec(raw) || /\badd\s+(.+?)\s+as\s+a\s+requirement\b/i.exec(raw);
@@ -2407,6 +2638,31 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (/\bprepare\b/i.test(t) && /\brequest\b/i.test(t)) {
       const cand = live.filter((i) => i.stage === "not_asked");
       const hit = named(cand).length ? named(cand) : cand.length === 1 ? cand : [];
+      // "Prepare each request" / "prepare the requests to CIC and APA": one draft each, one confirm.
+      const many = hit.length > 1 ? hit : cand.length > 1 && (/\b(each|all|every|both|them|requests)\b/i.test(raw)) ? cand : [];
+      if (many.length > 1) {
+        const missing = d.requirements.filter((r) => !r.suppliedAt).map((r) => r.label);
+        const title = "Prepare a draft request to " + joinNames(many.map((i) => i.insurerName));
+        return {
+          lead: title + "?",
+          text: "Here is exactly what would change. Nothing is written until you confirm, and nothing is sent.",
+          ref,
+          pending: {
+            title,
+            sections: [
+              { label: "UNDERSTOOD", items: ["Client: " + d.client.name, "Quote: " + d.opportunity.title, "Insurers: " + many.map((i) => i.insurerName).join(", ")] },
+              ...(missing.length ? [{ label: "MISSING", items: missing.map((m) => m + " — listed in each draft as to follow; supply it before a request is delivered") }] : []),
+              { label: "CHANGE", items: many.map((i) => i.insurerName + " — one draft request, awaiting your approval") },
+            ],
+            external: "Nothing is sent. Each draft waits for your approval; ASAP has no mailbox connected.",
+            action: "opp.action",
+            payload: { id, action: "approach_insurers", insurers: many.map((i) => ({ insurerId: i.insurerId })), prepare: true },
+            actionId: "opp:" + id + ":prepare-many:" + many.map((i) => i.id).sort().join("|"),
+            confirmLabel: "Prepare drafts",
+            progress: "Saving to your brokerage’s records — nothing is sent…",
+          },
+        };
+      }
       if (hit.length !== 1)
         return { lead: cand.length ? "Which insurer is the request for?" : "Every insurer already has a request.", text: "Nothing was changed.", clarify: cand.length ? { question: "Insurer", options: cand.map((i) => ({ label: i.insurerName, text: "Prepare the request to " + i.insurerName })) } : undefined, ref, keepWorkspace: !cand.length };
       const i = hit[0];
@@ -2423,6 +2679,82 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (/\b(record|log).*(deliver|sent)|\bdelivered\b/i.test(t))
       return { lead: "Record the delivery in the quotation.", text: "Say how it went and what proves it — the email subject and time, or a portal reference. ASAP records it as delivered by you, never as sent.", ref };
     return null;
+  }
+
+  /** What approaching several insurers wrote, insurer by insurer — never "sent", never "approached" by ASAP. */
+  function approachReceipt(id, o, res) {
+    const rs = res.results || [];
+    const line = (r) =>
+      r.insurerName +
+      (r.newOnFile ? " (put on file)" : "") +
+      " — " +
+      (r.approach === "added" ? "added" : "already on this quotation") +
+      (r.request === "prepared" ? ", draft request prepared" : r.request === "already" ? ", its request was already prepared (left as it was)" : "");
+    const prepared = rs.filter((r) => r.request === "prepared").length;
+    const added = rs.filter((r) => r.approach === "added").length;
+    const already = res.outcome === "already";
+    const missing = (o?.requirements || []).filter((r) => !r.suppliedAt).map((r) => r.label);
+    const head = already
+      ? "Nothing new — " + rs.map((r) => r.insurerName).join(", ") + " " + (rs.length === 1 ? "was" : "were") + " already on this quotation"
+      : [added ? plural(added, "insurer", "insurers") + " added" : null, prepared ? plural(prepared, "draft request", "draft requests") + " prepared" : null].filter(Boolean).join(", ") + " — nothing was sent";
+    return ok(head, {
+      detail: "Each draft waits for your review and approval. ASAP has no mailbox connected: after approving, copy or download it, deliver it yourself, and record how." + (missing.length ? " Still outstanding from the client: " + missing.join("; ") + " — listed in each draft as to follow." : ""),
+      nav: { ws: "quote", opportunityId: id },
+      already,
+      receipt: {
+        action: "Insurers approached on paper",
+        record: o ? o.client.name + " — " + o.opportunity.title : "Quotation",
+        outcome: already ? "Already done" : "Done",
+        changed: already ? [] : rs.map(line),
+        unchanged: ["No request was sent or approved", "No insurer has been contacted", "No cover or money changed", ...(missing.length ? ["The client requirement is still outstanding: " + missing.join("; ")] : [])],
+        next: o?.next?.what ?? null,
+        audit: already ? null : "opportunity.insurer_added · opportunity.request_prepared",
+      },
+    });
+  }
+
+  /** The quote Ask last asked "which insurers?" about, so the reply is read against it. */
+  let insurerAsk = null;
+  let askTurn = 0;
+
+  const INSURER_NOISE = /\b(insurance|assurance|company|co|ltd|limited|kenya|general|plc|group|the)\b|[.,&()]/gi;
+  const insurerKey = (n) => String(n).toLowerCase().replace(INSURER_NOISE, " ").replace(/\s+/g, " ").trim();
+  const sameInsurer = (a, b) => insurerKey(a) !== "" && insurerKey(a) === insurerKey(b);
+  const joinNames = (xs) => (xs.length <= 1 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
+
+  /** The same matching the server applies (matchInsurerName): exact, identifying words, leading word. */
+  function resolveInsurer(name, onFile) {
+    const exact = onFile.filter((i) => i.name.trim().toLowerCase() === name.trim().toLowerCase());
+    if (exact.length === 1) return { outcome: "one", id: exact[0].id, name: exact[0].name };
+    const key = insurerKey(name);
+    if (!key) return { outcome: "none" };
+    const same = onFile.filter((i) => insurerKey(i.name) === key);
+    if (same.length === 1) return { outcome: "one", id: same[0].id, name: same[0].name };
+    if (same.length > 1) return { outcome: "many", names: same.map((i) => i.name) };
+    const starts = onFile.filter((i) => (" " + insurerKey(i.name) + " ").startsWith(" " + key + " "));
+    if (starts.length === 1) return { outcome: "one", id: starts[0].id, name: starts[0].name };
+    if (starts.length > 1) return { outcome: "many", names: starts.map((i) => i.name) };
+    return { outcome: "none" };
+  }
+
+  /**
+   * Insurer names as typed — "APA Insurance, CIC and Jubilee", "add apa, cic and jubilee to this
+   * quote", "All three: APA, CIC and Jubilee", "add CIC to this quotation" — in any letter case.
+   * The list is what follows the verb, up to "as/to/for … insurers/this/the quote" or the sentence
+   * end; a bare list is read only as the answer to "which insurers?".
+   */
+  function insurerListFrom(raw) {
+    const END = "(?=\\s+(?:as|to|for|on|onto)\\s+(?:an?\\s+|the\\s+|our\\s+|this\\s+|that\\s+)?(?:insurers?|this|that|the|our|quot|approach)\\b|\\s*[.;!?](?:\\s|$)|\\s*$)";
+    const verb = new RegExp("\\b(?:add|approach|include|invite)\\s+(.+?)" + END, "i").exec(raw);
+    const lead = new RegExp("^\\s*(?:all three|all of them|all|both|these|them|yes)\\s*[:,—–-]\\s*(.+?)" + END, "i").exec(raw);
+    const bare = insurerAsk ? new RegExp("^\\s*(?:(?:just|only)\\s+)?(.+?)" + END, "i").exec(raw) : null;
+    const seg = (verb || lead || bare)?.[1] ?? "";
+    if (!seg || /\b(requirement|claim|policy|client|contact|renewal|document)s?\b/i.test(seg)) return [];
+    const STOP = /^(insurers?|an? insurers?|the insurers?|them|all|both|each|three|two|it|this|that|these|requests?)$/i;
+    return seg
+      .split(/\s*,\s*(?:and\s+)?|\s+and\s+|\s*&\s*/i)
+      .map((x) => x.replace(/^(?:the|insurer|insurers)\s+/i, "").replace(/\s+(?:insurers?)$/i, "").trim())
+      .filter((x) => x.length >= 2 && x.length <= 80 && !STOP.test(x) && !/\b(quote|quotation|request|prepare|send)\b/i.test(x));
   }
 
   function pendingOpp(d, ref, title, understood, change, action, extra, confirmLabel, external) {
@@ -2533,7 +2865,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * never supplied). Used only to refuse early and plainly; every write is still checked by the
    * server, which is the authority.
    */
-  const NEEDS = { "renewal.start": ["policy:edit", "start renewal work"], "renewal.decide": ["email:approve", "approve what leaves the brokerage"], "client.create": ["client:create", "add clients"], "claim.open": ["claim:create", "report claims"], "opportunity.create": ["space:create", "start quotation work"], "opp.action": ["space:create", "change quotation work"], "work.assign": ["job:edit", "change who owns Work or when it is due"], "automation.create": ["automation:create", "create automations"], "contact.create": ["client:edit", "add contacts"] };
+  const NEEDS = { "renewal.start": ["policy:edit", "start renewal work"], "renewal.decide": ["email:approve", "approve what leaves the brokerage"], "client.create": ["client:create", "add clients"], "claim.open": ["claim:create", "report claims"], "opportunity.create": ["space:create", "start quotation work"], "opp.action": ["space:create", "change quotation work"], "opp.approach": ["space:create", "change quotation work"], "work.assign": ["job:edit", "change who owns Work or when it is due"], "automation.create": ["automation:create", "create automations"], "contact.create": ["client:edit", "add contacts"], "contact.update": ["client:edit", "change contacts"] };
   const perms = new Set(me.permissions ?? []);
   const refusal = (action) => {
     const need = NEEDS[action];
@@ -2557,6 +2889,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   }
 
   async function routeInner(text, ctx) {
+    askTurn += 1;
+    // "Which insurers?" is answered by the very next message, or not at all.
+    if (insurerAsk && insurerAsk.turn !== askTurn - 1) insurerAsk = null;
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
     const t = correctTypos(text.trim(), names);
     // Questions about the client list, answered from the records — including when there are none.
@@ -2572,7 +2907,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     }
     // The name comes from what was typed, never the typo-corrected text: a client's name is theirs.
     const add = /\b(?:add|create)\s+(.+?)\s+as\s+an?\s+(?:new\s+)?(company|person|individual|corporate)?\s*client\b/i.exec(text.trim());
-    if (add) return addClientPreview(add[1].trim(), add[2] || null);
+    if (add) return addClientPreview(add[1].trim(), add[2] || null, contactFrom(text.trim().slice(add.index + add[0].length)));
+    const contactAsk = contactFromAsk(text.trim(), t, ctx);
+    if (contactAsk) return contactAsk;
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
     if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
@@ -2585,6 +2922,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ];
     const go = GO.find(([re]) => re.test(t.trim()));
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
+    // The answer to "which insurers?" goes back to that quotation before anything else reads it.
+    if (insurerAsk && insurerListFrom(text.trim()).length) {
+      const answered = quotationFromAsk(t, ctx, text.trim());
+      if (answered) return answered;
+    }
     const onboarding = onboardingFromAsk(text.trim(), t);
     if (onboarding) return onboarding;
     const supervised = supervisionFromAsk(text.trim(), t, ctx);

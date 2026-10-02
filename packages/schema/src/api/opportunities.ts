@@ -224,6 +224,23 @@ export type UpdateOpportunityRequest = z.infer<typeof updateOpportunityRequestSc
 
 export const opportunityActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("add_insurer"), insurerId: uuidSchema }),
+  /**
+   * Several insurers at once, by id or by name, and optionally a draft request to each. A name not
+   * yet on file is put on file; a name matching more than one insurer is refused with the matches.
+   * Drafts are composed by the server from the quotation's records and are never sent.
+   */
+  z.object({
+    action: z.literal("approach_insurers"),
+    insurers: z
+      .array(
+        z
+          .object({ insurerId: uuidSchema.optional(), name: z.string().trim().min(2, "Name the insurer").max(120).optional() })
+          .refine((x) => x.insurerId !== undefined || x.name !== undefined, "Give an insurer id or a name"),
+      )
+      .min(1)
+      .max(10),
+    prepare: z.boolean().default(false),
+  }),
   z.object({
     action: z.literal("remove_insurer"),
     opportunityInsurerId: uuidSchema,
@@ -302,6 +319,18 @@ export const opportunityActionResponseSchema = z.object({
   /** Why, when it was blocked. The guard's own words, shown beside the control (§34). */
   reason: z.string().max(300).nullable().default(null),
   opportunity: opportunityResponseSchema.nullable().default(null),
+  /** Per insurer, for approach_insurers: what was written and what already stood. */
+  results: z
+    .array(
+      z.object({
+        insurerId: uuidSchema,
+        insurerName: z.string(),
+        newOnFile: z.boolean(),
+        approach: z.enum(["added", "already"]),
+        request: z.enum(["prepared", "already", "not_requested"]),
+      }),
+    )
+    .default([]),
 });
 export type OpportunityActionResponse = z.infer<typeof opportunityActionResponseSchema>;
 

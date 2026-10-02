@@ -40,6 +40,12 @@ function findUser(t) {
 }
 function findClient(t, ctx) {
   const q = (t || '').toLowerCase();
+  // The whole name first, with or without its legal ending — the longest one named wins. A client
+  // whose first word is short ("UX TEST Karibu Logistics Ltd", "AB Motors") is still found by name.
+  const core = (n) => n.toLowerCase().replace(/[.,]/g, '').replace(/\s+(ltd|limited|plc|llc|inc|co)$/, '').trim();
+  const whole = sel.clients().filter(c => core(c.name).length >= 3 && new RegExp('\\b' + core(c.name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(q.replace(/[.,]/g, '')))
+    .sort((a, b) => core(b.name).length - core(a.name).length)[0];
+  if (whole) return whole;
   // Edited from the approved build: a whole word of three or more letters, never a substring —
   // a client called "A" otherwise matched almost every sentence and took over the context.
   const hit = sel.clients().find(c => { const w = c.name.split(' ')[0].toLowerCase(); return w.length >= 3 && new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b').test(q); });

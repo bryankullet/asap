@@ -215,6 +215,7 @@ export function createApp(deps: AppDeps) {
     "/imports",
     "/imports/*",
     "/contacts",
+    "/contacts/*",
     "/audit",
     "/email/threads",
     "/email/threads/*",

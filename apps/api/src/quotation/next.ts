@@ -48,27 +48,37 @@ export function quotationNext(o: Omit<OpportunityResponse, "next">): NextAction 
   const live = o.insurers.filter((i) => !i.removedAt);
   const stage = (s: OpportunityInsurer["stage"]) => live.filter((i) => i.stage === s);
 
-  if (outstanding.length > 0) {
-    return {
-      ...base,
-      what: `Collect the outstanding requirement${outstanding.length === 1 ? "" : "s"} from the client`,
-      holder: "brokerage",
-      missing: outstanding.map((r) => r.label),
-      why: "Insurers quote on what the client gives; a request sent without it comes back with questions.",
-      action: { name: "supply_requirement", label: "Mark a requirement supplied", targetId: outstanding[0]!.id },
-      stage: "requirements",
-    };
-  }
+  /*
+   * An outstanding requirement does not stop a person choosing insurers or drafting requests — the
+   * draft lists it as "to follow". It stands in front of delivery: an insurer quotes on what the
+   * client gives, so a request delivered without it comes back with questions.
+   */
+  const stillNeeded = outstanding.map((r) => r.label);
+  const pending = outstanding.length
+    ? ` Still outstanding from the client: ${stillNeeded.join("; ")} — it does not stop this step, but it must be supplied before a request is delivered.`
+    : "";
   if (live.length === 0) {
-    return { ...base, what: "Choose the insurers to approach", holder: "brokerage", missing: ["At least one insurer"], why: "No insurer can quote until they are asked.", action: { name: "add_insurer", label: "Add an insurer", targetId: null }, stage: "insurers" };
+    return { ...base, what: "Choose the insurers to approach", holder: "brokerage", missing: ["At least one insurer", ...stillNeeded], why: "No insurer can quote until they are asked." + pending, action: { name: "add_insurer", label: "Add an insurer", targetId: null }, stage: "insurers" };
   }
   const notAsked = stage("not_asked");
   if (notAsked.length > 0) {
-    return { ...base, what: `Prepare the request to ${names(notAsked)}`, holder: "brokerage", why: "The request is what the insurer quotes on; it is reviewed and approved before it goes.", action: { name: "prepare_request", label: "Prepare the request", targetId: notAsked[0]!.id }, stage: "prepare" };
+    return { ...base, what: `Prepare the request to ${names(notAsked)}`, holder: "brokerage", missing: stillNeeded, why: "The request is what the insurer quotes on; it is reviewed and approved before it goes." + pending, action: { name: "prepare_request", label: "Prepare the request", targetId: notAsked[0]!.id }, stage: "prepare" };
   }
   const toApprove = stage("request_prepared");
   if (toApprove.length > 0) {
-    return { ...base, what: `Review and approve the request to ${names(toApprove)}`, holder: "brokerage", why: "Nothing leaves the brokerage without a person's approval of the exact text.", action: { name: "approve_request", label: "Approve the request", targetId: toApprove[0]!.request!.id }, stage: "approve" };
+    return { ...base, what: `Review and approve the request to ${names(toApprove)}`, holder: "brokerage", missing: stillNeeded, why: "Nothing leaves the brokerage without a person's approval of the exact text." + pending, action: { name: "approve_request", label: "Approve the request", targetId: toApprove[0]!.request!.id }, stage: "approve" };
+  }
+  const nothingSentYet = live.every((i) => i.stage === "approved_to_deliver");
+  if (outstanding.length > 0 && nothingSentYet) {
+    return {
+      ...base,
+      what: `Collect the outstanding requirement${outstanding.length === 1 ? "" : "s"} from the client before delivering`,
+      holder: "brokerage",
+      missing: stillNeeded,
+      why: "The requests are approved, but insurers quote on what the client gives; a request delivered without it comes back with questions.",
+      action: { name: "supply_requirement", label: "Mark a requirement supplied", targetId: outstanding[0]!.id },
+      stage: "requirements",
+    };
   }
   const toDeliver = stage("approved_to_deliver");
   if (toDeliver.length > 0) {

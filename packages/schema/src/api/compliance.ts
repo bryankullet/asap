@@ -52,12 +52,43 @@ export const createClientRequestSchema = z.object({
    * create would not make.
    */
   preview: z.boolean().default(false),
+  /**
+   * The primary contact, when the person gave one while adding the client. Saved with the client
+   * in the same request, so "added with David Otieno as the contact" is true when it is said.
+   */
+  contact: z
+    .object({
+      fullName: z.string().trim().min(2, "Give the contact's full name").max(200),
+      roleLabel: z.string().trim().max(120).nullable().default(null),
+      email: z
+        .string()
+        .trim()
+        .max(320)
+        .refine((v) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), { message: "That does not look like an email address" })
+        .nullable()
+        .default(null),
+      phone: z.string().trim().max(40).nullable().default(null),
+    })
+    .optional(),
 });
+export type CreateClientRequest = z.infer<typeof createClientRequestSchema>;
 const clientCandidateSchema = z.object({ id: uuidSchema, name: z.string(), kind: ClientKind });
+/**
+ * What happened to the contact given with a new client — said, never assumed. `not_saved` carries
+ * the reason (an existing client keeps its own primary contact, for instance).
+ */
+const contactOutcomeSchema = z
+  .object({
+    state: z.enum(["saved", "already_on_file", "not_given", "not_saved"]),
+    contactId: uuidSchema.nullable().default(null),
+    reason: z.string().max(300).nullable().default(null),
+  })
+  .default({ state: "not_given", contactId: null, reason: null });
+
 export const createClientResponseSchema = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("created"), file: clientFileResponseSchema }),
+  z.object({ outcome: z.literal("created"), file: clientFileResponseSchema, contact: contactOutcomeSchema }),
   /* The create is idempotent on the exact name: a repeat (a retry, a double press) finds it. */
-  z.object({ outcome: z.literal("already_on_file"), file: clientFileResponseSchema }),
+  z.object({ outcome: z.literal("already_on_file"), file: clientFileResponseSchema, contact: contactOutcomeSchema }),
   z.object({
     outcome: z.literal("preview"),
     name: z.string(),

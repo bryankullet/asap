@@ -128,6 +128,8 @@ const oppDetail = () => ({
   next: { what: { not_asked: "Prepare the request to CIC General", request_prepared: "Review and approve the request to CIC General", approved_to_deliver: "Deliver the approved request to CIC General and record how", with_insurer: "Chase CIC General for terms" }[oppStage], holder: oppStage === "with_insurer" ? "outside_party" : "brokerage", party: oppStage === "with_insurer" ? "CIC General" : null, since: null, missing: [], checkAt: null, why: "Because.", record: { type: "opportunity", id: OPP, label: "Tausi — Motor fleet" }, action: null, stage: oppStage },
 });
 const opportunityAction = vi.fn(async () => ({ outcome: "done", reason: null, opportunity: oppDetail() }));
+const createContact = vi.fn(async (input: { clientId: string; fullName: string; roleLabel: string | null; email: string | null; phone: string | null }) => ({ contact: { id: "c9000000-0000-4000-8000-000000000001", clientId: input.clientId, fullName: input.fullName, roleLabel: input.roleLabel, email: input.email, phone: input.phone, isPrimary: true, source: "manual", notes: null, createdAt: "2026-10-02" } }));
+const updateContact = vi.fn(async (id: string, input: { fullName: string; roleLabel: string | null; email: string; phone: string | null }) => ({ contact: { id, clientId: CLIENT, fullName: input.fullName, roleLabel: input.roleLabel, email: input.email || null, phone: input.phone, isPrimary: true, source: "manual", notes: null, createdAt: "2026-09-01" } }));
 // Owner and due date, answered as the server's /manage contract would; a preview changes nothing.
 let workOwner = ME;
 let workDue: string | null = null;
@@ -258,6 +260,8 @@ vi.mock("../lib/api.js", () => ({
     setAutomationEnabled, createClient, previewImport, commitImport, createOpportunity, createWorkItem, createAutomation, askQuestion,
     opportunity: async (id: string) => (id === OPP ? oppDetail() : null),
     opportunityAction,
+    createContact,
+    updateContact,
     workItem: async (id: string) => (id === CLAIM_WORK && claimMade ? {
       item: { id: CLAIM_WORK, steps: [{ id: "docs", label: "Collect the claim form and supporting documents", actor: "client", state: "now", guards: [], evidence: [{ kind: "document", label: "Claim form" }], actions: [], party: null, reason: null, recorded: [], runId: null }] },
       claim: { claim: { id: CLAIM, organization_id: ORG, work_item_id: CLAIM_WORK, client_id: CLIENT, policy_id: claimMade.policyId, policy_period_id: null, status: "draft", source: "manual", incident_on: claimMade.incidentOn, incident_summary: claimMade.incidentSummary, reported_on: null, insurer_reference: null }, documents: [], notes: [], clock: null, candidatePeriods: [] },
@@ -856,10 +860,12 @@ describe("live mode", () => {
       const r = (await B.ai.route("We received the logbooks from the client by email today", { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } })) as Routed;
       expect(r.pending!.payload).toMatchObject({ action: "supply_requirement", requirementId: d.requirements[0]!.id });
       expect(opportunityAction).not.toHaveBeenCalled();
-      await B.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
-      const fromAsk = lastOpp();
+      // Read before the write: afterwards the Space shows what the server answered, and a supplied
+      // requirement no longer offers the form.
       const form = control(B.ai.workspace({ ws: "quote", opportunityId: OPP }), "opp.action", (o) => (o["payload"] as { action?: string })?.action === "supply_requirement")!;
       expect(form).not.toBeNull();
+      await B.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      const fromAsk = lastOpp();
       // The Space's select supplies the requirement; its text box the note.
       const choice = ((form["fields"] as { key: string; options?: { value: string }[] }[]).find((f) => f.key === "requirementId")!.options!)[0]!.value;
       await B.records.act("opp.action", { ...(form["payload"] as object), requirementId: choice, note: r.pending!.payload["note"] });
@@ -1247,6 +1253,205 @@ describe("live mode", () => {
       expect(ws).toContain("No renewal terms from First Insurer with 5 days to expiry.");
       expect(ws).toContain("Call the underwriter at First Insurer today.");
       expect(ws).toContain("I've fixed it — resume");
+    });
+  });
+
+  /*
+   * The acceptance-test path (fresh brokerage): insurers added to an existing quote by name and a
+   * draft prepared to each, contacts saved with and after the client, and the quote view agreeing
+   * with what the server answered the moment a write lands.
+   */
+  describe("insurers, drafts and contacts from Ask", () => {
+    type Pending = { action: string; payload: Record<string, unknown>; actionId: string; sections: { label: string; items: string[] }[]; external: string; title: string };
+    type Routed = { pending?: Pending; lead?: string; text?: string; clarify?: { options: { label: string; text: string }[] } };
+    const ctx = { ws: "quote", opportunityId: OPP, clientId: CLIENT, ref: { ws: "quote", opportunityId: OPP } };
+    const ask = async (A: Awaited<ReturnType<typeof live>>, q: string, c: unknown = ctx) => (await A.ai.route(q, c)) as Routed;
+    const section = (r: Routed, label: string) => r.pending!.sections.find((x) => x.label === label)?.items ?? [];
+    const withOutstanding = () => {
+      const d = oppDetail();
+      d.requirements[0]!.suppliedAt = null as unknown as string;
+      d.requirements[0]!.label = "UX TEST: five vehicle values and logbooks";
+      return d;
+    };
+    beforeEach(() => {
+      opportunityAction.mockClear();
+      createClient.mockClear();
+      createContact.mockClear();
+      updateContact.mockClear();
+    });
+
+    it("three insurers named at once: one card with client, quote, requirement and recipients — nothing sent, nothing written before confirm", async () => {
+      const api = (await import("../lib/api.js")).api as unknown as { opportunity: (id: string) => Promise<unknown> };
+      const spy = vi.spyOn(api, "opportunity").mockResolvedValue(withOutstanding());
+      const A = await live();
+      const r = await ask(A, "For the UX TEST Karibu Logistics quote, add APA Insurance, CIC and Jubilee as insurers to approach. Prepare each request but do not send anything.");
+      expect(r.clarify).toBeUndefined();
+      expect(r.pending!.action).toBe("opp.action");
+      // CIC resolves to CIC General on file, Jubilee to Jubilee Insurance; APA is put on file.
+      expect(r.pending!.payload).toEqual({ id: OPP, action: "approach_insurers", insurers: [{ name: "APA Insurance" }, { insurerId: INS_CIC }, { insurerId: "92000000-0000-4000-8000-000000000002" }], prepare: true });
+      expect(section(r, "UNDERSTOOD")).toEqual(["Client: Tausi Hauliers Ltd", "Quote: Motor fleet (Commercial motor)", "Insurers: APA Insurance, CIC General, Jubilee Insurance"]);
+      expect(section(r, "MISSING").join(" ")).toMatch(/UX TEST: five vehicle values and logbooks — does not stop the drafts/);
+      expect(section(r, "CHANGE").join(" ")).toMatch(/APA Insurance — put on file as a new insurer/);
+      expect(section(r, "CHANGE").join(" ")).toMatch(/CIC General — already on this quotation, not added twice/);
+      expect(section(r, "CHANGE").join(" ")).toMatch(/no insurer address is on file/);
+      expect(r.pending!.external).toMatch(/^Nothing is sent/);
+      expect(opportunityAction).not.toHaveBeenCalled();
+      // The same list asked again is the same action: a second confirm is not a second write.
+      const again = await ask(A, "For the UX TEST Karibu Logistics quote, add APA Insurance, CIC and Jubilee as insurers to approach. Prepare each request but do not send anything.");
+      expect(again.pending!.actionId).toBe(r.pending!.actionId);
+      spy.mockRestore();
+    });
+
+    it("confirmed: the receipt says drafts were prepared and nothing was sent, and the requirement stays outstanding", async () => {
+      const d = withOutstanding();
+      opportunityAction.mockResolvedValueOnce({ outcome: "done", reason: null, opportunity: d, results: [
+        { insurerId: "92000000-0000-4000-8000-0000000000a1", insurerName: "APA Insurance", newOnFile: true, approach: "added", request: "prepared" },
+        { insurerId: INS_CIC, insurerName: "CIC General", newOnFile: false, approach: "already", request: "prepared" },
+      ] } as never);
+      const A = await live();
+      const out = (await A.records.act("opp.action", { id: OPP, action: "approach_insurers", insurers: [{ name: "APA Insurance" }, { insurerId: INS_CIC }], prepare: true }, "k1")) as { ok: boolean; text: string; receipt: { changed: string[]; unchanged: string[] } };
+      expect(out.ok).toBe(true);
+      expect(out.text).toBe("1 insurer added, 2 draft requests prepared — nothing was sent");
+      expect(out.receipt.changed).toEqual(["APA Insurance (put on file) — added, draft request prepared", "CIC General — already on this quotation, draft request prepared"]);
+      expect(out.receipt.unchanged).toEqual(expect.arrayContaining(["No request was sent or approved", "No insurer has been contacted", "The client requirement is still outstanding: UX TEST: five vehicle values and logbooks"]));
+      expect(JSON.stringify(out)).not.toMatch(/(?<![Nn]othing )\b(was|were) sent\b(?! or)|approached by ASAP/);
+    });
+
+    it("the quote view shows what the server answered at once, before any re-read", async () => {
+      const A = await live();
+      const d = oppDetail();
+      d.requirements.push({ id: "93000000-0000-4000-8000-000000000009", label: "UX TEST: five vehicle values and logbooks", required: true, suppliedAt: null as unknown as string, suppliedByName: null as unknown as string, evidence: null });
+      opportunityAction.mockResolvedValueOnce({ outcome: "done", reason: null, opportunity: d } as never);
+      await A.records.act("opp.action", { id: OPP, action: "add_requirement", label: "UX TEST: five vehicle values and logbooks" }, "k2");
+      const view = JSON.stringify(A.ai.workspace({ ws: "quote", opportunityId: OPP }));
+      expect(view).toContain("UX TEST: five vehicle values and logbooks");
+      expect(view).toContain("Outstanding");
+      expect(view).toMatch(/does not stop you adding insurers or preparing drafts/);
+    });
+
+    it("asked without names, it asks which insurers; the reply naming three is read against the same quote", async () => {
+      const A = await live();
+      const first = await ask(A, "Add insurers to this quotation and prepare each request");
+      expect(first.lead).toBe("Which insurers should I add?");
+      expect(opportunityAction).not.toHaveBeenCalled();
+      // The reply carries no "insurer" or "quote" — and no quotation is open in context any more.
+      const reply = await ask(A, "All three: APA Insurance, CIC and Jubilee", {});
+      expect(reply.pending!.payload).toMatchObject({ id: OPP, action: "approach_insurers", prepare: true });
+      expect((reply.pending!.payload["insurers"] as unknown[]).length).toBe(3);
+    });
+
+    it("an ambiguous name asks a short clarification and writes nothing; a clear list does not", async () => {
+      const api = (await import("../lib/api.js")).api as unknown as { opportunity: (id: string) => Promise<unknown> };
+      const d = oppDetail();
+      d.availableInsurers = [{ id: INS_CIC, name: "CIC General" }, { id: "92000000-0000-4000-8000-0000000000c1", name: "Jubilee Allianz General" }, { id: "92000000-0000-4000-8000-0000000000c2", name: "Jubilee Health Insurance" }];
+      const spy = vi.spyOn(api, "opportunity").mockResolvedValue(d);
+      const A = await live();
+      const r = await ask(A, "Add APA and Jubilee as insurers to this quotation");
+      expect(r.lead).toBe("Which “Jubilee”?");
+      expect(r.clarify!.options.map((o) => o.label)).toEqual(["Jubilee Allianz General", "Jubilee Health Insurance"]);
+      expect(r.clarify!.options[0]!.text).toBe("APA, Jubilee Allianz General");
+      expect(opportunityAction).not.toHaveBeenCalled();
+      const picked = await ask(A, r.clarify!.options[0]!.text);
+      if (!picked.pending) throw new Error(JSON.stringify(picked));
+      expect(picked.pending!.payload["insurers"]).toEqual([{ name: "APA" }, { insurerId: "92000000-0000-4000-8000-0000000000c1" }]);
+      spy.mockRestore();
+    });
+
+    it("prepare each request for insurers already on the quote: one draft each, one confirm", async () => {
+      const api = (await import("../lib/api.js")).api as unknown as { opportunity: (id: string) => Promise<unknown> };
+      const d = oppDetail();
+      d.insurers.push({ ...d.insurers[0]!, id: "91000000-0000-4000-8000-000000000002", insurerId: "92000000-0000-4000-8000-000000000002", insurerName: "Jubilee Insurance" });
+      const spy = vi.spyOn(api, "opportunity").mockResolvedValue(d);
+      const A = await live();
+      const r = await ask(A, "Prepare each request");
+      if (!r.pending) throw new Error(JSON.stringify(r));
+      expect(r.pending!.payload).toEqual({ id: OPP, action: "approach_insurers", insurers: [{ insurerId: INS_CIC }, { insurerId: "92000000-0000-4000-8000-000000000002" }], prepare: true });
+      expect(r.pending!.external).toMatch(/Nothing is sent/);
+      spy.mockRestore();
+    });
+
+    it("the quote Space adds insurers by name with the same contract, and a prepared draft can be read, copied and edited before approval", async () => {
+      oppStage = "request_prepared";
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "quote", opportunityId: OPP });
+      const t = JSON.stringify(ws);
+      expect(t).toContain("Add insurers to approach");
+      expect(t).toContain("Draft request to CIC General — not approved, not sent");
+      expect(t).toContain("Edit the draft to CIC General");
+      expect(t).toContain("no insurer address on file");
+      await A.records.act("opp.approach", { id: OPP, names: "APA Insurance, CIC and Jubilee", prepare: "yes" }, "k3");
+      expect(opportunityAction.mock.calls.at(-1)).toEqual([OPP, { action: "approach_insurers", insurers: [{ name: "APA Insurance" }, { name: "CIC" }, { name: "Jubilee" }], prepare: true }]);
+      oppStage = "not_asked";
+    });
+
+    it("adding a client with a contact: the preview and the create carry it; the receipt claims it only when saved and read back", async () => {
+      const A = await live();
+      const r = await ask(A, "Add UX TEST Karibu Logistics Ltd as a company client. Primary contact: UX TEST David Otieno, Finance Manager, david.otieno@example.test", {});
+      expect(createClient.mock.calls[0]![0]).toMatchObject({ preview: true, contact: { fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test", phone: null } });
+      expect(section(r, "UNDERSTOOD")).toContain("Primary contact: UX TEST David Otieno · Finance Manager · david.otieno@example.test");
+      expect(r.text).toMatch(/UX TEST David Otieno is saved as the primary contact with the client/);
+      createClient.mockImplementationOnce(async () => ({ outcome: "created", file: { client: { id: "30000000-0000-4000-8000-0000000000ff" } }, contact: { state: "saved", contactId: "c9000000-0000-4000-8000-0000000000aa", reason: null } }) as never);
+      created.push({ id: "30000000-0000-4000-8000-0000000000ff", name: "UX TEST Karibu Logistics Ltd" });
+      const out = (await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId)) as { ok: boolean; text: string; receipt: { changed: string[] } };
+      expect(createClient.mock.calls.at(-1)![0]).toMatchObject({ confirmNew: true, contact: { fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test", phone: null } });
+      expect(out.text).toContain("with UX TEST David Otieno as the primary contact");
+      expect(out.receipt.changed).toContain("Primary contact: UX TEST David Otieno");
+    });
+
+    it("a contact the server did not save is never claimed saved", async () => {
+      const A = await live();
+      createClient.mockImplementationOnce(async () => ({ outcome: "created", file: { client: { id: "30000000-0000-4000-8000-0000000000ff" } }, contact: { state: "not_saved", contactId: null, reason: "The contact could not be saved. Add it on the client record." } }) as never);
+      if (!created.some((c) => c.id === "30000000-0000-4000-8000-0000000000ff")) created.push({ id: "30000000-0000-4000-8000-0000000000ff", name: "UX TEST Karibu Logistics Ltd" });
+      const out = (await A.records.act("client.create", { name: "UX TEST Karibu Logistics Ltd", kind: "corporate", confirmNew: "yes", contactName: "UX TEST David Otieno", contactEmail: "david.otieno@example.test" }, "k4")) as { text: string; receipt: { changed: string[]; unchanged: string[] } };
+      expect(out.text).not.toMatch(/primary contact/);
+      expect(out.receipt.changed).not.toContain("Primary contact: UX TEST David Otieno");
+      expect(out.receipt.unchanged.join(" ")).toMatch(/The contact was not saved/);
+    });
+
+    it("adding a contact afterwards from Ask, and editing it: cards first, saved to the record, shown on the client after", async () => {
+      const A = await live();
+      const r = await ask(A, "Add UX TEST David Otieno, Finance Manager, david.otieno@example.test as the contact for Tausi Hauliers", {});
+      if (!r.pending) throw new Error(JSON.stringify(r));
+      expect(r.pending!.action).toBe("contact.create");
+      expect(r.pending!.payload).toEqual({ clientId: CLIENT, fullName: "UX TEST David Otieno", roleLabel: "Finance Manager", email: "david.otieno@example.test", phone: "" });
+      expect(r.pending!.external).toBe("No message is sent to them.");
+      expect(createContact).not.toHaveBeenCalled();
+      await A.records.act(r.pending!.action, r.pending!.payload, r.pending!.actionId);
+      expect(createContact).toHaveBeenCalledTimes(1);
+      const client = JSON.stringify(A.ai.workspace({ ws: "client", clientId: CLIENT }));
+      expect(client).toContain("UX TEST David Otieno");
+      expect(client).toContain("Finance Manager · david.otieno@example.test · no phone on file");
+      // The one on file by that name is updated, not duplicated.
+      const edit = await ask(A, "Update the contact Otieno Were, Finance Director, +254 700 000 111 for Tausi Hauliers", {});
+      expect(edit.pending!.action).toBe("contact.update");
+      expect(edit.pending!.payload).toMatchObject({ contactId: "c1", fullName: "Otieno Were", roleLabel: "Finance Director", email: "otieno@example.test", phone: "+254 700 000 111" });
+      await A.records.act(edit.pending!.action, edit.pending!.payload, edit.pending!.actionId);
+      expect(updateContact).toHaveBeenCalledWith("c1", { fullName: "Otieno Were", roleLabel: "Finance Director", email: "otieno@example.test", phone: "+254 700 000 111" });
+      expect(JSON.stringify(A.ai.workspace({ ws: "client", clientId: CLIENT }))).toContain("Finance Director");
+    });
+
+    it("a client whose first word is short is still opened by its name", async () => {
+      const id = "30000000-0000-4000-8000-0000000000ux";
+      created.push({ id, name: "UX TEST Karibu Logistics Ltd" });
+      const A = await live();
+      const r = await A.ai.route("Open UX TEST Karibu Logistics Ltd", {});
+      expect((r.ref as { ws: string; clientId?: string })).toMatchObject({ ws: "client", clientId: id });
+      const without = await A.ai.route("Open UX TEST Karibu Logistics", {});
+      expect((without.ref as { clientId?: string }).clientId).toBe(id);
+      created.splice(created.findIndex((c) => c.id === id), 1);
+    });
+
+    it("the client record lists its contacts, each opening an edit form, with a way to add another", async () => {
+      const A = await live();
+      const client = A.ai.workspace({ ws: "client", clientId: CLIENT });
+      const t = JSON.stringify(client);
+      expect(t).toContain("\"label\":\"Contacts\"");
+      expect(t).toContain("\"contactId\":\"c1\"");
+      expect(t).toContain("Add another contact");
+      const edit = JSON.stringify(A.ai.workspace({ ws: "newcontact", clientId: CLIENT, contactId: "c1" }));
+      expect(edit).toContain("Edit Otieno Were");
+      expect(edit).toContain("\"action\":\"contact.update\"");
+      expect(edit).toContain("\"value\":\"otieno@example.test\"");
     });
   });
 });

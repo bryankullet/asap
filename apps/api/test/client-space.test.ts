@@ -70,9 +70,9 @@ function makeDb(): FakeDb {
         { id: THEIRS, organization_id: OTHER_ORG, name: "Someone else's client", kind: "corporate", file_status: "cleared", created_at: iso, deleted_at: null },
       ],
       client_contacts: [
-        { id: "22000000-0000-4000-8000-00000000000a", organization_id: ORG, client_id: ACME, full_name: "Wanjiku Kamau", role_label: "Finance manager", email: "w@acme.test", phone: "+254700000000", is_primary: true },
-        { id: "22000000-0000-4000-8000-00000000000b", organization_id: ORG, client_id: ACME, full_name: "Peter Mwangi", role_label: "Operations", email: null, phone: null, is_primary: false },
-        { id: "22000000-0000-4000-8000-00000000000c", organization_id: ORG, client_id: SOLO, full_name: "Grace Otieno", role_label: null, email: null, phone: "+254711111111", is_primary: true },
+        { id: "22000000-0000-4000-8000-00000000000a", organization_id: ORG, client_id: ACME, full_name: "Wanjiku Kamau", role_label: "Finance manager", email: "w@acme.test", phone: "+254700000000", is_primary: true, deleted_at: null },
+        { id: "22000000-0000-4000-8000-00000000000b", organization_id: ORG, client_id: ACME, full_name: "Peter Mwangi", role_label: "Operations", email: null, phone: null, is_primary: false, deleted_at: null },
+        { id: "22000000-0000-4000-8000-00000000000c", organization_id: ORG, client_id: SOLO, full_name: "Grace Otieno", role_label: null, email: null, phone: "+254711111111", is_primary: true, deleted_at: null },
       ],
       insurers: [{ id: INSURER, organization_id: ORG, name: "Jubilee" }],
       policies: [
