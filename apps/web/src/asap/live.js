@@ -1939,7 +1939,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return {
         lead: windowed.length ? plural(windowed.length, "policy period ends", "policy periods end") + " within the " + lead + "-day renewal window — ASAP started " + (windowed.length === 1 ? "it" : "them") + " on its own." : "No policy period ends within the " + lead + "-day renewal window.",
         text: [
-          manual.length ? plural(manual.length, "renewal was", "renewals were") + " started by a person, outside the automatic window: " + manual.map((r) => r.title).join("; ") + "." : null,
+          manual.length ? plural(manual.length, "renewal was", "renewals were") + " started by a person, outside the automatic window" + (manual.length <= 3 ? ": " + manual.map((r) => r.title).join("; ") : "") + "." : null,
           waiting.length ? plural(waiting.length, "bundle is", "bundles are") + " waiting for approval." : null,
           stopped.length ? plural(stopped.length, "renewal has", "renewals have") + " stopped and need a person." : null,
           "ASAP checks the window every day.",
@@ -1971,14 +1971,17 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     if (/\b(start|prepare|begin|do|handle)\b/i.test(t)) {
-      if (target) return { lead: "That renewal is already in hand.", text: target.stateLabel + " — " + target.progress.done + " of " + target.progress.steps + " steps done.", ref: { ws: "renewal", runId: target.id, workItemId: target.workItemId } };
+      // The renewal of the policy named — not any open renewal for the same client.
       if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, raw);
       const pol = asPolicy(sub);
       if (pol.ambiguous) return clarifyClient(pol.ambiguous, raw);
-      if (pol.several) return clarifyPolicy(pol.several, raw);
+      if (pol.several && !inFront) return clarifyPolicy(pol.several, raw);
+      if ((pol.none || pol.noPolicy || pol.several) && inFront) return { lead: "That renewal is already in hand.", text: inFront.stateLabel + " — " + inFront.progress.done + " of " + inFront.progress.steps + " steps done.", ref: { ws: "renewal", runId: inFront.id, workItemId: inFront.workItemId } };
       if (pol.none || pol.noPolicy) return { lead: "Which policy?", text: "Name the client or the policy number. Nothing was started.", ref: null, keepWorkspace: true };
       const p = pol.policy;
       const year = db.policyYears.filter((y) => y.policyId === p.id).sort((a, b) => (a.to < b.to ? 1 : -1))[0];
+      const existing = year ? runs.find((r) => r.subjectId === year.id && r.state !== "done" && r.state !== "cancelled") : null;
+      if (existing) return { lead: "That renewal is already in hand.", text: existing.stateLabel + " — " + existing.progress.done + " of " + existing.progress.steps + " steps done.", ref: { ws: "renewal", runId: existing.id, workItemId: existing.workItemId } };
       if (!year) return { lead: "There is no period on file for " + p.number + ".", text: "Record the policy's current period first. Nothing was started.", ref: null, keepWorkspace: true };
       const client = db.clients.find((c) => c.id === p.clientId);
       return {
