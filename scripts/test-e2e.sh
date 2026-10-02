@@ -44,11 +44,23 @@ setsid "$BIN" "$WORK/postgrest.conf" > "$WORK/postgrest.log" 2>&1 & PIDS="$!"
 export CONNECTED_POSTGREST_URL="http://127.0.0.1:$REST_PORT" CONNECTED_JWT_SECRET="$SECRET" CONNECTED_OWNER_URL="$DATABASE_URL"
 export CONNECTED_API_PORT="$API_PORT" E2E_WEB_ORIGIN="http://127.0.0.1:$WEB_PORT"
 for _ in $(seq 1 50); do curl -s -o /dev/null "$CONNECTED_POSTGREST_URL/" && break; sleep 0.2; done
+# Opt-in (E2E_REAL_DOCUMENTS=1): the real extractor and a local storage stand-in, so a document can
+# be filed, read and reviewed end to end. Without it documents cannot be stored locally.
+if [ -n "${E2E_REAL_DOCUMENTS:-}" ]; then
+  EXTRACTOR_PORT="${E2E_EXTRACTOR_PORT:-8199}"; STORAGE_PORT="${E2E_STORAGE_PORT:-3397}"
+  EXTRACTOR_SECRET="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  APP_ENV=local EXTRACTOR_PORT="$EXTRACTOR_PORT" EXTRACTOR_SHARED_SECRET="$EXTRACTOR_SECRET" \
+    setsid python3 -m asap_extractor.main > "$WORK/extractor.log" 2>&1 & PIDS="$PIDS $!"
+  export E2E_STORAGE_PORT="$STORAGE_PORT" CONNECTED_SUPABASE_URL="http://127.0.0.1:$STORAGE_PORT" E2E_DISPATCH=1 \
+    CONNECTED_EXTRACTOR_URL="http://127.0.0.1:$EXTRACTOR_PORT" CONNECTED_EXTRACTOR_SECRET="$EXTRACTOR_SECRET"
+  for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$EXTRACTOR_PORT/health" && break; sleep 0.3; done
+fi
 setsid bash -c "cd apps/api && exec npx tsx test/connected/serve.ts" > "$WORK/api.log" 2>&1 & PIDS="$PIDS $!"
 VITE_PUBLIC_SUPABASE_URL="http://127.0.0.1:9" VITE_PUBLIC_SUPABASE_ANON_KEY="e2e-anon" \
   VITE_PUBLIC_API_BASE_URL="http://127.0.0.1:$API_PORT" VITE_PUBLIC_APP_ENV="local" \
   setsid bash -c "cd apps/web && exec npx vite --host 127.0.0.1 --port $WEB_PORT --strictPort" > "$WORK/web.log" 2>&1 & PIDS="$PIDS $!"
 for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" && curl -s -o /dev/null "http://127.0.0.1:$WEB_PORT/e2e/live.html" && break; sleep 0.3; done
 curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" || { cat "$WORK/api.log" >&2; exit 1; }
+trap 'cp "$WORK"/*.log /tmp/ 2>/dev/null || true; cleanup' EXIT
 
 E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"

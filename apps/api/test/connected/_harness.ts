@@ -10,6 +10,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import pino from "pino";
 import { fakeProvider, type FakeScript } from "../../src/ai/providers/fake.js";
 import { createApp } from "../../src/app.js";
+import { httpExtractor } from "../../src/documents/extractor.js";
 import type { Mailer } from "../../src/mail/index.js";
 import { createSupabaseFactory } from "../../src/supabase.js";
 
@@ -27,7 +28,9 @@ export const READER: Person = { id: "c0000000-0000-4000-8000-000000000001", emai
 export const ACME = "70000000-0000-4000-8000-00000000000a";
 export const JUBILEE = "60000000-0000-4000-8000-00000000000a";
 export const CIC = "60000000-0000-4000-8000-00000000000b";
-const SUPABASE = "http://supabase.connected.test";
+// The browser e2e run may point this at its local storage stand-in (serve.ts, E2E_STORAGE_PORT) so
+// signed upload URLs are reachable from the browser; the connected tests keep the unreachable host.
+const SUPABASE = process.env["CONNECTED_SUPABASE_URL"] ?? "http://supabase.connected.test";
 
 const b64 = (v: unknown) => Buffer.from(typeof v === "string" ? v : JSON.stringify(v)).toString("base64url");
 export function jwt(claims: Record<string, unknown>): string {
@@ -52,6 +55,8 @@ const transport: typeof fetch = async (input, init) => {
     );
   }
   if (url.startsWith(`${SUPABASE}/rest/v1`)) return fetch(url.replace(`${SUPABASE}/rest/v1`, REST), init);
+  // Storage only exists in the browser e2e run, where SUPABASE is the local stand-in itself.
+  if (url.startsWith(`${SUPABASE}/storage/v1`) && process.env["CONNECTED_SUPABASE_URL"]) return fetch(url, init);
   throw new Error(`connected test: unexpected request to ${url}`);
 };
 
@@ -78,6 +83,10 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
     executor: () => async () => {},
     bootToken: "connected",
     aiProvider: fakeProvider(askScript),
+    // The real extraction service, when the browser e2e run starts one (CONNECTED_EXTRACTOR_URL).
+    extractor: process.env["CONNECTED_EXTRACTOR_URL"]
+      ? httpExtractor({ url: process.env["CONNECTED_EXTRACTOR_URL"], secret: process.env["CONNECTED_EXTRACTOR_SECRET"] ?? "", timeoutMs: 60_000 })
+      : null,
     // The worker's surface (sweeps, event dispatch), reachable with the same server key.
     apiInternalKey: apiKey,
   });
