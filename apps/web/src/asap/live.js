@@ -862,7 +862,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       entry.extractionState = "failed";
       entry.error = describeApiError(e);
     }
-    ingested.set(entry.id ?? "local:" + file.name + ":" + file.size, entry);
+    entry.key = entry.id ?? "local:" + file.name + ":" + file.size;
+    ingested.set(entry.key, entry);
     return entry;
   };
   /** The card for files added in chat, read fresh each render from what the server last said. */
@@ -914,7 +915,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         pending: p.blocking.length
           ? { title: "Needs correcting before import", sections: [{ label: "NEEDS CONFIRMATION", items: needs }], external: "Nothing is created until this is put right.", editRef: { ws: "import" }, editLabel: "Review in Space", cancelLabel: "Not now", confirmLabel: "Correct", action: "nav.open", payload: { ref: { ws: "import" } }, actionId: "nav.open:import:" + p.batch.id }
           : { title: "I found " + plural(clients, "client", "clients") + " and " + plural(policies, "policy", "policies"), sections: [{ label: "FROM " + sheets[0].name.toUpperCase(), items: p.rows.slice(0, 6).map((r) => [r.clientName, r.policyNumber].filter(Boolean).join(" · ") + (r.outcome === "match" ? " (existing client)" : r.outcome === "create" ? " (new)" : " (needs your decision)")) }, ...(needs.length ? [{ label: "NEEDS CONFIRMATION", items: needs }] : [])], external: "Confirming creates these records with an audit entry against your name. Nothing is sent to anyone.", action: "import.commit", payload: { batchId: p.batch.id }, actionId: "import.commit:" + p.batch.id, confirmLabel: "Confirm records", editRef: { ws: "import" }, editLabel: "Review in Space", cancelLabel: "Not now", progress: "Creating the records…" },
-        ingest: docsPart.map((x) => x.id).filter(Boolean),
+        ingest: docsPart.map((x) => x.key),
       };
     }
     if (!docs.length) return { lead: "Nothing to add.", text: notes.join(" ") || "Choose PDF, JPG, PNG, CSV or Excel files." };
@@ -925,7 +926,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       lead: okN ? plural(okN, "file", "files") + " received — ASAP is reading " + (okN === 1 ? "it" : "them") : "Those files could not be filed.",
       text: [okN ? "Each moves from Reading to Read; anything ASAP reads waits for your confirmation before it becomes a record." : "", ...notes].filter(Boolean).join(" "),
       ref: { ws: "setup" },
-      ingest: entries.map((x) => x.id ?? "local:" + x.name).filter(Boolean),
+      ingest: entries.map((x) => x.key),
     };
   };
 

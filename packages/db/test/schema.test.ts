@@ -181,6 +181,7 @@ describe("Drizzle schema conventions", () => {
       "work_item_pins",
       "work_items",
       "workflow_approvals",
+      "workflow_receipts",
       "workflow_runs",
       "workflow_steps",
     ]);

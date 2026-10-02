@@ -222,20 +222,21 @@ const expectText = async (page, re, where = page.locator("body")) => {
     await expectText(page, "ASAP WILL", lastPending(page));
     await expectText(page, "No message is sent to anyone", lastPending(page));
   });
-  await step(page, "28-renewal-bundle-waiting-approval", async () => {
+  await step(page, "28-renewal-stops-safely", async () => {
     await confirm(page, "Start renewal");
     await settle(page, 1500);
     await expectText(page, /Renewal started|already in hand/);
-    await expectText(page, "One approval: the pack and both messages");
-    await expectText(page, "What ASAP did");
-    await expectText(page, /no verified address|No verified address/i);
+    // D-131: the approval card in the conversation, and the Space's one status and one action.
+    // This journey's client has no contact with an email, so the renewal stops safely before any
+    // approval is asked for (D-131); approval in chat is covered by e2e/supervision.e2e.mjs.
+    await expectText(page, "Stopped safely — information is missing");
+    await expectText(page, "Waiting for information: a client contact with an email address");
+    await expectText(page, "What ASAP has done");
   });
-  await step(page, "29-renewal-approved-carries-on", async () => {
-    await page.locator(".asap-pane").getByRole("button", { name: /Approve the renewal bundle|Approve/ }).first().click();
-    await settle(page, 2000);
-    await expectText(page, /Renewal bundle approved/);
-    await expectText(page, /Approved, not sent|approved, not sent/);
-    await expectText(page, "Deliver and track the insurer request");
+  await step(page, "29-renewal-blocked-offers-resume", async () => {
+    // No bundle exists to approve; the one action is to resume once the contact is added.
+    await expectText(page, "I've fixed it — resume");
+    if (await page.getByRole("button", { name: "Approve bundle" }).count()) throw new Error("an approval is offered for a bundle that cannot be used");
     const body = await page.locator("body").innerText();
     const claimsSent = body.split("\n").filter((l) => /\bsent\b/i.test(l) && !/\b(no|not|nothing|never|isn’t|isn't)\b/i.test(l));
     if (claimsSent.length) throw new Error("something is called sent: " + claimsSent[0]);

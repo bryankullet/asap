@@ -2151,3 +2151,16 @@ all read it, so they cannot disagree.
 - A finished run writes one completion receipt (`workflow_receipts`, 0063): intended and achieved
   outcome, dates, approvals, people, evidence, delivery evidence, unresolved items and links;
   searchable; never edited.
+
+## D-132 — Onboarding and book ingestion happen in the conversation
+After a brokerage is created there is no separate onboarding dashboard: Ask welcomes it ("Your
+brokerage is ready…") with four ways to start, and it can skip and come back. The hand-off screen
+watches the account and opens the workspace as soon as the brokerage exists; after 15 s it explains
+and offers Retry (same request key, so never a second brokerage) and Continue to workspace.
+Files are added with the + beside the box, by picker or drop, several at once: documents are hashed
+and filed straight to storage (the same bytes are recognised, not stored twice) and their card reads
+each file's state from the server — never "read" before extraction finishes; spreadsheets become a
+creation preview on the existing import, so nothing becomes a record without confirmation. The Setup
+Space shows progress, files, records found, what needs confirmation and one next action. Not yet: a
+filed document cannot be moved to another client, and the chat card's live state is per session (the
+Setup Space and the document records are the persisted view).
