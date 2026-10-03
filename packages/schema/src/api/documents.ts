@@ -726,3 +726,14 @@ export const applyConflictSchema = z.object({
   found: z.string().nullable(),
 });
 export type ApplyConflict = z.infer<typeof applyConflictSchema>;
+
+/**
+ * Filing a document (D-138): a person says what kind it is and which client it belongs to. Either
+ * or both. `clientId: null` unfiles it. Nothing is read from the document to decide this.
+ */
+export const documentClassifyRequestSchema = z
+  .object({ kind: DocumentKind.optional(), clientId: uuidSchema.nullable().optional() })
+  .refine((v) => v.kind !== undefined || v.clientId !== undefined, {
+    message: "Give a kind, a client, or both.",
+  });
+export type DocumentClassifyRequest = z.infer<typeof documentClassifyRequestSchema>;

@@ -122,3 +122,87 @@ def _wrap(text: str, width: int) -> list[str]:
     if line:
         out.append(line)
     return out
+
+
+# The fictional existing policy schedule (01_UX_TEST_APA_Existing_Policy_Schedule.pdf), as laid out
+# on the hosted file: a two-column field table, then the vehicle table (D-138).
+SCHEDULE_ROWS = [
+    ("Client", "UX TEST Karibu Logistics Ltd"),
+    ("Policy number", "UX TEST APA-MTR-2025-00931"),
+    ("Insurer", "APA Insurance (simulated)"),
+    ("Cover", "Commercial motor - comprehensive"),
+    ("Period", "1 December 2025 to 30 November 2026"),
+    ("Total sum insured", "KES 39,200,000"),
+    ("Renewal date", "30 November 2026"),
+    ("Broker reference", "UXTEST-BROKER-2026-001"),
+    ("Insured vehicles", "Five fictional fleet vehicles are listed below. Vehicle IDs and chassis references are test identifiers."),
+    ("Cover notes", "No actual cover exists. No claim acceptance, premium receipt, or insurer approval is implied."),
+]
+VEHICLES = [
+    ("KDM 811A", "Isuzu NPR 75", "2021", "TEST-CH-002", "KES 12,000,000"),
+    ("UXTEST-VAN-003", "Toyota Hiace", "2020", "TEST-CH-003", "KES 5,000,000"),
+    ("UXTEST-TRUCK-004", "Mitsubishi Canter", "2019", "TEST-CH-004", "KES 7,500,000"),
+]
+
+
+def build_schedule(layout: str) -> bytes:
+    doc = pymupdf.open()
+    page = doc.new_page(width=595.28, height=841.89)
+    y = 50.0
+    for text, size in [
+        ("ASAP lifecycle QA | Fictional data | No real insurance or financial effect", 8),
+        ("SIMULATED TEST FIXTURE - NOT ISSUED BY ANY INSURER OR AUTHORITY", 9),
+        ("UX TEST - APA existing motor policy schedule", 13),
+        ("Renewal context for the fictional five-vehicle fleet; policy expires 30 November 2026.", 9),
+    ]:
+        page.insert_text((50, y), text, fontsize=size, fontname="helv")
+        y += size + 9
+    if layout == "table":
+        html = "<table style='border-collapse:collapse;font-family:sans-serif;font-size:9px'>"
+        html += "<tr><th style='text-align:left;width:150px;padding:3px'>Field</th><th style='text-align:left;padding:3px'>Test value</th></tr>"
+        for label, value in SCHEDULE_ROWS:
+            html += f"<tr><td style='vertical-align:top;padding:3px'><b>{label}</b></td><td style='vertical-align:top;padding:3px'>{value}</td></tr>"
+        html += "</table><br/><table style='font-family:sans-serif;font-size:8px'><tr><th>Registration / test ID</th><th>Make / model</th><th>Year</th><th>Chassis test ref</th><th>Declared value</th></tr>"
+        for v in VEHICLES:
+            html += "<tr>" + "".join(f"<td style='padding:2px 6px'>{c}</td>" for c in v) + "</tr>"
+        html += "</table>"
+        page.insert_htmlbox(pymupdf.Rect(50, y, 545, y + 600), html)
+    else:
+        for label, value in SCHEDULE_ROWS:
+            page.insert_text((50, y), label, fontsize=9, fontname="hebo")
+            y += 12
+            for chunk in _wrap(value, 95):
+                page.insert_text((50, y), chunk, fontsize=9, fontname="helv")
+                y += 12
+            y += 4
+    return doc.tobytes()
+
+
+# The fictional premium invoice and receipt, as laid out on the hosted files (D-138).
+MONEY_DOCS = {
+    "invoice": ("UX TEST - CIC premium invoice", "Fictional invoice for testing financial record handling; no payment is requested.", [
+        ("Insured", "UX TEST Karibu Logistics Ltd"), ("Policy", "UX TEST CIC-MTR-2026-00318"),
+        ("Invoice reference", "CIC-INV-UXTEST-20261201"), ("Issue date", "1 December 2026"), ("Due date", "15 December 2026"),
+        ("Annual total premium", "KES 4,850,000"), ("Payment received", "KES 0 as at invoice issue"), ("Balance due", "KES 4,850,000"),
+    ]),
+    "receipt": ("UX TEST - premium receipt evidence", "Fictional partial receipt for reconciliation testing; no funds moved.", [
+        ("Payer", "UX TEST Karibu Logistics Ltd"), ("Payee", "CIC Insurance (simulated)"), ("Policy", "UX TEST CIC-MTR-2026-00318"),
+        ("Invoice reference", "CIC-INV-UXTEST-20261201"), ("Receipt reference", "UXTEST-RECEIPT-20261215-001"), ("Date", "15 December 2026"),
+        ("Amount recorded", "KES 4,000,000"), ("Invoice total", "KES 4,850,000"), ("Expected remaining balance", "KES 850,000"),
+    ]),
+}
+
+
+def build_money(kind: str) -> bytes:
+    title, sub, table = MONEY_DOCS[kind]
+    doc = pymupdf.open()
+    page = doc.new_page(width=595.28, height=841.89)
+    y = 50.0
+    for text, size in [("ASAP lifecycle QA | Fictional data | No real insurance or financial effect", 8), ("SIMULATED TEST FIXTURE - NOT ISSUED BY ANY INSURER OR AUTHORITY", 9), (title, 13), (sub, 9)]:
+        page.insert_text((50, y), text, fontsize=size, fontname="helv")
+        y += size + 9
+    html = "<table style='border-collapse:collapse;font-family:sans-serif;font-size:9px'><tr><th style='text-align:left;width:150px;padding:3px'>Field</th><th style='text-align:left;padding:3px'>Test value</th></tr>"
+    for label, value in table:
+        html += f"<tr><td style='vertical-align:top;padding:3px'><b>{label}</b></td><td style='vertical-align:top;padding:3px'>{value}</td></tr>"
+    page.insert_htmlbox(pymupdf.Rect(50, y, 545, y + 500), html + "</table>")
+    return doc.tobytes()

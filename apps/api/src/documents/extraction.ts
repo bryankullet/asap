@@ -36,7 +36,7 @@ export async function extractDocument(
 
   const found = await db
     .from("documents")
-    .select("id, organization_id, filename, mime_type, storage_path, extraction_state")
+    .select("id, organization_id, filename, mime_type, storage_path, extraction_state, kind")
     .eq("id", documentId)
     .is("deleted_at", null)
     .maybeSingle();
@@ -50,6 +50,7 @@ export async function extractDocument(
     mime_type: string;
     storage_path: string;
     extraction_state: string;
+    kind: string;
   };
 
   /*
@@ -197,6 +198,8 @@ export async function extractDocument(
        * quotation — there is no OCR in this deployment.
        */
       extraction_error: result.needsManualReview,
+      // The kind its heading names, only where nobody has said what it is (D-138).
+      ...(doc.kind === "other" && result.suggestedKind ? { kind: result.suggestedKind } : {}),
     })
     .eq("id", doc.id);
   if (done.error) return await failRecording(db, logger, doc.id, "state", done.error);

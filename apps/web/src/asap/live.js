@@ -1532,6 +1532,50 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         return fail(e);
       }
     },
+    /*
+     * One term's decision (D-138): accept it as read, correct it to the value typed, or reject it
+     * as not what the document says. One term at a time — never a blanket approval.
+     */
+    "doc.classify": async (p) => {
+      const d = state.documents.get(p.documentId);
+      if (!d) return { ok: false, error: "That document is not open. Nothing was changed." };
+      const kind = p.kind || d.document.kind;
+      const clientId = p.clientId === undefined ? d.document.clientId : p.clientId || null;
+      if (kind === d.document.kind && clientId === (d.document.clientId ?? null)) return ok("Filing unchanged");
+      try {
+        const res = await api.classifyDocument(p.documentId, { kind, clientId });
+        state.documents.set(p.documentId, { ...d, document: { ...d.document, kind: res.document.kind, clientId: res.document.clientId ?? null } });
+        const row = db.documents.find((x) => x.id === p.documentId);
+        if (row) Object.assign(row, { kind: res.document.kind, clientId: res.document.clientId ?? null });
+        const client = clientId ? db.clients.find((c) => c.id === clientId) : null;
+        return ok("Filed" + (client ? " under " + client.name : " without a client"));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+    "doc.termDecide": async (p) => {
+      const decision = p.decision || "accept";
+      const reading = state.quoteReadings.get(p.documentId);
+      const term = reading?.proposals?.find((t) => t.id === p.proposalId);
+      if (!term) return { ok: false, error: "That term is not on this document any more. Refresh records; nothing was changed." };
+      const typed = String(p.value ?? "").trim();
+      const action =
+        decision === "reject" ? { action: "reject_proposal", proposalId: term.id }
+        : decision === "correct" && typed && typed !== (term.proposedValue ?? "") ? { action: "correct_proposal", proposalId: term.id, correctedValue: typed }
+        : decision === "correct" ? null
+        : { action: "accept_proposal", proposalId: term.id };
+      if (!action) return { ok: false, error: "Type the corrected value first — it is the same as what was read. Nothing was changed." };
+      try {
+        const res = await api.quotationReview(p.documentId, action);
+        if (res.outcome === "blocked") return { ok: false, error: (res.reason || "That could not be recorded.") + " Nothing was changed." };
+        if (res.reading) state.quoteReadings.set(p.documentId, res.reading);
+        const said = decision === "reject" ? "rejected" : action.action === "correct_proposal" ? "corrected" : "confirmed";
+        state.docNotice = { documentId: p.documentId, title: term.label + " " + said, text: "Recorded with your name. The comparison shows it as " + (decision === "reject" ? "not taken from this document." : "confirmed.") };
+        return ok(term.label + " " + said);
+      } catch (e) {
+        return fail(e);
+      }
+    },
     "doc.review": async (p) => {
       const d = state.documents.get(p.documentId);
       if (!d) return { ok: false, error: "That document is no longer on file." };
@@ -1666,7 +1710,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "doc.apply": async (p) => {
       const preview = state.applyPreviews.get(p.documentId);
       if (!preview) return { ok: false, error: "Preview the change first. Nothing was written." };
-      const usable = preview.fields.filter((f) => !f.blockedBecause && !f.unchanged && f.proposedValue);
+      // Evidence only (D-138): the confirmed values the record already holds, filed as their source.
+      const usable = preview.fields.filter((f) => !f.blockedBecause && (p.evidenceOnly ? f.unchanged : !f.unchanged) && f.proposedValue);
       if (!usable.length) return { ok: false, error: "There is nothing to apply. Nothing was written." };
       if (usable.some((f) => f.fieldKey === "premium") && !p.premiumBasis) return { ok: false, error: "Say whether the premium is gross or total payable. Nothing was written." };
       try {
@@ -1678,8 +1723,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         });
         state.applyPreviews.delete(p.documentId);
         await refresh();
-        const text = plural(usable.length, "value", "values") + " applied to " + preview.target.label;
-        state.docNotice = { documentId: p.documentId, title: text, text: "Written with an audit entry against your name. The record now shows these values, with this document as their evidence." };
+        const text = p.evidenceOnly ? "Filed as evidence for " + preview.target.label : plural(usable.length, "value", "values") + " applied to " + preview.target.label;
+        state.docNotice = { documentId: p.documentId, title: text, text: p.evidenceOnly ? "Recorded with an audit entry against your name. No value on the record changed; this document is now the evidence behind " + plural(usable.length, "value", "values") + "." : "Written with an audit entry against your name. The record now shows these values, with this document as their evidence." };
         return ok(text);
       } catch (e) {
         return fail(e);
@@ -1812,6 +1857,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       };
     }
     state.db = db;
+    // The terms ASAP read from it, so each can be confirmed on its own (D-138).
+    if (ref?.ws === "document" && ref.documentId && state.documents.get(ref.documentId)?.document?.extractionState === "extracted") void loadQuoteReading(ref.documentId);
     // A document opens its own review, attached to a client or not. One not read yet in this
     // session is fetched; one that does not exist says so. Never the Today Space instead.
     if (ref?.ws === "document" && !state.documents.has(ref.documentId)) {

@@ -126,6 +126,8 @@ import {
   spacePlanResponseSchema,
   workListResponseSchema,
   type WorkView,
+  documentSummarySchema,
+  type DocumentClassifyRequest,
 } from "@asap/schema";
 import { z } from "zod";
 import { env } from "../env.js";
@@ -350,6 +352,9 @@ export const api = {
   /** Tells the API the bytes arrived: the upload is direct to storage, so it cannot know. */
   documentFiled: (id: string) =>
     request("POST", `/documents/${id}/filed`, documentFiledResponseSchema, {}),
+  /** File a document: its kind and its client, as a person says (D-138). */
+  classifyDocument: (id: string, input: DocumentClassifyRequest) =>
+    request("POST", `/documents/${id}/classify`, z.object({ document: documentSummarySchema }), input),
   /** The records this document might be about, each with why ASAP believes it. */
   applyTargets: (id: string) =>
     request("GET", `/documents/${id}/apply-targets`, applyTargetsResponseSchema),
