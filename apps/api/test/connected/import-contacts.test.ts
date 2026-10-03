@@ -71,5 +71,27 @@ describe("an import naming a contact the client already has", () => {
     const [premium] =
       await sql`select pp.premium_amount from policy_periods pp join policies p on p.id = pp.policy_id where p.policy_number = ${`UX-${tag}-1`}`;
     expect(premium!["premium_amount"]).toBeNull();
+
+    // D-137: the same policy imported again is previewed as already on file — not "1 new policy" —
+    // and the commit writes nothing more. (Different bytes: the same file again is refused outright.)
+    const again = await call(AMINA, "POST", "/imports", {
+      filename: `16c_${tag}.csv`,
+      content: Buffer.from(Buffer.from(csv(`UX-${tag}-1`), "base64").toString() + "\n").toString(
+        "base64",
+      ),
+      mimeType: "text/csv",
+    });
+    expect(again.status).toBe(201);
+    expect(again.body.rows[0].policyStatus).toBe("on_file");
+    expect(again.body.summary.policiesToCreate).toBe(0);
+    const policiesBefore =
+      await sql`select count(*)::int as n from policies where policy_number = ${`UX-${tag}-1`}`;
+    const done = await call(AMINA, "POST", `/imports/${again.body.batch.id}/commit`, {});
+    expect(done.body.batch.policiesCreated).toBe(0);
+    expect(
+      (
+        await sql`select count(*)::int as n from policies where policy_number = ${`UX-${tag}-1`}`
+      )[0]!["n"],
+    ).toBe(policiesBefore[0]!["n"]);
   });
 });

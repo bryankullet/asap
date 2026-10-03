@@ -344,6 +344,17 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
      * times, and the duplicate check would only catch it on the second import.
      */
     const seenInFile = new Map<string, string>();
+    // The matched client's policies, read once per client, to say before the commit what it will
+    // actually write (D-137): a policy already on file is not "1 new policy".
+    const policiesOf = new Map<string, { id: string; cls: string; number: string; periods: string[] }[]>();
+    const policiesInFile = new Set<string>();
+    const readPolicies = async (clientId: string) => {
+      if (!policiesOf.has(clientId)) {
+        const q = await db.from("policies").select("id, class_of_business, policy_number, policy_periods(period_start, period_end)").eq("organization_id", org.id).eq("client_id", clientId).is("deleted_at", null);
+        policiesOf.set(clientId, ((q.data ?? []) as { id: string; class_of_business: string | null; policy_number: string | null; policy_periods: { period_start: string; period_end: string }[] }[]).map((x) => ({ id: x.id, cls: (x.class_of_business ?? "").trim(), number: (x.policy_number ?? "").trim(), periods: (x.policy_periods ?? []).map((p) => p.period_start + "/" + p.period_end) })));
+      }
+      return policiesOf.get(clientId)!;
+    };
     const rowInserts: Record<string, unknown>[] = [];
     const previews: Omit<ImportRowPreview, "id">[] = [];
 
@@ -394,10 +405,24 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         }
       }
 
+      let policyStatus: ImportRowPreview["policyStatus"] = "none";
+      if ((outcome === "match" || outcome === "create") && r.policyNumber && r.periodStart && r.periodEnd && r.insurerName) {
+        const clientKey = matchedClientId ?? `new:${r.clientName.trim().toLowerCase()}`;
+        const cls = (r.classOfBusiness ?? "").trim();
+        const fileKey = [clientKey, cls, r.policyNumber.trim(), r.periodStart, r.periodEnd].join("|");
+        if (policiesInFile.has(fileKey)) policyStatus = "repeated";
+        else {
+          policiesInFile.add(fileKey);
+          const same = matchedClientId ? (await readPolicies(matchedClientId)).find((x) => x.cls === cls && x.number === r.policyNumber!.trim()) : undefined;
+          policyStatus = !same ? "new" : same.periods.includes(r.periodStart + "/" + r.periodEnd) ? "on_file" : "new_period";
+        }
+      }
+
       previews.push({
         lineNumber: r.lineNumber,
         outcome,
         contactStatus,
+        policyStatus,
         problem,
         clientName: r.clientName || null,
         contactName: r.contactName,
@@ -443,6 +468,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         matchedClientId: null,
         candidates: [],
         contactStatus: "none",
+        policyStatus: "none",
       });
       rowInserts.push({
         organization_id: org.id,
@@ -817,9 +843,7 @@ function summarise(rows: ImportRowPreview[]) {
     ).size,
     // Only people the matched client does not already have, and each person once per file.
     contactsToCreate: rows.filter((r) => (r.outcome === "create" || r.outcome === "match") && r.contactStatus === "new").length,
-    policiesToCreate: rows.filter(
-      (r) => (r.outcome === "create" || r.outcome === "match") && r.policyNumber,
-    ).length,
+    policiesToCreate: rows.filter((r) => (r.outcome === "create" || r.outcome === "match") && r.policyStatus === "new").length,
     needsReview: rows.filter((r) => r.outcome === "needs_review").length,
     invalid: rows.filter((r) => r.outcome === "invalid").length,
   };

@@ -124,6 +124,13 @@ export const importRowPreviewSchema = z.object({
    * person on an earlier line of this file, `none` means the row names no contact.
    */
   contactStatus: z.enum(["new", "on_file", "repeated", "none"]).default("none"),
+  /**
+   * The row's policy against the matched client's own policies, by the rule the commit applies
+   * (same class and number is the same policy; same dates is the same period) (D-137): `new` would
+   * be created, `new_period` adds a period to a policy on file, `on_file` is already recorded and
+   * writes nothing, `repeated` is an earlier line of this file, `none` names no complete policy.
+   */
+  policyStatus: z.enum(["new", "new_period", "on_file", "repeated", "none"]).default("none"),
 });
 export type ImportRowPreview = z.infer<typeof importRowPreviewSchema>;
 

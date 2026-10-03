@@ -182,3 +182,27 @@ describe("setting one", () => {
     expect(JSON.stringify(rows[1]!["previous_state"])).toMatch(/cheapest_when_like_for_like/);
   });
 });
+
+import { renewalOperational as _ro } from "../src/workflows/renewal-view.js";
+describe("a renewal nothing has started on reads as queued, not working (D-137)", () => {
+  it("says queued when every step is pending", () => {
+    const steps = ["detect", "completeness"].map((key) => ({ key, state: "pending" }));
+    const v = {
+      run: { state: "running", currentStep: "detect", exception: null, facts: { origin: "window" }, startedAt: "2026-10-03T14:37:44Z" },
+      steps,
+      window: { leadDays: 60, followUpDays: 5, escalateDaysBeforeExpiry: 14 },
+      now: new Date("2026-10-03T14:40:00Z"),
+      approval: null,
+      communications: [],
+      owner: null,
+      startedByName: null,
+      periodEnd: "2026-11-30",
+      insurerName: "APA",
+      clientName: "UX TEST Karibu Logistics Ltd",
+      delivery: null,
+    } as unknown as Parameters<typeof _ro>[0];
+    const o = _ro(v);
+    expect(o.status).toBe("Queued — ASAP starts on its next pass");
+    expect(o.currentWork.title).toBe("Queued");
+  });
+});

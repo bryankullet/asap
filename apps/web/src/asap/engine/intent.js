@@ -406,8 +406,10 @@ WS.policy = (r) => {
  * is never that link, so none of them can turn this answer green.
  */
 export function coverVerdict({ reg, item, year }) {
-  if (!year) return { state: 'no_policy', label: 'Not on cover', covered: false, why: (reg || 'This vehicle') + ' has no policy period on file, so nothing covers it.' };
-  if (!item) return { state: 'not_scheduled', label: 'Not on cover', covered: false, why: (reg || 'This vehicle') + ' isn’t on any insurer schedule we hold. A request from the client, a logbook or an email doesn’t prove cover — only the insurer’s confirmation does.' };
+  // Absence of records is not absence of cover (D-137): ASAP can say what it holds, never that a
+  // vehicle is uninsured. Both stay "Cover not verified" until the insurer's confirmation is linked.
+  if (!year) return { state: 'no_policy', label: 'Cover not verified', covered: false, why: 'ASAP holds no policy period for ' + (reg || 'this vehicle') + ', so it cannot confirm cover either way. That is not the same as the vehicle being uninsured — only the insurer’s written confirmation, linked here, settles it.' };
+  if (!item) return { state: 'not_scheduled', label: 'Cover not verified', covered: false, why: (reg || 'This vehicle') + ' is not on any insurer schedule ASAP holds, so cover cannot be confirmed. A request from the client, a logbook or an email doesn’t prove cover — only the insurer’s confirmation does.' };
   if (!year.confirmationEvidenceId) return { state: 'unconfirmed', label: 'Unconfirmed', covered: false, why: reg + ' is on the schedule, but no insurer confirmation is linked to this period. Until one is, cover is not confirmed.' };
   return { state: 'covered', label: 'On cover', covered: true, why: null };
 }
@@ -426,12 +428,12 @@ WS.coverage = (r) => {
           : verdict.why),
       { t: 'facts', items: [['Vehicle', it ? it.reg + ' · ' + it.make : (reg || '—')],
         ['Sum insured', it ? fmtMoney(it.value) : 'not declared'],
-        ['Policy', year ? byId('policies', year.policyId).number : 'none'],
+        ['Policy', year ? byId('policies', year.policyId).number : 'None on file in ASAP'],
         ['Insurer confirmation', confirmed ? 'Linked' : 'Missing'],
         ['Excess', it ? fmtMoney(Math.max(30000, it.value * 0.025)) : '—'],
         ['Checked as', sel.user(S.session().userId).name]] },
       rows('Evidence behind this answer', [
-        year && year.confirmationEvidenceId ? { title: sel.evidence(year.confirmationEvidenceId).label, note: 'Insurer confirmation', badge: 'Verified', badgeTone: tone.ok, evidenceId: year.confirmationEvidenceId } : { title: 'No insurer confirmation', note: 'Nothing in the records confirms this cover.', badge: 'Missing', badgeTone: tone.bad },
+        year && year.confirmationEvidenceId ? { title: sel.evidence(year.confirmationEvidenceId).label, note: 'Insurer confirmation', badge: 'Verified', badgeTone: tone.ok, evidenceId: year.confirmationEvidenceId } : { title: 'No insurer confirmation on file', note: 'Nothing ASAP holds confirms or rules out this cover.', badge: 'Missing', badgeTone: tone.bad },
         year && year.scheduleDocumentId ? { title: byId('documents', year.scheduleDocumentId).name, note: 'Schedule ' + sv(year.scheduleVersion), badge: 'Source', badgeTone: tone.ok, action: { a: 'open', ref: { ws: 'document', documentId: year.scheduleDocumentId } } } : null
       ].filter(Boolean)),
       // Over live records servicing is not connected: no button that cannot work, and nothing that

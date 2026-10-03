@@ -2259,3 +2259,34 @@ missing.
   confirmed. A status warning ("indicative terms only", "no cover is in force") is raised at the
   top of the comparison and among the risks. When nothing was read, the comparison says "Not
   extracted — check the document": ASAP cannot establish that a document does not state something.
+
+## D-137
+
+**Hosted lifecycle findings, batch A: nothing on screen claims more than the records show.**
+
+- *Cover.* When ASAP holds no policy period, or the vehicle is on no schedule it holds, the cover
+  check says "Cover not verified", never "Not on cover". Missing records are not evidence of no
+  cover. Only an insurer confirmation linked to the period makes it "On cover".
+- *Renewal progress.* A run found by the sweep is advanced in the same sweep. Before, the database
+  stamped its `next_run_at` just after the sweep's `now`, so the run sat at "0 of 11" until the next
+  pass. A run whose steps have not started reads "Queued", not "Checking the renewal date…".
+- *Ask grounding.*
+  - A document named by its filename opens from the records, whether or not it is filed to a client.
+  - "Show <client> and its policies and contacts" answers from the same contacts and policies the
+    client Space shows.
+- *Prohibitions.* What the person tells ASAP not to do ("do not…", "don't…", "never…", "without…",
+  "preview only") is removed before routing and honoured. A read-only request is never refused
+  because of a negative money clause, and is never turned into a due-date change or a cover check.
+  Setting a due date needs a verb such as set or change; "premium due" is a question about money.
+- *Unbuilt steps.*
+  - Placement, reconciliation, money, servicing and the other steps that are not connected are never
+    offered as buttons. A gate into one becomes a note saying it is not available yet.
+  - Ask says the step is unavailable and opens no empty workspace.
+- *Claim facts.* An aside that forbids something ("(but do not register)") and a leading
+  "For <client>," are removed before the clauses are read. An instruction-first request then keeps
+  the collision, the time, the vehicle, the damage and the injury note, the same as a facts-first one.
+- *Import.*
+  - Each preview row says whether its policy is `new`, `new_period`, `on_file` or `repeated`, by the
+    same rule the commit uses. "New policies" counts only new policies.
+  - A chat confirmation card confirms only the batch it showed. Once that batch is imported, from
+    any surface, the card shows as done.

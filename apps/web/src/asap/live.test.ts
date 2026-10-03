@@ -364,6 +364,10 @@ describe("live mode", () => {
     // The imported policy is not readable back in this test's fixtures, so success is not claimed.
     expect(commitImport).toHaveBeenCalledWith("80000000-0000-4000-8000-000000000001", { resolutions: [] });
     expect(text(A.ai.workspace({ ws: "import" }))).toMatch(/cannot be read back|Imported book\.csv/);
+    // D-137: the chat card for the same batch, pressed after the Space imported it, is done — not Retry.
+    const late = (await A.records.act("import.commit", { batchId: "80000000-0000-4000-8000-000000000001" })) as { ok: boolean; error?: string };
+    expect(late.ok).toBe(true);
+    expect(commitImport).toHaveBeenCalledTimes(1);
 
     // Quotation work and a claim, through the API.
     expect(A.ai.workspace({ ws: "quote", clientId: CLIENT }).title).toMatch(/quotation/);
@@ -1522,10 +1526,43 @@ describe("live mode", () => {
       expect(createWorkItem).not.toHaveBeenCalledWith(expect.objectContaining({ incidentSummary: expect.stringMatching(/contact/i) }));
     });
 
+    it("Ask opens a document named by its file, filed to a client or not, and shows a client's own contacts and policies (D-137)", async () => {
+      const A = await live();
+      const doc = (await A.ai.route("Open ASAP_QA_TEST_20261002.pdf for review", {})) as { lead: string; text: string; ref: { ws: string; documentId: string } };
+      expect(doc.ref).toEqual({ ws: "document", documentId: UNDOC });
+      expect(doc.lead).toBe("Opening ASAP_QA_TEST_20261002.pdf.");
+      expect(doc.text).toMatch(/not filed to a client yet/);
+      const filed = (await A.ai.route("open schedule.pdf", {})) as unknown as { ref: { documentId: string } };
+      expect(filed.ref.documentId).toBe(DOC);
+      const c = (await A.ai.route("Show Tausi Hauliers Ltd and its policies and contacts", {})) as { lead: string; text: string; ref: unknown };
+      expect(c.lead).toBe("Tausi Hauliers Ltd: 2 policies and 1 contact on file.");
+      expect(c.text).toMatch(/Contacts: Otieno Were \(Finance\) — primary\./);
+      expect(c.text).toMatch(/TH-MTR-001/);
+      expect(c.text).not.toMatch(/no contact/i);
+      expect(c.ref).toEqual({ ws: "client", clientId: CLIENT });
+    });
+
+    it("what the person forbids is taken out before routing: read-only asks stay read-only (D-137)", async () => {
+      const A = await live();
+      const rec = (await A.ai.route("Help me reconcile the CIC statement for Tausi Hauliers Ltd. Preview only; do not record payments or move money", {})) as { lead: string; text: string; ref: unknown; pending?: unknown };
+      expect(rec.lead).toBe("Reconciliation is not available in ASAP yet.");
+      expect(rec.text).toMatch(/What you asked ASAP not to do was not done/);
+      expect(rec.ref).toBeNull();
+      expect(rec.pending).toBeUndefined();
+      const due = (await A.ai.route("Show the premium due for Tausi Hauliers Ltd and preview the matching receipt; do not record a payment or move money", {})) as { lead: string };
+      expect(due.lead).not.toBe("Due when?");
+      expect(due.lead).not.toMatch(/does not move money/);
+      const pl = (await A.ai.route("Prepare placement with APA for Tausi Hauliers Ltd — do not bind cover or contact anyone", {})) as { lead: string; ref: unknown };
+      expect(pl.lead).toBe("Placement is not available in ASAP yet.");
+      expect(pl.ref).toBeNull();
+    });
+
     it("cover check: a vehicle on no schedule is not on cover, and live mode offers no servicing or TOR button", async () => {
       const A = await live();
       const ws = A.ai.workspace({ ws: "coverage", reg: "KDN 482Q", clientId: CLIENT });
-      expect(ws.statusLabel).toBe("Not on cover");
+      const t0 = text;
+      expect(ws.statusLabel).toBe("Cover not verified");
+      expect(t0(ws)).not.toMatch(/Not on cover|nothing covers it/);
       const t = text(ws);
       expect(t).toContain("A request from the client, a logbook or an email doesn’t prove cover");
       expect(t).toContain("ASAP has not requested time on risk and has not created any servicing work");
@@ -1585,5 +1622,15 @@ describe("live mode", () => {
       expect(r.ref).toBeNull();
       expect(r.lead).toMatch(/don’t hold any quotation documents|only one quotation/);
     });
+  });
+});
+
+describe("withoutProhibitions (D-137)", () => {
+  it("drops each forbidden clause and says something was forbidden", async () => {
+    const { withoutProhibitions } = await import("./live.js");
+    expect(withoutProhibitions("Help me reconcile CIC. Preview only; do not record payments or move money")).toEqual({ text: "Help me reconcile CIC.", prohibited: true });
+    expect(withoutProhibitions("prepare (but do not register) a claim draft").text).toBe("prepare a claim draft");
+    expect(withoutProhibitions("Prepare placement with APA, don't bind cover").text).toBe("Prepare placement with APA");
+    expect(withoutProhibitions("What clients do I have?")).toEqual({ text: "What clients do I have?", prohibited: false });
   });
 });

@@ -527,6 +527,31 @@ const NOT_CONNECTED = {
  * draw them from built-in example content (sample insurers, sample replies, sample rules), which
  * over real records would be invented values — so live mode shows what is missing instead.
  */
+/**
+ * A request with what it forbids taken out: "Help me reconcile CIC. Preview only; do not record
+ * payments or move money" → "Help me reconcile CIC." (D-137). A prohibition runs from "do not",
+ * "don't", "never", "without" or "but not" to the end of its clause; "preview only" and "read only"
+ * are dropped as words. `prohibited` says something was forbidden, so the answer can say it was not
+ * done. Exported for its tests.
+ */
+export function withoutProhibitions(text) {
+  let prohibited = false;
+  const out = text
+    .replace(/\(?\s*\b(?:but\s+)?(?:do\s+not|don['’]t|dont|never|without|but\s+not)\b[^.;:!?()]*\)?/gi, () => {
+      prohibited = true;
+      return " ";
+    })
+    .replace(/\b(?:preview|read)[\s-]only\b/gi, () => {
+      prohibited = true;
+      return " ";
+    })
+    .replace(/\s*([,;:])\s*(?=[,;:.!?]|$)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .trim();
+  return { text: out || text, prohibited };
+}
+
 const NOT_CONNECTED_WS = {
   compare: "Quote comparison",
   placement: "Placement",
@@ -1171,9 +1196,18 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       return previewImport(null);
     },
     "import.basis": (p) => previewImport(p.basis),
-    "import.commit": async () => {
+    "import.commit": async (payload) => {
       const p = state.importPreview;
-      if (!p) return { ok: false, error: "Read a file first." };
+      const asked = payload?.batchId ?? null;
+      /*
+       * A confirmation card for a batch already imported (from the Space, or an earlier click) is
+       * done, not an error (D-137): it says so, and never offers Retry or "Read a file first".
+       */
+      const already = asked ? (state.committedBatches ??= new Map()).get(asked) : null;
+      if (already) return ok("Already imported — " + already, { detail: "These records were created once, with an audit entry. Nothing more was written." });
+      if (!p) return { ok: false, error: "That file is no longer open for import. Attach it again to preview it; nothing was written." };
+      // The card confirms the batch it showed — never whichever file happens to be open now.
+      if (asked && p.batch.id !== asked) return { ok: false, error: "That confirmation was for a different file. Review the file open in Import instead; nothing was written." };
       try {
         const resolutions = [...state.importResolutions.entries()].map(([lineNumber, clientId]) => ({ lineNumber, clientId }));
         const res = await api.commitImport(p.batch.id, { resolutions });
@@ -1188,6 +1222,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         const missing = expected.filter((n) => !onFile.has(n));
         state.importResult = { ...res, unverified: missing.length ? "These policies were saved but aren’t showing yet: " + missing.join(", ") + ". Refresh records; if they are still missing, tell your administrator." : "" };
         const b = res.batch;
+        (state.committedBatches ??= new Map()).set(b.id ?? p.batch.id, b.filename);
+        // Any chat card still offering to confirm this batch is now done, wherever it was confirmed.
+        for (const m of db.conversations.find((c) => c.id === "cnv_main")?.messages ?? [])
+          if (m?.pending && m.pending.actionId === "import.commit:" + p.batch.id && ["open", "failed"].includes(m.pending.status))
+            m.pending = { ...m.pending, status: "already", statusText: "Imported — " + b.filename + ". Nothing more to confirm." };
         const parts = [b.policiesCreated ? plural(b.policiesCreated, "policy", "policies") : null, b.clientsCreated ? plural(b.clientsCreated, "new client", "new clients") : "no new clients"].filter(Boolean);
         // Some of it written and some not is its own outcome — never a success, never a plain failure.
         const failed = (res.failures ?? []).length;
@@ -1920,6 +1959,12 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
           return note("amber", (b.label || "Message") + " — cannot be sent", "Sending is off because " + problems.join("; ") + ". Nothing has been sent.");
       }
       if (b && b.t === "gate" && b.action === "email.send") return null;
+      // Never offer a step into a part of ASAP that is not built yet (D-137): a button that opens
+      // "not connected" reads as a workflow that exists. Say what is unavailable instead.
+      const offTo = (x) => { const w = x?.nav?.ws ?? x?.action?.ref?.ws ?? x?.ref?.ws; return w && NOT_CONNECTED_WS[w] ? NOT_CONNECTED_WS[w] : null; };
+      if (b && b.t === "gate" && offTo(b))
+        return note("amber", offTo(b) + " — not available in ASAP yet", "This step is not built into ASAP yet, so nothing was prepared or recorded for it. Do it outside ASAP and keep the evidence on file.");
+      if (b && Array.isArray(b.items)) b = { ...b, items: b.items.map((it) => (it && typeof it === "object" && offTo(it) ? { ...it, action: null, note: [it.note, offTo(it) + " is not available in ASAP yet"].filter(Boolean).join(" · ") } : it)) };
       return clean(b);
     }).filter(Boolean);
     ws.title = clean(ws.title);
@@ -2065,6 +2110,64 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
    * cover (from the server's cover check, never the vehicle check), expiry, and a client's
    * policies. A vehicle registration in the question leaves it to the vehicle check.
    */
+  /**
+   * "Open 10_UX_TEST_…_Police_Abstract.pdf for review": a document named by its file, opened from
+   * the same records the Spaces read — filed to a client or not (D-137). Never "no such document"
+   * for a file the brokerage holds.
+   */
+  function documentFromAsk(raw) {
+    const low = raw.toLowerCase();
+    const named = (n) => {
+      const f = (n || "").toLowerCase();
+      const stem = f.replace(/\.[a-z0-9]{2,5}$/, "");
+      return f && (low.includes(f) || (stem.length >= 6 && /[_.-]/.test(stem) && low.includes(stem)));
+    };
+    const byId = /\bopen document ([0-9a-f-]{36})\b/i.exec(raw)?.[1];
+    const hits = byId ? db.documents.filter((d) => d.id === byId) : db.documents.filter((d) => named(d.name));
+    if (!hits.length) return null;
+    // The longest name wins when one filename contains another.
+    if (byId) return { lead: "Opening " + hits[0].name + ".", text: "Review what ASAP read from it, value by value; nothing is confirmed for you.", ref: { ws: "document", documentId: hits[0].id }, chips: LIVE_CHIPS };
+    const top = Math.max(...hits.map((d) => d.name.length));
+    const best = hits.filter((d) => d.name.length === top);
+    if (best.length > 1)
+      return { lead: "More than one document has that name.", text: "Choose which one. Nothing was opened.", clarify: { question: "Document", options: best.map((d) => ({ label: d.name + (d.clientId ? " — " + (db.clients.find((c) => c.id === d.clientId)?.name ?? "client") : " — not filed to a client"), text: "Open document " + d.id })) }, ref: null, keepWorkspace: true };
+    const d = best[0];
+    const client = d.clientId ? db.clients.find((c) => c.id === d.clientId) : null;
+    return {
+      lead: "Opening " + d.name + ".",
+      text: (client ? "Filed to " + client.name + "." : "It is not filed to a client yet.") + " Review what ASAP read from it, value by value; nothing is confirmed for you.",
+      ref: { ws: "document", documentId: d.id },
+      chips: LIVE_CHIPS,
+    };
+  }
+
+  /**
+   * "Show UX TEST Karibu Logistics Ltd and its policies and contacts": the client's own record, with
+   * the same contacts and policies the client Space shows (D-137) — never "no contacts" while the
+   * record holds one.
+   */
+  function clientOverviewFromAsk(t, ctx) {
+    if (!/\b(show|open|see|view|tell me about|pull up)\b/i.test(t) || !/\b(polic(y|ies)|contacts?|people|details|record)\b/i.test(t)) return null;
+    if (/\b(add|create|update|change|edit|delete|remove)\b/i.test(t)) return null;
+    const sub = resolveSubject(t, ctx);
+    if (sub?.type === "ambiguous") return clarifyClient(sub.candidates, t);
+    const client = sub && sub.clientId && db.clients.find((c) => c.id === sub.clientId);
+    if (!client) return null;
+    if ((db.meta.unreadableClients || []).includes(client.id))
+      return { lead: client.name + "’s record could not be read just now.", text: "Refresh records and try again. Nothing is shown as missing that may be on file.", ref: null, keepWorkspace: true };
+    const people = (db.contacts || []).filter((k) => k.clientId === client.id);
+    const pols = db.policies.filter((p) => p.clientId === client.id);
+    remember(clientSubject(client));
+    const who = people.map((k) => k.name + (k.role ? " (" + k.role + ")" : "") + (k.isPrimary ? " — primary" : "")).join("; ");
+    const what = pols.map((p) => { const y = latestYear(p.id); return p.number + " — " + (p.cls || "class not recorded") + (y ? ", " + y.insurer + ", " + S.fmtDate(y.from) + " – " + S.fmtDate(y.to) : ""); }).join("; ");
+    return {
+      lead: client.name + ": " + plural(pols.length, "policy", "policies") + " and " + plural(people.length, "contact", "contacts") + " on file.",
+      text: [people.length ? "Contacts: " + who + "." : "No contact is recorded on this client yet.", pols.length ? "Policies: " + what + "." : "No policy is recorded on this client yet."].join(" "),
+      ref: { ws: "client", clientId: client.id },
+      chips: LIVE_CHIPS,
+    };
+  }
+
   function recordQuestion(t, ctx) {
     const cover = /\bcover(ed|age)?\b|\bin force\b|\bon risk\b/i.test(t);
     const expiry = /\b(expire|expires|expiry|end date|renewal date|run(s)? out|when does .* end)\b/i.test(t);
@@ -2583,7 +2686,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   async function workFromAsk(raw, t, ctx) {
     if (/\b(?:assign|reassign|give|hand(?:\s+it)?\s+over)\b.*?\bto\s+[A-Z]|\b(due|deadline)\b/i.test(raw) && refusal("work.assign")) return refusal("work.assign");
     const assign = /\b(?:assign|reassign|give|hand(?:\s+it)?\s+over)\b.*?\bto\s+([A-Z][a-z]+)/i.exec(raw);
-    const dueWords = /\b(due|deadline)\b/i.test(t);
+    // Setting a due date, not mentioning one: "the premium due" is a question about money (D-137).
+    const dueWords = /\b(set|change|move|make|push|bring)\b[^.?!]*\b(due|deadline)\b|\bdue\s+(on|by)\b|\bdeadline\b/i.test(t) && !/\b(premium|balance|invoice|amount|payment|receipt)s?\s+due\b/i.test(t);
     if (!assign && !dueWords) return null;
     const when = dueWords ? parseDate(t) : null;
     if (dueWords && !assign && !when) return { lead: "Due when?", text: "Give the date — for example “due 15 Oct” or “due Friday”. Nothing was changed.", ref: null, keepWorkspace: true };
@@ -3006,7 +3110,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     // "Which insurers?" is answered by the very next message, or not at all.
     if (insurerAsk && insurerAsk.turn !== askTurn - 1) insurerAsk = null;
     const names = new Set(db.clients.flatMap((c) => c.name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)));
-    const t = correctTypos(text.trim(), names);
+    const typed = correctTypos(text.trim(), names);
+    /*
+     * What the person asked ASAP *not* to do is not what they asked for (D-137). "Preview only; do
+     * not record payments or move money" is a read-only request — routing on its words would refuse
+     * it ("move money"), open the wrong thing ("bind cover" → coverage) or ask for a due date that
+     * was never offered. The prohibitions are taken out before routing and honoured as given.
+     */
+    const told = withoutProhibitions(typed);
+    const t = told.text;
     // Questions about the client list, answered from the records — including when there are none.
     // Only a question *for the list*: "clients" is what is asked for, and no other record is named.
     // "Which policies does this client have?" is about one client's policies, not the list.
@@ -3025,7 +3137,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (contactAsk) return contactAsk;
     if (/^(import( records)?|add a client|new client)$/i.test(t)) return { lead: "Opening it.", text: "", ref: { ws: /import/i.test(t) ? "import" : "newclient" } };
 
-    if (/\bclaim\b/i.test(t) && /\b(report|register|new|open|file|log)\b/i.test(t)) return claimPreview(text.trim(), t, ctx);
+    // "Prepare a claim draft" asks for one; "whenever a document arrives on a claim, prepare it" is an automation.
+    if (!/\bautomation\b/i.test(typed) && /\bclaim\b/i.test(typed) && (/\b(report|register|new|open|file|log)\b/i.test(typed) || /\b(prepare|draft)\b[^.?!]{0,40}\bclaim\b|\bclaim\s+draft\b/i.test(typed))) return claimPreview(text.trim(), typed, ctx);
     // The chips live mode offers, and the places a broker asks to go, answered from the records.
     const GO = [
       [/^(show|open|see)( me)?( my)? work\??$|^my work\??$|^work$/i, { ws: "work" }, "Your work, from your records."],
@@ -3037,6 +3150,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
     const compared = await quoteCompareFromAsk(text.trim());
     if (compared) return compared;
+    const docAsked = documentFromAsk(text.trim());
+    if (docAsked) return docAsked;
+    const overview = clientOverviewFromAsk(t, ctx);
+    if (overview) return overview;
     // The answer to "which insurers?" goes back to that quotation before anything else reads it.
     if (insurerAsk && insurerListFrom(text.trim()).length) {
       const answered = quotationFromAsk(t, ctx, text.trim());
@@ -3070,7 +3187,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     if (r.nothing) return askServer(text.trim(), ctx);
     if (Array.isArray(r.chips) && r.chips.some((c) => DEMO_WORDS.test(typeof c === "string" ? c : c.label ?? ""))) r.chips = LIVE_CHIPS;
     if (r.ref && NOT_CONNECTED_WS[r.ref.ws]) {
-      return { ...r, lead: NOT_CONNECTED_WS[r.ref.ws] + " is not connected to your records yet.", text: "I opened the workspace so you can see that nothing is shown there yet.", plan: null, chips: LIVE_CHIPS };
+      // Not opened (D-137): an empty workspace for an unbuilt step reads as a workflow that exists.
+      return { lead: NOT_CONNECTED_WS[r.ref.ws] + " is not available in ASAP yet.", text: "Nothing was prepared, recorded or sent. " + (told.prohibited ? "What you asked ASAP not to do was not done. " : "") + "Do this step outside ASAP for now and keep the evidence on file; ASAP can still answer from the records it holds.", ref: null, keepWorkspace: true, chips: LIVE_CHIPS };
     }
     if (r.ref && LIVE_WS.has(r.ref.ws)) {
       // The engine's answer for these was written around its example records; the workspace speaks for itself.

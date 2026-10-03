@@ -64,3 +64,30 @@ describe("incidentFacts", () => {
     );
   });
 });
+
+describe("instruction-first claim requests keep every incident fact (D-137)", () => {
+  const INSTRUCTION_FIRST =
+    "For UX TEST Karibu Logistics Ltd, prepare (but do not register) a claim draft for the fictional low-speed collision on 2 October 2026 at 08:20 involving KDM 811A; front-left body damage; no injury reported. Use only these incident facts. First check for the policy that covered that date. Do not contact anyone or imply coverage or acceptance.";
+  const FACTS_FIRST =
+    "Low-speed collision on 2 October 2026 at 08:20 involving KDM 811A; front-left body damage; no injury reported. Prepare a claim draft for UX TEST Karibu Logistics Ltd but do not register it. Do not contact anyone.";
+  for (const [name, prompt] of [
+    ["instruction-first", INSTRUCTION_FIRST],
+    ["facts-first", FACTS_FIRST],
+  ] as const) {
+    it(
+      name +
+        ": the collision, the time, the vehicle, the damage and no injury all survive; no instruction does",
+      () => {
+        const { facts } = incidentFacts(prompt);
+        expect(facts).toMatch(/collision/i);
+        expect(facts).toMatch(/08:20/);
+        expect(facts).toMatch(/KDM 811A/);
+        expect(facts).toMatch(/front-left body damage/i);
+        expect(facts).toMatch(/no injury reported/i);
+        expect(facts).not.toMatch(
+          /register|contact|coverage|acceptance|Use only|First check|Karibu|claim draft/i,
+        );
+      },
+    );
+  }
+});

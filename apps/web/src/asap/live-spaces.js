@@ -140,7 +140,7 @@ function importSpace(state) {
         ["Rows read", String(sum.rows)],
         ["New clients", String(sum.clientsToCreate)],
         ["New contacts", String(sum.contactsToCreate) + (p.rows.some((r) => r.contactStatus === "on_file") ? " (" + plural(p.rows.filter((r) => r.contactStatus === "on_file").length, "contact is", "contacts are") + " already on file)" : "")],
-        ["New policies", String(sum.policiesToCreate)],
+        ["New policies", String(sum.policiesToCreate) + (p.rows.some((r) => r.policyStatus === "on_file") ? " (" + plural(p.rows.filter((r) => r.policyStatus === "on_file").length, "policy is", "policies are") + " already on file — nothing written for " + (p.rows.filter((r) => r.policyStatus === "on_file").length === 1 ? "it" : "them") + ")" : "") + (p.rows.some((r) => r.policyStatus === "new_period") ? " · " + plural(p.rows.filter((r) => r.policyStatus === "new_period").length, "new period", "new periods") + " on policies already on file" : "")],
         ["Your decision needed / invalid", sum.needsReview + " / " + sum.invalid],
       ]),
     );
