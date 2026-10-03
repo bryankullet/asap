@@ -27,7 +27,7 @@ const TAG = Date.now().toString(36).slice(-6).toUpperCase();
 /* ---------------------------------------------------------------- a brand-new person, no brokerage */
 const STACY = randomUUID();
 sql(`insert into auth.users (id, aud, role, email, raw_user_meta_data) values ('${STACY}', 'authenticated', 'authenticated', 'stacy-${TAG.toLowerCase()}@qa.test', '{"full_name":"Stacy"}')`);
-const TOKEN = jwt({ sub: STACY, email: `stacy-${TAG.toLowerCase()}@qa.test`, role: "authenticated", aud: "authenticated" });
+let TOKEN = jwt({ sub: STACY, email: `stacy-${TAG.toLowerCase()}@qa.test`, role: "authenticated", aud: "authenticated" });
 const api = async (method, path, body) => {
   const res = await fetch(API + path, { method, headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, body: await res.json().catch(() => ({})) };
@@ -118,8 +118,9 @@ await step(page, "04-compare-opens-a-real-comparison", async () => {
   await expectText(p, "No recommendation");
   await expectText(p, /No quotation can be recommended: material terms are missing/);
   await expectText(p, "UX TEST APA Insurance");
-  await expectText(p, "(read, not confirmed)");
-  await expectText(p, "Not found in the document");
+  await expectText(p, "(page 1 · read, not confirmed)");
+  await expectText(p, "Not extracted — check the document");
+  await refuseText(p, "Not found in the document");
   await expectText(p, "Not read by ASAP — check the document");
   await expectText(p, "What could hurt the client");
   await expectText(p, "Excludes: Unlicensed drivers");
@@ -142,14 +143,77 @@ await step(page, "06-after-refresh-the-same-comparison", async () => {
   await ask(page, "Compare all three UX TEST quotations");
   const p = pane(page);
   await expectText(p, "Comparing 3 quotations as read");
-  await expectText(p, "(read, not confirmed)");
-  await expectText(p, "Not found in the document");
+  await expectText(p, "(page 1 · read, not confirmed)");
+  await expectText(p, "Not extracted — check the document");
 });
 
 const effects = sql(`select (select count(*) from quote_requests) || '/' || (select count(*) from insurer_responses) || '/' || (select count(*) from email_send_attempts) || '/' || (select count(*) from document_fields f join documents d on d.id = f.document_id where d.filename like '%_${TAG}.pdf' and f.state <> 'proposed')`);
 check("07 no request, reply, email or confirmation was created by comparing", effects.endsWith("/0/0") || /^\d+\/\d+\/0\/0$/.test(effects), effects);
 const before = effects.split("/").slice(0, 2).join("/");
 check("07 the counts of requests and replies did not move", before === sql(`select (select count(*) from quote_requests) || '/' || (select count(*) from insurer_responses)`), before);
+
+/* ------------------------------------------------- D-136: the real quotation layouts, term by term */
+// A second brokerage holding the three fictional quotations as they are laid out — APA with each
+// label above its value, CIC as one combined paragraph, Jubilee as the two-column table — read by
+// the real extractor. Every term must land in its own row, and the status warning must survive a
+// refresh.
+const LAYOUTS = [["APA", "stacked"], ["CIC", "block"], ["Jubilee", "table"]];
+const KEN = randomUUID();
+sql(`insert into auth.users (id, aud, role, email, raw_user_meta_data) values ('${KEN}', 'authenticated', 'authenticated', 'ken-${TAG.toLowerCase()}@qa.test', '{"full_name":"Ken"}')`);
+TOKEN = jwt({ sub: KEN, email: `ken-${TAG.toLowerCase()}@qa.test`, role: "authenticated", aud: "authenticated" });
+const org2 = await api("POST", "/organizations", { name: `UX TEST Quote Layouts ${TAG}`, country: "KE", currency: "KES", timezone: "Africa/Nairobi", accepted_terms: true, request_key: randomUUID() });
+check("08 a second test brokerage", org2.status < 300, String(org2.status));
+const files = LAYOUTS.map(([n, layout], i) => `/tmp/0${i + 2}_UX_TEST_Quotation_${n}_${layout}_${TAG}.pdf`);
+execFileSync("python3", ["-c", `
+import sys; sys.path.insert(0, "apps/extractor/tests")
+from quotation_fixtures import build
+for (name, layout), path in zip(${JSON.stringify(LAYOUTS)}, ${JSON.stringify(files)}):
+    open(path, "wb").write(build(name, layout))
+`]);
+const page2 = await open();
+await step(page2, "09-upload-the-three-layouts", async () => {
+  await page2.locator(".asap-attach-input").setInputFiles(files);
+  await settle(page2, 2000);
+  await expectText(page2.locator("body"), /3 files received/);
+});
+const like2 = `'%_UX_TEST_Quotation_%_${TAG}.pdf'`;
+const state2 = () => sql(`select string_agg(d.extraction_state, ',' order by d.filename) from documents d join organizations o on o.id = d.organization_id where o.name = 'UX TEST Quote Layouts ${TAG}' and d.filename like ${like2}`);
+let read2 = false;
+for (let i = 0; i < 60 && !read2; i++) {
+  read2 = state2() === "extracted,extracted,extracted";
+  if (!read2) await page2.waitForTimeout(1500);
+}
+check("10 the extractor read all three layouts", read2, state2());
+const termsOf = sql(`select string_agg(split_part(d.filename, '_', 5) || ':' || t.term_type || ':' || t.label, ' | ' order by d.filename, t.ordinal) from document_term_proposals t join documents d on d.id = t.document_id join organizations o on o.id = d.organization_id where o.name = 'UX TEST Quote Layouts ${TAG}'`);
+for (const n of ["APA", "CIC", "Jubilee"])
+  check(`11 ${n}: each term read on its own`, ["excess:Excess", "other:Geographic scope", "exclusion:Key exclusions", "other:Outstanding information", "other:Quote validity", "other:Status"].every((t) => termsOf.includes(`${n}:${t}`)), termsOf);
+const bled = sql(`select count(*) from document_term_proposals t join documents d on d.id = t.document_id join organizations o on o.id = d.organization_id where o.name = 'UX TEST Quote Layouts ${TAG}' and ((t.label <> 'Key exclusions' and t.proposed_value ~* 'wear and tear|goods carried') or (t.label <> 'Status' and t.proposed_value ~* 'no cover is in force') or t.proposed_value ~* 'use restriction|outstanding information|key exclusions')`);
+check("11 no term carries a neighbour's words", bled === "0", bled + " bled");
+
+const layoutChecks = async (p) => {
+  await expectText(p, "Comparing 3 quotations as read");
+  await expectText(p, "Status warnings in these quotations");
+  await expectText(p, "Indicative terms only - not accepted, bound, or issued. No cover is in force.");
+  await expectText(p, "Kenya and Uganda; other territories by written agreement. (page 1 · read, not confirmed)");
+  await expectText(p, "Kenya, Uganda and Tanzania subject to trip declaration.");
+  await expectText(p, "Requires final vehicle values");
+  await expectText(p, "30 days from simulated issue date");
+  await expectText(p, "Outstanding information");
+  await expectText(p, "Not extracted — check the document"); // no limits in any of the three
+  await refuseText(p, /agreement\. Wear and tear|Not found in the document|Not read by ASAP — check the document\s*\n?\s*Geographic/);
+};
+await step(page2, "12-compare-the-three-layouts", async () => {
+  await reload(page2);
+  await ask(page2, "Compare all three UX TEST quotations");
+  await layoutChecks(pane(page2));
+});
+await step(page2, "13-warnings-survive-refresh", async () => {
+  await reload(page2);
+  await ask(page2, "Compare all three UX TEST quotations");
+  await layoutChecks(pane(page2));
+});
+const decided2 = sql(`select count(*) from document_term_proposals t join documents d on d.id = t.document_id join organizations o on o.id = d.organization_id where o.name = 'UX TEST Quote Layouts ${TAG}' and t.state <> 'proposed'`);
+check("14 nothing was confirmed on anyone's behalf", decided2 === "0", decided2);
 
 await browser.close();
 process.stdout.write(`\n${results.filter((r) => r.ok).length} of ${results.length} checks passed; screenshots in ${OUT}\n`);

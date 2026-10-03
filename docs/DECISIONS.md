@@ -2234,3 +2234,28 @@ sessions. Unset the variable and redeploy to go back to direct.
   its document and page and its state (confirmed / read, not confirmed / not found / unclear / not
   read by ASAP — geographic scope and payment terms). It never recommends: missing material terms
   (premium, excess, limits, validity) are named per quotation instead.
+
+## D-136
+
+**Quotation terms are read one by one, and a missing value is "not extracted", not "not found".**
+Hosted reading of the three fictional quotations folded the exclusions, the outstanding information
+and the status warning into one "Geographical limit" term, so the comparison said exclusions were
+missing.
+
+- *Extractor.* Words are grouped into visual lines by where their boxes sit, not by rounding a
+  coordinate. A term's value continues onto the next line only until another heading — of a term,
+  a field or any other row — begins. Three layouts are read the same way: label and value on one
+  line, a label above its value, and several "Label: value" terms run together in one paragraph,
+  including a heading broken across a wrap. Geographic scope (including "Geographical limit"),
+  outstanding information, quote validity and status are stored as `other` terms under one fixed
+  label each, so no migration is needed. "Geographical limit" is never a limit of liability. The
+  layouts of the three fictional quotations are kept as regression fixtures
+  (`apps/extractor/tests/quotation_fixtures.py`).
+- *Re-reading.* A document queued again is re-read in place: field proposals are upserted on
+  (document, key) and terms on (document, ordinal). A field or term a person has decided is never
+  touched. A stale proposed term beyond the new reading's count is left as it is, not deleted.
+- *Comparison.* New rows for geographic scope, outstanding information and status warnings.
+  Validity falls back to the quote-validity term. Every value carries its page and whether it is
+  confirmed. A status warning ("indicative terms only", "no cover is in force") is raised at the
+  top of the comparison and among the risks. When nothing was read, the comparison says "Not
+  extracted — check the document": ASAP cannot establish that a document does not state something.

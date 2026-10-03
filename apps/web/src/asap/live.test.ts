@@ -1559,8 +1559,8 @@ describe("live mode", () => {
         const t = text(ws);
         expect(ws.title).toBe("Comparing 3 quotations as read");
         expect(t).toContain("UX TEST APA");
-        expect(t).toContain("245,000 (read, not confirmed)");
-        expect(t).toContain("Not found in the document");
+        expect(t).toContain("245,000 (page 1 · read, not confirmed)");
+        expect(t).toContain("Not extracted — check the document");
         expect(t).toContain("What could hurt the client");
         // The premium opens at the field it was read from.
         expect(t).toContain("\"fieldId\":\"f0000010-0000-4000-8000-000000000001\"");
@@ -1570,7 +1570,7 @@ describe("live mode", () => {
         const B = await live();
         B.ai.workspace(r.ref);
         await new Promise((res) => setTimeout(res, 0));
-        expect(text(B.ai.workspace(r.ref))).toContain("245,000 (read, not confirmed)");
+        expect(text(B.ai.workspace(r.ref))).toContain("245,000 (page 1 · read, not confirmed)");
         expect(reviewDocumentField).not.toHaveBeenCalledWith(expect.stringMatching(/^e0/), expect.anything(), expect.anything());
       } finally {
         api["documents"] = realDocuments;
