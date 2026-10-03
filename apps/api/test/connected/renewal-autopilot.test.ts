@@ -66,6 +66,9 @@ const runFor = async (period: string) => (await sql<{ id: string; state: string;
 describe("Renewal Autopilot", () => {
   it("1–2 · the schedule detects the period once; a second sweep and a restart create nothing more", async () => {
     await sweep();
+    // D-137: the pass that finds the renewal also advances it — no "0 of 11" until the next sweep.
+    const afterOne = await runFor(periodId);
+    expect(afterOne.map((r) => r.state)).toEqual(["waiting_approval"]);
     await sweep();
     const runs = await runFor(periodId);
     expect(runs).toHaveLength(1);

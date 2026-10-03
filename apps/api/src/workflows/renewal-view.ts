@@ -138,6 +138,13 @@ export function renewalOperational(v: ViewInput): RenewalOperational {
   let primaryAction: PrimaryAction = { kind: "none", label: "Nothing needed from you now" };
   let attentionReason: string | null = null;
 
+  // Nothing begun yet: queued, not working (D-137). Saying "Checking the renewal date…" while no
+  // step has started is how a run waiting for the next pass read as stalled work.
+  const begun = v.steps.some((st) => st.state !== "pending");
+  if (v.run.state === "running" && !begun) {
+    status = "Queued — ASAP starts on its next pass";
+    currentWork = { title: "Queued", detail: "ASAP found this renewal and starts on it within a few minutes. Nothing has been done yet." };
+  }
   if (v.run.state === "exception") {
     tone = "attention";
     const info = v.run.exception?.code === "missing_information";

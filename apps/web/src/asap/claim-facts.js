@@ -44,6 +44,10 @@ const INCIDENT =
 export function incidentFacts(raw) {
   const text = String(raw || "")
     .replace(/\s+/g, " ")
+    // An aside that forbids something — "(but do not register)" — is a direction wherever it sits
+    // (D-137); left in, it cut the clause and the collision, the time and the vehicle were lost.
+    .replace(/\(\s*(?:but\s+)?(?:do not|don't|dont|never|not)\b[^)]*\)/gi, " ")
+    .replace(/\s{2,}/g, " ")
     .trim();
   // Sentences, then the clauses a sentence joins with ";" or ". " — keeping dates like 2.10.2026 whole.
   const clauses = text
@@ -53,6 +57,9 @@ export function incidentFacts(raw) {
   const facts = [];
   const directions = [];
   for (let clause of clauses) {
+    // "For <client>, prepare a claim draft for the collision…": who it is for leads in, then the request.
+    const leadIn = /^for\s+([^,]{2,80}),\s*(.+)$/i.exec(clause);
+    if (leadIn && !INCIDENT.test(leadIn[1])) clause = leadIn[2];
     clause = trimRequest(clause.replace(POLICY_NOTE, ""));
     // "Prepare a draft claim for X but do not register it": the whole clause is a direction.
     if (DIRECTION.test(clause) && !INCIDENT.test(clause.replace(TRAILING_DIRECTION, ""))) {

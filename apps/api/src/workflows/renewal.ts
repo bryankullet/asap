@@ -510,9 +510,9 @@ export const RENEWAL: WorkflowDefinition = {
  * Finds periods ending within the window and starts one run for each, once. A period whose policy
  * already has a later period is renewed; a policy with an open renewal Work item adopts it.
  */
-export async function detectRenewals(db: SupabaseClient, logger: Logger, organizationId: string, now = new Date()): Promise<{ started: number; existing: number }> {
+export async function detectRenewals(db: SupabaseClient, logger: Logger, organizationId: string, now = new Date()): Promise<{ started: number; existing: number; startedRunIds: string[] }> {
   // A brokerage that set "start renewal work" below automatic starts renewals itself.
-  if (!automatic((await autonomyRule(db, organizationId)).actions.detect_renewals)) return { started: 0, existing: 0 };
+  if (!automatic((await autonomyRule(db, organizationId)).actions.detect_renewals)) return { started: 0, existing: 0, startedRunIds: [] };
   const window = await renewalWindow(db, organizationId);
   const today = isoDay(now);
   const horizon = isoDay(new Date(now.getTime() + window.leadDays * DAY));
@@ -520,14 +520,18 @@ export async function detectRenewals(db: SupabaseClient, logger: Logger, organiz
   const periods = (q.data ?? []) as { id: string; policy_id: string; period_end: string }[];
   let started = 0;
   let existing = 0;
+  const startedRunIds: string[] = [];
   for (const p of periods) {
     const r = await detectRenewalFor(db, logger, organizationId, p.id);
     if ("blocked" in r) continue;
-    if (r.created) started++;
+    if (r.created) {
+      started++;
+      startedRunIds.push(r.runId);
+    }
     else existing++;
   }
   if (started) logger.info({ organizationId, started }, "renewals detected");
-  return { started, existing };
+  return { started, existing, startedRunIds };
 }
 
 /** One period: renewed already, unreadable, or one run (created now or found). */
@@ -587,10 +591,22 @@ async function ensureRenewalWork(db: SupabaseClient, organizationId: string, s: 
 export async function sweepWorkflows(db: SupabaseClient, logger: Logger, now = new Date()) {
   const orgs = await db.from("organizations").select("id");
   let started = 0;
-  for (const o of (orgs.data ?? []) as { id: string }[]) started += (await detectRenewals(db, logger, o.id, now)).started;
+  /*
+   * A run found in this pass is advanced in this pass (D-137). Its `next_run_at` is stamped by the
+   * database a moment after `now`, so the due query below missed it and the run sat at "0 of 11"
+   * until the next sweep — fifteen minutes that read as ASAP working when it was only queued.
+   */
+  const fresh: string[] = [];
+  for (const o of (orgs.data ?? []) as { id: string }[]) {
+    const d = await detectRenewals(db, logger, o.id, now);
+    started += d.started;
+    fresh.push(...d.startedRunIds);
+  }
   const due = await db.from("workflow_runs").select("id").in("state", ["running", "waiting_approval", "waiting_party"]).lte("next_run_at", now.toISOString()).order("next_run_at").limit(100);
   const outcomes = [];
-  for (const r of (due.data ?? []) as { id: string }[]) {
+  const ids = [...new Set([...fresh, ...((due.data ?? []) as { id: string }[]).map((r) => r.id)])];
+  for (const id of ids) {
+    const r = { id };
     try {
       outcomes.push(await advanceRun(db, logger, RENEWAL, r.id, now));
     } catch (e) {
