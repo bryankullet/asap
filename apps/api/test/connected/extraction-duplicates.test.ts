@@ -62,6 +62,7 @@ const ABSTRACT: ExtractionResult = {
   ],
   terms: [],
   needsManualReview: null,
+  suggestedKind: null,
 };
 
 describe("a document stating a field twice, against the real database", () => {

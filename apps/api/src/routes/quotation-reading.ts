@@ -156,6 +156,26 @@ export function quotationReadingRoutes(deps: { logger: Logger }) {
         result: "success",
         newState: { insurerResponseId: row.id },
       });
+
+      // Terms a person confirmed before the link now become the answer's confirmed terms (D-138).
+      const confirmedQ = await db
+        .from("document_term_proposals")
+        .select(
+          "id, document_id, ordinal, term_type, label, proposed_value, amount, currency, page_number, region_x, region_y, region_width, region_height, condition, state, quote_term_id, corrected_value, reviewed_by",
+        )
+        .eq("organization_id", org.id)
+        .eq("document_id", documentId)
+        .in("state", ["accepted", "corrected"])
+        .is("quote_term_id", null);
+      for (const p of (confirmedQ.data ?? []) as (ProposalRow & { corrected_value: string | null; reviewed_by: string | null })[]) {
+        const written = await writeConfirmedTerm(db, org.id, row.id, documentId, p, p.state === "corrected" ? p.corrected_value : null, p.reviewed_by ?? user.id, now);
+        if ("blocked" in written) continue;
+        await db
+          .from("document_term_proposals")
+          .update({ quote_term_id: written.termId, previous_revision_id: written.previousRevisionId })
+          .eq("organization_id", org.id)
+          .eq("id", p.id);
+      }
       return done();
     }
 
@@ -198,85 +218,31 @@ export function quotationReadingRoutes(deps: { logger: Logger }) {
       return done();
     }
 
-    /* Accepting or correcting writes a confirmed term, so the answer must be chosen first. */
-    const target = await db
-      .from("insurer_responses")
-      .select("id, organization_id")
-      .eq("organization_id", org.id)
-      .eq("source_document_id", documentId)
-      .maybeSingle();
-    const response = target.data as { id: string } | null;
-    if (response === null) {
-      return blocked(
-        "Choose which insurer's answer this quotation is, before accepting anything from it.",
-      );
-    }
-
-    const value =
-      input.action === "correct_proposal" ? input.correctedValue : proposal.proposed_value;
+    const corrected = input.action === "correct_proposal" ? input.correctedValue : null;
+    const value = corrected ?? proposal.proposed_value;
     if (value === null && proposal.amount === null) {
       return blocked("There is nothing here to record. Correct it, or reject it.");
     }
 
-    /* What the term said before this, so the proposal records what it replaced. */
-    const existing = await db
-      .from("quote_terms")
+    /*
+     * The answer this quotation is filed against, if one is chosen. Confirming what the document
+     * says does not wait for it (D-138): without an answer the decision is recorded on the reading,
+     * and the confirmed term is written to the answer when the quotation is linked.
+     */
+    const target = await db
+      .from("insurer_responses")
       .select("id")
       .eq("organization_id", org.id)
-      .eq("insurer_response_id", response.id)
-      .eq("term_type", proposal.term_type)
-      .eq("label", proposal.label)
+      .eq("source_document_id", documentId)
       .maybeSingle();
-    const already = existing.data as { id: string } | null;
-
-    let termId: string;
+    const response = target.data as { id: string } | null;
+    let termId: string | null = null;
     let previousRevisionId: string | null = null;
-
-    if (already === null) {
-      const created = await db
-        .from("quote_terms")
-        .insert({
-          organization_id: org.id,
-          insurer_response_id: response.id,
-          term_type: proposal.term_type,
-          label: proposal.label,
-          extracted_value: proposal.proposed_value,
-          corrected_value: input.action === "correct_proposal" ? input.correctedValue : null,
-          corrected_by: input.action === "correct_proposal" ? user.id : null,
-          corrected_at: input.action === "correct_proposal" ? now : null,
-          amount: pgMoney(proposal.amount),
-          currency: proposal.currency,
-          unclear: proposal.condition === "unclear",
-          evidence_document_id: documentId,
-          evidence_page: proposal.page_number,
-          region_x: proposal.region_x,
-          region_y: proposal.region_y,
-          region_width: proposal.region_width,
-          region_height: proposal.region_height,
-        })
-        .select("id")
-        .maybeSingle();
-      if (created.error || !created.data) {
-        return blocked("That term could not be recorded against this answer.");
-      }
-      termId = (created.data as { id: string }).id;
-    } else {
-      termId = already.id;
-      previousRevisionId = await latestRevisionOf(db, org.id, termId);
-      const updated = await db
-        .from("quote_terms")
-        .update({
-          corrected_value: input.action === "correct_proposal" ? input.correctedValue : null,
-          corrected_by: input.action === "correct_proposal" ? user.id : null,
-          corrected_at: input.action === "correct_proposal" ? now : null,
-          evidence_document_id: documentId,
-          evidence_page: proposal.page_number,
-        })
-        .eq("organization_id", org.id)
-        .eq("id", termId)
-        .select("id")
-        .maybeSingle();
-      if (updated.error) return sendError(c, mapDatabaseError(updated.error));
+    if (response !== null) {
+      const written = await writeConfirmedTerm(db, org.id, response.id, documentId, proposal, corrected, user.id, now);
+      if ("blocked" in written) return blocked(written.blocked);
+      termId = written.termId;
+      previousRevisionId = written.previousRevisionId;
     }
 
     const decided = await db
@@ -483,4 +449,74 @@ async function load(
     ),
     permissions: { canReview: hasPermission(ctx, "document", "edit") },
   };
+}
+
+
+/**
+ * Writes one confirmed reading to an insurer answer's terms: creates the term, or records the
+ * correction on the term already there. Shared by confirming a term and by linking a quotation
+ * whose terms were confirmed first (D-138).
+ */
+async function writeConfirmedTerm(
+  db: SupabaseClient,
+  organizationId: string,
+  responseId: string,
+  documentId: string,
+  proposal: ProposalRow,
+  corrected: string | null,
+  userId: string,
+  now: string,
+): Promise<{ termId: string; previousRevisionId: string | null } | { blocked: string }> {
+  const existing = await db
+    .from("quote_terms")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("insurer_response_id", responseId)
+    .eq("term_type", proposal.term_type)
+    .eq("label", proposal.label)
+    .maybeSingle();
+  const already = existing.data as { id: string } | null;
+  if (already === null) {
+    const created = await db
+      .from("quote_terms")
+      .insert({
+        organization_id: organizationId,
+        insurer_response_id: responseId,
+        term_type: proposal.term_type,
+        label: proposal.label,
+        extracted_value: proposal.proposed_value,
+        corrected_value: corrected,
+        corrected_by: corrected !== null ? userId : null,
+        corrected_at: corrected !== null ? now : null,
+        amount: pgMoney(proposal.amount),
+        currency: proposal.currency,
+        unclear: proposal.condition === "unclear",
+        evidence_document_id: documentId,
+        evidence_page: proposal.page_number,
+        region_x: proposal.region_x,
+        region_y: proposal.region_y,
+        region_width: proposal.region_width,
+        region_height: proposal.region_height,
+      })
+      .select("id")
+      .maybeSingle();
+    if (created.error || !created.data) return { blocked: "That term could not be recorded against this answer." };
+    return { termId: (created.data as { id: string }).id, previousRevisionId: null };
+  }
+  const previousRevisionId = await latestRevisionOf(db, organizationId, already.id);
+  const updated = await db
+    .from("quote_terms")
+    .update({
+      corrected_value: corrected,
+      corrected_by: corrected !== null ? userId : null,
+      corrected_at: corrected !== null ? now : null,
+      evidence_document_id: documentId,
+      evidence_page: proposal.page_number,
+    })
+    .eq("organization_id", organizationId)
+    .eq("id", already.id)
+    .select("id")
+    .maybeSingle();
+  if (updated.error) return { blocked: "That term could not be updated on this answer." };
+  return { termId: already.id, previousRevisionId };
 }

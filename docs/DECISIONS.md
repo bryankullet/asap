@@ -2290,3 +2290,37 @@ missing.
     same rule the commit uses. "New policies" counts only new policies.
   - A chat confirmation card confirms only the batch it showed. Once that batch is imported, from
     any surface, the card shows as done.
+
+## D-138
+
+**Hosted lifecycle findings, batch B: review paths that fit the document.**
+
+- *Quotation terms are confirmed one at a time.* Document review lists each term ASAP read, with its
+  page and state. Each open term has its own decision: accept as read, correct to a typed value, or
+  reject. The decision is recorded with the person's name, and the comparison reads it from the
+  server.
+  - Migration 0064 lets a term be accepted or corrected before the quotation is linked to an
+    insurer's answer. 0053 required a `quote_terms` row, which needs an answer, so a quotation
+    uploaded on its own could never be confirmed.
+  - When the quotation is linked, every confirmed term is written to the answer's terms.
+  - A rejected term still carries no term row.
+- *Policy schedules.*
+  - A table row's label is matched whole, at the column gap. "Insured vehicles" is no longer read as
+    the insured, and "Cover notes" is not the cover.
+  - Labels read: Client and Insured, Cover and Class, and a period written as one range ("1 December
+    2025 to 30 November 2026"), which gives both ends.
+  - A date written in words is read as an ISO date.
+  - The currency is read from the stated amount ("KES 39,200,000"), never assumed.
+- *Evidence when nothing changes.* When the record already holds every confirmed value, the
+  document can be filed as their evidence. It goes through the same apply path, with `from = to`, an
+  application receipt and an audit row. No value changes and nothing about cover follows.
+- *Document kinds and filing.*
+  - The extractor suggests a kind from the document's own heading, never its small print. It is
+    applied only to a document still marked "other".
+  - A person sets the kind and the client through `POST /documents/:id/classify`, gated on
+    `document:edit` and audited as `document.filed_to`.
+  - Invoices and receipts read their own fields: references, issue, due and payment dates, amounts
+    received, totals and balance. They never offer to create a client or policy. ASAP says
+    plainly that invoices and payments are not recorded yet.
+- *Imports say what they write.* Clients, contacts, policies and periods. A workbook sheet that is a
+  vehicle schedule is labelled as not imported.

@@ -267,13 +267,19 @@ describe("choosing which answer a quotation is", () => {
 });
 
 describe("reviewing what was read", () => {
-  it("will not confirm a term before the answer has been chosen", async () => {
+  it("confirms a term before any answer is chosen, and writes it to the answer when the quotation is linked (D-138)", async () => {
     const body = await readJson(
       await act({ action: "accept_proposal", proposalId: "3c000000-0000-4000-8000-00000000000a" }),
     );
-    expect(body.outcome).toBe("blocked");
-    expect(body.reason).toMatch(/Choose which insurer's answer/);
+    expect(body.outcome).toBe("done");
+    const proposal = db.tables["document_term_proposals"]!.find((p) => p["id"] === "3c000000-0000-4000-8000-00000000000a")!;
+    expect(proposal["state"]).toBe("accepted");
+    expect(proposal["quote_term_id"]).toBeNull();
     expect(db.tables["quote_terms"]).toHaveLength(0);
+    await link();
+    expect(db.tables["quote_terms"]).toHaveLength(1);
+    expect(db.tables["quote_terms"]![0]!["label"]).toBe("Excess 0");
+    expect(proposal["quote_term_id"]).toBe(db.tables["quote_terms"]![0]!["id"]);
   });
 
   it("accepting writes the confirmed term, with its page and rectangle", async () => {
@@ -395,6 +401,7 @@ describe("a second reading of the same file", () => {
       },
     ],
     needsManualReview: null,
+  suggestedKind: null,
   };
 
   function queued() {

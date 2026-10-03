@@ -68,6 +68,9 @@ class Extraction:
     #: Why this document cannot be read, when it cannot. An image-only PDF is the common case:
     #: there is no OCR in this deployment, so it is said plainly rather than read as empty.
     needs_manual_review: str | None = None
+    #: What kind of document the first page says it is, by its own heading (D-138). A suggestion a
+    #: person can change, never applied over a kind someone chose.
+    suggested_kind: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -106,6 +109,7 @@ class Extraction:
                 for t in self.terms
             ],
             "needsManualReview": self.needs_manual_review,
+            "suggestedKind": self.suggested_kind,
         }
 
 
@@ -178,7 +182,84 @@ _VALUE_AFTER_LABEL = re.compile(r"^[\s:.\-–]*(.+)$")
 # and proposing ":" would put a colon in front of a person as though it were a figure.
 _HAS_SUBSTANCE = re.compile(r"[A-Za-z0-9]")
 
-_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})\b")
+_MONTHS = ("january", "february", "march", "april", "may", "june", "july", "august", "september",
+           "october", "november", "december")
+_WORD_DATE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(m[:3] + "[a-z]*" for m in _MONTHS) + r")\.?,?\s+(\d{4})\b", re.IGNORECASE)
+_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4})\b|" + _WORD_DATE.pattern, re.IGNORECASE)
+
+
+def _iso_from_words(text: str) -> str | None:
+    """ "1 December 2025" → "2025-12-01". A date written in words is still a date (D-138)."""
+    m = _WORD_DATE.search(text)
+    if not m:
+        return None
+    month = next((i for i, name in enumerate(_MONTHS, start=1) if name.startswith(m.group(2).lower()[:3])), None)
+    day = int(m.group(1))
+    if month is None or not 1 <= day <= 31:
+        return None
+    return f"{int(m.group(3)):04d}-{month:02d}-{day:02d}"
+
+
+# A label that is a whole table row heading, matched exactly (D-138). "Insured vehicles" is a row
+# about the vehicles, not the insured; "Cover notes" is not the cover. A label read by prefix took
+# "vehicles" as the insured's name.
+_EXACT_LABELS: dict[str, str] = {
+    **{label: key for key, labels in {
+        "policy_number": ("policy no", "policy number", "policy ref", "certificate no", "certificate number", "policy"),
+        "quotation_reference": ("quotation no", "quotation number", "quotation ref", "quote no", "quote ref", "quote reference", "quotation reference"),
+        "insured_name": ("name of insured", "insured name", "the insured", "policyholder", "assured", "insured", "client", "client name", "insured client"),
+        "insurer_name": ("insurance company", "underwriter", "insurer"),
+        "class_of_business": ("class of business", "class", "cover", "cover type", "type of cover", "class of insurance"),
+        "period_start": ("period from", "inception date", "inception", "effective date", "start date", "cover start"),
+        "period_end": ("period to", "expiry date", "expiry", "end date", "cover end"),
+        "sum_insured": ("total sum insured", "sum insured"),
+        "premium": ("annual total premium", "total premium", "gross premium", "annual premium", "premium"),
+        "premium_basis": ("premium basis", "rating basis", "basis of premium"),
+        "currency": ("currency",),
+        "quote_valid_until": ("quotation valid until", "quote valid until", "valid until", "offer valid until"),
+    }.items() for label in labels},
+    # A period written as one range: split into its start and its end.
+    "period": "period_range", "period of insurance": "period_range", "period of cover": "period_range",
+    "insurance period": "period_range", "policy period": "period_range",
+}
+
+
+# What an invoice or a receipt states, read only from documents whose heading says they are one
+# (D-138). A policy schedule's "Date" is not a payment date.
+MONEY_KINDS = frozenset({"invoice", "receipt"})
+_MONEY_LABELS: dict[str, str] = {
+    **{label: key for key, labels in {
+        "invoice_reference": ("invoice reference", "invoice no", "invoice number", "debit note no", "debit note number"),
+        "receipt_reference": ("receipt reference", "receipt no", "receipt number"),
+        "issue_date": ("issue date", "invoice date", "date of issue"),
+        "due_date": ("due date", "payment due", "date due"),
+        "payment_date": ("date", "payment date", "date received", "date paid"),
+        "amount_received": ("payment received", "amount received", "amount recorded", "amount paid"),
+        "invoice_total": ("invoice total", "total due", "amount due"),
+        "balance_due": ("balance due", "expected remaining balance", "outstanding balance", "balance"),
+        "payer": ("payer", "received from"),
+        "payee": ("payee", "paid to"),
+    }.items() for label in labels},
+}
+_MONEY_FIELD_KEYS: tuple[str, ...] = tuple(dict.fromkeys(_MONEY_LABELS.values()))
+# On an invoice or a receipt, the policy fields that still make sense to ask about.
+_MONEY_DOC_POLICY_KEYS: tuple[str, ...] = ("insured_name", "insurer_name", "policy_number", "premium", "currency")
+
+
+def _exact_label(label: str, kind: str | None) -> str | None:
+    flat = _normalise(label).strip(" :")
+    if kind in MONEY_KINDS and flat in _MONEY_LABELS:
+        return _MONEY_LABELS[flat]
+    return _EXACT_LABELS.get(flat)
+
+
+def _range_dates(value: str) -> tuple[str, str] | None:
+    """ "1 December 2025 to 30 November 2026" → both ends, as ISO dates."""
+    halves = re.split(r"\s+(?:to|until|till|through|-|–|—)\s+", value, maxsplit=1)
+    if len(halves) != 2:
+        return None
+    ends = [_iso_from_words(h) or (_DATE.search(h).group(1) if _DATE.search(h) and _DATE.search(h).group(1) else None) for h in halves]
+    return (ends[0], ends[1]) if ends[0] and ends[1] else None
 _MONEY = re.compile(r"\b\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b|\b\d+\.\d{2}\b")
 
 # What a value for this key has to look like. A guard against the remaining way a label can pick
@@ -208,6 +289,7 @@ def read_document(data: bytes, filename: str, mime_type: str) -> Extraction:
         return out
 
     with doc:
+        kind = suggest_kind(doc[0].get_text("text")) if len(doc) else None
         for index, page in enumerate(doc, start=1):
             out.pages.append(
                 Page(
@@ -217,10 +299,11 @@ def read_document(data: bytes, filename: str, mime_type: str) -> Extraction:
                     height=float(page.rect.height),
                 )
             )
-            _read_fields(page, index, out)
+            _read_fields(page, index, out, kind)
             _read_terms(page, index, out)
 
-    _settle(out)
+        out.suggested_kind = kind
+    _settle(out, kind)
     # No text on any page means an image-only document. There is no OCR in this deployment, so
     # this says so rather than returning an empty reading that looks like a document with
     # nothing in it.
@@ -281,7 +364,7 @@ def _up_to_the_next_label(value: str) -> str:
     return value[:cut].strip(" \t:.-–")
 
 
-def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
+def _read_fields(page: Any, page_number: int, out: Extraction, kind: str | None = None) -> None:
     """Find labelled values on one page, with where each one sits.
 
     Position is the point. A figure a person cannot find on the page is a figure they cannot check,
@@ -305,17 +388,48 @@ def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
         text = " ".join(p[4] for p in parts)
         flat = _normalise(text)
 
+        def emit(key: str, value: str, region_parts: list[Any]) -> bool:
+            """One labelled value, in the shape its key holds; a period range becomes both ends."""
+            value = value.strip(" \t:.-–")
+            if not value or not _HAS_SUBSTANCE.search(value) or _normalise(value) in _EVERY_LABEL:
+                return False
+            if key == "period_range":
+                ends = _range_dates(value)
+                if not ends:
+                    return False
+                for k, v in zip(("period_start", "period_end"), ends):
+                    out.fields.append(Field(field_key=k, value=v, page=page_number, region=_bounds(region_parts), condition="known"))
+                return True
+            if key in ("period_start", "period_end", "quote_valid_until", "issue_date", "due_date", "payment_date"):
+                value = _iso_from_words(value) or value
+            shape = _VALUE_SHAPE.get(key)
+            if shape is not None and not shape.search(value):
+                return False
+            out.fields.append(Field(field_key=key, value=value, page=page_number, region=_bounds(region_parts), condition="known"))
+            return True
+
         # A stacked schedule: the label on one line, its value on the next.
         if under is not None:
             key, under = under, None
-            shape = _VALUE_SHAPE.get(key)
-            if flat not in _EVERY_LABEL and _HAS_SUBSTANCE.search(text) and (shape is None or shape.search(text)):
-                out.fields.append(Field(field_key=key, value=text.strip(" \t:.-–"), page=page_number, region=_bounds(parts), condition="known"))
+            if emit(key, text, parts):
                 continue
-        alone = [key for key, label, at in _labels_on(flat) if at == 0 and len(label) == len(flat.strip(" :"))]
-        if alone and text[:1].isupper():
-            under = alone[0]
+        exact = _exact_label(text, kind)
+        if exact and text[:1].isupper():
+            under = exact
             continue
+
+        # A table row: the label column, a gap, the value column. The label is the whole heading,
+        # matched exactly — a heading ASAP does not know is no field at all, not a prefix match.
+        if ":" not in text:
+            split = _split_label_and_value(parts, text)
+            if split is not None:
+                label, value, value_parts = split
+                key = _exact_label(label, kind)
+                if key:
+                    emit(key, value, value_parts or parts)
+                    continue
+                if len(label.split()) <= 4 and label[:1].isupper():
+                    continue
 
         charge = bool(_CHARGE_CONTEXT.search(text))
 
@@ -326,6 +440,10 @@ def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
             # A line that names a charge names no party and states no premium, whatever label
             # happens to sit on it. This is the "Policyholders compensation fund" defect.
             if charge and (key in _PARTY_KEYS or key in {"premium", "sum_insured"}):
+                continue
+            # "Insured vehicles …": the label runs on into another word, so it heads something else.
+            follows = text[at + len(label):] if at + len(label) <= len(text) else ""
+            if re.match(r"\s+[a-z]", follows) and ":" not in follows[:2]:
                 continue
             # "Do not send it to any insurer, client…" mentions a party; it does not name one.
             # A label that names a party is written as a heading, with a capital.
@@ -667,7 +785,8 @@ def _split_label_and_value(
     gaps = [parts[i][0] - parts[i - 1][2] for i in range(1, len(parts))]
     if not gaps:
         return None
-    ordinary = sorted(gaps)[len(gaps) // 2]
+    # The lower median: with two gaps, the ordinary word space is the smaller one, not the column gap.
+    ordinary = sorted(gaps)[(len(gaps) - 1) // 2]
     for index, gap in enumerate(gaps, start=1):
         if gap >= _COLUMN_GAP_MINIMUM and gap >= ordinary * _COLUMN_GAP_RATIO:
             label = " ".join(p[4] for p in parts[:index])
@@ -725,7 +844,7 @@ def _bounds(parts: list[tuple[float, float, float, float, str]]) -> dict[str, fl
     return {"x": x0, "y": y0, "width": max(x1 - x0, 1.0), "height": max(y1 - y0, 1.0)}
 
 
-def _settle(out: Extraction) -> None:
+def _settle(out: Extraction, kind: str | None = None) -> None:
     """Decide what to do when a document says the same thing more than once, and note what it never
     said at all.
 
@@ -734,6 +853,15 @@ def _settle(out: Extraction) -> None:
     point of having conditions. Picking the first, or the one that looks better, would hide exactly
     the thing a person needs to see.
     """
+    # The currency a stated amount carries: "KES 39,200,000" states KES (D-138). Read from the amount
+    # itself, so it points where the amount does; never assumed from the brokerage's own currency.
+    if not any(f.field_key == "currency" and f.value for f in out.fields):
+        for f in out.fields:
+            m = re.match(r"\s*([A-Z]{3})\b", f.value or "") if f.field_key in ("premium", "sum_insured") else None
+            if m and m.group(1) not in {"THE", "AND", "PER", "FOR"}:
+                out.fields.append(Field("currency", m.group(1), f.page, f.region, "known"))
+                break
+
     by_key: dict[str, list[Field]] = {}
     for f in out.fields:
         by_key.setdefault(f.field_key, []).append(f)
@@ -751,9 +879,36 @@ def _settle(out: Extraction) -> None:
 
     # What the document never said. A missing field is a fact worth proposing: the review screen
     # shows it as missing rather than leaving a person to notice an absence.
-    for key in LABELS:
+    asked = (*_MONEY_DOC_POLICY_KEYS, *_MONEY_FIELD_KEYS) if kind in MONEY_KINDS else tuple(LABELS)
+    for key in asked:
         if key not in by_key:
             settled.append(Field(key, None, None, None, "missing"))
 
     settled.sort(key=lambda f: (f.page or 999, f.field_key))
     out.fields = settled
+
+
+# A document's own words about what it is, checked in this order on its first page (D-138). Order
+# matters: a "claim form" can mention a policy, and an invoice can mention a quotation.
+_KIND_RULES: tuple[tuple[str, Any], ...] = (
+    # A client's instruction or choice is correspondence, though it names a quotation.
+    ("correspondence", re.compile(r"\b(choice|instruction)\s+record\b|\bclient\s+(instruction|choice)\b", re.IGNORECASE)),
+    ("claim_form", re.compile(r"\bclaim\s+(notification\s+)?form\b|\bpolice\s+abstract\b|\bclaim\s+notification\b", re.IGNORECASE)),
+    ("receipt", re.compile(r"\b(official\s+)?receipt\b(?!\s+(is|was)\s+not)", re.IGNORECASE)),
+    ("invoice", re.compile(r"\b(tax\s+|debit\s+note|premium\s+)?invoice\b|\bdebit\s+note\b", re.IGNORECASE)),
+    ("statement", re.compile(r"\b(statement\s+of\s+account|commission\s+statement|insurer\s+statement)\b", re.IGNORECASE)),
+    ("endorsement", re.compile(r"\bendorsement\b", re.IGNORECASE)),
+    ("certificate", re.compile(r"\bcertificate\s+of\s+insurance\b|\btime\s+on\s+risk\b|\bcover\s+note\b", re.IGNORECASE)),
+    ("certificate", re.compile(r"\bplacement\s+confirmation\b|\bconfirmation\s+of\s+cover\b", re.IGNORECASE)),
+    ("quote_slip", re.compile(r"\bquotation\b|\bquote\s+slip\b|\brenewal\s+terms\b", re.IGNORECASE)),
+    ("policy_schedule", re.compile(r"\bpolicy\s+schedule\b|\bschedule\s+of\s+insurance\b", re.IGNORECASE)),
+)
+
+
+def suggest_kind(first_page: str) -> str | None:
+    """The kind a document's heading names, from its first lines only — not its small print."""
+    head = "\n".join(line for line in first_page.splitlines()[:8] if not re.search(r"no real insurance|not issued by|fixture|use restriction", line, re.IGNORECASE))
+    for kind, pattern in _KIND_RULES:
+        if pattern.search(head):
+            return kind
+    return None

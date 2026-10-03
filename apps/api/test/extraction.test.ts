@@ -35,6 +35,7 @@ const RESULT: ExtractionResult = {
   ],
   terms: [],
   needsManualReview: null,
+  suggestedKind: null,
 };
 
 function makeDb(state = "queued"): FakeDb {
@@ -171,6 +172,7 @@ describe("a document that states the same field more than once", () => {
     ],
     terms: [],
     needsManualReview: null,
+  suggestedKind: null,
   };
   const withUniqueIndex = () => {
     db = makeDb();
