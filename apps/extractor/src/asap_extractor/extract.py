@@ -126,7 +126,7 @@ LABELS: dict[str, tuple[str, ...]] = {
     # "limit" is deliberately NOT here. A quotation's limit of liability is a term of cover, not
     # the value of the thing insured, and reading one as the other overstates what is covered.
     "sum_insured": ("total sum insured", "sum insured", "declared value", "value insured"),
-    "premium": ("total premium", "gross premium", "annual premium", "premium"),
+    "premium": ("annual total premium", "total premium", "gross premium", "annual premium", "premium"),
     "premium_basis": ("premium basis", "rating basis", "basis of premium", "rate"),
     "currency": ("currency",),
     "quote_valid_until": ("quotation valid until", "quote valid until", "valid until", "validity",
@@ -300,14 +300,22 @@ def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
 
     # Words whose baselines agree to within a couple of points are on the same visual line. The
     # tolerance is deliberately coarse: a schedule's rows are far further apart than this.
-    lines: dict[int, list[tuple[float, float, float, float, str]]] = {}
-    for x0, y0, x1, y1, word, _block, _line, _ in words:
-        lines.setdefault(round(y0 / _LINE_TOLERANCE), []).append((x0, y0, x1, y1, word))
-
-    for parts in lines.values():
-        parts.sort(key=lambda w: w[0])
+    under: str | None = None  # a field label alone on its line, whose value is the next line
+    for parts in _visual_lines(words):
         text = " ".join(p[4] for p in parts)
         flat = _normalise(text)
+
+        # A stacked schedule: the label on one line, its value on the next.
+        if under is not None:
+            key, under = under, None
+            shape = _VALUE_SHAPE.get(key)
+            if flat not in _EVERY_LABEL and _HAS_SUBSTANCE.search(text) and (shape is None or shape.search(text)):
+                out.fields.append(Field(field_key=key, value=text.strip(" \t:.-–"), page=page_number, region=_bounds(parts), condition="known"))
+                continue
+        alone = [key for key, label, at in _labels_on(flat) if at == 0 and len(label) == len(flat.strip(" :"))]
+        if alone and text[:1].isupper():
+            under = alone[0]
+            continue
 
         charge = bool(_CHARGE_CONTEXT.search(text))
 
@@ -318,6 +326,10 @@ def _read_fields(page: Any, page_number: int, out: Extraction) -> None:
             # A line that names a charge names no party and states no premium, whatever label
             # happens to sit on it. This is the "Policyholders compensation fund" defect.
             if charge and (key in _PARTY_KEYS or key in {"premium", "sum_insured"}):
+                continue
+            # "Do not send it to any insurer, client…" mentions a party; it does not name one.
+            # A label that names a party is written as a heading, with a capital.
+            if key in _PARTY_KEYS and at < len(text) and text[at : at + 1].islower():
                 continue
 
             after = text[at + len(label):] if len(text) > at + len(label) else ""
@@ -421,80 +433,218 @@ _COLUMN_GAP_RATIO = 1.8
 _COLUMN_GAP_MINIMUM = 9.0
 
 
+# Terms a quotation names that the term table's own types do not (D-136). Stored as type `other`
+# under one fixed label each, so the comparison can find them without a migration. Checked before
+# the classic rules: "Geographical limit" is a territory, not a limit of liability.
+_EXTRA_TERMS: tuple[tuple[str, Any], ...] = (
+    ("Geographic scope", re.compile(r"^(geographical|geographic|territorial)\s+(scope|limits?|area|cover)\b|^territor(y|ies|ial)\b", re.IGNORECASE)),
+    ("Outstanding information", re.compile(r"^(outstanding\s+(information|requirements?|items)|information\s+(required|outstanding))\b", re.IGNORECASE)),
+    ("Quote validity", re.compile(r"^((quote|quotation|offer)\s+)?validity\b|^valid\s+(until|for)\b", re.IGNORECASE)),
+    ("Status", re.compile(r"^((quote|quotation|offer)\s+)?status\b", re.IGNORECASE)),
+)
+
+# Row headings that are not terms but end one: a term's value never runs on into the next row.
+_ROW_HEADINGS: frozenset[str] = frozenset({
+    "field", "test value", "value", "client", "cover", "proposed period", "period", "quote reference",
+    "reference", "use restriction", "notes", "remarks", "prepared by", "date", "annual total premium",
+    "total sum insured", "sum insured", "premium", "insurer", "insured", "page",
+})
+
+
+def _term_heading(label: str) -> tuple[str, str | None] | None:
+    """What kind of term a heading names: (type, fixed label for `other` types), or None."""
+    text = label.strip(" \t:.-–")
+    if not text or len(text.split()) > 6:
+        return None
+    for canonical, pattern in _EXTRA_TERMS:
+        if pattern.search(text):
+            return "other", canonical
+    term_type = _classify(text)
+    return (term_type, None) if term_type else None
+
+
+def _is_row_heading(text: str) -> bool:
+    flat = _normalise(text)
+    return flat in _ROW_HEADINGS or flat in _EVERY_LABEL
+
+
+def _inline_segments(text: str) -> list[tuple[str | None, str]]:
+    """A line cut wherever a heading introduces a value: "Excess: 5% … Geographical limit: Kenya …"
+    is two terms, not one. The text before the first heading comes back with no label."""
+    cuts: list[tuple[int, int]] = []  # (label start, colon index)
+    for m in re.finditer(r":", text):
+        before = text[: m.start()]
+        words = list(re.finditer(r"\S+", before))
+        if not words:
+            continue
+        found = None
+        for k in range(min(5, len(words)), 0, -1):
+            begin = words[-k].start()
+            phrase = before[begin:]
+            # A heading starts a sentence or a row: capitalised, at the start or after a full stop
+            # or a semicolon. "per vehicle Geographical limit" is "Geographical limit".
+            starts = begin == 0 or re.search(r"[.;:]\s*$", before[:begin]) or phrase[:1].isupper()
+            if starts and phrase[:1].isupper() and (_term_heading(phrase) or _is_row_heading(phrase)):
+                found = begin
+                break
+        # An unknown label still ends a term when it starts the line: "Use restriction: …".
+        if found is None and len(words) <= 3 and words[0].start() == 0 and before[:1].isupper():
+            found = 0
+        if found is not None and (not cuts or found > cuts[-1][1]):
+            cuts.append((found, m.start()))
+    if not cuts:
+        return [(None, text)]
+    segments: list[tuple[str | None, str]] = []
+    if text[: cuts[0][0]].strip():
+        segments.append((None, text[: cuts[0][0]].strip()))
+    for i, (begin, colon) in enumerate(cuts):
+        stop = cuts[i + 1][0] if i + 1 < len(cuts) else len(text)
+        segments.append((text[begin:colon].strip(), text[colon + 1 : stop].strip()))
+    return segments
+
+
+def _visual_lines(words: list[Any]) -> list[list[tuple[float, float, float, float, str]]]:
+    """Words on one visual line, by where their boxes sit — not by rounding a coordinate.
+
+    Rounding put a bold label and the value beside it into different "lines" whenever their tops
+    straddled a rounding boundary, so a value lost its label at random (the hosted quotations).
+    """
+    items = sorted(((w[0], w[1], w[2], w[3], w[4]) for w in words), key=lambda p: ((p[1] + p[3]) / 2, p[0]))
+    lines: list[dict[str, Any]] = []
+    for part in items:
+        centre = (part[1] + part[3]) / 2
+        height = max(part[3] - part[1], 1.0)
+        if lines and abs(centre - lines[-1]["c"]) <= max(1.5, 0.35 * height):
+            line = lines[-1]
+            line["parts"].append(part)
+            line["c"] += (centre - line["c"]) / len(line["parts"])
+        else:
+            lines.append({"c": centre, "parts": [part]})
+    return [sorted(line["parts"], key=lambda p: p[0]) for line in lines]
+
+
 def _read_terms(page: Any, page_number: int, out: Extraction) -> None:
-    """Find the terms a quotation states, one row per occurrence.
+    """Find the terms a quotation states, one row per occurrence, each kept to its own words.
 
-    A quotation states several excesses and several exclusions. `_read_fields` answers "what is
-    the premium" and holds one value per key; this answers "what excesses apply" and must not
-    flatten them, because the one it dropped is the one that mattered.
-
-    A line is split into what the document calls the term and what it says about it — at a colon
-    where there is one, otherwise at a column gap wide enough not to be a word space. A line with
-    neither, following a term, is that term continuing: real quotations wrap their conditions.
+    Three layouts are read the same way (D-136): a label and its value on one line (with a colon
+    or a column gap); a heading on a line of its own with the value on the lines below; and
+    several "Label: value" terms run together in one paragraph. A value continues onto the next
+    line only until another heading — of a term, of a field or of any other row — begins: that is
+    what keeps an exclusion, the outstanding information and a status warning out of a territory.
     """
     words = page.get_text("words")
     if not words:
         return
 
-    lines: dict[int, list[tuple[float, float, float, float, str]]] = {}
-    for x0, y0, x1, y1, word, _block, _line, _ in words:
-        lines.setdefault(round(y0 / _LINE_TOLERANCE), []).append((x0, y0, x1, y1, word))
+    open_term: int | None = None  # index in out.terms of the term whose value may continue
+    pending: tuple[str, str | None, str] | None = None  # a heading still waiting for its value
 
-    previous: Term | None = None
-    for _key in sorted(lines):
-        parts = sorted(lines[_key], key=lambda w: w[0])
+    def add(term_type: str, canonical: str | None, label: str, value: str, parts: list[Any]) -> int:
+        amount, currency = _money(value)
+        out.terms.append(
+            Term(
+                ordinal=len(out.terms),
+                term_type=term_type,
+                label=canonical or label.strip(" \t:.-–"),
+                value=value,
+                amount=amount,
+                currency=currency,
+                page=page_number,
+                region=_bounds(parts),
+                condition="unclear" if _UNCOMPARABLE.search(value) else "known",
+                method="labelled_line",
+            )
+        )
+        return len(out.terms) - 1
+
+    def extend(index: int, text: str, parts: list[Any]) -> None:
+        t = out.terms[index]
+        value = f"{t.value or ''} {text}".strip()
+        amount, currency = (t.amount, t.currency) if t.amount else _money(value)
+        out.terms[index] = replace(t, value=value, amount=amount, currency=currency, region=_merge(t.region, _bounds(parts)),
+                                   condition="unclear" if _UNCOMPARABLE.search(value) else t.condition)
+
+    def unlabelled(text: str, parts: list[Any]) -> None:
+        nonlocal open_term, pending
+        if not _HAS_SUBSTANCE.search(text):
+            return
+        heading = _term_heading(text)
+        if heading and len(text.split()) <= 4 and not re.search(r"\d", text):
+            pending, open_term = (heading[0], heading[1], text), None
+            return
+        if _is_row_heading(text):
+            pending, open_term = None, None
+            return
+        if pending:
+            open_term = add(pending[0], pending[1], pending[2], text, parts)
+            pending = None
+            return
+        if open_term is not None:
+            begins_a_row = any(at == 0 for _k, _l, at in _labels_on(_normalise(text)))
+            if begins_a_row:
+                open_term = None
+                return
+            extend(open_term, text, parts)
+
+    # A paragraph of "Label: value" terms wraps, and a heading can break across the wrap ("… Key" /
+    # "exclusions: …"). Lines that follow such a paragraph closely, from the same margin, are read
+    # with it as one text; a table row, whose value column starts elsewhere, never is.
+    groups: list[list[Any]] = []
+    for line in _visual_lines(words):
+        if groups:
+            prev = groups[-1]
+            prev_text = " ".join(p[4] for p in prev)
+            height = max(prev[-1][3] - prev[-1][1], 1.0)
+            gap = min(p[1] for p in line) - max(p[3] for p in prev)
+            same_margin = abs(min(p[0] for p in line) - min(p[0] for p in prev)) <= 2.0
+            line_text = " ".join(p[4] for p in line)
+            opens_a_row = any(
+                line_text[:1].isupper() and (_term_heading(" ".join(line_text.split()[:k])) or _is_row_heading(" ".join(line_text.split()[:k])))
+                for k in range(1, 5)
+            )
+            if (":" in prev_text and _inline_segments(prev_text) != [(None, prev_text)] and same_margin
+                    and gap < 0.6 * height and not opens_a_row):
+                groups[-1] = prev + line
+                continue
+        groups.append(line)
+
+    for parts in groups:
         text = " ".join(p[4] for p in parts).strip()
         if not text:
             continue
-
-        split = _split_label_and_value(parts, text)
-        if split is None:
-            # No label on this line. If the last line was a term, this is it continuing.
-            # A continuation is a line that does not *begin* a new labelled row. Testing for a
-            # label anywhere would break on an exclusion that happens to mention the underwriter.
-            begins_a_row = any(at == 0 for _k, _l, at in _labels_on(_normalise(text)))
-            # Nor is a line naming a term of its own a continuation of the last one, whatever
-            # its layout: swallowing it would hide a limit inside an excess.
-            if (
-                previous is not None
-                and _HAS_SUBSTANCE.search(text)
-                and not begins_a_row
-                and _classify(text) is None
-            ):
-                joined = f"{previous.value or ''} {text}".strip()
-                out.terms[-1] = replace(
-                    previous,
-                    value=joined,
-                    region=_merge(previous.region, _bounds(parts)),
-                )
-                previous = out.terms[-1]
+        segments = _inline_segments(text)
+        if segments == [(None, text)]:
+            # No colon heading: a table row split at its column gap, or plain text.
+            split = _split_label_and_value(parts, text)
+            if split is not None and ":" not in text:
+                label, value, value_parts = split
+                heading = _term_heading(label)
+                if heading and value and _HAS_SUBSTANCE.search(value):
+                    pending = None
+                    open_term = add(heading[0], heading[1], label, value, value_parts or parts)
+                    continue
+                if _is_row_heading(label) or _labels_on(_normalise(label)):
+                    pending, open_term = None, None
+                    continue
+            unlabelled(text, parts)
             continue
-
-        label, value, value_parts = split
-        term_type = _classify(label)
-        if term_type is None:
-            previous = None
-            continue
-        if not value or not _HAS_SUBSTANCE.search(value):
-            previous = None
-            continue
-
-        amount, currency = _money(value)
-        unclear = bool(_UNCOMPARABLE.search(value))
-        term = Term(
-            ordinal=len(out.terms),
-            term_type=term_type,
-            label=label.strip(" \t:.-–"),
-            value=value,
-            amount=amount,
-            currency=currency,
-            page=page_number,
-            region=_bounds(value_parts or parts),
-            condition="unclear" if unclear else "known",
-            method="labelled_line",
-        )
-        out.terms.append(term)
-        previous = term
+        for label, value in segments:
+            if label is None:
+                unlabelled(value, parts)
+                continue
+            heading = _term_heading(label)
+            if heading is None:
+                # A labelled value of another kind ends any term before it.
+                pending, open_term = None, None
+                continue
+            if value and _HAS_SUBSTANCE.search(value):
+                # Under a pending heading ("Geographical scope" above "Geographical limit: …"),
+                # the pending heading's kind wins when both name the same thing.
+                kind = heading
+                pending = None
+                open_term = add(kind[0], kind[1], label, value, _words_spanning(parts, text, 0, len(value), value))
+            else:
+                pending, open_term = (heading[0], heading[1], label), None
 
 
 def _split_label_and_value(

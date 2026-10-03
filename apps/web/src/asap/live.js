@@ -1887,7 +1887,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const askedFor = /\bthree\b/i.test(raw) ? 3 : /\btwo\b|\bboth\b/i.test(raw) ? 2 : null;
     return {
       lead: "Comparing " + plural(readings.length, "quotation", "quotations") + " as ASAP read them" + (askedFor && askedFor !== readings.length ? " — you asked for " + askedFor + ", and these are the ones on file" : "") + ".",
-      text: [c.whyNoRecommendation, c.risks.length ? plural(c.risks.length, "thing", "things") + " that could hurt the client are listed beside this, each with the page it was read from." : "Nothing was flagged from what was read; geographic scope and payment terms are not read by ASAP, so check them in each document."].join(" "),
+      text: [c.whyNoRecommendation, c.risks.length ? plural(c.risks.length, "thing", "things") + " that could hurt the client are listed beside this, each with the page it was read from." : "Nothing was flagged from what was read; payment terms are not read by ASAP, and a value it did not extract may still be in the document, so check each one."].join(" "),
       ref: { ws: "quotecompare", documentIds: ids },
       chips: readings.map((r) => "Review " + r.document.filename).slice(0, 3),
     };

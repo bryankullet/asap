@@ -6,11 +6,18 @@
  * confirmed. Nothing here is a recommendation: ASAP never picks an insurer, and when a material
  * term is missing from any quotation it says that no comparison can be relied on yet.
  *
- * Absence is never shown as zero or "included": a value the document does not state is "Not found
- * in the document"; a document ASAP could not read is "Could not be read"; a term stated in words
- * nobody can compare is "Unclear"; and a term ASAP does not read at all (geographic scope, payment
- * terms) says so, so a blank is never mistaken for nothing.
+ * Absence is never shown as zero or "included". When ASAP read no value it says "Not extracted —
+ * check the document" (D-136): that is what is known — the reading found nothing — and not that the
+ * document says nothing, which ASAP cannot establish. A document ASAP could not read is "Could not
+ * be read"; a term stated in words nobody can compare is "Unclear"; and a term ASAP does not read at
+ * all (payment terms) says so, so a blank is never mistaken for nothing.
+ *
+ * Every value shows the page it was read from and whether a person has confirmed it. A status
+ * warning the quotation states ("indicative terms only", "no cover is in force") is never folded
+ * into another row: it has its own row and is raised as a warning.
  */
+
+export const NOT_EXTRACTED = "Not extracted — check the document";
 
 /** The dimensions compared, in the order a broker reads a quotation. */
 export const DIMENSIONS = [
@@ -18,19 +25,47 @@ export const DIMENSIONS = [
   { key: "sum_insured", label: "Sum insured", field: "sum_insured" },
   { key: "excess", label: "Excess", term: ["excess"], material: true },
   { key: "limit", label: "Limits", term: ["limit"], material: true },
+  // Read by the extractor as `other` terms under one fixed label each (D-136).
+  { key: "territory", label: "Geographic scope", term: ["other"], labelled: /^geographic scope$/i },
   { key: "exclusion", label: "Exclusions", term: ["exclusion"] },
   {
     key: "conditions",
     label: "Conditions and subjectivities",
     term: ["condition", "subjectivity"],
   },
-  { key: "validity", label: "Valid until", field: "quote_valid_until", material: true },
+  {
+    key: "validity",
+    label: "Quote validity",
+    field: "quote_valid_until",
+    orTerm: /^quote validity$/i,
+    material: true,
+  },
+  {
+    key: "outstanding",
+    label: "Outstanding information",
+    term: ["other"],
+    labelled: /^outstanding information$/i,
+  },
+  { key: "status", label: "Status warnings", term: ["other"], labelled: /^status$/i },
   { key: "basis", label: "Premium basis", field: "premium_basis" },
-  { key: "territory", label: "Geographic scope", notRead: true },
   { key: "payment", label: "Payment terms", notRead: true },
 ];
 
 const DAY = 86_400_000;
+
+/** Where a value was read and whether a person confirmed it, said beside the value. */
+function source(page, confirmed, conflicting = false) {
+  const where = page ? "page " + page : "page not placed";
+  const state = confirmed
+    ? "confirmed"
+    : conflicting
+      ? "different values on the document"
+      : "read, not confirmed";
+  return " (" + where + " · " + state + ")";
+}
+
+/** A quotation's own words that say it is not cover, or not a firm offer. */
+const WARNING = /indicative|not (yet )?(accepted|bound|issued)|no cover|not in force|subject to/i;
 
 /** A date ASAP can compare: ISO or day/month/year. Null when it cannot tell. */
 function dateOf(v) {
@@ -57,6 +92,7 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
   const missingMaterial = new Map();
   const risks = [];
   const evidence = [];
+  const warnings = [];
 
   const rows = DIMENSIONS.map((dim) => {
     const cells = readings.map((r, i) => {
@@ -68,13 +104,16 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
           missingMaterial.set(name, [...(missingMaterial.get(name) || []), dim.label]);
         return { v: "Could not be read", flag: "missing" };
       }
-      if (dim.field) {
-        const f = r.fields.find((x) => x.fieldKey === dim.field);
-        const value = f ? (f.correctedValue ?? f.proposedValue) : null;
-        if (!value || f.state === "rejected") {
+      const fieldRead = dim.field ? r.fields.find((x) => x.fieldKey === dim.field) : null;
+      const fieldValue = fieldRead ? (fieldRead.correctedValue ?? fieldRead.proposedValue) : null;
+      const useField = dim.field && fieldValue && fieldRead.state !== "rejected";
+      if (dim.field && (useField || !dim.orTerm)) {
+        const f = fieldRead;
+        const value = fieldValue;
+        if (!useField) {
           if (dim.material)
             missingMaterial.set(name, [...(missingMaterial.get(name) || []), dim.label]);
-          return { v: "Not found in the document", flag: "missing" };
+          return { v: NOT_EXTRACTED, flag: "missing" };
         }
         const confirmed = f.state === "accepted" || f.state === "corrected";
         const conflicting = f.condition === "conflicting" && !confirmed;
@@ -121,19 +160,20 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
             });
         }
         return {
-          v:
-            shown +
-            (confirmed
-              ? ""
-              : conflicting
-                ? " (different values on the document)"
-                : " (read, not confirmed)"),
+          v: shown + source(f.page, confirmed, conflicting),
           flag: confirmed ? "ok" : "uncertain",
         };
       }
       // Terms: every reading of that kind, never flattened into one.
+      const kinds = dim.term ?? ["other"];
+      const named = dim.labelled ?? dim.orTerm;
       const terms = r.proposals.filter(
-        (t) => dim.term.includes(t.termType) && t.state !== "rejected",
+        (t) =>
+          kinds.includes(t.termType) &&
+          t.state !== "rejected" &&
+          (!named || named.test(t.label.trim())) &&
+          // An `other` term with a fixed label belongs to its own row, never to Limits or Exclusions.
+          (t.termType !== "other" || named),
       );
       if (!terms.length) {
         if (dim.material)
@@ -145,11 +185,12 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
             documentId: r.document.id,
             page: null,
           });
-        return { v: "Not found in the document", flag: "missing" };
+        return { v: NOT_EXTRACTED, flag: "missing" };
       }
       // A term labelled only with its own kind ("Excess", "Exclusions") is not said twice.
       const generic = (t) =>
-        /^(exclusions?|excess(es)?|limits?( of liability)?|conditions?|subjectivit(y|ies))$/i.test(
+        !!named ||
+        /^((key|main|principal) )?(exclusions?|excess(es)?|limits?( of liability)?|conditions?|subjectivit(y|ies))$/i.test(
           t.label.trim(),
         );
       for (const t of terms) {
@@ -164,6 +205,22 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
           page: t.page,
           confirmed,
         });
+        if (dim.key === "status" && value && WARNING.test(value)) {
+          warnings.push({
+            insurer: name,
+            text: value,
+            documentId: r.document.id,
+            page: t.page,
+            confirmed,
+          });
+          risks.push({
+            insurer: name,
+            text: "Status warning: " + value,
+            documentId: r.document.id,
+            page: t.page,
+          });
+        }
+        if (dim.key === "status" || dim.key === "validity" || dim.key === "outstanding") continue;
         if (t.condition === "unclear" || !value)
           risks.push({
             insurer: name,
@@ -190,15 +247,22 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
         (t) => t.condition === "unclear" || !(t.correctedValue ?? t.proposedValue),
       );
       return {
-        v:
-          terms
-            .map(
-              (t) =>
-                (generic(t) ? "" : t.label + ": ") +
-                (t.correctedValue ?? t.proposedValue ?? "unclear"),
-            )
-            .join("; ") + (allConfirmed ? "" : " (read, not confirmed)"),
-        flag: anyUnclear ? "missing" : allConfirmed ? "ok" : "uncertain",
+        v: terms
+          .map(
+            (t) =>
+              (generic(t) ? "" : t.label + ": ") +
+              (t.correctedValue ?? t.proposedValue ?? "unclear") +
+              source(t.page, t.state === "accepted" || t.state === "corrected"),
+          )
+          .join("; "),
+        flag:
+          dim.key === "status" && warnings.some((w) => w.documentId === r.document.id)
+            ? "missing"
+            : anyUnclear
+              ? "missing"
+              : allConfirmed
+                ? "ok"
+                : "uncertain",
       };
     });
     return { label: dim.label, cells };
@@ -214,6 +278,7 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
     rows,
     evidence,
     risks,
+    warnings,
     missingMaterial: missing.map(([insurer, labels]) => ({ insurer, labels })),
     unconfirmed,
     // Never a pick. The reason is the honest one for this comparison.

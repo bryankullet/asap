@@ -8,6 +8,7 @@ export type QuoteComparison = {
   rows: { label: string; cells: CompareCell[] }[];
   evidence: CompareEvidence[];
   risks: CompareRisk[];
+  warnings: { insurer: string; text: string; documentId: string; page: number | null; confirmed: boolean }[];
   missingMaterial: { insurer: string; labels: string[] }[];
   unconfirmed: number;
   recommendation: null;

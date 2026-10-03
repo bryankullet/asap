@@ -107,8 +107,23 @@ export async function extractDocument(
   }
 
   if (result.fields.length > 0) {
-    const fields = await db.from("document_fields").insert(
-      onePerKey(result.fields).map((f) => ({
+    /*
+     * Upserted on (document, key), so a document queued again to be re-read (D-136) refreshes its
+     * own proposals instead of failing on the unique key — and a field a person has already
+     * accepted or corrected is never touched.
+     */
+    const existing = await db
+      .from("document_fields")
+      .select("field_key, state")
+      .eq("organization_id", doc.organization_id)
+      .eq("document_id", doc.id);
+    if (existing.error) return await failRecording(db, logger, doc.id, "fields", existing.error);
+    const decidedKeys = new Set(
+      ((existing.data ?? []) as { field_key: string; state: string }[]).filter((r) => r.state !== "proposed").map((r) => r.field_key),
+    );
+    const freshFields = onePerKey(result.fields).filter((f) => !decidedKeys.has(f.fieldKey));
+    const fields = freshFields.length === 0 ? { error: null } : await db.from("document_fields").upsert(
+      freshFields.map((f) => ({
         organization_id: doc.organization_id,
         document_id: doc.id,
         field_key: f.fieldKey,
@@ -122,6 +137,7 @@ export async function extractDocument(
         state: "proposed",
         condition: f.condition,
       })),
+      { onConflict: "document_id,field_key" },
     );
     if (fields.error) return await failRecording(db, logger, doc.id, "fields", fields.error);
   }

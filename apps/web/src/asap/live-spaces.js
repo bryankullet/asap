@@ -1525,6 +1525,8 @@ function quoteCompareSpace(ref, state) {
     status: "draft",
     statusLabel: c.unconfirmed ? plural(c.unconfirmed, "value", "values") + " not confirmed" : "All values confirmed",
     blocks: [
+      // A quotation that says it is not cover says so first, in its own words (D-136).
+      ...(c.warnings.length ? [note("red", "Status warnings in these quotations", c.warnings.map((w) => w.insurer + ": " + w.text + (w.page ? " (page " + w.page + ")" : "")).join(" "))] : []),
       note(c.missingMaterial.length ? "red" : "amber", "No recommendation", c.whyNoRecommendation),
       ...(c.unconfirmed ? [note("amber", "These are readings, not confirmed terms", "Values marked “read, not confirmed” come from ASAP reading the documents. Confirm each quotation from its document before presenting this to the client. Nothing here was confirmed or chosen for you.")] : []),
       ...(failed.length ? [note("red", plural(failed.length, "quotation could not be opened", "quotations could not be opened"), "It is left out of the comparison rather than shown as empty.")] : []),
@@ -1533,7 +1535,7 @@ function quoteCompareSpace(ref, state) {
         "What could hurt the client",
         c.risks.length
           ? c.risks.map((r) => ({ title: r.insurer, note: r.text + (r.page ? " · page " + r.page : ""), badge: "Check", badgeTone: bad, action: open(r.documentId, null) }))
-          : [{ title: "Nothing flagged from what was read", note: "That is not the same as nothing to worry about: geographic scope and payment terms are not read by ASAP — check them in each document.", badge: "Read", badgeTone: warn }],
+          : [{ title: "Nothing flagged from what was read", note: "That is not the same as nothing to worry about: payment terms are not read by ASAP, and a value ASAP did not extract may still be in the document — check each one.", badge: "Read", badgeTone: warn }],
       ),
       rows(
         "Where each value was read",
