@@ -777,6 +777,11 @@ export function documentRoutes(deps: {
     if (error) return sendError(c, mapDatabaseError(error));
     if (!data) throw new HttpError(404, "not_found", "That field is not available.");
     const before = toField(data as FieldRow);
+    // The document states this more than once, differently: accepting "the first reading" would be
+    // ASAP choosing. A person looks at the page and enters the right value (or rejects it).
+    if (decision === "accept" && before.condition === "conflicting") {
+      throw new HttpError(409, "conflicting_reading", "The document gives more than one value for this. Check the page and enter the right value as a correction.");
+    }
 
     /*
      * The same decision twice is one decision.

@@ -103,12 +103,12 @@ export async function extractDocument(
       })),
       { onConflict: "document_id,page_number" },
     );
-    if (pages.error) return await fail(db, doc.id, "What was read could not be recorded.");
+    if (pages.error) return await failRecording(db, logger, doc.id, "pages", pages.error);
   }
 
   if (result.fields.length > 0) {
     const fields = await db.from("document_fields").insert(
-      result.fields.map((f) => ({
+      onePerKey(result.fields).map((f) => ({
         organization_id: doc.organization_id,
         document_id: doc.id,
         field_key: f.fieldKey,
@@ -123,7 +123,7 @@ export async function extractDocument(
         condition: f.condition,
       })),
     );
-    if (fields.error) return await fail(db, doc.id, "What was read could not be recorded.");
+    if (fields.error) return await failRecording(db, logger, doc.id, "fields", fields.error);
   }
 
   /*
@@ -166,7 +166,7 @@ export async function extractDocument(
         })),
         { onConflict: "document_id,ordinal" },
       );
-      if (terms.error) return await fail(db, doc.id, "What was read could not be recorded.");
+      if (terms.error) return await failRecording(db, logger, doc.id, "terms", terms.error);
     }
   }
 
@@ -183,7 +183,7 @@ export async function extractDocument(
       extraction_error: result.needsManualReview,
     })
     .eq("id", doc.id);
-  if (done.error) return await fail(db, doc.id, "What was read could not be recorded.");
+  if (done.error) return await failRecording(db, logger, doc.id, "state", done.error);
 
   return { state: "extracted", pages: result.pages.length, fields: result.fields.length };
 }
@@ -195,4 +195,47 @@ async function fail(db: SupabaseClient, id: string, reason: string): Promise<Ext
     .update({ extraction_state: "failed", extraction_error: reason })
     .eq("id", id);
   return { state: "failed", reason };
+}
+
+type ExtractedField = { fieldKey: string; value: string | null; page: number | null; region: { x: number; y: number; width: number; height: number } | null; condition: string };
+
+/**
+ * One proposal per field, as the table holds them (`unique (document_id, field_key)`).
+ *
+ * The extractor reports every reading of a field: a document that states the same registration
+ * twice, or two different ones, comes back with two rows for one key — and inserting both made the
+ * whole reading fail ("What was read could not be recorded"). Readings that agree become one
+ * proposal. Readings that disagree become one proposal marked `conflicting`, carrying the first
+ * reading and where it was found, so the review screen asks a person to look and decide — nothing
+ * is resolved here, and the conflict is never hidden.
+ */
+export function onePerKey<F extends ExtractedField>(fields: F[]): F[] {
+  const out = new Map<string, F>();
+  for (const f of fields) {
+    const seen = out.get(f.fieldKey);
+    if (!seen) {
+      out.set(f.fieldKey, f);
+      continue;
+    }
+    // A missing placeholder gives way to an actual reading.
+    if (seen.value === null && f.value !== null) {
+      out.set(f.fieldKey, f);
+      continue;
+    }
+    const differ = f.value !== null && seen.value !== null && f.value.trim().toLowerCase() !== seen.value.trim().toLowerCase();
+    if (differ || f.condition === "conflicting") out.set(f.fieldKey, { ...seen, condition: "conflicting" });
+  }
+  return [...out.values()];
+}
+
+/** A write that failed: the database's own code is logged (never the document's words), and the document says so. */
+async function failRecording(
+  db: SupabaseClient,
+  logger: Logger,
+  id: string,
+  step: "pages" | "fields" | "terms" | "state",
+  error: { code?: string; message?: string },
+): Promise<ExtractionOutcome> {
+  logger.error({ documentId: id, step, code: error.code ?? null, constraint: /constraint "([^"]+)"/.exec(error.message ?? "")?.[1] ?? null }, "extraction could not be recorded");
+  return fail(db, id, "What was read could not be recorded.");
 }

@@ -400,17 +400,30 @@ WS.policy = (r) => {
     ] };
 };
 
+/**
+ * Whether a vehicle is on cover, from the records alone. Only an insurer confirmation linked to the
+ * period the vehicle is scheduled on makes it "On cover"; a logbook, a client's request or an email
+ * is never that link, so none of them can turn this answer green.
+ */
+export function coverVerdict({ reg, item, year }) {
+  if (!year) return { state: 'no_policy', label: 'Not on cover', covered: false, why: (reg || 'This vehicle') + ' has no policy period on file, so nothing covers it.' };
+  if (!item) return { state: 'not_scheduled', label: 'Not on cover', covered: false, why: (reg || 'This vehicle') + ' isn’t on any insurer schedule we hold. A request from the client, a logbook or an email doesn’t prove cover — only the insurer’s confirmation does.' };
+  if (!year.confirmationEvidenceId) return { state: 'unconfirmed', label: 'Unconfirmed', covered: false, why: reg + ' is on the schedule, but no insurer confirmation is linked to this period. Until one is, cover is not confirmed.' };
+  return { state: 'covered', label: 'On cover', covered: true, why: null };
+}
+
 WS.coverage = (r) => {
   const reg = r.reg;
   const it = reg ? sel.itemByReg(reg) : null;
   const year = it ? byId('policyYears', it.policyYearId) : sel.activeYear(r.clientId);
   const confirmed = year && year.confirmationEvidenceId;
+  const verdict = coverVerdict({ reg, item: it, year });
   return { kind: 'Coverage check', title: (reg || 'Cover') + ' — cover check', status: it && confirmed ? 'live' : 'draft',
-    statusLabel: it ? (confirmed ? 'On cover' : 'Unconfirmed') : 'Not on cover',
+    statusLabel: verdict.label,
     blocks: [
-      note(it && confirmed ? 'green' : 'red', it && confirmed ? 'Covered' : 'Cover not confirmed',
-        it && confirmed ? reg + ' appears on schedule v' + it.scheduleVersion + ' of ' + byId('policies', year.policyId).number + ', in force ' + fmtDate(year.from) + ' – ' + fmtDate(year.to) + '.'
-          : (reg || 'This vehicle') + ' isn’t on any insurer schedule we hold. A request from the client, a logbook or an email doesn’t prove cover — only the insurer’s confirmation does.'),
+      note(verdict.covered ? 'green' : 'red', verdict.covered ? 'Covered' : 'Cover not confirmed',
+        verdict.covered ? reg + ' appears on schedule v' + it.scheduleVersion + ' of ' + byId('policies', year.policyId).number + ', in force ' + fmtDate(year.from) + ' – ' + fmtDate(year.to) + '.'
+          : verdict.why),
       { t: 'facts', items: [['Vehicle', it ? it.reg + ' · ' + it.make : (reg || '—')],
         ['Sum insured', it ? fmtMoney(it.value) : 'not declared'],
         ['Policy', year ? byId('policies', year.policyId).number : 'none'],
@@ -421,7 +434,9 @@ WS.coverage = (r) => {
         year && year.confirmationEvidenceId ? { title: sel.evidence(year.confirmationEvidenceId).label, note: 'Insurer confirmation', badge: 'Verified', badgeTone: tone.ok, evidenceId: year.confirmationEvidenceId } : { title: 'No insurer confirmation', note: 'Nothing in the records confirms this cover.', badge: 'Missing', badgeTone: tone.bad },
         year && year.scheduleDocumentId ? { title: byId('documents', year.scheduleDocumentId).name, note: 'Schedule ' + sv(year.scheduleVersion), badge: 'Source', badgeTone: tone.ok, action: { a: 'open', ref: { ws: 'document', documentId: year.scheduleDocumentId } } } : null
       ].filter(Boolean)),
-      ...(it ? [] : [{ t: 'gate', kind: 'approve', label: 'Open servicing work for ' + (reg || 'this vehicle'),
+      // Over live records servicing is not connected: no button that cannot work, and nothing that
+      // reads as asking for time on risk. The next step is said, not offered.
+      ...(it ? [] : S.isLive() ? [{ t: 'note', tone: 'amber', title: 'Adding ' + (reg || 'this vehicle') + ' to cover', text: 'Ask the insurer to add it and confirm in writing; link that confirmation to the policy period here. ASAP has not requested time on risk and has not created any servicing work.' }] : [{ t: 'gate', kind: 'approve', label: 'Open servicing work for ' + (reg || 'this vehicle'),
         detail: 'Creates servicing work so the vehicle can be added properly. It does not create cover.',
         action: 'servicing.create', payload: { clientId: r.clientId, policyYearId: year?.id, detail: 'Add vehicle ' + (reg || '') + ' to cover', missing: ['Declared value'] } }])
     ] };

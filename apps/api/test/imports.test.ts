@@ -9,6 +9,7 @@
  *   - the same file cannot be imported twice;
  *   - a person approves a preview, and the commit writes exactly that.
  */
+import { readFileSync } from "node:fs";
 import pino from "pino";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
@@ -511,3 +512,136 @@ describe("PATCH /contacts/:id", () => {
   });
 });
 
+
+/*
+ * Staging acceptance findings (D-135): a contact the matched client already has is not new; the
+ * premium question is asked only when a premium is present; a workbook is read from the sheet that
+ * holds the book, any sheet can be chosen, and headings can be mapped — all before anything is
+ * written.
+ */
+describe("contacts the matched client already has", () => {
+  const ONFILE = "70000000-0000-4000-8000-0000000000a1";
+  const seedDavid = () => {
+    db.tables["clients"]!.push({ id: "20000000-0000-4000-8000-0000000000c1", organization_id: ORG, name: "UX TEST Karibu Logistics Ltd", kind: "corporate", deleted_at: null });
+    db.tables["client_contacts"]!.push({ id: ONFILE, organization_id: ORG, client_id: "20000000-0000-4000-8000-0000000000c1", full_name: "UX TEST David Otieno", role_label: "Finance Manager", email: "david.otieno@example.test", phone: "+254 712 345 678", is_primary: true, source: "manual", deleted_at: null });
+    db.defaults = { ...(db.defaults ?? {}), client_contacts: { deleted_at: null } };
+  };
+  const NOPREMIUM = (contact: string, email: string, phone = "") =>
+    ["Client,Contact,Email,Phone,Policy No,Insurer,Class,Start,Expiry,Premium", `UX TEST Karibu Logistics Ltd,${contact},${email},${phone},UX-MTR-001,UX TEST Jubilee,Motor commercial,2026-10-01,2027-09-30,`].join("\n");
+
+  it.each([
+    ["the same email, in another case", "UX TEST David Otieno", "DAVID.OTIENO@example.test", ""],
+    ["the same phone, written another way", "D. Otieno", "", "0712 345 678"],
+    ["the same name, with no email or phone", "ux test  david otieno", "", ""],
+  ])("matches by %s: the preview says on file, and creates no contact", async (_label, contact, email, phone) => {
+    seedDavid();
+    const body = await readJson(await preview({ filename: "16_UX_TEST_Import_Policy_NoPremium.csv", content: NOPREMIUM(contact, email, phone) }));
+    expect(body.rows[0]).toMatchObject({ outcome: "match", contactStatus: "on_file" });
+    expect(body.summary.contactsToCreate).toBe(0);
+  });
+
+  it("a different email under the same name is a different person, not merged", async () => {
+    seedDavid();
+    const body = await readJson(await preview({ filename: "x.csv", content: NOPREMIUM("UX TEST David Otieno", "d.otieno@other.test") }));
+    expect(body.rows[0].contactStatus).toBe("new");
+    expect(body.summary.contactsToCreate).toBe(1);
+  });
+
+  it("the same person at another client is not matched across clients", async () => {
+    seedDavid();
+    const content = "Client,Contact,Email\nMara Foods Limited,UX TEST David Otieno,david.otieno@example.test";
+    const body = await readJson(await preview({ filename: "y.csv", content }));
+    expect(body.rows[0]).toMatchObject({ matchedClientId: EXISTING, contactStatus: "new" });
+  });
+
+  it("committing — and committing a second import of the same rows — writes no duplicate contact", async () => {
+    seedDavid();
+    const content = NOPREMIUM("UX TEST David Otieno", "david.otieno@example.test");
+    const commitOnce = async (name: string, rows: string) => {
+      const p = await readJson(await preview({ filename: name, content: rows }));
+      const res = await build().request(`/imports/${p.batch.id}/commit`, { method: "POST", headers: auth, body: JSON.stringify({}) });
+      return readJson(res);
+    };
+    const first = await commitOnce("a.csv", content);
+    expect(first.batch.contactsCreated).toBe(0);
+    // A different file carrying the same person again (a re-export): still nothing new.
+    const second = await commitOnce("b.csv", content + "\n");
+    expect(second.batch.contactsCreated).toBe(0);
+    expect(db.inserts.filter((i) => i.table === "client_contacts")).toHaveLength(0);
+    expect(db.tables["client_contacts"]).toHaveLength(1);
+  });
+
+  it("a person repeated on several lines for a new client is one new contact", async () => {
+    const content = ["Client,Contact,Email,Policy No,Insurer,Start,Expiry", "UX TEST New Co Ltd,Jane W,jane@newco.test,P1,UX TEST APA,2026-10-01,2027-09-30", "UX TEST New Co Ltd,Jane W,jane@newco.test,P2,UX TEST APA,2026-10-01,2027-09-30"].join("\n");
+    const body = await readJson(await preview({ filename: "z.csv", content }));
+    expect(body.rows.map((r: { contactStatus: string }) => r.contactStatus)).toEqual(["new", "repeated"]);
+    expect(body.summary.contactsToCreate).toBe(1);
+  });
+});
+
+describe("the premium-basis question", () => {
+  const ROW = "UX TEST Karibu Logistics Ltd,UX-MTR-001,UX TEST Jubilee,2026-10-01,2027-09-30";
+  it("is not asked when the file has no premium column", async () => {
+    const body = await readJson(await preview({ filename: "a.csv", content: `Client,Policy No,Insurer,Start,Expiry\n${ROW}` }));
+    expect(body.blocking).toEqual([]);
+    expect(body.rows[0].premiumAmount).toBeNull();
+  });
+  it("is not asked when the premium column is blank on every row — and the premium stays missing", async () => {
+    const body = await readJson(await preview({ filename: "b.csv", content: `Client,Policy No,Insurer,Start,Expiry,Premium\n${ROW},` }));
+    expect(body.blocking).toEqual([]);
+    expect(body.rows[0]).toMatchObject({ outcome: "create", premiumAmount: null, problem: null });
+    expect(body.columns.find((c: { header: string }) => c.header === "Premium").meaning).toBe("premium_amount");
+  });
+  it("is asked as soon as a premium value is present", async () => {
+    const body = await readJson(await preview({ filename: "c.csv", content: `Client,Policy No,Insurer,Start,Expiry,Premium\n${ROW},"125,000.00"` }));
+    expect(body.blocking.join(" ")).toMatch(/gross premium or the total the client pays/);
+  });
+});
+
+describe("workbooks: the sheet that holds the book, any sheet on request, and mapped headings", () => {
+  const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url));
+  const previewFile = (filename: string, bytes: Buffer, extra: Record<string, unknown> = {}) =>
+    build().request("/imports", { method: "POST", headers: auth, body: JSON.stringify({ filename, content: bytes.toString("base64"), mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...extra }) });
+
+  it("skips a Read Me sheet and reads the data sheet, naming it and offering the others", async () => {
+    const res = await previewFile("14_UX_TEST_Client_Vehicle_Policy_Book.xlsx", fixture("ux-test-book-with-readme.xlsx"));
+    expect(res.status).toBe(201);
+    const body = await readJson(res);
+    expect(body.sheetName).toBe("Clients and policies");
+    expect(body.sheets.map((s: { name: string }) => s.name)).toEqual(["Read Me", "Clients and policies", "Vehicles"]);
+    expect(body.blocking).toEqual([]);
+    expect(body.rows.map((r: { clientName: string; policyNumber: string }) => [r.clientName, r.policyNumber])).toEqual([
+      ["UX TEST Karibu Logistics Ltd", "UX-MTR-001"],
+      ["UX TEST Pwani Traders Ltd", "UX-FIR-002"],
+    ]);
+    // Read only: nothing written.
+    expect(db.inserts.filter((i) => i.table === "clients" || i.table === "client_contacts")).toHaveLength(0);
+    expect(created).toBe(0);
+  });
+
+  it("reads another sheet when a person chooses it, and refuses a sheet that is not there", async () => {
+    const body = await readJson(await previewFile("book.xlsx", fixture("ux-test-book-with-readme.xlsx"), { sheetName: "Read Me" }));
+    expect(body.sheetName).toBe("Read Me");
+    expect(body.blocking.join(" ")).toMatch(/client's name/);
+    const missing = await previewFile("book.xlsx", fixture("ux-test-book-with-readme.xlsx"), { sheetName: "Nope" });
+    expect(missing.status).toBe(422);
+    expect((await readJson(missing)).message).toMatch(/Choose one of: Read Me, Clients and policies, Vehicles/);
+  });
+
+  it("headings it cannot recognise are mapped by a person before the preview counts anything", async () => {
+    // Nothing on either sheet is recognised: the table-shaped sheet is read, not the instructions.
+    const first = await readJson(await previewFile("map.xlsx", fixture("ux-test-book-needs-mapping.xlsx")));
+    expect(first.sheetName).toBe("Book");
+    const before = await readJson(await previewFile("map.xlsx", fixture("ux-test-book-needs-mapping.xlsx"), { sheetName: "Book" }));
+    expect(before.blocking.join(" ")).toMatch(/client's name/);
+    const after = await readJson(
+      await previewFile("map.xlsx", fixture("ux-test-book-needs-mapping.xlsx"), {
+        sheetName: "Book",
+        columns: { "Named Party": "client_name", Person: "contact_name", Ref: "policy_number", Carrier: "insurer_name", Line: "class_of_business", Begins: "period_start", Ends: "period_end" },
+      }),
+    );
+    expect(after.blocking).toEqual([]);
+    expect(after.rows[0]).toMatchObject({ clientName: "UX TEST Karibu Logistics Ltd", policyNumber: "UX-MTR-009", insurerName: "UX TEST APA", periodStart: "2026-10-01", periodEnd: "2027-09-30" });
+    expect(created).toBe(0);
+  });
+});

@@ -24,7 +24,6 @@ const jwt = (c) => {
   return `${h}.${b}.${createHmac("sha256", process.env.CONNECTED_JWT_SECRET).update(`${h}.${b}`).digest("base64url")}`;
 };
 const AMINA = jwt({ sub: "a0000000-0000-4000-8000-000000000001", email: "amina@connected.test", role: "authenticated", aud: "authenticated" });
-const READER = jwt({ sub: "c0000000-0000-4000-8000-000000000001", email: "reader@connected.test", role: "authenticated", aud: "authenticated" });
 const RUN = Date.now().toString(36).slice(-5);
 const CLIENT = `UX TEST Karibu Logistics ${RUN} Ltd`;
 

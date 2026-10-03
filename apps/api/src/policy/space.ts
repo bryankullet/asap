@@ -119,7 +119,7 @@ export async function loadPolicySpace(env: Env, policyId: string, opts: { period
     }
     for (const a of docApps.filter((x) => x["target_type"] === "policy_period" && x["target_id"] === periodId)) {
       const d = docs.find((x) => x["id"] === a["document_id"]);
-      if (!d || !["policy_schedule", "certificate"].includes(d["kind"] as string)) continue;
+      if (!d || !documentProvesCover(d["kind"] as string)) continue;
       if (origin === "manual") origin = "document";
       out.push({
         kind: "document", label: `${d["filename"] as string}, reviewed and applied to this period`,
@@ -134,7 +134,7 @@ export async function loadPolicySpace(env: Env, policyId: string, opts: { period
     const e = evidenceFor(p["id"] as string);
     return {
       id: p["id"] as string, start: p["period_start"] as string, end: p["period_end"] as string,
-      evidence: e.evidence, verified: e.evidence.some((x) => x.kind === "cover_confirmation" || x.kind === "issued_document" || x.kind === "document"),
+      evidence: e.evidence, verified: evidenceVerifiesCover(e.evidence),
       cancellation: e.cancellation, origin: e.origin,
     };
   });
@@ -423,4 +423,19 @@ export function policyFingerprint(v: PolicySpaceResponse): { versions: Record<st
     openRenewal: v.work.filter((w) => w.kind === "renewal").map((w) => w.id),
   };
   return { versions, fingerprint: createHash("sha256").update(JSON.stringify(versions)).digest("hex") };
+}
+
+/**
+ * Which documents can stand as proof of cover once reviewed and applied to a period: the insurer's
+ * schedule or certificate. A logbook, a proposal, a client's request, a quotation or an email is
+ * information about a risk, never confirmation that an insurer covers it.
+ */
+export const COVER_DOCUMENT_KINDS: readonly string[] = ["policy_schedule", "certificate"];
+export function documentProvesCover(kind: string | null | undefined): boolean {
+  return COVER_DOCUMENT_KINDS.includes(kind ?? "");
+}
+
+/** A period is verified only by the insurer's confirmation, its issued policy, or a reviewed schedule/certificate. */
+export function evidenceVerifiesCover(evidence: { kind: string }[]): boolean {
+  return evidence.some((x) => x.kind === "cover_confirmation" || x.kind === "issued_document" || x.kind === "document");
 }

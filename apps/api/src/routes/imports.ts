@@ -9,6 +9,7 @@ import {
   type PremiumBasis,
   contactsResponseSchema,
   createContactRequestSchema,
+  findSameContact,
   updateContactRequestSchema,
   contactResponseSchema,
   importCommitRequestSchema,
@@ -256,7 +257,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
       );
     }
 
-    const read = await readImport(bytes, input.filename, input.mimeType);
+    const read = await readImport(bytes, input.filename, input.mimeType, input.sheetName);
     if (read.kind === "not_a_book") {
       // In words, with somewhere to go. A file ASAP cannot read as a book is not a failure of the
       // person who uploaded it.
@@ -291,7 +292,11 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         "No column in this file was recognised as the client's name, and everything else is filed under a client.",
       );
     }
-    if (mapped.has("premium_amount") && !input.premiumBasis) {
+    // Asked only when a premium is actually being imported: an empty premium column says nothing
+    // about gross or total payable, and a missing premium stays missing.
+    const premiumHeaders = parsed.headers.filter((h) => columns[h] === "premium_amount");
+    const anyPremium = parsed.rows.some((r) => premiumHeaders.some((h) => (r.cells[h] ?? "").trim() !== ""));
+    if (anyPremium && !input.premiumBasis) {
       blocking.push(
         "This file has a premium column. Say whether those figures are the gross premium or the total the client pays — the two differ by the statutory levies and cannot be told apart from the numbers.",
       );
@@ -304,6 +309,18 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
       .is("deleted_at", null);
     if (existing.error) return sendError(c, mapDatabaseError(existing.error));
     const candidates = (existing.data ?? []) as ClientCandidate[];
+    // The brokerage's contacts, so a row naming a person a matched client already has is not
+    // counted (or later written) as a new contact.
+    const contactsR = await db
+      .from("client_contacts")
+      .select("client_id, full_name, email, phone")
+      .eq("organization_id", org.id)
+      .is("deleted_at", null);
+    if (contactsR.error) return sendError(c, mapDatabaseError(contactsR.error));
+    const contactsOnFile = ((contactsR.data ?? []) as { client_id: string; full_name: string; email: string | null; phone: string | null }[]).map(
+      (x) => ({ clientId: x.client_id, fullName: x.full_name, email: x.email, phone: x.phone }),
+    );
+    const contactsInFile = new Map<string, { fullName: string | null; email: string | null; phone: string | null }[]>();
 
     const batchInsert = await db
       .from("import_batches")
@@ -364,9 +381,23 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         }
       }
 
+      let contactStatus: ImportRowPreview["contactStatus"] = "none";
+      const person = { fullName: r.contactName ?? (r.contactEmail || r.contactPhone ? r.clientName : null), email: r.contactEmail, phone: r.contactPhone };
+      if ((outcome === "match" || outcome === "create") && (r.contactName || r.contactEmail || r.contactPhone)) {
+        const clientKey = matchedClientId ?? `new:${r.clientName.trim().toLowerCase()}`;
+        const seen = contactsInFile.get(clientKey) ?? [];
+        if (matchedClientId && findSameContact(person, contactsOnFile.filter((x) => x.clientId === matchedClientId))) contactStatus = "on_file";
+        else if (findSameContact(person, seen)) contactStatus = "repeated";
+        else {
+          contactStatus = "new";
+          contactsInFile.set(clientKey, [...seen, person]);
+        }
+      }
+
       previews.push({
         lineNumber: r.lineNumber,
         outcome,
+        contactStatus,
         problem,
         clientName: r.clientName || null,
         contactName: r.contactName,
@@ -411,6 +442,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         premiumAmount: null,
         matchedClientId: null,
         candidates: [],
+        contactStatus: "none",
       });
       rowInserts.push({
         organization_id: org.id,
@@ -442,6 +474,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         batch,
         source: read.source,
         sheetName: read.sheetName ?? null,
+        sheets: read.sheets ?? [],
         mappedByModel,
         rows: rows.sort((a, b) => a.lineNumber - b.lineNumber),
         summary: summarise(rows),
@@ -555,6 +588,25 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
         }
 
         if (r.contactName || r.contactEmail || r.contactPhone) {
+          /*
+           * Re-checked against the client's contacts as they are now, not as they were at preview:
+           * the same person is never written twice, whether by a repeated import, a second line of
+           * this file or a contact added by hand in between.
+           */
+          const have = await db
+            .from("client_contacts")
+            .select("full_name, email, phone, is_primary")
+            .eq("organization_id", org.id)
+            .eq("client_id", clientId)
+            .is("deleted_at", null);
+          if (have.error) throw have.error;
+          const onFile = ((have.data ?? []) as { full_name: string; email: string | null; phone: string | null; is_primary: boolean }[]).map(
+            (x) => ({ fullName: x.full_name, email: x.email, phone: x.phone, isPrimary: x.is_primary }),
+          );
+          const person = { fullName: r.contactName ?? r.clientName, email: r.contactEmail, phone: r.contactPhone };
+          if (findSameContact(person, onFile)) {
+            createdByName.set(`${key}:contact`, "on_file");
+          } else {
           const contact = await db
             .from("client_contacts")
             .insert({
@@ -566,7 +618,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
               phone: r.contactPhone,
               // The first contact a client gets is the one to write to; a later import does not
               // silently take that over, because the partial unique index would refuse it.
-              is_primary: !createdByName.has(`${key}:contact`),
+              is_primary: !onFile.some((x) => x.isPrimary) && !createdByName.has(`${key}:contact`),
               source: "import",
               created_by: user.id,
             })
@@ -576,6 +628,7 @@ export function importRoutes(deps: { logger: Logger; aiProvider?: AiProvider | n
           if (!contact.error && contact.data) {
             createdByName.set(`${key}:contact`, contact.data.id);
             contactsCreated++;
+          }
           }
         }
 
@@ -762,9 +815,8 @@ function summarise(rows: ImportRowPreview[]) {
     clientsToCreate: new Set(
       rows.filter((r) => r.outcome === "create").map((r) => r.clientName?.toLowerCase()),
     ).size,
-    contactsToCreate: rows.filter(
-      (r) => (r.outcome === "create" || r.outcome === "match") && (r.contactName || r.contactEmail),
-    ).length,
+    // Only people the matched client does not already have, and each person once per file.
+    contactsToCreate: rows.filter((r) => (r.outcome === "create" || r.outcome === "match") && r.contactStatus === "new").length,
     policiesToCreate: rows.filter(
       (r) => (r.outcome === "create" || r.outcome === "match") && r.policyNumber,
     ).length,

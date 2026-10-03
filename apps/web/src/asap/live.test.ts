@@ -1454,4 +1454,136 @@ describe("live mode", () => {
       expect(edit).toContain("\"value\":\"otieno@example.test\"");
     });
   });
+
+  /*
+   * Staging acceptance findings (D-135), in live mode: the import space asks for the premium basis
+   * only when the server needs it, offers the workbook's sheets and a column mapping, and says what
+   * a reload lost; a claim never saves the prompt as the incident; the cover check offers no button
+   * it cannot honour; and quotations are compared from what was read, with no pick.
+   */
+  describe("staging findings", () => {
+    const apiMod = async () => (await import("../lib/api.js")).api as unknown as Record<string, unknown>;
+
+    it("import: the premium-basis question follows the server; sheets and headings re-read the same file; nothing is written", async () => {
+      previewImport.mockClear();
+      const original = previewImport.getMockImplementation()!;
+      previewImport.mockImplementation(async () => ({
+        batch: { id: "80000000-0000-4000-8000-000000000002", filename: "14_UX_TEST_Client_Vehicle_Policy_Book.xlsx", rowCount: 1, premiumBasis: null },
+        source: "spreadsheet", sheetName: "Clients and policies",
+        sheets: [{ name: "Read Me", rows: 3, headers: ["Sheet", "What it holds"] }, { name: "Clients and policies", rows: 1, headers: ["Client", "Named Party", "Premium"] }],
+        rows: [{ id: "r1", lineNumber: 2, outcome: "match", problem: null, clientName: "UX TEST Karibu Logistics Ltd", contactName: "UX TEST David Otieno", contactEmail: "david.otieno@example.test", policyNumber: "UX-MTR-001", insurerName: "UX TEST Jubilee", classOfBusiness: "Motor", periodStart: "2026-10-01", periodEnd: "2027-09-30", premiumAmount: null, matchedClientId: CLIENT, candidates: [], contactStatus: "on_file" }],
+        summary: { rows: 1, clientsToCreate: 0, contactsToCreate: 0, policiesToCreate: 1, needsReview: 0, invalid: 0 },
+        // A premium column, empty on every row: the server does not ask, so neither does the page.
+        columns: [{ header: "Client", meaning: "client_name" }, { header: "Named Party", meaning: null }, { header: "Premium", meaning: "premium_amount" }],
+        blocking: [], mappedByModel: [],
+      }) as never);
+      const A = await live();
+      await A.documents.read(new File(["x"], "14_UX_TEST_Client_Vehicle_Policy_Book.xlsx"));
+      await A.records.act("import.preview", { name: "14_UX_TEST_Client_Vehicle_Policy_Book.xlsx" });
+      const ws = text(A.ai.workspace({ ws: "import" }));
+      expect(ws).not.toMatch(/Premiums in this file are gross/);
+      expect(ws).toContain("New contacts\",\"0 (1 contact is already on file)");
+      expect(ws).toContain("Sheets in this workbook");
+      expect(ws).toContain("Read this sheet");
+      expect(ws).toContain("What each column holds");
+      await A.records.act("import.sheet", { sheet: "Read Me" });
+      expect(previewImport).toHaveBeenLastCalledWith(expect.objectContaining({ sheetName: "Read Me" }));
+      // Mapping: the column's position names it; the meaning goes to the server as the header's.
+      await A.records.act("import.map", { col0: "client_name", col1: "contact_name", col2: "ignore" });
+      expect(previewImport).toHaveBeenLastCalledWith(expect.objectContaining({ sheetName: "Read Me", columns: { Client: "client_name", "Named Party": "contact_name" } }));
+      expect(commitImport).not.toHaveBeenCalledWith("80000000-0000-4000-8000-000000000002", expect.anything());
+      previewImport.mockImplementation(original);
+    });
+
+    it("import: after a reload, a file that was read but not imported is said to be gone, not kept", async () => {
+      const api = await apiMod();
+      api["imports"] = async () => ({ batches: [{ id: "80000000-0000-4000-8000-000000000003", filename: "14_UX_TEST_Client_Vehicle_Policy_Book.xlsx", rowCount: 2, premiumBasis: null, status: "previewed", clientsCreated: 0, contactsCreated: 0, policiesCreated: 0, periodsCreated: 0, rowsSkipped: 0, failureReason: null, createdAt: "2026-10-03T08:00:00Z", committedAt: null }] });
+      const A = await live();
+      const ws = text(A.ai.workspace({ ws: "import" }));
+      expect(ws).toContain("“14_UX_TEST_Client_Vehicle_Policy_Book.xlsx” was read but not imported");
+      expect(ws).toContain("Nothing from that file was saved to your records");
+      delete api["imports"];
+    });
+
+    it("claim: the three observed prompts keep only the incident; a prompt with no facts asks instead of saving it", async () => {
+      const A = await live();
+      const ctxP = { ws: "policy", clientId: CLIENT, policyYearId: PER_OK, ref: { ws: "policy", clientId: CLIENT, policyYearId: PER_OK } };
+      // Two policies on file: ASAP asks which; the person picks TH-MTR-001.
+      const which = (await A.ai.route("UX TEST KDM 811A had a low-speed collision on 2 October 2026 with front-left body damage, no injury reported. Prepare a draft claim for Tausi Hauliers but do not register it or contact anyone.", ctxP)) as { clarify: { options: { label: string; text: string }[] } };
+      const pick = which.clarify.options.find((o) => o.label.startsWith("TH-MTR-001"))!;
+      const r = (await A.ai.route(pick.text, ctxP)) as { pending?: { payload: Record<string, string>; external: string } };
+      if (!r.pending) throw new Error(JSON.stringify(r));
+      expect(r.pending!.payload["incidentSummary"]).toBe("UX TEST KDM 811A had a low-speed collision on 2 October 2026 with front-left body damage, no injury reported.");
+      expect(r.pending!.payload["incidentOn"]).toBe("2026-10-02");
+      expect(r.pending!.external).toMatch(/No message is sent/);
+      const none = (await A.ai.route("Report a claim for Tausi Hauliers on 2 October 2026. Do not contact anyone on TH-MTR-001", ctxP)) as { pending?: unknown; lead: string };
+      expect(none.pending).toBeUndefined();
+      expect(none.lead).toBe("What happened?");
+      expect(createWorkItem).not.toHaveBeenCalledWith(expect.objectContaining({ incidentSummary: expect.stringMatching(/contact/i) }));
+    });
+
+    it("cover check: a vehicle on no schedule is not on cover, and live mode offers no servicing or TOR button", async () => {
+      const A = await live();
+      const ws = A.ai.workspace({ ws: "coverage", reg: "KDN 482Q", clientId: CLIENT });
+      expect(ws.statusLabel).toBe("Not on cover");
+      const t = text(ws);
+      expect(t).toContain("A request from the client, a logbook or an email doesn’t prove cover");
+      expect(t).toContain("ASAP has not requested time on risk and has not created any servicing work");
+      expect(t).not.toMatch(/servicing\.create|tor\.request/);
+    });
+
+    it("compare: three quotation documents compared as read, each value with its source; a reload rebuilds the same; no pick", async () => {
+      const api = await apiMod();
+      const Q = (n: number, insurer: string, premium: string | null) => ({
+        document: { id: "e000000" + n + "-0000-4000-8000-000000000001", kind: "quote_slip", filename: "0" + (n + 1) + "_UX_TEST_Quotation_" + insurer + ".pdf", mimeType: "application/pdf", byteSize: 1, pageCount: 1, extractionState: "extracted", extractionError: null, clientId: null, workItemId: null, createdAt: "2026-10-03T08:4" + n + ":00Z" },
+        pages: [], fileUrl: null, fileUrlExpiresAt: null,
+        fields: [{ id: "f00000" + n + "0-0000-4000-8000-000000000001", fieldKey: "premium", proposedValue: premium, correctedValue: null, state: "proposed", condition: premium ? "known" : "missing", page: premium ? 1 : null, region: null, reviewedBy: null, reviewedAt: null }],
+      });
+      const docs = [Q(1, "APA", "245,000"), Q(2, "CIC", "231,500"), Q(3, "Jubilee", null)];
+      const reading = (d: ReturnType<typeof Q>, insurer: string) => ({ document: { id: d.document.id, filename: d.document.filename, pageCount: 1, extractionState: "extracted" }, needsManualReview: null, linkedTo: null, permissions: { canReview: true },
+        fields: [{ fieldKey: "insurer_name", proposedValue: "UX TEST " + insurer, correctedValue: null, page: 1, condition: "known", state: "proposed" }, ...d.fields.map((f) => ({ fieldKey: f.fieldKey, proposedValue: f.proposedValue, correctedValue: null, page: f.page, condition: f.condition, state: f.state }))], proposals: [] });
+      const realDocuments = api["documents"];
+      const realDocument = api["document"];
+      api["documents"] = async () => ({ documents: docs.map((d) => d.document), limits: { maxBytes: 1, readableMimeTypes: [] } });
+      api["document"] = async (id: string) => docs.find((d) => d.document.id === id) ?? null;
+      const quotationReading = vi.fn(async (id: string) => { const i = docs.findIndex((d) => d.document.id === id); return reading(docs[i]!, ["APA", "CIC", "Jubilee"][i]!); });
+      api["quotationReading"] = quotationReading;
+      try {
+        const A = await live();
+        const r = (await A.ai.route("Compare all three UX TEST quotations and show me what could hurt the client", {})) as { lead: string; text: string; ref: { ws: string; documentIds: string[] } };
+        expect(r.ref.ws).toBe("quotecompare");
+        expect(r.ref.documentIds).toHaveLength(3);
+        expect(r.lead).toBe("Comparing 3 quotations as ASAP read them.");
+        expect(r.text).toMatch(/^No quotation can be recommended: material terms are missing/);
+        const ws = A.ai.workspace(r.ref);
+        const t = text(ws);
+        expect(ws.title).toBe("Comparing 3 quotations as read");
+        expect(t).toContain("UX TEST APA");
+        expect(t).toContain("245,000 (read, not confirmed)");
+        expect(t).toContain("Not found in the document");
+        expect(t).toContain("What could hurt the client");
+        // The premium opens at the field it was read from.
+        expect(t).toContain("\"fieldId\":\"f0000010-0000-4000-8000-000000000001\"");
+        // No pick: nothing names a quotation as the one to take.
+        expect(t).not.toMatch(/we recommend|recommended (quote|insurer|option)|best quote|choose UX TEST/i);
+        // A reload: the same records give the same comparison.
+        const B = await live();
+        B.ai.workspace(r.ref);
+        await new Promise((res) => setTimeout(res, 0));
+        expect(text(B.ai.workspace(r.ref))).toContain("245,000 (read, not confirmed)");
+        expect(reviewDocumentField).not.toHaveBeenCalledWith(expect.stringMatching(/^e0/), expect.anything(), expect.anything());
+      } finally {
+        api["documents"] = realDocuments;
+        api["document"] = realDocument;
+        delete api["quotationReading"];
+      }
+    });
+
+    it("compare: with fewer than two quotations it says so, and opens no empty comparison", async () => {
+      const A = await live();
+      const r = (await A.ai.route("Compare all three UX TEST quotations", {})) as { lead: string; ref: unknown };
+      expect(r.ref).toBeNull();
+      expect(r.lead).toMatch(/don’t hold any quotation documents|only one quotation/);
+    });
+  });
 });

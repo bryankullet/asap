@@ -2201,3 +2201,36 @@ sessions. Unset the variable and redeploy to go back to direct.
   merging clients; keying `work_item_create` by client needs a migration and is left for approval.
 - *Opening a client by name* matches the whole name first, so a client whose first word is short
   ("UX TEST Karibu Logistics Ltd") is found.
+
+## D-135
+
+**Hosted staging findings (Brokerage App, 3 Oct 2026).**
+- *Import contacts.* A row's contact is matched against the matched client's own contacts — same
+  email (any case), else same phone (last nine digits), else same name when the row gives neither —
+  and never across clients. The preview says `on_file`, `repeated` or `new` per row and counts only
+  new ones; the commit re-checks against the client's contacts as they are at that moment, so a
+  repeated import or preview never writes the same person twice. A differing email under the same
+  name is a different person, not merged.
+- *Premium basis* is asked only when a premium value is actually present; an empty premium column
+  asks nothing and the premium stays missing.
+- *Workbooks.* Every sheet is listed; the default is the sheet whose headings read as a book (a
+  client-name column, then the most recognised headings, then the most table-like), never a "Read
+  Me" by position; any sheet can be chosen, and unrecognised headings mapped, re-reading the same
+  file before anything is written. A preview lives only in the page that read it: after a reload the
+  Import space says the file was read but not imported and nothing from it was kept.
+- *Extraction recording.* The extractor reports every reading of a field; the table holds one row
+  per (document, field). Readings are settled to one proposal per field before insert — agreeing
+  ones once, differing ones once marked `conflicting` with the first reading's page as evidence. A
+  conflicting field cannot be accepted as read: the reviewer types the value they checked (saved as
+  a correction). The database error code and constraint are now logged on a failed recording.
+  Storing every alternative reading would need a column (a migration) and is not done here.
+- *Claim incident.* "What happened" is the incident facts only: directions to ASAP or about the
+  workflow are dropped clause by clause; when no incident facts are found, Ask asks rather than
+  saving the prompt. Registration still needs its own approval.
+- *Cover.* Only an insurer confirmation, its issued policy, or a reviewed schedule/certificate
+  applied to the period verifies cover; logbooks, requests and emails never do. In live mode the
+  cover check offers no servicing/TOR button (servicing is not connected) and says so.
+- *Quote comparison* is built from the server's reading of each quotation document, every value with
+  its document and page and its state (confirmed / read, not confirmed / not found / unclear / not
+  read by ASAP — geographic scope and payment terms). It never recommends: missing material terms
+  (premium, excess, limits, validity) are named per quotation instead.

@@ -15,6 +15,8 @@ import * as S from "./engine/store.js";
 import { buildWorkspace, interpret, parseDate, WORKSPACE_NAMES } from "./engine/intent.js";
 import { IMPORT_HEADERS, liveSpace, plural, requestDraft } from "./live-spaces.js";
 import { createRefresher, lifecycleOf, runMutation } from "./mutation.js";
+import { incidentFacts } from "./claim-facts.js";
+import { compareQuotations } from "./quote-compare.js";
 
 const WORK_VIEWS = ["needs", "with", "progress", "done"];
 const CLIENT_VIEWS = ["blocking", "incomplete", "refresh_due", "cleared", "not_started"];
@@ -127,6 +129,9 @@ async function hydrate(me) {
     })
     .catch(() => []);
 
+  // The last file read but never imported: its rows live only in the page that read it, so after
+  // a reload the Import space says so instead of implying anything was kept.
+  const importsP = Promise.resolve().then(() => api.imports()).catch(() => ({ batches: [] }));
   const [members, mailboxes, automations, audit, opportunities, ...workViews] = await Promise.all([
     api.members().catch(() => ({ members: [] })),
     api.mailboxes().catch(() => null),
@@ -460,7 +465,8 @@ async function hydrate(me) {
   const [supervision, rules] = await Promise.all([supervisionP, rulesP]);
   // Completion receipts are read when one is opened, not on every load.
   const receipts = new Map();
-  return { db, extras: { renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
+  const unfinishedImport = ((await importsP).batches || []).find((b) => b.status === "previewed") || null;
+  return { db, extras: { unfinishedImport, renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
 /** The newest server conversation, as the interface's thread. Empty when there is none. */
@@ -642,7 +648,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   // Set when the server's Ask stored the last question and its answer itself.
   let serverStoredLast = false;
   /** Live-only state the live workspaces read. */
-  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
+  const state = { me, members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, receipts: loaded.extras.receipts, applyPreviews: new Map(), docNotice: null, modelConfigured: loaded.extras.modelConfigured, unfinishedImport: loaded.extras.unfinishedImport, importSheet: null, importColumns: {}, quoteReadings: new Map(), quoteReadingErrors: new Set(), duplicate: null, importPreview: null, importFile: null, importResult: null, importResolutions: new Map() };
 
   // The re-read after a write runs in the background (mutation.js): a write settles when the
   // server answers it, and the interface re-renders when the fresh records land.
@@ -665,7 +671,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       // What this session already did stays done: a re-read must not make a finished action clickable again.
       db.meta.ledger = { ...db.meta.ledger, ...ledger };
       if (thread) Object.assign(db.conversations.find((c) => c.id === "cnv_main"), { messages: thread.messages });
-      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, modelConfigured: loaded.extras.modelConfigured });
+      Object.assign(state, { members: loaded.extras.members, mailboxes: loaded.extras.mailboxes, opportunities: loaded.extras.opportunities, documents: loaded.extras.documents, applyTargets: loaded.extras.applyTargets, claims: loaded.extras.claims, renewals: loaded.extras.renewals, supervision: loaded.extras.supervision, rules: loaded.extras.rules, modelConfigured: loaded.extras.modelConfigured, unfinishedImport: loaded.extras.unfinishedImport });
       for (const [id, p] of oppPatches) {
         if (p.at >= next.startedAt) state.opportunities.set(id, { ...(state.opportunities.get(id) || {}), ...p.d });
         else oppPatches.delete(id);
@@ -714,7 +720,10 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         content: await base64File(file),
         mimeType: file.type || "application/octet-stream",
         premiumBasis: basis ?? state.importPreview?.batch.premiumBasis ?? null,
+        ...(state.importSheet ? { sheetName: state.importSheet } : {}),
+        ...(Object.keys(state.importColumns).length ? { columns: state.importColumns } : {}),
       });
+      state.unfinishedImport = null;
       state.importResult = null;
       state.importError = null;
       state.importResolutions = new Map();
@@ -970,6 +979,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     const notes = other.length ? [other.map((f) => f.name).join(", ") + (other.length === 1 ? " is" : " are") + " not a file ASAP reads — PDF, JPG, PNG, CSV or Excel. Nothing was filed from " + (other.length === 1 ? "it" : "them") + "."] : [];
     if (sheets.length) {
       state.importFile = sheets[0];
+      // A new file is read from its own first reading: no sheet or headings chosen for another file.
+      state.importSheet = null;
+      state.importColumns = {};
       const res = await previewImport(null);
       if (sheets.length > 1) notes.push("Only " + sheets[0].name + " was read; add the others one at a time so each is previewed on its own.");
       if (!res.ok) return { lead: res.error, text: notes.join(" "), ref: { ws: "import" } };
@@ -981,7 +993,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (docsPart.length) pollIngested();
       return {
         lead: "I found " + plural(clients, "client", "clients") + " and " + plural(policies, "policy", "policies"),
-        text: [sheets[0].name + ": " + plural(p.summary.rows, "row", "rows") + " read." + (docsPart.length ? " " + plural(docsPart.length, "document", "documents") + " filed alongside." : ""), ...notes].join(" "),
+        text: [sheets[0].name + ": " + plural(p.summary.rows, "row", "rows") + " read" + (p.sheetName ? " from the “" + p.sheetName + "” sheet" + ((p.sheets || []).length > 1 ? " (other sheets: " + p.sheets.filter((x) => x.name !== p.sheetName).map((x) => x.name).join(", ") + " — choose another in the Space)" : "") : "") + "." + (docsPart.length ? " " + plural(docsPart.length, "document", "documents") + " filed alongside." : ""), ...notes].join(" "),
         ref: { ws: "import" },
         pending: p.blocking.length
           ? { title: "Needs correcting before import", sections: [{ label: "NEEDS CONFIRMATION", items: needs }], external: "Nothing is created until this is put right.", editRef: { ws: "import" }, editLabel: "Review in Space", cancelLabel: "Not now", confirmLabel: "Correct", action: "nav.open", payload: { ref: { ws: "import" } }, actionId: "nav.open:import:" + p.batch.id }
@@ -1132,6 +1144,30 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       if (!file) return { ok: false, error: "The file is no longer selected. Choose it again." };
       pendingFiles.delete(p.name);
       state.importFile = file;
+      // A new file starts from its own first reading: no sheet or headings carried over.
+      state.importSheet = null;
+      state.importColumns = {};
+      return previewImport(null);
+    },
+    /** Read another sheet of the same workbook. The file is still in the page; nothing is written. */
+    "import.sheet": (p) => {
+      if (!state.importFile) return { ok: false, error: "Choose the file again — it is no longer selected. Nothing from it was saved." };
+      state.importSheet = p.sheet;
+      state.importColumns = {};
+      return previewImport(null);
+    },
+    /** A person's meaning for headings ASAP did not recognise, then the same preview again. */
+    "import.map": (p) => {
+      if (!state.importFile) return { ok: false, error: "Choose the file again — it is no longer selected. Nothing from it was saved." };
+      const headers = state.importPreview?.columns.map((c) => c.header) || [];
+      const next = { ...state.importColumns };
+      headers.forEach((h, i) => {
+        const v = p["col" + i];
+        if (v === undefined) return;
+        if (v && v !== "ignore") next[h] = v;
+        else delete next[h];
+      });
+      state.importColumns = next;
       return previewImport(null);
     },
     "import.basis": (p) => previewImport(p.basis),
@@ -1189,6 +1225,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     "import.clear": () => {
       state.importPreview = null;
       state.importFile = null;
+      state.importSheet = null;
+      state.importColumns = {};
       state.importError = null;
       return ok("File discarded — nothing from it was saved");
     },
@@ -1465,6 +1503,15 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         let notFound = 0;
         for (const f of open) {
           const typed = (p[f.id] ?? "").trim();
+          // A reading the document gives two ways is never accepted as read: what the person typed
+          // after checking the page is their correction; left empty, it waits for them.
+          if (f.condition === "conflicting") {
+            if (typed) {
+              await api.reviewDocumentField(d.document.id, f.id, { decision: "correct", value: typed });
+              corrected++;
+            }
+            continue;
+          }
           if (typed && typed !== (f.proposedValue ?? "")) {
             await api.reviewDocumentField(d.document.id, f.id, { decision: "correct", value: typed });
             corrected++;
@@ -1743,6 +1790,9 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       }
       return { kind: "Document", title: "Opening the document…", status: "live", statusLabel: "Loading", ref, blocks: [note("green", "Opening the document", "Reading it and the values ASAP found from your brokerage's records.")] };
     }
+    // Quotation readings for a comparison: fetched from the server each time they are missing, so a
+    // reloaded page rebuilds the same comparison from the same records.
+    if (ref?.ws === "quotecompare") for (const id of ref.documentIds || []) loadQuoteReading(id);
     if (ref?.ws === "renewal" && ref.view === "receipt" && ref.runId && !state.receipts.has(ref.runId))
       void api.workflowReceipt(ref.runId).then((x) => { state.receipts.set(ref.runId, x); refresher.notify(); }).catch(() => {});
     const own = liveSpace(ref, state);
@@ -1786,6 +1836,61 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
         built.blocks.push({ t: "gate", kind: "approve", heading: "Upcoming", label: "See what ASAP plans", detail: state.supervision.upcoming.slice(0, 3).map((u) => u.label + " — " + S.fmtDate(u.at)).join(" · "), nav: { ws: "renewal", view: "upcoming" } });
     }
     return built;
+  }
+
+  // One request per reading in flight: the Space and Ask asking at once share it.
+  const loadingReadings = new Map();
+  function loadQuoteReading(id) {
+    if (state.quoteReadings.has(id) || state.quoteReadingErrors.has(id)) return null;
+    if (loadingReadings.has(id)) return loadingReadings.get(id);
+    const p = Promise.resolve()
+      .then(() => api.quotationReading(id))
+      .then((r) => state.quoteReadings.set(id, r))
+      .catch(() => state.quoteReadingErrors.add(id))
+      .finally(() => {
+        loadingReadings.delete(id);
+        refresher.notify();
+      });
+    loadingReadings.set(id, p);
+    return p;
+  }
+
+  /** Quotation documents on file: read as quote slips, carrying a quotation reference, or named so. */
+  function quotationDocuments(clientId) {
+    const isQuote = (d) =>
+      d.document.kind === "quote_slip" ||
+      d.fields?.some((f) => f.fieldKey === "quotation_reference" && (f.correctedValue ?? f.proposedValue)) ||
+      /quot/i.test(d.document.filename);
+    return [...state.documents.values()]
+      .filter((d) => d && isQuote(d))
+      .filter((d) => !clientId || !d.document.clientId || d.document.clientId === clientId)
+      .sort((a, b) => (a.document.createdAt < b.document.createdAt ? 1 : -1))
+      .slice(0, 6);
+  }
+
+  /**
+   * "Compare the quotations": every quotation document on file, compared as read — never a pick,
+   * and never an empty comparison opened as though one existed.
+   */
+  async function quoteCompareFromAsk(raw) {
+    if (!/\bcompar/i.test(raw) || !/\bquot/i.test(raw)) return null;
+    const named = db.clients.find((c) => new RegExp("\\b" + c.name.replace(/\s+(ltd|limited)$/i, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i").test(raw));
+    const docs = quotationDocuments(named?.id);
+    if (docs.length < 2)
+      return { lead: docs.length ? "I hold only one quotation document." : "I don’t hold any quotation documents to compare.", text: "A comparison needs at least two quotations on file. Upload the others and ASAP will read them; nothing was compared or chosen.", ref: null, keepWorkspace: true };
+    const ids = docs.map((d) => d.document.id);
+    await Promise.all(ids.map((id) => loadQuoteReading(id)));
+    const readings = ids.map((id) => state.quoteReadings.get(id)).filter(Boolean);
+    if (readings.length < 2)
+      return { lead: "I could not read enough of the quotations to compare them.", text: "Fewer than two could be opened just now. Refresh records and try again. Nothing was compared or chosen.", ref: null, keepWorkspace: true };
+    const c = compareQuotations(readings, (docId, key) => state.documents.get(docId)?.fields?.find((f) => f.fieldKey === key)?.id ?? null);
+    const askedFor = /\bthree\b/i.test(raw) ? 3 : /\btwo\b|\bboth\b/i.test(raw) ? 2 : null;
+    return {
+      lead: "Comparing " + plural(readings.length, "quotation", "quotations") + " as ASAP read them" + (askedFor && askedFor !== readings.length ? " — you asked for " + askedFor + ", and these are the ones on file" : "") + ".",
+      text: [c.whyNoRecommendation, c.risks.length ? plural(c.risks.length, "thing", "things") + " that could hurt the client are listed beside this, each with the page it was read from." : "Nothing was flagged from what was read; geographic scope and payment terms are not read by ASAP, so check them in each document."].join(" "),
+      ref: { ws: "quotecompare", documentIds: ids },
+      chips: readings.map((r) => "Review " + r.document.filename).slice(0, 3),
+    };
   }
 
   /**
@@ -2833,8 +2938,16 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
       convo.pendingClarification = { question: "claim date", text: raw };
       return { lead: "When did it happen?", text: "The date of the loss decides which period of cover it falls in. Nothing was changed.", clarify: { question: "Date of loss", options: [{ label: "Today", text: raw + " today" }, { label: "Yesterday", text: raw + " yesterday" }] }, ref: null, keepWorkspace: true };
     }
-    const what = raw.replace(/^.*?\bclaim\b\s*(for|about|—|-|:)?\s*/i, "").replace(/\s+on\s+[A-Z0-9-]{4,}\s*$/i, "").trim();
-    const summary = what.length >= 8 ? what.charAt(0).toUpperCase() + what.slice(1) : "Loss reported by the client — details to be added";
+    // The incident, without the directions about the work ("do not contact anyone…").
+    const { facts } = incidentFacts(raw.replace(/\s+on\s+[A-Z]{2,}[-/][A-Z0-9/-]{3,}\s*$/i, ""));
+    if (!facts)
+      return {
+        lead: "What happened?",
+        text: "I could not tell the facts of the loss apart from the instructions, so I have not prepared anything. Say what happened — the vehicle or property, the damage, and whether anyone was hurt — or write it in the claim form. Nothing was changed.",
+        ref: { ws: "claim", clientId: client.id, policyId: policy ? policy.id : "unknown", incidentOn: when.date },
+        keepWorkspace: false,
+      };
+    const summary = facts;
     const policyLine = policy ? policy.number + " — " + (policy.cls || "class not recorded") : "Not known yet — the claim says so until it is matched";
     return {
       lead: "I can report this as a draft claim for " + client.name + ".",
@@ -2922,6 +3035,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     ];
     const go = GO.find(([re]) => re.test(t.trim()));
     if (go) return { lead: go[2], text: "The workspace beside this answer is read from your brokerage's records.", ref: go[1], chips: LIVE_CHIPS };
+    const compared = await quoteCompareFromAsk(text.trim());
+    if (compared) return compared;
     // The answer to "which insurers?" goes back to that quotation before anything else reads it.
     if (insurerAsk && insurerListFrom(text.trim()).length) {
       const answered = quotationFromAsk(t, ctx, text.trim());
