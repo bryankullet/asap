@@ -73,10 +73,12 @@ describe("an import naming a contact the client already has", () => {
     expect(premium!["premium_amount"]).toBeNull();
 
     // D-137: the same policy imported again is previewed as already on file — not "1 new policy" —
-    // and the commit writes nothing more.
+    // and the commit writes nothing more. (Different bytes: the same file again is refused outright.)
     const again = await call(AMINA, "POST", "/imports", {
       filename: `16c_${tag}.csv`,
-      content: csv(`UX-${tag}-1`),
+      content: Buffer.from(Buffer.from(csv(`UX-${tag}-1`), "base64").toString() + "\n").toString(
+        "base64",
+      ),
       mimeType: "text/csv",
     });
     expect(again.status).toBe(201);
