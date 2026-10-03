@@ -152,3 +152,49 @@ describe("when it goes wrong", () => {
     expect(String(doc["extraction_error"])).not.toMatch(/boom/);
   });
 });
+
+/*
+ * 10_UX_TEST_KDM_811A_Police_Abstract.pdf failed with "What was read could not be recorded": the
+ * extractor reported one field twice (the document stated it in two places), and the table holds
+ * one row per (document, field) — so the whole insert was refused. Readings now settle to one
+ * proposal per field; differing readings are marked conflicting, never resolved by ASAP.
+ */
+describe("a document that states the same field more than once", () => {
+  const ABSTRACT: ExtractionResult = {
+    pages: [{ pageNumber: 1, text: "UX TEST POLICE ABSTRACT … KDM 811A … 02/10/2026", width: 595, height: 842 }],
+    fields: [
+      { fieldKey: "insured_name", value: "UX TEST Karibu Logistics Ltd", page: 1, region: { x: 40, y: 700, width: 200, height: 12 }, condition: "known" },
+      { fieldKey: "insured_name", value: "UX TEST KARIBU LOGISTICS LTD", page: 1, region: { x: 40, y: 400, width: 200, height: 12 }, condition: "known" },
+      { fieldKey: "period_start", value: "02/10/2026", page: 1, region: { x: 40, y: 650, width: 80, height: 12 }, condition: "conflicting" },
+      { fieldKey: "period_start", value: "03/10/2026", page: 1, region: { x: 40, y: 300, width: 80, height: 12 }, condition: "conflicting" },
+      { fieldKey: "premium", value: null, page: null, region: null, condition: "missing" },
+    ],
+    terms: [],
+    needsManualReview: null,
+  };
+  const withUniqueIndex = () => {
+    db = makeDb();
+    db.uniques = { document_fields: [["document_id", "field_key"]], document_pages: [["document_id", "page_number"]] };
+  };
+
+  it("records every field once and finishes extracted, with its pages as evidence", async () => {
+    withUniqueIndex();
+    const out = await extractDocument(client(), logger, scriptedExtractor(ABSTRACT), "bucket", DOC);
+    expect(out).toEqual({ state: "extracted", pages: 1, fields: 5 });
+    expect(db.tables["documents"]![0]).toMatchObject({ extraction_state: "extracted", page_count: 1 });
+    const rows = db.tables["document_fields"]!;
+    expect(rows.map((r) => r["field_key"]).sort()).toEqual(["insured_name", "period_start", "premium"]);
+    expect(db.tables["document_pages"]).toHaveLength(1);
+  });
+
+  it("agreeing readings are one proposal; differing readings are one proposal marked conflicting, with where it was read", async () => {
+    withUniqueIndex();
+    await extractDocument(client(), logger, scriptedExtractor(ABSTRACT), "bucket", DOC);
+    const byKey = Object.fromEntries(db.tables["document_fields"]!.map((r) => [r["field_key"], r]));
+    expect(byKey["insured_name"]).toMatchObject({ proposed_value: "UX TEST Karibu Logistics Ltd", condition: "known", page_number: 1, region_y: 700 });
+    expect(byKey["period_start"]).toMatchObject({ proposed_value: "02/10/2026", condition: "conflicting", page_number: 1 });
+    expect(byKey["premium"]).toMatchObject({ proposed_value: null, condition: "missing" });
+    // Unconfirmed until a person reviews them.
+    expect(Object.values(byKey).every((r) => (r as Record<string, unknown>)["state"] === "proposed")).toBe(true);
+  });
+});

@@ -5,8 +5,9 @@
  *
  * Every value shown comes from an API response. Nothing here is example content.
  */
-import { AUTOMATION_REGISTRY, automationProblems, IMPORT_COLUMN_SYNONYMS } from "@asap/schema";
+import { AUTOMATION_REGISTRY, automationProblems, IMPORT_COLUMN_SYNONYMS, ImportColumn } from "@asap/schema";
 import * as S from "./engine/store.js";
+import { compareQuotations } from "./quote-compare.js";
 import { throughSupabaseBase } from "../lib/supabase.js";
 
 const ok = "ok";
@@ -112,6 +113,14 @@ function importSpace(state) {
     { t: "upload", label: "Choose a spreadsheet, CSV or PDF of clients and policies", action: "import.preview" },
   ];
   if (state.importError && !p) blocks.push(note("red", state.importError.title, state.importError.text));
+  if (!p && !state.importResult && state.unfinishedImport)
+    blocks.push(
+      note(
+        "amber",
+        "“" + state.unfinishedImport.filename + "” was read but not imported",
+        "Its preview was only kept on the page that read it, so it could not be restored after the page was reloaded. Nothing from that file was saved to your records. Choose the file again to see the preview and continue.",
+      ),
+    );
   if (!p)
     blocks.push(
       rows(
@@ -130,15 +139,48 @@ function importSpace(state) {
         ["File", p.batch.filename + " · read as " + p.source + (p.sheetName ? " (" + p.sheetName + ")" : "")],
         ["Rows read", String(sum.rows)],
         ["New clients", String(sum.clientsToCreate)],
-        ["New contacts", String(sum.contactsToCreate)],
+        ["New contacts", String(sum.contactsToCreate) + (p.rows.some((r) => r.contactStatus === "on_file") ? " (" + plural(p.rows.filter((r) => r.contactStatus === "on_file").length, "contact is", "contacts are") + " already on file)" : "")],
         ["New policies", String(sum.policiesToCreate)],
         ["Your decision needed / invalid", sum.needsReview + " / " + sum.invalid],
       ]),
     );
     if (p.blocking.length) blocks.push(note("red", "Before this can be imported", p.blocking.join(" ")));
+    // A workbook: every sheet, the one read marked, any other one read on request.
+    if ((p.sheets || []).length > 1)
+      blocks.push(
+        rows(
+          "Sheets in this workbook",
+          p.sheets.map((sh) => ({
+            title: sh.name,
+            note: plural(sh.rows, "row", "rows") + (sh.headers.length ? " · headings: " + sh.headers.slice(0, 6).join(", ") + (sh.headers.length > 6 ? "…" : "") : " · no headings found"),
+            badge: sh.name === p.sheetName ? "Reading" : "Other sheet",
+            badgeTone: sh.name === p.sheetName ? ok : warn,
+            ...(sh.name === p.sheetName ? {} : { secondary: { a: "act", action: "import.sheet", payload: { sheet: sh.name }, label: "Read this sheet" } }),
+          })),
+        ),
+      );
     const unmapped = p.columns.filter((c) => !c.meaning).map((c) => c.header);
-    if (unmapped.length) blocks.push(note("amber", "Headings ASAP did not recognise", unmapped.join(", ") + " — these columns are ignored. Rename them to a heading from the list if they matter."));
-    if (p.blocking.some((b) => /premium/i.test(b)) || (p.columns.some((c) => c.meaning === "premium_amount") && !p.batch.premiumBasis)) {
+    if (unmapped.length) blocks.push(note("amber", "Headings ASAP did not recognise", unmapped.join(", ") + " — ignored unless you say what they hold below. Nothing is imported until you confirm."));
+    // Say what each heading holds: the preview is read again with it, still writing nothing.
+    if (unmapped.length || p.blocking.some((b) => /client's name/i.test(b)))
+      blocks.push(
+        form(
+          "importmap:" + p.batch.id,
+          "What each column holds",
+          p.columns.map((c, i) => ({
+            key: "col" + i,
+            label: c.header.toUpperCase(),
+            value: c.meaning || "ignore",
+            options: [{ value: "ignore", label: "Ignore this column" }, ...ImportColumn.options.map((m) => ({ value: m, label: m.replace(/_/g, " ") }))],
+          })),
+          "import.map",
+          {},
+          "Read again with these columns",
+          "Reads the same file again with your choices. Nothing is written until you import.",
+        ),
+      );
+    // Asked only when the server needs it — that is, when a premium value is actually in the file.
+    if (p.blocking.some((b) => /premium/i.test(b))) {
       blocks.push(gate("Premiums in this file are gross", "Premium before levies and taxes.", "import.basis", { basis: "gross" }));
       blocks.push(gate("Premiums in this file are total payable", "Premium including levies and taxes.", "import.basis", { basis: "total_payable" }));
     }
@@ -1221,7 +1263,7 @@ function documentSpace(ref, state) {
                 ? fields.map((f) => ({
                     title: words(f.fieldKey),
                     note: (valueOf(f) ?? "nothing read") + (f.page ? " · page " + f.page + " — show where" : " · page not placed"),
-                    badge: f.state === "proposed" ? "Proposed" : words(f.state),
+                    badge: f.state === "proposed" ? (f.condition === "conflicting" ? "Different values — check" : "Proposed") : words(f.state),
                     badgeTone: f.state === "proposed" ? warn : f.state === "rejected" ? bad : ok,
                     ...(f.page ? { action: { a: "open", ref: { ...base, fieldId: f.id } } } : {}),
                   }))
@@ -1232,7 +1274,12 @@ function documentSpace(ref, state) {
                   form(
                     "review:" + doc.id,
                     "Confirm what ASAP read",
-                    open.map((f) => ({ key: f.id, label: words(f.fieldKey).toUpperCase() + (f.page ? " (PAGE " + f.page + ")" : f.proposedValue ? "" : " — NOT FOUND"), value: f.proposedValue ?? "", placeholder: f.proposedValue ? "" : "Not found on this document — leave empty, or type it" })),
+                    open.map((f) =>
+                      f.condition === "conflicting"
+                        ? // Read more than one way: nothing prefilled, so the person checks the page and types it.
+                          { key: f.id, label: words(f.fieldKey).toUpperCase() + " — DIFFERENT VALUES ON THE DOCUMENT" + (f.page ? " (FIRST ON PAGE " + f.page + ")" : ""), value: "", placeholder: "The document gives more than one value (one reads “" + (f.proposedValue ?? "") + "”) — check the page and type the right one" }
+                        : { key: f.id, label: words(f.fieldKey).toUpperCase() + (f.page ? " (PAGE " + f.page + ")" : f.proposedValue ? "" : " — NOT FOUND"), value: f.proposedValue ?? "", placeholder: f.proposedValue ? "" : "Not found on this document — leave empty, or type it" },
+                    ),
                     "doc.review",
                     { documentId: doc.id },
                     "Confirm these values",
@@ -1456,6 +1503,47 @@ function connectionsSpace(state) {
   };
 }
 
+/**
+ * Quotations compared as ASAP read them (D-135): every value from the server's reading of its
+ * document, each with where it was read; unread, missing and unclear values said as such; and no
+ * recommendation — material terms missing, or values unconfirmed, are named instead.
+ */
+function quoteCompareSpace(ref, state) {
+  const ids = ref.documentIds || [];
+  const readings = ids.map((id) => state.quoteReadings?.get(id)).filter(Boolean);
+  const failed = ids.filter((id) => state.quoteReadingErrors?.has(id));
+  if (readings.length + failed.length < ids.length)
+    return { kind: "Quote comparison", title: "Reading the quotations…", status: "live", statusLabel: "Loading", blocks: [note("green", "Reading what ASAP found in each quotation", "From your brokerage's records. Nothing is confirmed or chosen here.")] };
+  if (readings.length < 2)
+    return { kind: "Quote comparison", title: "Not enough quotations to compare", status: "draft", statusLabel: "Cannot compare", blocks: [note("red", "Fewer than two quotations could be read", (failed.length ? plural(failed.length, "quotation could", "quotations could") + " not be opened. " : "") + "A comparison needs at least two. Nothing was compared or chosen.")] };
+  const fieldIdOf = (docId, key) => state.documents.get(docId)?.fields?.find((f) => f.fieldKey === key)?.id ?? null;
+  const c = compareQuotations(readings, fieldIdOf);
+  const open = (documentId, fieldId) => ({ a: "open", ref: { ws: "document", documentId, ...(fieldId ? { fieldId } : {}) } });
+  return {
+    kind: "Quote comparison",
+    title: "Comparing " + plural(readings.length, "quotation", "quotations") + " as read",
+    status: "draft",
+    statusLabel: c.unconfirmed ? plural(c.unconfirmed, "value", "values") + " not confirmed" : "All values confirmed",
+    blocks: [
+      note(c.missingMaterial.length ? "red" : "amber", "No recommendation", c.whyNoRecommendation),
+      ...(c.unconfirmed ? [note("amber", "These are readings, not confirmed terms", "Values marked “read, not confirmed” come from ASAP reading the documents. Confirm each quotation from its document before presenting this to the client. Nothing here was confirmed or chosen for you.")] : []),
+      ...(failed.length ? [note("red", plural(failed.length, "quotation could not be opened", "quotations could not be opened"), "It is left out of the comparison rather than shown as empty.")] : []),
+      { t: "compare", label: "Side by side", cols: c.cols, rows: c.rows },
+      rows(
+        "What could hurt the client",
+        c.risks.length
+          ? c.risks.map((r) => ({ title: r.insurer, note: r.text + (r.page ? " · page " + r.page : ""), badge: "Check", badgeTone: bad, action: open(r.documentId, null) }))
+          : [{ title: "Nothing flagged from what was read", note: "That is not the same as nothing to worry about: geographic scope and payment terms are not read by ASAP — check them in each document.", badge: "Read", badgeTone: warn }],
+      ),
+      rows(
+        "Where each value was read",
+        c.evidence.map((e) => ({ title: e.insurer + " · " + e.label, note: e.value + (e.page ? " · page " + e.page : " · page not placed"), badge: e.confirmed ? "Confirmed" : "Read, not confirmed", badgeTone: e.confirmed ? ok : warn, action: open(e.documentId, e.fieldId) })),
+      ),
+      ...readings.map((r) => nav("Review " + r.document.filename, "Confirm what ASAP read from this quotation, value by value.", { ws: "document", documentId: r.document.id })),
+    ],
+  };
+}
+
 /** A live workspace for `ref`, or null when the engine's own workspace should be used. */
 export function liveSpace(ref, state) {
   if (!ref) return null;
@@ -1470,6 +1558,8 @@ export function liveSpace(ref, state) {
       return importSpace(state);
     case "quote":
       return quoteSpace(ref, state);
+    case "quotecompare":
+      return quoteCompareSpace(ref, state);
     case "claim":
       return ref.claimId ? claimSpace(ref, state) : newClaimSpace(ref);
     case "workitem":

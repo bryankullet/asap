@@ -118,6 +118,12 @@ export const importRowPreviewSchema = z.object({
   matchedClientId: uuidSchema.nullable(),
   /** When the client is ambiguous: who it might be, so a person can choose rather than guess. */
   candidates: z.array(importCandidateSchema).max(5).default([]),
+  /**
+   * The row's contact against the matched client's own contacts: `new` would be created,
+   * `on_file` is already that client's contact (by email, phone or name), `repeated` is the same
+   * person on an earlier line of this file, `none` means the row names no contact.
+   */
+  contactStatus: z.enum(["new", "on_file", "repeated", "none"]).default("none"),
 });
 export type ImportRowPreview = z.infer<typeof importRowPreviewSchema>;
 
@@ -178,6 +184,8 @@ export const importPreviewRequestSchema = z.object({
    * without rewriting the parser.
    */
   columns: z.record(z.string(), ImportColumn).default({}),
+  /** For a workbook: the sheet a person chose. Absent, the sheet that reads as a book is used. */
+  sheetName: z.string().trim().min(1).max(200).optional(),
 });
 export type ImportPreviewRequest = z.input<typeof importPreviewRequestSchema>;
 
@@ -199,6 +207,10 @@ export const importPreviewResponseSchema = z.object({
   blocking: z.array(z.string()),
   /** Set when a heading was mapped by the model rather than by the synonym table. */
   mappedByModel: z.array(z.string()).default([]),
+  /** Every sheet of a workbook, so a person can choose another one. Empty for a CSV or PDF. */
+  sheets: z
+    .array(z.object({ name: z.string(), rows: z.number().int().min(0), headers: z.array(z.string()) }))
+    .default([]),
 });
 export type ImportPreviewResponse = z.infer<typeof importPreviewResponseSchema>;
 

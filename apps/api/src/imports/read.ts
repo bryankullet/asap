@@ -1,6 +1,6 @@
 import readXlsxFile from "read-excel-file/node";
 import { getDocumentProxy } from "unpdf";
-import { IMPORT_ROW_LIMIT, parseCsv, type ParsedCsv, type RawRow } from "@asap/schema";
+import { IMPORT_ROW_LIMIT, parseCsv, suggestColumns, type ParsedCsv, type RawRow } from "@asap/schema";
 
 /**
  * Reading whatever a brokerage actually has.
@@ -16,10 +16,13 @@ import { IMPORT_ROW_LIMIT, parseCsv, type ParsedCsv, type RawRow } from "@asap/s
 
 /** What a file turned out to be, and what became of it. */
 export type ReadOutcome =
-  | { kind: "rows"; parsed: ParsedCsv; source: SourceKind; sheetName?: string }
+  | { kind: "rows"; parsed: ParsedCsv; source: SourceKind; sheetName?: string; sheets?: SheetSummary[] }
   | { kind: "not_a_book"; reason: string; suggestion: string };
 
 export type SourceKind = "csv" | "spreadsheet" | "pdf";
+
+/** One sheet of a workbook: its name, how many rows it holds and the headings found on it. */
+export type SheetSummary = { name: string; rows: number; headers: string[] };
 
 /**
  * Which reader a file needs.
@@ -55,6 +58,7 @@ export async function readImport(
   bytes: Buffer,
   filename: string,
   mimeType: string,
+  sheetName?: string,
 ): Promise<ReadOutcome> {
   const kind = classify(filename, mimeType);
 
@@ -79,23 +83,49 @@ export async function readImport(
       };
     }
 
-    /*
-     * The first sheet that has a table on it.
-     *
-     * A workbook routinely opens on a cover sheet, a summary or an empty tab, and reading that and
-     * reporting "no columns" would be true of the sheet and false of the workbook. Guessing which
-     * *of several* tables is the book would be the silent wrongness this file exists to avoid — so
-     * it takes the first with a header and says which one that was.
-     */
-    const chosen = sheets.find((s) => sheetToRows(s.data).headers.length > 1) ?? sheets[0];
-    if (!chosen) {
+    const read = sheets.map((sh) => ({ name: sh.sheet, parsed: sheetToRows(sh.data) }));
+    const summaries: SheetSummary[] = read.map((r) => ({ name: r.name, rows: r.parsed.rows.length, headers: r.parsed.headers }));
+    if (read.length === 0) {
       return {
         kind: "not_a_book",
         reason: "That spreadsheet has no sheets in it.",
         suggestion: "Check the file opens in your spreadsheet program, then try again.",
       };
     }
-    return { kind: "rows", parsed: sheetToRows(chosen.data), source: "spreadsheet", sheetName: chosen.sheet };
+
+    /*
+     * The sheet a person chose, when they chose one. Otherwise the sheet whose headings read as a
+     * book — a client-name column first, then the most recognised headings — so a workbook that
+     * opens on a "Read Me" or instructions sheet is not read as five rows of instructions. Which
+     * sheet was read is always named, and every other sheet is offered.
+     */
+    if (sheetName !== undefined) {
+      const picked = read.find((r) => r.name === sheetName);
+      if (!picked) {
+        return {
+          kind: "not_a_book",
+          reason: `This workbook has no sheet called “${sheetName}”.`,
+          suggestion: `Choose one of: ${read.map((r) => r.name).join(", ")}.`,
+        };
+      }
+      return { kind: "rows", parsed: picked.parsed, source: "spreadsheet", sheetName: picked.name, sheets: summaries };
+    }
+    const recognised = (r: (typeof read)[number]) => Object.values(suggestColumns(r.parsed.headers)).filter(Boolean);
+    const withClient = read.find((r) => recognised(r).includes("client_name") && r.parsed.rows.length > 0);
+    const mostRecognised = [...read]
+      .filter((r) => r.parsed.rows.length > 0)
+      .sort((a, b) => recognised(b).length - recognised(a).length)[0];
+    // Nothing recognised anywhere: the sheet most like a table — most headings, then most rows —
+    // rather than whichever comes first, which is usually the instructions.
+    const widest = [...read]
+      .filter((r) => r.parsed.headers.length > 1)
+      .sort((a, b) => b.parsed.headers.length - a.parsed.headers.length || b.parsed.rows.length - a.parsed.rows.length)[0];
+    const chosen =
+      withClient ??
+      (mostRecognised && recognised(mostRecognised).length > 0 ? mostRecognised : undefined) ??
+      widest ??
+      read[0]!;
+    return { kind: "rows", parsed: chosen.parsed, source: "spreadsheet", sheetName: chosen.name, sheets: summaries };
   }
 
   if (kind === "pdf") {

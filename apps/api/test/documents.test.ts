@@ -353,6 +353,17 @@ describe("documents", () => {
     expect(db.inserts.filter((i) => i.table === "audit_log")).toHaveLength(1);
   });
 
+  it("a reading the document gives two different ways cannot be accepted as-is — a person corrects it", async () => {
+    const f = db.tables["document_fields"]!.find((r) => r["id"] === FIELD)!;
+    f["condition"] = "conflicting";
+    const res = await review("tok-amina", FIELD, { decision: "accept" });
+    expect(res.status).toBe(409);
+    expect(await readJson(res)).toMatchObject({ error: "conflicting_reading" });
+    expect(f["state"]).toBe("proposed");
+    const fixed = await readJson(await review("tok-amina", FIELD, { decision: "correct", value: "MC-4471-A" }));
+    expect(fixed.field).toMatchObject({ state: "corrected", condition: "known", correctedValue: "MC-4471-A" });
+  });
+
   it("keeps a correction apart from what the extractor read", async () => {
     const body = await readJson(await review("tok-amina", FIELD, { decision: "correct", value: "MC-4471-A" }));
     expect(body.field.state).toBe("corrected");
