@@ -195,4 +195,30 @@ describe("compareQuotations", () => {
       "ASAP does not recommend an insurer. The client chooses from the confirmed terms.",
     );
   });
+
+  it("a term labelled only with its kind is not said twice", () => {
+    const r = compareQuotations(
+      [
+        reading(
+          "d6",
+          "a.pdf",
+          [field("insurer_name", "UX TEST APA")],
+          [
+            term("exclusion", "Exclusions", "Unlicensed drivers"),
+            term("excess", "Excess", "KES 20,000"),
+          ],
+        ),
+        reading("d7", "b.pdf", [field("insurer_name", "UX TEST CIC")], []),
+      ],
+      () => null,
+      TODAY,
+    );
+    expect(r.risks.map((x) => x.text)).toContain("Excludes: Unlicensed drivers");
+    expect(r.evidence.map((e) => e.label)).toEqual(
+      expect.arrayContaining(["Exclusions", "Excess"]),
+    );
+    expect(r.rows.find((x) => x.label === "Excess")!.cells[0]!.v).toBe(
+      "KES 20,000 (read, not confirmed)",
+    );
+  });
 });

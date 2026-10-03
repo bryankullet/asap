@@ -147,12 +147,17 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
           });
         return { v: "Not found in the document", flag: "missing" };
       }
+      // A term labelled only with its own kind ("Excess", "Exclusions") is not said twice.
+      const generic = (t) =>
+        /^(exclusions?|excess(es)?|limits?( of liability)?|conditions?|subjectivit(y|ies))$/i.test(
+          t.label.trim(),
+        );
       for (const t of terms) {
         const value = t.correctedValue ?? t.proposedValue;
         const confirmed = t.state === "accepted" || t.state === "corrected";
         evidence.push({
           insurer: name,
-          label: dim.label + " — " + t.label,
+          label: generic(t) ? dim.label : dim.label + " — " + t.label,
           value: value ?? "unclear",
           documentId: r.document.id,
           fieldId: null,
@@ -175,8 +180,7 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
             insurer: name,
             text:
               (dim.key === "exclusion" ? "Excludes: " : "Subject to: ") +
-              t.label +
-              (value && value !== t.label ? " — " + value : ""),
+              (generic(t) ? value : t.label + (value && value !== t.label ? " — " + value : "")),
             documentId: r.document.id,
             page: t.page,
           });
@@ -188,7 +192,11 @@ export function compareQuotations(readings, fieldIdOf = () => null, today = Date
       return {
         v:
           terms
-            .map((t) => t.label + ": " + (t.correctedValue ?? t.proposedValue ?? "unclear"))
+            .map(
+              (t) =>
+                (generic(t) ? "" : t.label + ": ") +
+                (t.correctedValue ?? t.proposedValue ?? "unclear"),
+            )
             .join("; ") + (allConfirmed ? "" : " (read, not confirmed)"),
         flag: anyUnclear ? "missing" : allConfirmed ? "ok" : "uncertain",
       };
