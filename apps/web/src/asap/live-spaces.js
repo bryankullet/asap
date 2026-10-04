@@ -145,6 +145,8 @@ function importSpace(state) {
       ]),
     );
     if (p.blocking.length) blocks.push(note("red", "Before this can be imported", p.blocking.join(" ")));
+    // What an import can write, said once, so a vehicle schedule is never mistaken for imported (D-138).
+    blocks.push(note("amber", "What an import writes", "Clients, their contacts, policies and periods of cover. Vehicle schedules, claims, invoices and payments in a file are not imported yet — they stay in your file."));
     // A workbook: every sheet, the one read marked, any other one read on request.
     if ((p.sheets || []).length > 1)
       blocks.push(
@@ -152,7 +154,7 @@ function importSpace(state) {
           "Sheets in this workbook",
           p.sheets.map((sh) => ({
             title: sh.name,
-            note: plural(sh.rows, "row", "rows") + (sh.headers.length ? " · headings: " + sh.headers.slice(0, 6).join(", ") + (sh.headers.length > 6 ? "…" : "") : " · no headings found"),
+            note: plural(sh.rows, "row", "rows") + (sh.headers.length ? " · headings: " + sh.headers.slice(0, 6).join(", ") + (sh.headers.length > 6 ? "…" : "") : " · no headings found") + (VEHICLE_SHEET.test(sh.name + " " + sh.headers.join(" ")) ? " · a vehicle schedule — ASAP does not import vehicles yet" : ""),
             badge: sh.name === p.sheetName ? "Reading" : "Other sheet",
             badgeTone: sh.name === p.sheetName ? ok : warn,
             ...(sh.name === p.sheetName ? {} : { secondary: { a: "act", action: "import.sheet", payload: { sheet: sh.name }, label: "Read this sheet" } }),
@@ -1255,6 +1257,7 @@ function documentSpace(ref, state) {
           : { title: doc.filename, note: "The stored file could not be opened just now. Its text and the values read from it are shown here; refresh records to try again.", badge: "Unavailable", badgeTone: warn },
       ]),
       ...(focus ? evidenceBlocks(d, focus, fileLink, base) : []),
+      ...filingBlock(doc, state),
       ...(doc.extractionState === "extracted"
         ? [
             rows(
@@ -1287,13 +1290,86 @@ function documentSpace(ref, state) {
                   ),
                 ]
               : []),
+            ...termBlocks(doc, state),
+            // An invoice or a receipt is not a policy (D-138): its confirmed values stay on the document
+            // as evidence, and no client, policy or payment is created from it.
+            ...(MONEY_KINDS.has(doc.kind) && !open.length && settled.length ? [note("amber", "Invoices and payments are not recorded in ASAP yet", "Your confirmed values stay with this document and its pages as evidence. ASAP has not recorded an invoice, a payment or a balance, and nothing about cover follows from it.")] : []),
             // A document read before any client exists creates its client and policy (D-132).
-            ...(!open.length && settled.length && !doc.clientId ? createRecordsBlocks(d) : []),
-            ...(!open.length && settled.length && doc.clientId ? applyBlocks(d, state) : []),
+            ...(!MONEY_KINDS.has(doc.kind) && !open.length && settled.length && !doc.clientId ? createRecordsBlocks(d) : []),
+            ...(!MONEY_KINDS.has(doc.kind) && !open.length && settled.length && doc.clientId ? applyBlocks(d, state) : []),
           ]
         : [note(doc.extractionState === "failed" ? "red" : "amber", reading, doc.extractionState === "failed" ? "Nothing was read from this file. It is still stored and can be opened." : "The values appear here for you to confirm once ASAP has read the file. Refresh records to check.")]),
     ],
   };
+}
+
+const MONEY_KINDS = new Set(["invoice", "receipt"]);
+const VEHICLE_SHEET = /\b(vehicles?|registration|reg(istration)? no|chassis|make|model|fleet)\b/i;
+const KIND_LABELS = [
+  ["policy_schedule", "Policy schedule"], ["quote_slip", "Quotation"], ["endorsement", "Endorsement"], ["certificate", "Certificate or cover confirmation"],
+  ["claim_form", "Claim form or incident record"], ["invoice", "Invoice"], ["receipt", "Receipt"], ["statement", "Statement"],
+  ["correspondence", "Correspondence"], ["identity", "Identity"], ["other", "Other"],
+];
+
+/**
+ * Filing (D-138): what kind of document this is and whose it is, set by a person. The kind its
+ * heading names may already be filled in; it is only ever a starting point.
+ */
+function filingBlock(doc, state) {
+  const clients = state.db?.clients ?? [];
+  const current = KIND_LABELS.find(([k]) => k === doc.kind);
+  return [
+    form(
+      "file:" + doc.id,
+      doc.clientId ? "Filing — change the kind or the client" : "File this document",
+      [
+        { key: "kind", label: "KIND", options: [current, ...KIND_LABELS.filter(([k]) => k !== doc.kind)].map(([value, label]) => ({ value, label })) },
+        { key: "clientId", label: "CLIENT", options: [...(doc.clientId ? clients.filter((c) => c.id === doc.clientId) : []), ...clients.filter((c) => c.id !== doc.clientId)].map((c) => ({ value: c.id, label: c.name })).concat(doc.clientId ? [{ value: "", label: "Not filed under a client" }] : [{ value: "", label: "Leave unfiled for now" }]) },
+      ],
+      "doc.classify",
+      { documentId: doc.id },
+      "Save filing",
+      "Recorded with your name. Filing says whose document it is and what it is; it does not confirm any value in it or change any record.",
+    ),
+  ];
+}
+
+/**
+ * The terms ASAP read from a quotation, each decided on its own (D-138): accept as read, correct,
+ * or reject. Each shows its page and its state; a decided term says who decided it. Values come
+ * from the server's reading, never from model text.
+ */
+function termBlocks(doc, state) {
+  const reading = state.quoteReadings?.get(doc.id);
+  const terms = reading?.proposals ?? [];
+  if (!terms.length) return [];
+  const stateWord = (t) => (t.state === "accepted" ? "Confirmed" : t.state === "corrected" ? "Corrected" : t.state === "rejected" ? "Rejected" : t.condition === "unclear" ? "Unclear — check" : "Read, not confirmed");
+  const open = terms.filter((t) => t.state === "proposed");
+  return [
+    rows(
+      "Terms ASAP read",
+      terms.map((t) => ({
+        title: t.label,
+        note: (t.correctedValue ?? t.proposedValue ?? "nothing read") + (t.page ? " · page " + t.page : " · page not placed") + (t.reviewedByName ? " · " + stateWord(t).toLowerCase() + " by " + t.reviewedByName : ""),
+        badge: stateWord(t),
+        badgeTone: t.state === "proposed" ? warn : t.state === "rejected" ? bad : ok,
+      })),
+    ),
+    ...open.map((t) =>
+      form(
+        "term:" + t.id,
+        t.label + (t.page ? " — page " + t.page : ""),
+        [
+          { key: "decision", label: "DECISION", options: [{ value: "accept", label: "Accept as read" }, { value: "correct", label: "Correct it to the value below" }, { value: "reject", label: "Reject — the document does not say this" }] },
+          { key: "value", label: "VALUE ON THE DOCUMENT", value: t.proposedValue ?? "", placeholder: "What the document says" },
+        ],
+        "doc.termDecide",
+        { documentId: doc.id, proposalId: t.id },
+        "Record decision for " + t.label,
+        "Recorded with your name against this term only. Check it on page " + (t.page ?? "?") + " first. Nothing is sent to anyone.",
+      ),
+    ),
+  ];
 }
 
 /**
@@ -1417,7 +1493,23 @@ function applyBlocks(d, state) {
           "Written with an audit entry against your name. If the record changed since this preview, nothing is written and you are asked to preview again.",
         ),
       );
-    } else out.push(note("green", "Nothing to apply", "The record already holds these values, or none of them can go on it."));
+    } else {
+      // The record already holds what the document says: the document is then its evidence (D-138).
+      const same = preview.fields.filter((f) => !f.blockedBecause && f.unchanged && f.proposedValue);
+      out.push(note("green", "Nothing to change", same.length ? "The record already holds " + plural(same.length, "value", "values") + " this document confirms. You can file the document as their evidence — nothing on the record changes." : "None of these values can go on this record."));
+      if (same.length)
+        out.push(
+          form(
+            "evidence:" + doc.id,
+            "File as evidence for " + preview.target.label,
+            same.some((f) => f.fieldKey === "premium") ? [{ key: "premiumBasis", label: "WHAT THE PREMIUM FIGURE IS", options: PREMIUM_BASIS }] : [],
+            "doc.apply",
+            { documentId: doc.id, evidenceOnly: true },
+            "File as evidence for " + plural(same.length, "value", "values"),
+            "Links this document, its pages and your confirmed values to the record, with an audit entry against your name. No value changes, and it says nothing about cover.",
+          ),
+        );
+    }
   }
   return out;
 }

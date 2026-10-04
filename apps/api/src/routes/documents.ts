@@ -21,6 +21,7 @@ import {
   type ApplyTargetType as ApplyTargetTypeValue,
   type DocumentSummary,
   type NextAction,
+  documentClassifyRequestSchema,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pgMoney } from "../numeric.js";
@@ -535,6 +536,44 @@ export function documentRoutes(deps: {
    * that called this without uploading anything would otherwise queue a document that does not
    * exist, and the extractor would fail on it later and further away from the cause.
    */
+  /*
+   * Filing a document (D-138): its kind and its client, as a person says. A document uploaded on
+   * its own is otherwise left "Other" and unfiled, and every review treats it as a policy.
+   */
+  app.post("/documents/:id/classify", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const input = documentClassifyRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!input.success) throw new HttpError(400, "validation_failed", "Give a kind, a client, or both.");
+    if (!hasPermission(ctx, "document", "edit")) throw new HttpError(403, "forbidden", "Your role cannot file documents.");
+    const found = await db.from("documents").select(DOCUMENT_SUMMARY_COLUMNS).eq("organization_id", org.id).eq("id", id).is("deleted_at", null).maybeSingle();
+    if (found.error) return sendError(c, mapDatabaseError(found.error));
+    if (!found.data) throw new HttpError(404, "not_found", "No document with that id");
+    const before = found.data as DocumentRow;
+    if (input.data.clientId) {
+      const client = await db.from("clients").select("id").eq("organization_id", org.id).eq("id", input.data.clientId).is("deleted_at", null).maybeSingle();
+      if (!client.data) throw new HttpError(404, "not_found", "That client is not in this brokerage.");
+    }
+    const patch: Record<string, unknown> = {};
+    if (input.data.kind !== undefined) patch["kind"] = input.data.kind;
+    if (input.data.clientId !== undefined) patch["client_id"] = input.data.clientId;
+    const updated = await db.from("documents").update(patch).eq("organization_id", org.id).eq("id", id).select(DOCUMENT_SUMMARY_COLUMNS).single();
+    if (updated.error) return sendError(c, mapDatabaseError(updated.error));
+    await recordAudit(db, deps.logger, c, {
+      organizationId: org.id,
+      actorUserId: user.id,
+      action: "document.filed_to",
+      objectType: "document",
+      objectId: id,
+      result: "success",
+      previousState: { kind: before.kind, clientId: before.client_id },
+      newState: { kind: (updated.data as DocumentRow).kind, clientId: (updated.data as DocumentRow).client_id },
+    });
+    return c.json({ document: summarise(updated.data as DocumentRow) });
+  });
+
   app.post("/documents/:id/filed", async (c) => {
     const { db, user } = c.get("auth");
     const id = c.req.param("id");

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DocumentKind } from "@asap/schema";
 
 /**
  * The extraction service interface.
@@ -66,6 +67,8 @@ export const extractionResultSchema = z.object({
   terms: z.array(extractedTermSchema).default([]),
   /** Why this document cannot be read at all — an image-only scan, with no OCR in this build. */
   needsManualReview: z.string().nullable().default(null),
+  /** The kind the document's own heading names (D-138). A suggestion; never over a chosen kind. */
+  suggestedKind: DocumentKind.nullable().default(null),
 });
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 

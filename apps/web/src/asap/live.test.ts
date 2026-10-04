@@ -483,6 +483,15 @@ describe("live mode", () => {
     const applied = (await a.records.act("doc.apply", { documentId: DOC })) as { ok: boolean };
     expect(applied.ok).toBe(true);
     expect(applyToRecord).toHaveBeenCalledWith(DOC, expect.objectContaining({ targetType: "policy", targetId: POL_OK, fields: [expect.objectContaining({ fieldKey: "policy_number", from: null, to: "TH-MTR-001" })] }));
+    // D-138: when the record already holds the value, the document can still be filed as its evidence.
+    applyPreview.mockResolvedValueOnce({ target: { targetType: "policy", targetId: POL_OK, label: "TH-MTR-001 · Motor", reason: "r", condition: "known" }, fields: [{ documentFieldId: FIELD, fieldKey: "policy_number", currentValue: "TH-MTR-001", proposedValue: "TH-MTR-001", page: 1, region: null, condition: "inferred", state: "accepted", unchanged: true, blockedBecause: null }], missing: [] } as never);
+    await a.records.act("doc.applyPreview", { documentId: DOC, target: "policy:" + POL_OK });
+    const ev = text(a.ai.workspace({ ws: "document", documentId: DOC }));
+    expect(ev).toContain("File as evidence for TH-MTR-001 · Motor");
+    expect(ev).toContain("it says nothing about cover");
+    const filed = (await a.records.act("doc.apply", { documentId: DOC, evidenceOnly: true })) as { ok: boolean; text: string };
+    expect(filed).toMatchObject({ ok: true, text: "Filed as evidence for TH-MTR-001 · Motor" });
+    expect(applyToRecord).toHaveBeenLastCalledWith(DOC, expect.objectContaining({ fields: [expect.objectContaining({ fieldKey: "policy_number", from: "TH-MTR-001", to: "TH-MTR-001" })] }));
   });
 
   it("answers only questions for the client list from the list, and sends the rest on", async () => {
@@ -1612,6 +1621,74 @@ describe("live mode", () => {
       } finally {
         api["documents"] = realDocuments;
         api["document"] = realDocument;
+        delete api["quotationReading"];
+      }
+    });
+
+    it("document review: each quotation term is decided on its own, with its page, and the decision shows (D-138)", async () => {
+      const api = await apiMod();
+      const DQ = "e0000009-0000-4000-8000-000000000001";
+      const T = "3c000000-0000-4000-8000-000000000009";
+      const detail = { document: { id: DQ, kind: "quote_slip", filename: "02_UX_TEST_Quotation_APA.pdf", mimeType: "application/pdf", byteSize: 1, pageCount: 1, extractionState: "extracted", extractionError: null, clientId: null, workItemId: null, createdAt: "2026-10-03T08:40:00Z" }, pages: [], fileUrl: null, fileUrlExpiresAt: null, fields: [] };
+      const term = (state: string) => ({ id: T, ordinal: 2, termType: "other", label: "Geographic scope", proposedValue: "Kenya and Uganda; other territories by written agreement.", amount: null, currency: null, page: 1, region: null, condition: "known", method: "labelled_line", state, correctedValue: null, reviewedByName: state === "proposed" ? null : "Cynthia", reviewedAt: null, quoteTermId: null });
+      const reading = (state: string) => ({ document: { id: DQ, filename: detail.document.filename, pageCount: 1, extractionState: "extracted" }, needsManualReview: null, linkedTo: null, permissions: { canReview: true }, fields: [], proposals: [term(state)] });
+      const realDocument = api["document"];
+      api["document"] = async (id: string) => (id === DQ ? detail : null);
+      api["quotationReading"] = vi.fn(async () => reading("proposed"));
+      const quotationReview = vi.fn(async () => ({ outcome: "done", reason: null, reading: reading("accepted") }));
+      api["quotationReview"] = quotationReview;
+      try {
+        const A = await live();
+        A.ai.workspace({ ws: "document", documentId: DQ });
+        await new Promise((res) => setTimeout(res, 0));
+        A.ai.workspace({ ws: "document", documentId: DQ });
+        await new Promise((res) => setTimeout(res, 0));
+        let t = text(A.ai.workspace({ ws: "document", documentId: DQ }));
+        expect(t).toContain("Terms ASAP read");
+        expect(t).toContain("Geographic scope — page 1");
+        expect(t).toContain("Read, not confirmed");
+        expect(t).toContain("Reject — the document does not say this");
+        const same = (await A.records.act("doc.termDecide", { documentId: DQ, proposalId: T, decision: "correct", value: "Kenya and Uganda; other territories by written agreement." })) as { ok: boolean; error: string };
+        expect(same.ok).toBe(false);
+        expect(quotationReview).not.toHaveBeenCalled();
+        const r = (await A.records.act("doc.termDecide", { documentId: DQ, proposalId: T, decision: "accept", value: "" })) as { ok: boolean };
+        expect(r.ok).toBe(true);
+        expect(quotationReview).toHaveBeenCalledWith(DQ, { action: "accept_proposal", proposalId: T });
+        t = text(A.ai.workspace({ ws: "document", documentId: DQ }));
+        expect(t).toContain("confirmed by Cynthia");
+        expect(t).not.toContain("Record decision for Geographic scope");
+      } finally {
+        api["document"] = realDocument;
+        delete api["quotationReading"];
+        delete api["quotationReview"];
+      }
+    });
+
+    it("a document is filed by a person — kind and client — and an invoice is never treated as a policy (D-138)", async () => {
+      const api = await apiMod();
+      const DI = "e0000008-0000-4000-8000-000000000001";
+      const detail = (kind: string, clientId: string | null) => ({ document: { id: DI, kind, filename: "11_UX_TEST_CIC_Premium_Invoice.pdf", mimeType: "application/pdf", byteSize: 1, pageCount: 1, extractionState: "extracted", extractionError: null, clientId, workItemId: null, createdAt: "2026-10-03T08:40:00Z" }, pages: [], fileUrl: null, fileUrlExpiresAt: null,
+        fields: [{ id: "f0000080-0000-4000-8000-000000000001", fieldKey: "invoice_reference", proposedValue: "CIC-INV-UXTEST-20261201", correctedValue: null, state: "accepted", condition: "known", page: 1, region: null, reviewedBy: null, reviewedAt: null }] });
+      const realDocument = api["document"];
+      api["document"] = async (id: string) => (id === DI ? detail("invoice", null) : null);
+      const classifyDocument = vi.fn(async (_id: string, input: { kind: string; clientId: string | null }) => ({ document: { ...detail(input.kind, input.clientId).document } }));
+      api["classifyDocument"] = classifyDocument;
+      api["quotationReading"] = vi.fn(async () => ({ document: { id: DI, filename: "x", pageCount: 1, extractionState: "extracted" }, needsManualReview: null, linkedTo: null, permissions: { canReview: true }, fields: [], proposals: [] }));
+      try {
+        const A = await live();
+        A.ai.workspace({ ws: "document", documentId: DI });
+        await new Promise((res) => setTimeout(res, 0));
+        const t = text(A.ai.workspace({ ws: "document", documentId: DI }));
+        expect(t).toContain("File this document");
+        expect(t).toContain("Invoices and payments are not recorded in ASAP yet");
+        expect(t).not.toContain("Create the client and policy from this document");
+        const r = (await A.records.act("doc.classify", { documentId: DI, kind: "invoice", clientId: CLIENT })) as { ok: boolean; text: string };
+        expect(r).toMatchObject({ ok: true, text: "Filed under Tausi Hauliers Ltd" });
+        expect(classifyDocument).toHaveBeenCalledWith(DI, { kind: "invoice", clientId: CLIENT });
+        expect(text(A.ai.workspace({ ws: "document", documentId: DI }))).not.toContain("Apply confirmed values to a record");
+      } finally {
+        api["document"] = realDocument;
+        delete api["classifyDocument"];
         delete api["quotationReading"];
       }
     });
