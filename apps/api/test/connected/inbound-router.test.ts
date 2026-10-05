@@ -49,7 +49,7 @@ const paste = async (body: Record<string, unknown>) => {
   const r = await call(AMINA, "POST", "/inbound/messages", body);
   expect(r.status).toBeLessThan(300);
   await pump(r.body.emailMessageId);
-  return r.body as { emailMessageId: string; attachments: { filename: string; outcome: string }[] };
+  return r.body as { emailMessageId: string; attachments: { filename: string; outcome: string; documentId: string | null }[] };
 };
 
 beforeAll(async () => {
@@ -128,9 +128,11 @@ describe("the inbound router", () => {
     const [m] = await sql`select from_address, subject, body_text, provider_message_id from email_messages where id = ${r.emailMessageId}`;
     expect(m).toMatchObject({ from_address: "quotes@cic.test", provider_message_id: `cic-${TAG}@cic.test`, subject: `RE: ${subject}` });
     expect(String(m!["body_text"])).toMatch(/premium KES 5,620,000 for twelve months/);
-    // No file store in this test: the attachment is said not kept, never half-filed.
-    expect(r.attachments).toEqual([{ filename: "CIC-quote.pdf", documentId: null, outcome: "not_kept" }]);
-    expect((await sql`select count(*)::int as n from documents where filename = 'CIC-quote.pdf' and deleted_at is null`)[0]!["n"]).toBe(0);
+    // Kept as a document, through the upload path (D-153).
+    expect(r.attachments).toMatchObject([{ filename: "CIC-quote.pdf", outcome: "filed" }]);
+    const [doc] = await sql`select extraction_state, mime_type, byte_size from documents where id = ${r.attachments[0]!.documentId}`;
+    expect(doc).toMatchObject({ extraction_state: "queued", mime_type: "application/pdf" });
+    expect((await sql`select count(*)::int as n from events where event_type = 'document.received' and entity_id = ${r.attachments[0]!.documentId}`)[0]!["n"]).toBe(1);
     expect(await classification(r.emailMessageId)).toMatchObject({ state: "routed", routed_run_id: runId, routed_by: "auto" });
     expect(String((await work())["required_action"])).toMatch(/Jubilee/);
 

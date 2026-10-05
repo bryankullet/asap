@@ -2737,3 +2737,20 @@ D-144 filed an insurer's reply to the quotation and asked a person to record it 
   extractor, confirmed one at a time (D-138).
 - *Not yet:* renewal terms filed by email are not read into a proposal — renewal still asks a
   person to record them.
+
+## D-153
+
+**Attachments are kept in the connected suite, and the end-to-end test runs without stand-ins.**
+
+D-146's end-to-end test cleared KYC by a database update and inserted the extractor's output by hand,
+and attachments in connected tests were not kept (no file store).
+- *Storage.* `scripts/test-connected.sh` always starts the storage stand-in
+  (`test/connected/storage-standin.ts`, the same one `serve.ts` uses), so an inbound attachment is
+  filed as a document, queued, and announced with `document.received`.
+- *Extractor.* When `EXTRACTOR_PYTHON` is set, the script starts the real Python extractor and
+  passes its URL to the tests.
+- *End to end.* The client is opened with `POST /clients` and cleared through `POST /clients/:id/file`
+  (identity and beneficial-ownership documents with references, review, clearance). The policy
+  schedule arrives as a PDF attachment on the insurer's email; the extractor reads it, and the
+  issuance run files it. The inserted extractor output remains only where no extractor is running,
+  and the test says so where it happens.

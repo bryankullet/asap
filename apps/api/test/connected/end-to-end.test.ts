@@ -7,15 +7,16 @@
  * brokerage — no mailbox is connected in this brokerage, so every external message is approved and
  * then delivered by a person, and no send attempt exists.
  *
- * Two stand-ins, both named where they happen: the client's file is cleared by the database owner
- * (KYC clearance has no route), and the insurer's policy document is inserted as the extractor
- * leaves it (the Python extractor is proven by its own suite; there is no file store here).
+ * No stand-ins where the suite runs whole (D-153): the client's file is cleared through the API,
+ * the policy schedule arrives as an email attachment that is kept as a document, and the real
+ * extractor reads it. Only where no extractor is running does the test insert its output instead.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FakeScript } from "../../src/ai/providers/fake.js";
 import type { createApp } from "../../src/app.js";
+import { textPdf } from "./_pdf.js";
 import { AMINA, buildApp, caller, CIC, JUBILEE, newApiKey, ORG_A, OWNER } from "./_harness.js";
 
 const API_KEY = newApiKey();
@@ -76,10 +77,17 @@ beforeAll(async () => {
   sql = postgres(OWNER, { max: 2, onnotice: () => {} });
   await sql`insert into app.api_keys (key_hash, label) values (encode(extensions.digest(${API_KEY}, 'sha256'), 'hex'), 'connected-end-to-end')`;
   app = buildApp(API_KEY, script);
-  [{ id: clientId }] = (await sql`insert into clients (organization_id, name, kind, source) values (${ORG_A}, ${CLIENT}, 'corporate', 'manual') returning id`) as unknown as [{ id: string }];
+  // The client, opened and cleared by a person through the API (D-153): ASAP will not prepare
+  // placement on an uncleared file.
+  expect((await call(AMINA, "POST", "/clients", { name: CLIENT, kind: "corporate", confirmNew: true })).body.outcome).toBe("created");
+  clientId = (await sql`select id from clients where organization_id = ${ORG_A} and name = ${CLIENT}`)[0]!["id"] as string;
   await sql`insert into client_contacts (organization_id, client_id, full_name, email, is_primary, source) values (${ORG_A}, ${clientId}, 'Achieng Odhiambo', ${CLIENT_EMAIL}, true, 'manual')`;
-  // Stand-in: KYC clearance has no route yet. ASAP will not prepare placement on an uncleared file.
-  await sql`update clients set file_status = 'cleared', file_decided_by = ${AMINA.id}, file_decided_at = now(), file_decision_reason = 'KYC documents verified.', refresh_due_at = now() + interval '1 year' where id = ${clientId}`;
+  const file = (body: Record<string, unknown>) => call(AMINA, "POST", `/clients/${clientId}/file`, body);
+  expect((await file({ action: "record_document", kind: "identity", label: "Certificate of incorporation", reference: `CPR/2019/${TAG}` })).status).toBe(200);
+  expect((await file({ action: "record_document", kind: "beneficial_ownership", label: "Beneficial ownership declaration", reference: `BO/${TAG}` })).status).toBe(200);
+  expect((await file({ action: "start_review" })).status).toBe(200);
+  expect((await file({ action: "clear", reason: "Identity and beneficial ownership verified.", refreshIntervalDays: 365 })).status).toBe(200);
+  expect((await sql`select file_status from clients where id = ${clientId}`)[0]!["file_status"]).toBe("cleared");
   jubileeName = (await sql`select name from insurers where id = ${JUBILEE}`)[0]!["name"] as string;
   watched.add(clientId);
 });
@@ -203,18 +211,37 @@ describe("one client, from an enquiry email to an issued policy", () => {
     await pump();
     const iss = await run("issuance", placementId);
     expect(iss).toMatchObject({ state: "waiting_party", current_step: "policy_document" });
-    const mail = await paste({ from: "policy@jubilee.test", subject: `Policy schedule — ${CLIENT}`, body: `Attached the policy schedule ${POLICY_NUMBER} for ${CLIENT}. POL-${TAG}` });
-    expect(await sorted(mail)).toMatchObject({ kind: "policy_document", state: "routed", routed_run_id: iss!["id"] });
-
-    // Stand-in: the extractor's output for the attached schedule.
-    const [doc] = await sql`insert into documents (organization_id, client_id, kind, filename, mime_type, byte_size, storage_path, content_sha256, page_count, extraction_state, uploaded_by)
-      values (${ORG_A}, ${clientId}, 'policy_schedule', ${`Schedule ${TAG}.pdf`}, 'application/pdf', 41000, ${`${ORG_A}/email/${TAG}.pdf`}, ${createHash("sha256").update(`e2e${TAG}`).digest("hex")}, 2, 'extracted', ${AMINA.id}) returning id`;
-    const fields: [string, string][] = [["insured_name", CLIENT], ["insurer_name", jubileeName], ["policy_number", POLICY_NUMBER], ["class_of_business", "Commercial motor"], ["period_start", "2026-09-10"], ["period_end", "2027-09-09"], ["currency", "KES"], ["premium", "5,310,000.00"]];
-    for (const [n, [key, value]] of fields.entries())
-      await sql`insert into document_fields (organization_id, document_id, field_key, proposed_value, page_number, region_x, region_y, region_width, region_height, condition) values (${ORG_A}, ${doc!["id"]}, ${key}, ${value}, 1, 72, ${120 + n * 24}, 260, 18, 'inferred')`;
-    await sql`insert into events (organization_id, event_type, entity_type, entity_id, actor, payload) values (${ORG_A}, 'document.read', 'document', ${doc!["id"]}, 'automation', ${sql.json({ documentId: doc!["id"], kind: "policy_schedule", clientId })})`;
-    watched.add(doc!["id"] as string);
+    // The insurer's email, with the schedule attached: kept as a document and read by the extractor (D-153).
+    const pdf = textPdf(["POLICY SCHEDULE", `Policy number: ${POLICY_NUMBER}`, `Name of insured: ${CLIENT}`, `Insurer: ${jubileeName}`, "Class of business: Commercial motor", "Period from: 2026-09-10", "Period to: 2027-09-09", "Currency: KES", "Annual premium: 5,310,000.00"]);
+    const eml = [
+      "From: Jubilee Policy Desk <policy@jubilee.test>", `To: broker@acme-brokers.test`, `Subject: Policy schedule — ${CLIENT}`, "Date: Mon, 05 Oct 2026 09:12:00 +0300",
+      `Message-ID: <pol-${TAG}@jubilee.test>`, "MIME-Version: 1.0", 'Content-Type: multipart/mixed; boundary="b1"', "",
+      "--b1", "Content-Type: text/plain; charset=utf-8", "", `Attached the policy schedule ${POLICY_NUMBER} for ${CLIENT}. POL-${TAG}`,
+      "--b1", 'Content-Type: application/pdf; name="Schedule.pdf"', 'Content-Disposition: attachment; filename="Schedule.pdf"', "Content-Transfer-Encoding: base64", "",
+      pdf.toString("base64").replace(/(.{76})/g, "$1\r\n"), "--b1--", "",
+    ].join("\r\n");
+    const posted = await call(AMINA, "POST", "/inbound/messages", { eml });
+    expect(posted.status).toBe(201);
+    const attachment = (posted.body.attachments as { outcome: string; documentId: string }[])[0]!;
+    expect(attachment.outcome).toBe("filed");
+    watched.add(posted.body.emailMessageId);
+    const doc = { id: attachment.documentId };
+    watched.add(doc.id);
     await pump();
+    expect(await sorted(posted.body.emailMessageId)).toMatchObject({ kind: "policy_document", state: "routed", routed_run_id: iss!["id"] });
+    if (!process.env["CONNECTED_EXTRACTOR_URL"]) {
+      // Stand-in, only where no extractor is running: its output, as it leaves it, and its event.
+      const fields: [string, string][] = [["insured_name", CLIENT], ["insurer_name", jubileeName], ["policy_number", POLICY_NUMBER], ["class_of_business", "Commercial motor"], ["period_start", "2026-09-10"], ["period_end", "2027-09-09"], ["currency", "KES"], ["premium", "5,310,000.00"]];
+      for (const [n, [key, value]] of fields.entries())
+        await sql`insert into document_fields (organization_id, document_id, field_key, proposed_value, page_number, region_x, region_y, region_width, region_height, condition) values (${ORG_A}, ${doc.id}, ${key}, ${value}, 1, 72, ${120 + n * 24}, 260, 18, 'inferred')`;
+      await sql`update documents set extraction_state = 'extracted', page_count = 1 where id = ${doc.id}`;
+      await sql`insert into events (organization_id, event_type, entity_type, entity_id, actor, payload) values (${ORG_A}, 'document.read', 'document', ${doc.id}, 'automation', ${sql.json({ documentId: doc.id, kind: "policy_schedule", clientId: null })})`;
+      await pump();
+    } else {
+      expect((await sql`select extraction_state from documents where id = ${doc.id}`)[0]!["extraction_state"]).toBe("extracted");
+      const read = await sql`select field_key, proposed_value from document_fields where document_id = ${doc.id} and proposed_value is not null`;
+      expect(Object.fromEntries(read.map((f) => [f["field_key"], f["proposed_value"]]))).toMatchObject({ insured_name: CLIENT, policy_number: POLICY_NUMBER, premium: "5,310,000.00" });
+    }
     const [ipd] = await sql`select recorded_by, recorded_by_run_id from issued_policy_documents where document_id = ${doc!["id"]}`;
     expect(ipd).toMatchObject({ recorded_by: null, recorded_by_run_id: iss!["id"] });
   });
