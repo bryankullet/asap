@@ -103,21 +103,35 @@ describe("the claim workflow", () => {
     expect(String(n["reason"])).toMatch(/ASAP prepares the notice for approval once .* has a verified address on file/);
   });
 
-  it("notified by a person: ASAP waits on the insurer for its reference, then finishes with a receipt and hands the claim back", async () => {
+  it("notified by a person: ASAP waits on the insurer for its reference, then follows the settlement to payment and finishes with a receipt", async () => {
     expect((await act(workId, { stepId: "submit", verb: "record_send", evidence: "Emailed claims@jubilee.test at 10:12" })).body.outcome).toBe("applied");
     await pump(claimId);
     expect(await runOf(claimId)).toMatchObject({ state: "waiting_party", current_step: "registration" });
     expect(await work(workId)).toMatchObject({ task_status: "with_party" });
     expect((await call(AMINA, "POST", `/claims/${claimId}/actions`, { action: "set_insurer_reference", reference: `JUB/CLM/${TAG}` })).status).toBe(200);
     await pump(claimId);
+    // Settlement (D-154): each paper is a person's record, with its figure; ASAP names who holds the next.
+    expect(await runOf(claimId)).toMatchObject({ state: "waiting_party", current_step: "settlement" });
+    expect(String((await work(workId))["required_action"])).toMatch(/to send its settlement offer$/);
+    expect((await act(workId, { stepId: "response", verb: "record_evidence", evidence: "Assessor's report accepted, letter of 20 Oct" })).body.outcome).toBe("applied");
+    const noFigure = await act(workId, { stepId: "offer", verb: "record_evidence", evidence: "Discharge voucher DV-77" });
+    expect(noFigure.body).toMatchObject({ outcome: "blocked", reason: "Record the amount and currency on the discharge voucher." });
+    expect((await act(workId, { stepId: "offer", verb: "record_evidence", evidence: "Discharge voucher DV-77", amount: "184500", currency: "KES" })).body.outcome).toBe("applied");
+    await pump(claimId);
+    expect(await work(workId)).toMatchObject({ task_status: "with_party", task_party: expect.stringMatching(/^Acme/) });
+    expect(String((await work(workId))["required_action"])).toMatch(/the signed discharge voucher for .*'s offer of KES 184,500\.00$/);
+    expect((await act(workId, { stepId: "acceptance", verb: "record_evidence", evidence: "Signed DV-77 returned" })).body.outcome).toBe("applied");
+    await pump(claimId);
+    expect(String((await work(workId))["required_action"])).toMatch(/to send payment of KES 184,500\.00$/);
+    expect((await act(workId, { stepId: "payment", verb: "record_evidence", evidence: "RTGS FT26293XYZ", amount: "184500.00", currency: "KES", paidOn: day(0) })).body.outcome).toBe("applied");
+    await pump(claimId);
+    expect((await sql`select offer_amount, paid_amount, paid_currency from claims where id = ${claimId}`)[0]).toMatchObject({ offer_amount: "184500.00", paid_amount: "184500.00", paid_currency: "KES" });
     const r = await runOf(claimId);
     expect(r["state"]).toBe("done");
     const [receipt] = await sql`select outcome, receipt from workflow_receipts where run_id = ${r["id"]}`;
-    expect(receipt!["outcome"]).toMatch(/^Claim registered by .* \(JUB\/CLM\//);
+    expect(receipt!["outcome"]).toMatch(/^Claim settled — KES 184,500\.00 from .* received .* \(JUB\/CLM\//);
     expect(JSON.stringify(receipt!["receipt"])).toMatch(/ASAP made no coverage or claims decision/);
     const w = await work(workId);
-    expect(w["task_status"]).toBe("with_party");
-    expect(w["task_since"]).not.toBeNull();
     for (const text of [w["required_action"], w["reason"], receipt!["outcome"]]) expect(String(text ?? "")).not.toMatch(banned);
   });
 
@@ -176,10 +190,17 @@ describe("the endorsement workflow", () => {
     expect((await work(workId))["required_action"]).toBe("Apply the confirmed changes to the policy");
     expect((await act(workId, { stepId: "update_policy", verb: "approve" })).body.outcome).toBe("applied");
     await pump(id);
+    expect(await runOf(id)).toMatchObject({ state: "waiting_party", current_step: "premium" });
+    expect(String((await work(workId))["required_action"])).toMatch(/debit or credit note for the change — or that there is none$/);
+    expect((await act(workId, { stepId: "premium", verb: "record_evidence", evidence: `DN/${TAG}`, premiumDirection: "additional" })).body).toMatchObject({ outcome: "blocked", reason: "Record the amount and currency on the insurer's note." });
+    expect((await act(workId, { stepId: "premium", verb: "record_evidence", evidence: `DN/${TAG}`, premiumDirection: "additional", amount: "61250", currency: "KES" })).body.outcome).toBe("applied");
+    await pump(id);
+    expect((await sql`select direction, amount, recorded_by from endorsement_premium_adjustments where endorsement_id = ${id}`)[0]).toMatchObject({ direction: "additional", amount: "61250.00", recorded_by: AMINA.id });
     const done = await runOf(id);
     expect(done["state"]).toBe("done");
     const [receipt] = await sql`select outcome from workflow_receipts where run_id = ${done["id"]}`;
     expect(receipt!["outcome"]).toMatch(/^Endorsement applied — 1 of 1 item confirmed by /);
+    expect((await sql`select receipt->>'premium' as p from workflow_receipts where run_id = ${done["id"]}`)[0]!["p"]).toBe(`Additional premium KES 61,250.00 (DN/${TAG})`);
   });
 
   it("a transfer of ownership asked for by someone else waits for the policyholder's own instruction", async () => {

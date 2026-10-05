@@ -2754,3 +2754,25 @@ and attachments in connected tests were not kept (no file store).
   schedule arrives as a PDF attachment on the insurer's email; the extractor reads it, and the
   issuance run files it. The inserted extractor output remains only where no extractor is running,
   and the test says so where it happens.
+
+## D-154
+
+**Claim settlement and endorsement premium adjustments are recorded, with their figures, and the runs follow them.**
+
+A claim's run ended at the insurer's registration, and an endorsement's at the applied change. The
+offer, acceptance and payment were references with no figure, and nothing held a premium adjustment.
+- *Claims.* Migration 0077 gives the claim its offer amount and currency, and the amount, currency and
+  date of the payment. `claim_amount_record` takes each one once, and only after its reference.
+  The Work item's offer and payment steps require the figure from the voucher or the receipt.
+  The claim run gains a `settlement` step. It follows up the insurer for its offer, the client for the
+  signed voucher (naming the offer), and the insurer for payment, on `claim.document_chase_days`.
+  It finishes when the payment is recorded, with a receipt naming the amount received.
+- *Endorsements.* `endorsement_premium_adjustments` (0077) holds one record per endorsement:
+  additional or return premium, with its amount, currency and the insurer's note number; or none,
+  with the person's reason. Members can read it; only `endorsement_premium_record`, through the API,
+  writes it. The Work item's premium step records it. The endorsement run waits for it after the
+  change is applied and names it on the receipt.
+- *What ASAP does not do.* No money moves. ASAP decides no claim, offer or premium: every figure is a
+  person's record of the insurer's or bank's paper, and a wrong figure is corrected by an exception,
+  never overwritten. Levies on an adjustment are not split out. That waits for the levy rules to be
+  confirmed per brokerage.

@@ -124,6 +124,13 @@ export const actRequestSchema = z.object({
   policyPeriodId: uuidSchema.optional(),
   /** claim response step: a call note can never stand in for the insurer's written response. */
   evidenceKind: z.enum(["document", "call_note"]).optional(),
+  /** claim offer and payment, endorsement premium: the figure on the insurer's own paper (D-154). */
+  amount: z.string().trim().regex(/^\d{1,12}(\.\d{1,2})?$/).optional(),
+  currency: z.string().trim().regex(/^[A-Z]{3}$/).optional(),
+  /** claim payment: the day it was received. */
+  paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** endorsement premium: additional or return premium on the insurer's note, or none. */
+  premiumDirection: z.enum(["additional", "return", "none"]).optional(),
 });
 export type ActRequest = z.infer<typeof actRequestSchema>;
 

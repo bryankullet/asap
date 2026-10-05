@@ -310,6 +310,15 @@ describe("a claim reported by email, to its registration", () => {
     expect(String((await sql`select required_action from work_items where id = ${workId}`)[0]!["required_action"])).toMatch(/^Record what arrived from /);
     expect((await call(AMINA, "POST", `/claims/${claimId}/actions`, { action: "set_insurer_reference", reference: `CLM-${TAG}` })).status).toBe(200);
     await pump();
+    expect((await run("claim", claimId))!["current_step"]).toBe("settlement");
+    // Settlement, to the money received (D-154): each paper recorded by a person, with its figure.
+    expect((await act({ stepId: "response", verb: "record_evidence", evidence: "Jubilee's letter accepting the assessor's report" })).body.outcome).toBe("applied");
+    expect((await act({ stepId: "offer", verb: "record_evidence", evidence: `Discharge voucher DV-${TAG}`, amount: "412000", currency: "KES" })).body.outcome).toBe("applied");
+    await pump();
+    expect((await act({ stepId: "acceptance", verb: "record_evidence", evidence: "Signed voucher returned by the client" })).body.outcome).toBe("applied");
+    await pump();
+    expect((await act({ stepId: "payment", verb: "record_evidence", evidence: `EFT ${TAG}`, amount: "412000", currency: "KES", paidOn: new Date().toISOString().slice(0, 10) })).body.outcome).toBe("applied");
+    await pump();
     expect((await run("claim", claimId))!["state"]).toBe("done");
     const [receipt] = await sql`select receipt from workflow_receipts where run_id = ${cr!["id"]}`;
     expect(JSON.stringify(receipt!["receipt"])).toMatch(/ASAP made no coverage or claims decision/);

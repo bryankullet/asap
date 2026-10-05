@@ -35,6 +35,8 @@ const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1
 type Claim = {
   id: string; organization_id: string; work_item_id: string; client_id: string; policy_id: string | null; policy_period_id: string | null; status: string;
   incident_on: string; incident_summary: string; insurer_reference: string | null; registered_at: string | null; created_at: string;
+  offer_reference: string | null; offer_amount: string | null; offer_currency: string | null; acceptance_reference: string | null;
+  payment_reference: string | null; paid_amount: string | null; paid_currency: string | null; paid_on: string | null;
   clock_clause_reference: string | null; clock_clause_page: number | null; clock_clause_days: number | null; clock_start_event: "incident" | "client_aware" | "notified_to_us" | null; clock_start_on: string | null; clock_start_evidence: string | null;
 };
 type Facts = { claim: Claim; clientName: string; insurerName: string | null; steps: Step[]; documents: { id: string; label: string; holder: string; requested_at: string | null; created_at: string }[] };
@@ -285,14 +287,45 @@ async function registration(ctx: StepContext): Promise<StepResult> {
 const holderName = (holder: string, f: Facts) =>
   holder === "client" ? f.clientName : holder === "insurer" ? (f.insurerName ?? "the insurer") : holder === "us" ? "us" : `the ${holder}`;
 
+const money = (amount: string, currency: string) => `${currency} ${Number(amount).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Settlement (D-154): the insurer's offer on its discharge voucher, the client's signed acceptance,
+ * and the payment received — each a person's record of the paper, with the figure on it. ASAP follows
+ * up the party who holds the next one and names the figure in Work; it never decides any of them.
+ */
+async function settlement(ctx: StepContext): Promise<StepResult> {
+  const f = await facts(ctx);
+  const c = f.claim;
+  const insurer = f.insurerName ?? "the insurer";
+  if (c.paid_amount && c.paid_currency && c.paid_on)
+    return { kind: "done", output: { paidOn: c.paid_on }, evidence: [{ kind: "record", label: `${money(c.paid_amount, c.paid_currency)} received ${human(c.paid_on)}: ${c.payment_reference}`, ref: `claim:${c.id}` }] };
+  const rule = await ruleOr(ctx.db, ctx.run.organization_id, "claim.document_chase_days", claimDocumentChaseRuleSchema, CLAIM_DOCUMENT_CHASE_DEFAULT, CLAIM_DOCUMENT_CHASE_BASIS);
+  if (!c.offer_reference || !c.offer_amount || !c.offer_currency) {
+    const since = recordedAt(f.steps, "response") ?? ((ctx.step.output["since"] as string | undefined) ?? ctx.now.toISOString());
+    const r = await followUp(ctx, { party: insurer, since, key: "offer", what: "its settlement offer", every: rule.days, basis: rule.basis });
+    return r.kind === "wait" ? { ...r, output: { ...r.output, since } } : r;
+  }
+  const offer = money(c.offer_amount, c.offer_currency);
+  if (!c.acceptance_reference) {
+    const since = recordedAt(f.steps, "offer") ?? ctx.now.toISOString();
+    return followUp(ctx, { party: f.clientName, since, key: "acceptance", what: `the signed discharge voucher for ${insurer}'s offer of ${offer}`, every: rule.days, basis: rule.basis });
+  }
+  const since = recordedAt(f.steps, "acceptance") ?? ctx.now.toISOString();
+  return followUp(ctx, { party: insurer, since, key: "payment", what: `payment of ${offer}`, every: rule.days, basis: rule.basis });
+}
+
 async function finish(ctx: StepContext): Promise<StepResult> {
   const f = await facts(ctx);
   const insurer = f.insurerName ?? "the insurer";
-  const outcome = `Claim registered by ${insurer} (${f.claim.insurer_reference}) — every listed document received`;
+  const c = f.claim;
+  const outcome = c.paid_amount && c.paid_currency && c.paid_on
+    ? `Claim settled — ${money(c.paid_amount, c.paid_currency)} from ${insurer} received ${human(c.paid_on)} (${c.insurer_reference})`
+    : `Claim registered by ${insurer} (${c.insurer_reference}) — every listed document received`;
   await ctx.db.from("workflow_receipts").upsert({
     organization_id: ctx.run.organization_id, run_id: ctx.run.id, workflow: "claim", client_id: f.claim.client_id, work_item_id: ctx.run.work_item_id,
     title: `Claim — ${f.clientName}, incident of ${human(f.claim.incident_on)}`, outcome,
-    receipt: { intendedOutcome: `${insurer} registers the claim with what it needs to assess it`, achievedOutcome: outcome, decision: `${insurer} decides the claim. ASAP made no coverage or claims decision.`, nothingSent: "ASAP sent nothing itself: the notice and every document went from people." },
+    receipt: { intendedOutcome: `${insurer} registers the claim with what it needs to assess it, and the settlement is received`, achievedOutcome: outcome, decision: `${insurer} decides the claim. ASAP made no coverage or claims decision.`, nothingSent: "ASAP sent nothing itself: the notice and every document went from people." },
   }, { onConflict: "run_id", ignoreDuplicates: true });
   // The Work item goes back to its own steps: the insurer's response is what is next.
   const t = deriveTask(f.steps);
@@ -309,7 +342,8 @@ export const CLAIM: WorkflowDefinition = {
     { key: "documents", label: "Outstanding documents chased", maxAttempts: 5, run: documents },
     { key: "notify", label: "Insurer notified by a person, before the deadline", run: notify },
     { key: "registration", label: "Insurer's claim reference awaited and chased", maxAttempts: 5, run: registration },
-    { key: "finish", label: "Claim registered; documents in", run: finish },
+    { key: "settlement", label: "Offer, acceptance and payment recorded by people; each party followed up", maxAttempts: 5, run: settlement },
+    { key: "finish", label: "Claim settled", run: finish },
   ],
 };
 

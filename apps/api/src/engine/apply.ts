@@ -52,7 +52,9 @@ export type Effects = {
   /** claim match step: a person chose the policy period; the draft becomes registered. */
   registerClaim?: { policyPeriodId: string };
   /** claim steps 8, 9, 10: one fact each, never merged. */
-  claimFact?: { fact: "offer" | "acceptance" | "payment"; reference: string };
+  claimFact?: { fact: "offer" | "acceptance" | "payment"; reference: string; amount?: { amount: string; currency: string; paidOn: string | null } };
+  /** endorsement premium step: the insurer's note, as a person recorded it (D-154). */
+  endorsementPremium?: { direction: "additional" | "return" | "none"; amount: string | null; currency: string | null; reference: string };
   /** endorsement update step: the insurer's decisions become a new effective-dated policy version. */
   applyEndorsement?: true;
 };
@@ -134,6 +136,20 @@ export function evaluateGuard(
             reason: `Still outstanding: ${outstanding.map((d) => `${d.label} (with ${HOLDER_LABELS[d.holder]})`).join("; ")}.`,
           };
         }
+      }
+      // The settlement offer, the payment and an endorsement's premium carry the figure on the
+      // insurer's own paper (D-154): a person types it from the voucher, receipt or note.
+      if (item.kind === "claim" && (step.id === "offer" || step.id === "payment")) {
+        if (!req.amount || !req.currency)
+          return { guard: id, reason: step.id === "offer" ? "Record the amount and currency on the discharge voucher." : "Record the amount and currency received." };
+        if (step.id === "payment" && (!req.paidOn || (ctx && req.paidOn > ctx.now.toISOString().slice(0, 10))))
+          return { guard: id, reason: "Record the day the payment was received." };
+      }
+      if (item.kind === "endorsement" && step.id === "premium") {
+        if (!req.premiumDirection)
+          return { guard: id, reason: "Record whether the insurer's note is for additional premium, return premium, or none." };
+        if (req.premiumDirection !== "none" && (!req.amount || !req.currency || Number(req.amount) <= 0))
+          return { guard: id, reason: "Record the amount and currency on the insurer's note." };
       }
       // Claim: the insurer's response is their written words; a call note is ours.
       if (item.kind === "claim" && step.id === "response" && req.evidenceKind === "call_note") {
@@ -414,6 +430,12 @@ export function applyAction(
         (step.id === "offer" || step.id === "acceptance" || step.id === "payment")
       ) {
         effects.claimFact = { fact: step.id, reference: (req.evidence ?? "").trim() };
+        if (step.id !== "acceptance" && req.amount && req.currency)
+          effects.claimFact.amount = { amount: req.amount, currency: req.currency, paidOn: step.id === "payment" ? (req.paidOn ?? null) : null };
+      }
+      if (item.kind === "endorsement" && step.id === "premium" && req.premiumDirection) {
+        const none = req.premiumDirection === "none";
+        effects.endorsementPremium = { direction: req.premiumDirection, amount: none ? null : (req.amount ?? null), currency: none ? null : (req.currency ?? null), reference: (req.evidence ?? "").trim() };
       }
       return {
         kind: "applied",

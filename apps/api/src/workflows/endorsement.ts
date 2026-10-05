@@ -14,7 +14,8 @@ import { filedEmails, recordFiledWork } from "./inbound.js";
  * TRANSFER_NEEDS_POLICYHOLDER) — prepares the request to the insurer and asks a person to approve
  * its exact text, waits for a person to deliver it, chases the insurer on `endorsement.chase`, and
  * waits for a person to record the insurer's itemised answer and to apply the confirmed change.
- * Any premium adjustment is finance's step on the Work item; ASAP moves no money.
+ * The premium adjustment — additional or return premium on the insurer's note, or none — is a
+ * person's record (D-154); the run waits for it and names it on the receipt. ASAP moves no money.
  */
 
 const DAY = 86_400_000;
@@ -186,14 +187,33 @@ async function apply(ctx: StepContext): Promise<StepResult> {
   return { kind: "wait", on: "party", until: DAY_WAIT(ctx) };
 }
 
+type Adjustment = { direction: "additional" | "return" | "none"; amount: string | null; currency: string | null; reference: string };
+const money = (amount: string, currency: string) => `${currency} ${Number(amount).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const adjustmentText = (a: Adjustment) =>
+  a.direction === "none" ? `No premium adjustment: ${a.reference}` : `${a.direction === "additional" ? "Additional" : "Return"} premium ${money(a.amount!, a.currency!)} (${a.reference})`;
+
+async function adjustment(ctx: StepContext): Promise<Adjustment | null> {
+  const r = await ctx.db.from("endorsement_premium_adjustments").select("direction, amount, currency, reference").eq("endorsement_id", ctx.run.subject_id).maybeSingle();
+  return (r.data as Adjustment | null) ?? null;
+}
+
+async function premium(ctx: StepContext): Promise<StepResult> {
+  const a = await adjustment(ctx);
+  if (a) return { kind: "done", output: { direction: a.direction }, evidence: [{ kind: "record", label: adjustmentText(a), ref: `endorsement:${ctx.run.subject_id}` }] };
+  const f = await facts(ctx);
+  await setWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Record ${f.insurerName}'s debit or credit note for the change — or that there is none`, reason: "The change is on the policy. The premium adjustment is whatever the insurer's note says; ASAP moves no money." });
+  return { kind: "wait", on: "party", until: DAY_WAIT(ctx) };
+}
+
 async function finish(ctx: StepContext): Promise<StepResult> {
   const f = await facts(ctx);
+  const a = await adjustment(ctx);
   const accepted = f.e.items.filter((i) => i.decision === "accepted").length;
   const outcome = `Endorsement applied — ${accepted} of ${f.e.items.length} item${f.e.items.length === 1 ? "" : "s"} confirmed by ${f.insurerName}`;
   await ctx.db.from("workflow_receipts").upsert({
     organization_id: ctx.run.organization_id, run_id: ctx.run.id, workflow: "endorsement", client_id: f.clientId || null, work_item_id: ctx.run.work_item_id,
     title: `Endorsement — ${f.clientName}${f.policyNumber ? `, ${f.policyNumber}` : ""}`, outcome,
-    receipt: { intendedOutcome: `The requested change on ${f.clientName}'s policy`, achievedOutcome: outcome, nothingSent: "ASAP sent nothing itself: the request was approved and delivered by people.", premium: "Any additional or return premium is finance's step on the Work item." },
+    receipt: { intendedOutcome: `The requested change on ${f.clientName}'s policy`, achievedOutcome: outcome, nothingSent: "ASAP sent nothing itself: the request was approved and delivered by people.", premium: a ? adjustmentText(a) : "Any additional or return premium is finance's step on the Work item." },
   }, { onConflict: "run_id", ignoreDuplicates: true });
   const t = deriveTask(f.steps);
   await setWork(ctx, { task_status: t.status, task_party: t.party, task_since: t.status === "with_party" ? ctx.now.toISOString() : null, required_action: null, reason: null });
@@ -209,6 +229,7 @@ export const ENDORSEMENT: WorkflowDefinition = {
     { key: "delivery", label: "Request delivered by a person", run: delivery },
     { key: "response", label: "Insurer's itemised answer awaited and chased", maxAttempts: 5, run: response },
     { key: "apply", label: "Confirmed changes applied by a person", run: apply },
+    { key: "premium", label: "Premium adjustment recorded by a person", run: premium },
     { key: "finish", label: "Endorsement applied", run: finish },
   ],
 };

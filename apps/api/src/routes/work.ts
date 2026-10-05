@@ -1241,6 +1241,26 @@ export function workRoutes(deps: WorkDeps) {
       });
       if (error) return sendError(c, mapDatabaseError(error));
     }
+    if (effects.claimFact?.amount && facts.claim) {
+      const { error } = await db.rpc("claim_amount_record", {
+        p_claim_id: facts.claim.claim.id,
+        p_fact: effects.claimFact.fact,
+        p_amount: effects.claimFact.amount.amount,
+        p_currency: effects.claimFact.amount.currency,
+        p_paid_on: effects.claimFact.amount.paidOn,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
+    if (effects.endorsementPremium && facts.endorsement) {
+      const { error } = await db.rpc("endorsement_premium_record", {
+        p_endorsement_id: facts.endorsement.endorsement.id,
+        p_direction: effects.endorsementPremium.direction,
+        p_amount: effects.endorsementPremium.amount,
+        p_currency: effects.endorsementPremium.currency,
+        p_reference: effects.endorsementPremium.reference,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
     if (effects.applyEndorsement && facts.endorsement) {
       const { error } = await db.rpc("endorsement_apply", {
         p_id: facts.endorsement.endorsement.id,

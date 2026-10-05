@@ -122,6 +122,7 @@ describe("Drizzle schema conventions", () => {
       "email_messages",
       "email_send_attempts",
       "email_threads",
+      "endorsement_premium_adjustments",
       "endorsements",
       "event_deliveries",
       "events",
