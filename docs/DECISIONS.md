@@ -2645,3 +2645,25 @@ Written before the code, because it changes how the external-messages cap applie
 - `docs/AUTONOMOUS-WORK-MAP.md` "Missing" lines are updated. `ASAP_CURRENT_BUILD_AUDIT.md` is marked
   superseded. `render.yaml` needs no change: no new environment variable, and the worker already
   dispatches every event and runs the generic sweep.
+
+## D-149
+
+**The engine reads one brokerage through RLS; the exception helper uses the declared tools.**
+
+D-146 did not use the declared Ask tools, because they rely on RLS and the engine's service
+connection bypasses it. The engine now has a reading connection that RLS confines to one brokerage:
+- *The token.* `forEngine(organizationId)` signs a five-minute token with the project's JWT secret,
+  for the worker role (which never bypasses RLS), naming the organization.
+- *How RLS honours it (0074).* `app.worker_org()` — already the workers' tenancy — reads that claim
+  only when the role really is the worker and the transaction is read-only. PostgREST runs a GET
+  read-only, so the token can read and can never write, even though the worker role's grants would
+  allow writes. A person cannot make such a token: only the server holds the secret.
+- *The exception helper.* It now runs a short tool loop over the declared tools that only read,
+  never the `prepare_*` ones, on that connection. Whatever a tool reads becomes evidence the
+  suggestion may cite. On a deployment without a JWT secret it falls back to the organization-filtered
+  queries of D-146.
+- *Proven* by a connected test: the token sees only its own brokerage's clients, and its write is
+  refused. pgTAP checks that a person's forged claim means nothing, and that the claim is ignored
+  outside a read-only transaction.
+- *Hosted note.* This needs the project's legacy (HS256) JWT secret to be accepted by PostgREST,
+  which is the Supabase default while the legacy secret is not revoked.

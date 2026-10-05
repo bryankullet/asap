@@ -41,6 +41,8 @@ export function internalRoutes(deps: {
    */
   /** The gateway's provider, for the inbound router's classification; null means it abstains. */
   aiProvider?: AiProvider | null;
+  /** A connection that reads one brokerage under RLS (D-149); null without a JWT secret. */
+  engineDb?: (organizationId: string) => SupabaseClient | null;
   mailbox?:
     | {
         providers: Partial<Record<"gmail" | "microsoft", MailboxProvider>>;
@@ -227,7 +229,7 @@ export function internalRoutes(deps: {
     if (!event.event_type.startsWith("workflow.")) results.push(...(await routeEventToWorkflows(db, deps.logger, event)));
     // A run that could not finish gets one suggested fix, when a model is configured (D-146).
     if (event.event_type === "run.could_not_finish" && event.entity_id) {
-      const out = await suggestFix(db, deps.aiProvider ?? null, deps.logger, { id: event.id, organization_id: event.organization_id, entity_id: event.entity_id });
+      const out = await suggestFix(db, deps.engineDb?.(event.organization_id) ?? null, deps.aiProvider ?? null, deps.logger, { id: event.id, organization_id: event.organization_id, entity_id: event.entity_id });
       results.push({ consumer: "exception_helper", result: out === "suggested" ? "success" : "skipped", detail: out });
     }
     // An inbound email is sorted once (D-144): routed to the one run waiting for it, or Unsorted.

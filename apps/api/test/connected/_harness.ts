@@ -74,6 +74,7 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
       // The engine's own connection (internal routes, D-129): a service_role token for local PostgREST only.
       serviceRoleKey: jwt({ role: "service_role" }),
       apiInternalKey: apiKey,
+      jwtSecret: SECRET,
       fetch: transport,
     }),
     mailer: silentMailer,

@@ -141,6 +141,7 @@ export function createApp(deps: AppDeps) {
         bucket: deps.storage?.bucket ?? "insurance-documents",
         mailbox: deps.mailbox,
         aiProvider: deps.aiProvider ?? null,
+        engineDb: (organizationId: string) => supabase.forEngine?.(organizationId) ?? null,
       }),
     );
   }

@@ -1,4 +1,6 @@
-import type { AiProvider } from "@asap/schema";
+import type { AiMessage, AiProvider } from "@asap/schema";
+import { MAX_TOOL_ROUNDS } from "../ai/gateway.js";
+import { DECLARED_TOOLS } from "../ai/tools/index.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { z } from "zod";
@@ -8,10 +10,10 @@ import { z } from "zod";
  * suggested fix with the evidence it rests on — a proposal on the exception, which a person
  * accepts or rejects.
  *
- * What it reads, it reads only from the run's own brokerage: every query below filters on the
- * run's organization. The declared Ask tools are not used here because they rely on a person's
- * session for tenancy (RLS); on the engine's connection they would read across brokerages, which
- * §45 rule 1 forbids. The model sees only the evidence gathered here and may only point at it.
+ * What it reads, it reads only from the run's own brokerage: the starting evidence through queries
+ * that each filter on the run's organization, and anything further through the declared, read-only
+ * Ask tools on a connection RLS confines to that brokerage (D-149). The model may only point at
+ * what was read.
  *
  * Accepting can do one thing from a fixed list — record an insurer address that appeared in the
  * brokerage's own correspondence — through the person's ordinary path, as the person. With no model
@@ -66,30 +68,66 @@ export async function gatherEvidence(db: SupabaseClient, organizationId: string,
   return { evidence, insurer, exception: run.exception, workflow: run.workflow };
 }
 
-export async function suggestFix(db: SupabaseClient, provider: AiProvider | null, logger: Logger, event: { id: string; organization_id: string; entity_id: string | null }): Promise<"suggested" | "none" | "already"> {
+/** Only the tools that read. Preparing anything is never part of looking into why a run stopped. */
+const READ_TOOLS = DECLARED_TOOLS.filter((t) => !t.declaration.name.startsWith("prepare_"));
+
+/**
+ * `reads` is the engine's one-brokerage connection (D-149): a worker-role token naming this
+ * organization, so RLS — not this code — decides what the declared tools can see. Writes (the
+ * suggestion and its audit row) go through `db`, the engine's own connection. Without `reads`
+ * (no JWT secret on this deployment) the helper uses only its organization-filtered queries.
+ */
+export async function suggestFix(db: SupabaseClient, reads: SupabaseClient | null, provider: AiProvider | null, logger: Logger, event: { id: string; organization_id: string; entity_id: string | null }): Promise<"suggested" | "none" | "already"> {
   if (!provider || !event.entity_id) return "none";
   const existing = await db.from("exception_suggestions").select("id").eq("event_id", event.id).maybeSingle();
   if (existing.data) return "already";
-  const g = await gatherEvidence(db, event.organization_id, event.entity_id);
+  const g = await gatherEvidence(reads ?? db, event.organization_id, event.entity_id);
   if (!g.exception) return "none";
+  const tools = reads ? READ_TOOLS : [];
+  const messages: AiMessage[] = [{ role: "user", content: JSON.stringify({ exception: g.exception, workflow: g.workflow, evidence: g.evidence }) }];
   let parsed: z.infer<typeof reply> | null = null;
   let model: string;
   try {
-    const res = await provider.complete({
-      system: [
-        "A piece of work at a Kenyan insurance brokerage stopped and needs a person. Suggest ONE fix, in one or two plain sentences.",
-        "Use only the evidence given. Cite it by its ref. Never decide or suggest a claim or coverage decision.",
-        "If the fix is to record an insurer's address that appears in the evidence, set action to {\"type\":\"record_insurer_contact\",\"email\":…}; otherwise null.",
-        "Reply with JSON only: {\"suggestion\": …, \"evidence\": [refs], \"action\": … or null, \"confidence\": 0 to 1}.",
-      ].join("\n"),
-      messages: [{ role: "user", content: JSON.stringify({ exception: g.exception, workflow: g.workflow, evidence: g.evidence }) }],
-      tools: [],
-      responseSchema: null,
-      maxOutputTokens: 400,
-    });
-    model = `${res.servedBy.provider}:${res.servedBy.model}`;
-    const p = reply.safeParse(firstJson(res.text));
-    parsed = p.success ? p.data : null;
+    for (let round = 0; ; round++) {
+      const last = round >= MAX_TOOL_ROUNDS;
+      const res = await provider.complete({
+        system: [
+          "A piece of work at a Kenyan insurance brokerage stopped and needs a person. Suggest ONE fix, in one or two plain sentences.",
+          "You may read the brokerage's records with the tools given; they only read. Use only the evidence given or read. Cite it by its ref.",
+          "Never decide or suggest a claim or coverage decision.",
+          "If the fix is to record an insurer's address that appears in the evidence, set action to {\"type\":\"record_insurer_contact\",\"email\":…}; otherwise null.",
+          "Reply with JSON only: {\"suggestion\": …, \"evidence\": [refs], \"action\": … or null, \"confidence\": 0 to 1}.",
+        ].join("\n"),
+        messages,
+        tools: last ? [] : tools.map((t) => t.declaration),
+        responseSchema: null,
+        maxOutputTokens: 400,
+      });
+      model = `${res.servedBy.provider}:${res.servedBy.model}`;
+      if (res.stop === "tool_use" && res.toolCalls.length && !last && reads) {
+        messages.push({ role: "assistant", content: res.text, toolCalls: res.toolCalls });
+        for (const call of res.toolCalls) {
+          const tool = tools.find((t) => t.declaration.name === call.name);
+          let content: string;
+          let isError = false;
+          try {
+            if (!tool) throw new Error("no such tool");
+            const result = await tool.run(call.arguments, { db: reads, organizationId: event.organization_id });
+            content = JSON.stringify(result ?? null);
+            // What a tool read is evidence the suggestion may cite.
+            g.evidence.push({ ref: `tool:${call.id}`, label: `Read with ${call.name}`, detail: content.slice(0, 600) });
+          } catch (err) {
+            isError = true;
+            content = JSON.stringify({ error: err instanceof z.ZodError ? "that call did not validate" : "could not read" });
+          }
+          messages.push({ role: "tool_result", toolCallId: call.id, content, isError });
+        }
+        continue;
+      }
+      const p = reply.safeParse(firstJson(res.text));
+      parsed = p.success ? p.data : null;
+      break;
+    }
   } catch (err) {
     logger.warn({ err }, "exception helper: the model could not be asked; the exception shows as it is");
     return "none";
@@ -104,6 +142,6 @@ export async function suggestFix(db: SupabaseClient, provider: AiProvider | null
     suggestion: parsed.suggestion, evidence: cited.length ? cited : g.evidence.slice(0, 1), action, confidence: parsed.confidence, model,
   });
   if (ins.error) return ins.error.code === "23505" ? "already" : "none";
-  await db.from("audit_log").insert({ organization_id: event.organization_id, actor_type: "automation", action: "workflow.suggestion_proposed", object_type: "workflow_run", object_id: event.entity_id, new_state: { code: g.exception.code, action: action?.type ?? null } });
+  await db.from("audit_log").insert({ organization_id: event.organization_id, actor_type: "automation", action: "workflow.suggestion_proposed", object_type: "workflow_run", object_id: event.entity_id, new_state: { code: g.exception.code, action: action?.type ?? null, toolsRead: g.evidence.filter((e) => e.ref.startsWith("tool:")).length } });
   return "suggested";
 }

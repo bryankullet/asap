@@ -29,6 +29,7 @@ const supabase = createSupabaseFactory({
   anonKey: env.SUPABASE_ANON_KEY,
   serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
   apiInternalKey: env.API_INTERNAL_KEY,
+  jwtSecret: env.SUPABASE_JWT_SECRET,
 });
 
 // Optional transports (D-046): absent config disables the feature and says so once.

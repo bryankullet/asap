@@ -9,13 +9,19 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FakeScript } from "../../src/ai/providers/fake.js";
 import type { createApp } from "../../src/app.js";
-import { AMINA, buildApp, caller, newApiKey, ORG_A, OWNER } from "./_harness.js";
+import { engineToken } from "../../src/supabase.js";
+import { AMINA, buildApp, caller, newApiKey, ORG_A, ORG_B, OWNER } from "./_harness.js";
 
 const API_KEY = newApiKey();
 const TAG = randomUUID().slice(0, 6);
 const INSURER = `Pioneer General ${TAG}`;
 const GOOD = `claims-${TAG}@pioneer.test`;
 const script: FakeScript = [
+  {
+    match: new RegExp(`"code":"tools_${TAG}"`),
+    reply: { text: "", toolCalls: [{ id: "t1", name: "find_clients", arguments: { name: "Acme" } }], stop: "tool_use" },
+    then: { text: JSON.stringify({ suggestion: "The client file was read; ask the account executive to confirm the insurer's address.", evidence: ["run", "tool:t1"], action: null, confidence: 0.6 }), toolCalls: [], stop: "end" },
+  },
   { match: new RegExp(`"code":"no_address_${TAG}"`), reply: { text: JSON.stringify({ suggestion: `${INSURER} has no address on file; ${GOOD} wrote to this brokerage about it.`, evidence: ["run", "verified_addresses"], action: { type: "record_insurer_contact", email: GOOD }, confidence: 0.8 }), toolCalls: [], stop: "end" } },
   { match: new RegExp(`"code":"invented_${TAG}"`), reply: { text: JSON.stringify({ suggestion: "Record the address underwriting@made-up.test for the insurer.", evidence: ["run"], action: { type: "record_insurer_contact", email: "underwriting@made-up.test" }, confidence: 0.9 }), toolCalls: [], stop: "end" } },
 ];
@@ -74,5 +80,31 @@ describe("the exception helper", () => {
     const runId = await stoppedRun(`unscripted_${TAG}`);
     expect((await call(AMINA, "GET", `/workflows/runs/${runId}/suggestion`)).body.suggestion).toBeNull();
     expect((await sql`select state from workflow_runs where id = ${runId}`)[0]!["state"]).toBe("exception");
+  });
+
+  it("looks further with the declared read-only tools, on a connection that reads one brokerage", async () => {
+    const runId = await stoppedRun(`tools_${TAG}`);
+    const s = (await call(AMINA, "GET", `/workflows/runs/${runId}/suggestion`)).body.suggestion;
+    expect((s.evidence as { ref: string; label: string }[]).map((e) => e.ref)).toEqual(["run", "tool:t1"]);
+    expect((s.evidence as { label: string }[])[1]!.label).toBe("Read with find_clients");
+    const [a] = await sql`select new_state from audit_log where action = 'workflow.suggestion_proposed' and object_id = ${runId}`;
+    expect((a!["new_state"] as { toolsRead: number }).toolsRead).toBe(1);
+  });
+
+  it("the engine's token reads its brokerage and nothing else — RLS decides, not the query", async () => {
+    const rest = process.env["CONNECTED_POSTGREST_URL"]!;
+    const get = async (org: string, path: string) => {
+      const res = await fetch(`${rest}/${path}`, { headers: { Authorization: `Bearer ${engineToken(process.env["CONNECTED_JWT_SECRET"]!, org)}` } });
+      expect(res.status).toBe(200);
+      return (await res.json()) as { organization_id: string }[];
+    };
+    const asA = await get(ORG_A, "clients?select=organization_id");
+    expect(asA.length).toBeGreaterThan(0);
+    expect(new Set(asA.map((r) => r.organization_id))).toEqual(new Set([ORG_A]));
+    const asB = await get(ORG_B, "clients?select=organization_id");
+    expect(asB.every((r) => r.organization_id === ORG_B)).toBe(true);
+    // It reads; it cannot write.
+    const write = await fetch(`${rest}/clients`, { method: "POST", headers: { Authorization: `Bearer ${engineToken(process.env["CONNECTED_JWT_SECRET"]!, ORG_A)}`, "Content-Type": "application/json" }, body: JSON.stringify({ organization_id: ORG_A, name: "Engine wrote this", kind: "corporate", source: "manual" }) });
+    expect(write.status).toBeGreaterThanOrEqual(400);
   });
 });
