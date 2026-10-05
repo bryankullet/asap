@@ -29,7 +29,7 @@ export type DeliveryOutcome = { communicationId: string; party: string; outcome:
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-async function connectedMailbox(db: SupabaseClient, service: SupabaseClient, mailbox: MailboxDeps, organizationId: string): Promise<{ id: string; provider: MailboxProvider; credentials: MailboxCredentials; address: string } | null> {
+export async function connectedMailbox(db: SupabaseClient, service: SupabaseClient, mailbox: MailboxDeps, organizationId: string): Promise<{ id: string; provider: MailboxProvider; credentials: MailboxCredentials; address: string } | null> {
   if (!mailbox) return null;
   const r = await db.from("mailboxes").select("id, provider, email_address").eq("organization_id", organizationId).eq("status", "connected").order("created_at").limit(1);
   const box = ((r.data ?? []) as { id: string; provider: "gmail" | "microsoft"; email_address: string }[])[0];

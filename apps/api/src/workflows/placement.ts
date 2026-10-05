@@ -9,6 +9,7 @@ import { runEnv } from "./run-env.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
 import { systemReadContext } from "./system-context.js";
 import { filedEmails, recordFiledWork } from "./inbound.js";
+import { sendStandingChaser } from "./chasers.js";
 
 /**
  * Placement and issuance on the engine (D-142), chained:
@@ -43,7 +44,7 @@ async function setWork(ctx: StepContext, patch: Record<string, unknown>) {
 }
 
 /** Chase one outside party on the brokerage's cadence: follow-ups recorded in the step, escalation once. */
-async function chase(ctx: StepContext, o: { party: string; sentAt: string; key: string; deadline: Date; rule: { followUpDays: number; escalateDaysBefore: number; basis: string }; what: string }): Promise<StepResult> {
+async function chase(ctx: StepContext, o: { party: string; sentAt: string; key: string; deadline: Date; rule: { followUpDays: number; escalateDaysBefore: number; basis: string }; what: string; chaser: { purpose: "placement_chase" | "issuance_chase"; client: string; subject: string } }): Promise<StepResult> {
   const filed = filedEmails(ctx);
   if (filed.length) {
     await setWork(ctx, recordFiledWork(filed[0]!, o.what === "Cover confirmation" ? "the cover confirmation or answer" : "the policy or answer"));
@@ -62,6 +63,12 @@ async function chase(ctx: StepContext, o: { party: string; sentAt: string; key: 
   }
   if (ctx.now >= nextAt && automatic(autonomy.actions.follow_up)) {
     const n = followUps + 1;
+    // Under a person's standing approval of the wording, ASAP sends the routine chaser itself (D-147).
+    const sent = await sendStandingChaser(ctx, o.chaser.purpose, { insurer: o.party, client: o.chaser.client, subject: o.chaser.subject, sentOn: human(o.sentAt), followUp: n });
+    if (sent.sent) {
+      await setWork(ctx, { task_status: "with_party", task_party: o.party, task_since: o.sentAt, required_action: `ASAP chased ${o.party} for ${o.what.toLowerCase()} (follow-up ${n}) with the approved wording`, reason: `Sent to ${sent.to} under a standing approval. ${o.rule.basis}`, task_next_check: new Date(ctx.now.getTime() + o.rule.followUpDays * DAY).toISOString() });
+      return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + o.rule.followUpDays * DAY), output: { followUps: n, escalated } };
+    }
     await setWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Chase ${o.party} for ${o.what.toLowerCase()} (follow-up ${n})`, reason: `Sent ${human(o.sentAt)}; nothing back after ${n * o.rule.followUpDays} days.`, task_next_check: new Date(ctx.now.getTime() + o.rule.followUpDays * DAY).toISOString() });
     await auditAutomation(ctx.db, ctx.run, `workflow.${ctx.run.workflow}.follow_up`, { party: o.party, followUp: n });
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + o.rule.followUpDays * DAY), output: { followUps: n, escalated } };
@@ -136,7 +143,7 @@ async function confirmation(ctx: StepContext): Promise<StepResult> {
   const rule = await ruleOr(ctx.db, ctx.run.organization_id, "placement.chase", chaseRuleSchema, PLACEMENT_CHASE_DEFAULT, PLACEMENT_CHASE_BASIS);
   const byRule = new Date(new Date(sentAt).getTime() + rule.deadlineDays * DAY);
   const effective = new Date(v.placement.requestedEffectiveAt);
-  return chase(ctx, { party: v.insurer.name, sentAt, key: "confirmation", deadline: effective < byRule && effective > new Date(sentAt) ? effective : byRule, rule, what: "Cover confirmation" });
+  return chase(ctx, { party: v.insurer.name, sentAt, key: "confirmation", deadline: effective < byRule && effective > new Date(sentAt) ? effective : byRule, rule, what: "Cover confirmation", chaser: { purpose: "placement_chase", client: v.client.name, subject: v.request?.subject ?? v.opportunity.title } });
 }
 
 async function coverCheck(ctx: StepContext): Promise<StepResult> {
@@ -220,7 +227,7 @@ async function policyDocument(ctx: StepContext): Promise<StepResult> {
   }
   const sentAt = (ctx.done["submission"]?.["sentAt"] as string) ?? ctx.now.toISOString();
   const rule = await ruleOr(ctx.db, ctx.run.organization_id, "issuance.chase", chaseRuleSchema, ISSUANCE_CHASE_DEFAULT, ISSUANCE_CHASE_BASIS);
-  return chase(ctx, { party: i.insurer.name, sentAt, key: "policy", deadline: new Date(new Date(sentAt).getTime() + rule.deadlineDays * DAY), rule, what: "The issued policy" });
+  return chase(ctx, { party: i.insurer.name, sentAt, key: "policy", deadline: new Date(new Date(sentAt).getTime() + rule.deadlineDays * DAY), rule, what: "The issued policy", chaser: { purpose: "issuance_chase", client: i.client.name, subject: `Issuance — ${i.client.name}` } });
 }
 async function reviewAndCheck(ctx: StepContext): Promise<StepResult> {
   const i = await issuance(ctx);

@@ -32,7 +32,8 @@ export type SendResult =
 export async function sendThroughMailbox(input: {
   db: SupabaseClient;
   logger: Logger;
-  c: Context;
+  /** The person's request; null when ASAP sends under a person's standing approval (D-147). */
+  c: Context | null;
   organizationId: string;
   approverId: string;
   mailbox: { id: string; provider: MailboxProvider; credentials: MailboxCredentials };
@@ -102,13 +103,13 @@ export async function sendThroughMailbox(input: {
     logger.error({ attemptId }, "could not record the outcome of a send");
   }
 
-  await recordAudit(db, logger, c, {
+  const auditEntry = {
     organizationId,
     actorUserId: approverId,
     action: "email.send_attempted",
     objectType: "email_send_attempt",
     objectId: attemptId,
-    result: outcome.outcome === "sent" ? "success" : "failure",
+    result: outcome.outcome === "sent" ? ("success" as const) : ("failure" as const),
     // Recipients and the provider's id — never the subject or the body (docs/SECRETS.md).
     newState: {
       outcome: outcome.outcome,
@@ -117,7 +118,14 @@ export async function sendThroughMailbox(input: {
       provider_message_id: outcome.outcome === "sent" ? outcome.providerMessageId : null,
     },
     failureReason: outcome.outcome === "sent" ? null : outcome.reason,
-  });
+  };
+  if (c) await recordAudit(db, logger, c, auditEntry);
+  else
+    await db.from("audit_log").insert({
+      organization_id: organizationId, actor_type: "automation", action: auditEntry.action, object_type: auditEntry.objectType, object_id: attemptId,
+      new_state: { ...auditEntry.newState, standingApprovalBy: approverId }, result: auditEntry.result, failure_reason: auditEntry.failureReason,
+    });
+
 
   if (outcome.outcome === "sent") {
     return { state: "sent", attemptId, providerMessageId: outcome.providerMessageId };

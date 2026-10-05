@@ -594,6 +594,7 @@ export const AUTONOMY_ACTIONS = {
   prepare_placement: "Prepare placement and issuance requests, run the cover and issued-policy checks, and file the insurer's policy document when exactly one placement fits it",
   prepare_claim: "Start claim work, watch the notification clock, and chase the insurer and whoever holds an outstanding claim document",
   prepare_endorsement: "Start endorsement work, check its requirements, prepare the insurer request and the approval bundle, and chase the insurer",
+  insurer_chasers: "Send routine insurer chasers worded exactly as a person approved once, through the connected mailbox",
 } as const;
 export type AutonomyAction = keyof typeof AUTONOMY_ACTIONS;
 /** Never automatic, whatever a brokerage sets: a person does these. */
@@ -610,6 +611,8 @@ export const AUTONOMY_CAP: Record<AutonomyAction, AutonomyLevel> = {
   prepare_placement: "manage_exceptions",
   prepare_claim: "manage_exceptions",
   prepare_endorsement: "manage_exceptions",
+  // Never above acting within rules: each chaser is sent under a person's standing approval (D-147).
+  insurer_chasers: "act_within_rules",
 };
 export const autonomyRuleSchema = z.object({
   actions: z.object({
@@ -627,6 +630,8 @@ export const autonomyRuleSchema = z.object({
     prepare_placement: AutonomyLevel.default("act_within_rules"),
     prepare_claim: AutonomyLevel.default("act_within_rules"),
     prepare_endorsement: AutonomyLevel.default("act_within_rules"),
+    // Off unless a brokerage turns it on (D-147).
+    insurer_chasers: AutonomyLevel.default("prepare"),
   }),
   /** Who may approve what leaves the brokerage. */
   approver: z.enum(["any_approver", "admin_or_owner"]),
@@ -637,7 +642,7 @@ export const autonomyRuleSchema = z.object({
 });
 export type AutonomyRule = z.infer<typeof autonomyRuleSchema>;
 export const AUTONOMY_DEFAULT: AutonomyRule = {
-  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules", prepare_placement: "act_within_rules", prepare_claim: "act_within_rules", prepare_endorsement: "act_within_rules" },
+  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules", prepare_placement: "act_within_rules", prepare_claim: "act_within_rules", prepare_endorsement: "act_within_rules", insurer_chasers: "prepare" },
   approver: "any_approver",
   assignment: "client_file_owner",
   alsoNever: [],

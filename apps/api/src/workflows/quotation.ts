@@ -11,6 +11,7 @@ import { liveRunsOn, type EventHandler } from "./registry.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
 import { systemReadContext } from "./system-context.js";
 import { filedEmails, recordFiledWork } from "./inbound.js";
+import { sendStandingChaser } from "./chasers.js";
 
 /**
  * The quotation workflow (D-141): from an opened opportunity to the options handed to a person.
@@ -252,7 +253,18 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
   }
   if (due.length && automatic(autonomy.actions.follow_up)) {
     for (const a of due) followUps[a.id] = (followUps[a.id] ?? 0) + 1;
-    await syncWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Chase ${list(due.map((a) => `${a.insurerName} (follow-up ${followUps[a.id]})`))} for terms`, reason: `No terms ${rule.followUpDays * Math.max(...due.map((a) => followUps[a.id]!))} days after the request reached them. Answers are due ${human(deadline)}.`, task_next_check: new Date(ctx.now.getTime() + rule.followUpDays * DAY).toISOString() });
+    // Under a person's standing approval of the wording, ASAP sends the routine chaser itself (D-147).
+    const cl = await ctx.db.from("clients").select("name").eq("id", o.client_id).maybeSingle();
+    const clientName = (cl.data as { name: string } | null)?.name ?? "the client";
+    const manual: Approach[] = [];
+    for (const a of due) {
+      const sent = await sendStandingChaser(ctx, "quote_chase", { insurer: a.insurerName, client: clientName, subject: a.request!.subject, sentOn: human(a.delivery!.delivered_at), followUp: followUps[a.id]! });
+      if (!sent.sent) manual.push(a);
+    }
+    if (!manual.length)
+      await syncWork(ctx, { task_status: "with_party", task_party: parties, task_since: earliest, required_action: `ASAP chased ${list(due.map((a) => `${a.insurerName} (follow-up ${followUps[a.id]})`))} with the approved wording`, reason: `Sent through the connected mailbox under a standing approval. Answers are due ${human(deadline)}.`, task_next_check: new Date(ctx.now.getTime() + rule.followUpDays * DAY).toISOString() });
+    else
+      await syncWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Chase ${list(manual.map((a) => `${a.insurerName} (follow-up ${followUps[a.id]})`))} for terms`, reason: `No terms ${rule.followUpDays * Math.max(...manual.map((a) => followUps[a.id]!))} days after the request reached them. Answers are due ${human(deadline)}.`, task_next_check: new Date(ctx.now.getTime() + rule.followUpDays * DAY).toISOString() });
     await auditAutomation(ctx.db, ctx.run, "workflow.quotation.follow_up", { insurers: due.map((a) => a.insurerName), followUps: due.map((a) => followUps[a.id]) });
   } else if (!due.length && !escalated && !out.some((a) => followUps[a.id])) {
     // After a chase, the chase stays the next action until terms arrive or the next one is due.

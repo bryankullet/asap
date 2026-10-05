@@ -148,3 +148,11 @@ export const decideSuggestionRequestSchema = z.object({
   decision: z.enum(["accept", "reject"]),
   note: z.string().trim().max(500).optional(),
 });
+
+/** A person approves the exact wording of a routine insurer chaser, once (D-147). */
+export const approveChaserTemplateRequestSchema = z.object({
+  purpose: z.enum(["quote_chase", "placement_chase", "issuance_chase"]),
+  subject: z.string().trim().min(5).max(300),
+  body: z.string().trim().min(20).max(4000),
+  minDaysBetween: z.number().int().min(1).max(30),
+});

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, numeric, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, numeric, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { timestamptz, uuidPrimaryKey } from "./_shared.js";
 import { insurers } from "./compliance.js";
 import { emailMessages } from "./email.js";
@@ -85,5 +85,48 @@ export const exceptionSuggestions = pgTable(
     index("exception_suggestions_organization_id_idx").on(t.organizationId),
     index("exception_suggestions_run_id_idx").on(t.runId),
     index("exception_suggestions_decided_by_idx").on(t.decidedBy),
+  ],
+);
+
+/** A person's standing approval of a routine insurer chaser's wording (0073, D-147). */
+export const chaserTemplates = pgTable(
+  "chaser_templates",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    purpose: text("purpose").notNull(),
+    version: integer("version").notNull(),
+    audience: text("audience").notNull().default("insurer"),
+    subjectTemplate: text("subject_template").notNull(),
+    bodyTemplate: text("body_template").notNull(),
+    minDaysBetween: integer("min_days_between").notNull(),
+    sha256: text("sha256").notNull(),
+    approvedBy: uuid("approved_by").notNull().references(() => users.id),
+    approvedAt: timestamptz("approved_at").notNull().default(sql`now()`),
+    retiredAt: timestamptz("retired_at"),
+  },
+  (t) => [unique("chaser_templates_organization_id_purpose_version_key").on(t.organizationId, t.purpose, t.version), index("chaser_templates_approved_by_idx").on(t.approvedBy)],
+);
+
+/** Every chaser sent under a standing approval (0073, D-147). */
+export const chaserSends = pgTable(
+  "chaser_sends",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    templateId: uuid("template_id").notNull().references(() => chaserTemplates.id),
+    runId: uuid("run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+    party: text("party").notNull(),
+    followUp: integer("follow_up").notNull(),
+    toAddress: text("to_address").notNull(),
+    bodySha256: text("body_sha256").notNull(),
+    sendAttemptId: uuid("send_attempt_id").notNull(),
+    sentAt: timestamptz("sent_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    unique("chaser_sends_run_id_party_follow_up_key").on(t.runId, t.party, t.followUp),
+    index("chaser_sends_organization_id_idx").on(t.organizationId),
+    index("chaser_sends_template_id_idx").on(t.templateId),
+    index("chaser_sends_send_attempt_id_idx").on(t.sendAttemptId),
   ],
 );

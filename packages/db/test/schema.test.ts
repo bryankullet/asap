@@ -92,6 +92,8 @@ describe("Drizzle schema conventions", () => {
       "audit_log",
       "automation_runs",
       "automations",
+      "chaser_sends",
+      "chaser_templates",
       "claim_documents",
       "claim_notes",
       "claims",

@@ -2575,3 +2575,41 @@ missing.
   they rely on a person's session for tenancy (RLS), and on the engine's connection they would read
   across brokerages (§45 rule 1). The helper reads through queries that each filter on the run's
   organization, and the model sees only what they return.
+
+## D-147
+
+**Autonomy build, phase 9: standing approvals for routine insurer chasers — default off.**
+
+Written before the code, because it changes how the external-messages cap applies.
+
+- *What a person approves.* A chaser template, once: subject and body wording, audience `insurer`
+  only, and the fewest days between two chasers to the same insurer on the same work
+  (`chaser_templates`, 0073). Each approval is a new version with its own digest. The previous
+  version is retired, never edited. Client-facing messages cannot be templated: the audience check
+  is in the database.
+- *When ASAP may send without a fresh approval.* All of these must hold:
+  - a follow-up is due on the brokerage's chase rule;
+  - `insurer_chasers` (new on the ladder: cap `act_within_rules`, default `prepare`, which is off)
+    is set to `act_within_rules`;
+  - a mailbox is connected;
+  - the insurer has a verified address (D-145);
+  - an approved template for that purpose is live;
+  - the last chaser to that insurer on that work was at least the template's minimum days ago;
+  - the message renders exactly from the approved version: the placeholders are filled only from
+    the run's own facts, and the rendered text is hashed with the template version.
+
+  Otherwise the follow-up stays a person's job, exactly as before.
+- *The approval behind each send.* Each send goes through `sendThroughMailbox` with the template's
+  approver as the approving person — the standing approval is that person's approval of exactly
+  this wording. It is keyed on run, insurer, follow-up number and template digest, so it is sent
+  once. Each send is recorded in `chaser_sends` and in the audit history as the automation, naming
+  the template version.
+- *What does not change.* `external_messages` stays capped at `act_after_approval`. The
+  `NEVER_AUTOMATIC` line "Send an external message without a person's approval" stays true and
+  unchanged: nothing leaves without a person having approved its exact wording.
+- *As built (D-147).* Migration 0073 (`chaser_templates`, `chaser_sends`,
+  `chaser_template_approve`, `chaser_template_withdraw`); routes `GET/POST /chaser-templates` and
+  `POST /chaser-templates/:id/withdraw`. Wired into quotation chasing (per insurer) and into
+  placement and issuance chasing. A send that cannot happen for any reason falls back to the
+  person's "Chase …" Work, unchanged. `sendThroughMailbox` records such a send in the audit history
+  as the automation, naming the standing approver.

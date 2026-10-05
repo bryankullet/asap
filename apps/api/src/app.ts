@@ -38,6 +38,8 @@ import type { AiProvider } from "@asap/schema";
 import type { Executor } from "./runs/executor.js";
 import type { Extractor } from "./documents/extractor.js";
 import type { SupabaseFactory } from "./supabase.js";
+import { configureEngineMailbox } from "./workflows/chasers.js";
+import { chaserRoutes } from "./routes/chasers.js";
 
 export type AppDeps = {
   logger: Logger;
@@ -235,6 +237,8 @@ export function createApp(deps: AppDeps) {
     "/inbound/*",
     "/insurers/*",
     "/exception-suggestions/*",
+    "/chaser-templates",
+    "/chaser-templates/*",
   ]) {
     app.use(path, guard);
   }
@@ -263,7 +267,10 @@ export function createApp(deps: AppDeps) {
   app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
+  // The engine sends standing-approved chasers through the same adapters (D-147).
+  configureEngineMailbox(deps.mailbox ? { providers: deps.mailbox.providers, encryptionKey: deps.mailbox.encryptionKey } : undefined);
   app.route("/", workflowRoutes({ logger, service: () => supabase.service(), mailbox: deps.mailbox ? { providers: deps.mailbox.providers, encryptionKey: deps.mailbox.encryptionKey } : undefined }));
+  app.route("/", chaserRoutes());
   app.route("/", inboundRoutes({ logger, service: () => supabase.service(), bucket: deps.storage?.bucket ?? "insurance-documents" }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
