@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
+import { emitEvent } from "../events/emit.js";
 
 /**
  * The execution foundation (D-129): one durable, resumable run of multi-step work.
@@ -276,6 +277,17 @@ async function except(
       .eq("id", run.work_item_id);
   }
   await auditAutomation(db, run, `workflow.${run.workflow}.exception`, { step: row.step_key, code: exception.code, message: exception.message, needs: exception.needs }, [], "failure", exception.code);
+  // The run could not finish (D-140): the exception helper looks into why, an automation may react.
+  await emitEvent(db, null, {
+    organizationId: run.organization_id,
+    eventType: "run.could_not_finish",
+    entityType: "workflow_run",
+    entityId: run.id,
+    actor: "automation",
+    actorUserId: null,
+    payload: { runId: run.id, workflow: run.workflow, step: row.step_key, code: exception.code, workItemId: run.work_item_id },
+    dedupeKey: `${run.id}:${at}`,
+  });
   return { runId: run.id, state: "exception", stepsDone, stoppedAt: row.step_key };
 }
 

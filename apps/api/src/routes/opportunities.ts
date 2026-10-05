@@ -16,6 +16,7 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
+import { emitEvent } from "../events/emit.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
@@ -838,18 +839,37 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           .eq("opportunity_insurer_id", input.opportunityInsurerId)
           .maybeSingle();
 
+        let responseId: string;
         if (existing.data) {
+          responseId = (existing.data as { id: string }).id;
           const updated = await db
             .from("insurer_responses")
             .update(row)
             .eq("organization_id", org.id)
-            .eq("id", (existing.data as { id: string }).id)
+            .eq("id", responseId)
             .select("id")
             .maybeSingle();
           if (updated.error) return sendError(c, mapDatabaseError(updated.error));
         } else {
           const inserted = await db.from("insurer_responses").insert(row).select("id").maybeSingle();
           if (inserted.error || !inserted.data) return done("already");
+          responseId = (inserted.data as { id: string }).id;
+        }
+
+        // The insurer has answered (D-140): once per response and outcome, so a quotation run waiting
+        // on this insurer wakes. A "no response" is not an answer and wakes nothing.
+        if (input.outcome !== "no_response") {
+          const w = await db.from("opportunities").select("work_item_id").eq("organization_id", org.id).eq("id", id).maybeSingle();
+          await emitEvent(db, deps.logger, {
+            organizationId: org.id,
+            eventType: "quote.received",
+            entityType: "opportunity",
+            entityId: id,
+            actor: "user",
+            actorUserId: user.id,
+            payload: { insurerResponseId: responseId, opportunityInsurerId: input.opportunityInsurerId, outcome: input.outcome, workItemId: (w.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+            dedupeKey: `${responseId}:${input.outcome}`,
+          });
         }
 
         await recordAudit(db, deps.logger, c, {

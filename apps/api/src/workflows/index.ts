@@ -13,7 +13,9 @@ registerWorkflow({
 
 export {
   advanceAnyRun,
+  liveRunsOn,
   registerWorkflow,
+  routeEventToWorkflows,
   registeredWorkflows,
   sweepWorkflows,
   workflowNamed,

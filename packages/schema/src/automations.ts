@@ -184,13 +184,13 @@ export type AutomationResponse = z.infer<typeof automationResponseSchema>;
 export const AUTOMATION_REGISTRY = {
   triggers: [
     { event: "document.received", label: "A document arrives on a piece of work", executable: true, why: "Emitted when a document is uploaded or synced and filed against work." },
-    { event: "quote.received", label: "An insurer's quote is recorded", executable: false, why: "Nothing emits this event yet." },
+    { event: "quote.received", label: "An insurer's quote is recorded", executable: true, why: "Emitted when an insurer's answer is recorded on quotation work (D-140)." },
     { event: "renewal.approaching", label: "A renewal is approaching", executable: false, why: "Nothing emits this event yet." },
     { event: "payment.received", label: "A payment is received", executable: false, why: "Nothing emits this event yet." },
-    { event: "cover.confirmed", label: "Cover is confirmed", executable: false, why: "Nothing emits this event yet." },
-    { event: "claim.registered", label: "A claim is registered", executable: false, why: "Nothing emits this event yet." },
-    { event: "check.overdue", label: "A check is overdue", executable: false, why: "Nothing emits this event yet." },
-    { event: "run.could_not_finish", label: "An ASAP run could not finish", executable: false, why: "Nothing emits this event yet." },
+    { event: "cover.confirmed", label: "Cover is confirmed", executable: true, why: "Emitted when the insurer's confirmation passes the cover check (D-140)." },
+    { event: "claim.registered", label: "A claim is registered", executable: true, why: "Emitted when the insurer's claim reference is recorded (D-140)." },
+    { event: "check.overdue", label: "A check is overdue", executable: true, why: "Emitted by the scheduled pass, once per item and due date (D-140)." },
+    { event: "run.could_not_finish", label: "An ASAP run could not finish", executable: true, why: "Emitted when a workflow run stops with an exception (D-140)." },
   ],
   facts: [
     { fact: "kind", label: "Kind of work", operators: ["equals", "not_equals", "is_one_of"], value: "text" },

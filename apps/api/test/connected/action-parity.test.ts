@@ -380,7 +380,7 @@ describe("automations are only what the registry can execute (D-125)", () => {
   });
   it("the registry is served as one list; another brokerage cannot test this automation", async () => {
     const reg = (await call(AMINA, "GET", "/automations/registry")).body;
-    expect(reg.triggers.filter((x: Json) => x.executable).map((x: Json) => x.event)).toEqual(["document.received"]);
+    expect(reg.triggers.filter((x: Json) => x.executable).map((x: Json) => x.event)).toEqual(["document.received", "quote.received", "cover.confirmed", "claim.registered", "check.overdue", "run.could_not_finish"]);
     expect((await call(BETA, "POST", `/automations/${id}/test`)).status).toBe(404);
   });
 });

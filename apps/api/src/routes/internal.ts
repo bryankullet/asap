@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
-import { advanceAnyRun, sweepWorkflows } from "../workflows/index.js";
+import { advanceAnyRun, routeEventToWorkflows, sweepWorkflows } from "../workflows/index.js";
 import { extractDocument } from "../documents/extraction.js";
 import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
 import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
@@ -213,6 +213,13 @@ export function internalRoutes(deps: {
         results.push({ consumer: "workflow", result: "failure", detail: (e as Error).message ?? "the run could not be advanced" });
       }
     }
+
+    /*
+     * Semantic events start and wake workflows (D-140): `quote.received` wakes the quotation run
+     * waiting on that insurer, `client.instruction_recorded` starts placement, and so on — each
+     * registered workflow says which events it listens for.
+     */
+    if (!event.event_type.startsWith("workflow.")) results.push(...(await routeEventToWorkflows(db, deps.logger, event)));
 
     /*
      * Automations. They hang off a work item, so an event about something else — a document not

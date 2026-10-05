@@ -1080,7 +1080,7 @@ describe("live mode", () => {
       const A = await live();
       const list = A.ai.workspace({ ws: "automation" }) as { blocks: { t: string; fields?: { key: string; options?: { value: string }[] }[] }[] };
       const builder = list.blocks.find((b) => b.t === "builder")!;
-      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received"]);
+      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received", "quote.received", "cover.confirmed", "claim.registered", "check.overdue", "run.could_not_finish"]);
       const bad = (await A.ai.route("Create an automation: when a renewal is approaching, email the client automatically", {})) as { pending?: unknown; lead: string; text: string };
       expect(bad.pending).toBeUndefined();
       expect(bad.lead).toBe("That cannot be saved as a working automation.");

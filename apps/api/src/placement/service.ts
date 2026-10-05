@@ -11,6 +11,7 @@ import {
   type RecordInstructionRequest,
 } from "@asap/schema";
 import { pgMoney } from "../numeric.js";
+import { emitEvent } from "../events/emit.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditEntry } from "../audit.js";
 import { hasPermission, type resolveContext } from "../context.js";
@@ -403,6 +404,18 @@ export async function executeRecordInstruction(
 
   /* And the first lifecycle Work, keyed on the placement: prepare the request. */
   await load(env.db, env.ctx, org, placementId, { sync: true });
+  // A person recorded the client's instruction (D-140): the quotation run finishes and placement starts.
+  const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+  await emitEvent(db, null, {
+    organizationId: org,
+    eventType: "client.instruction_recorded",
+    entityType: "placement",
+    entityId: placementId,
+    actor: "user",
+    actorUserId: env.userId,
+    payload: { opportunityId, clientInstructionId: instructionId, placementId, workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+    dedupeKey: instructionId,
+  });
   return { ...done(), placementId };
 }
 
@@ -862,6 +875,25 @@ async function runCoverMatch(env: Env, placementId: string, comparedBy: string |
     result: "success",
     newState: { coverMatchId: resultId, basisVersionId: basis.id, materialDifferences: totals.material },
   });
+  /*
+   * Cover is confirmed when the insurer's confirmation matches what the client accepted — no material
+   * difference, nothing unclear (D-140). Once per confirmation and basis: a client accepting the
+   * insurer's changes makes a new basis, and the re-check that passes is that fact.
+   */
+  const outcome = response["outcome"] as string | undefined;
+  if (totals.material === 0 && totals.unclear === 0 && (outcome === "confirmed_as_requested" || outcome === "confirmed_with_changes")) {
+    const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+    await emitEvent(db, null, {
+      organizationId: org,
+      eventType: "cover.confirmed",
+      entityType: "placement",
+      entityId: placementId,
+      actor: comparedBy ? "user" : "system",
+      actorUserId: comparedBy,
+      payload: { placementId, coverMatchId: resultId, placementInsurerResponseId: response["id"], workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+      dedupeKey: `${response["id"] as string}:${basis.id}`,
+    });
+  }
   return resultId;
 }
 

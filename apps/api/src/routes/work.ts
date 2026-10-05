@@ -67,6 +67,7 @@ import {
   loadPolicy,
   today,
 } from "../servicing.js";
+import { emitEvent } from "../events/emit.js";
 import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import type { Executor, RunFacts } from "../runs/executor.js";
@@ -294,6 +295,11 @@ export function workRoutes(deps: WorkDeps) {
         p_source: input.source ?? "ask",
       });
       if (r.error) return sendError(c, mapDatabaseError(r.error));
+      // A claim was reported (D-140): the claim run starts. Once per claim.
+      const claimRow = await db.from("claims").select("id").eq("work_item_id", id).maybeSingle();
+      const claimId = (claimRow.data as { id: string } | null)?.id;
+      if (claimId)
+        await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "claim.reported", entityType: "claim", entityId: claimId, actor: "user", actorUserId: user.id, payload: { claimId, workItemId: id, clientId: client.id }, dedupeKey: claimId });
       /*
        * A new claim is looked at again in two days: the documents an insurer assesses are what a
        * late claim is refused for. Written through the same contract as every derived work state.
@@ -325,6 +331,11 @@ export function workRoutes(deps: WorkDeps) {
         p_items: [],
       });
       if (r.error) return sendError(c, mapDatabaseError(r.error));
+      // An endorsement was asked for (D-140): the endorsement run starts. Once per endorsement.
+      const endRow = await db.from("endorsements").select("id").eq("work_item_id", id).maybeSingle();
+      const endorsementId = (endRow.data as { id: string } | null)?.id;
+      if (endorsementId)
+        await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "endorsement.requested", entityType: "endorsement", entityId: endorsementId, actor: "user", actorUserId: user.id, payload: { endorsementId, workItemId: id, clientId: client.id, policyId: policy!.id }, dedupeKey: endorsementId });
     }
     const item = await loadItem(db, id);
     return c.json(
@@ -456,12 +467,18 @@ export function workRoutes(deps: WorkDeps) {
         break;
     }
     if (r.error) return sendError(c, mapDatabaseError(r.error));
+    // The insurer has registered the claim (D-140): its reference is the evidence. Once per claim.
+    if (input.action === "set_insurer_reference") {
+      const cl = await db.from("claims").select("organization_id, work_item_id").eq("id", id).maybeSingle();
+      const row = cl.data as { organization_id: string; work_item_id: string } | null;
+      if (row)
+        await emitEvent(db, deps.logger, { organizationId: row.organization_id, eventType: "claim.registered", entityType: "claim", entityId: id, actor: "user", actorUserId: user.id, payload: { claimId: id, workItemId: row.work_item_id }, dedupeKey: id });
+    }
     const wiR = await db.from("claims").select("work_item_id").eq("id", id).maybeSingle();
     if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
     const detail = wiR.data
       ? await loadClaimDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
       : null;
-    void user;
     return c.json({ claim: detail });
   });
 

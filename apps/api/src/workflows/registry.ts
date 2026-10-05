@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
+import { emitEvent } from "../events/emit.js";
 import { advanceRun, type AdvanceOutcome, type WorkflowDefinition } from "./engine.js";
 
 /**
@@ -16,7 +17,14 @@ export type Detector = (
   organizationId: string,
   now: Date,
 ) => Promise<{ started: number; startedRunIds: string[] }>;
-export type RegisteredWorkflow = { definition: WorkflowDefinition; detect?: Detector };
+/** A semantic event, as the dispatcher reads it (D-140). Ids only. */
+export type WorkflowEvent = { id: string; organization_id: string; event_type: string; entity_type: string | null; entity_id: string | null; payload: Record<string, unknown> | null };
+/**
+ * What a workflow does with an event: start the run the event starts (idempotently — one live run
+ * per subject), or name the runs waiting on its subject. Returns the runs to advance now.
+ */
+export type EventHandler = (db: SupabaseClient, logger: Logger, event: WorkflowEvent) => Promise<string[]>;
+export type RegisteredWorkflow = { definition: WorkflowDefinition; detect?: Detector; on?: Partial<Record<string, EventHandler>> };
 
 const registry = new Map<string, RegisteredWorkflow>();
 
@@ -120,6 +128,7 @@ export async function sweepWorkflows(db: SupabaseClient, logger: Logger, now = n
       }
     }
   }
+  const overdue = await emitOverdueChecks(db, now);
   const due = await db
     .from("workflow_runs")
     .select("id")
@@ -139,5 +148,61 @@ export async function sweepWorkflows(db: SupabaseClient, logger: Logger, now = n
       );
     }
   }
-  return { started, advanced: outcomes.length, outcomes };
+  return { started, advanced: outcomes.length, outcomes, overdue };
+}
+
+/**
+ * Work whose next check has passed (D-140): one `check.overdue` per item and due date, however many
+ * sweeps see it. Done work is never overdue.
+ */
+export async function emitOverdueChecks(db: SupabaseClient, now = new Date()): Promise<number> {
+  const q = await db.from("work_items").select("id, organization_id, task_next_check, kind").lt("task_next_check", now.toISOString()).neq("task_status", "done").is("deleted_at", null).limit(500);
+  let emitted = 0;
+  for (const w of (q.data ?? []) as { id: string; organization_id: string; task_next_check: string; kind: string }[]) {
+    const r = await emitEvent(db, null, {
+      organizationId: w.organization_id,
+      eventType: "check.overdue",
+      entityType: "work_item",
+      entityId: w.id,
+      actor: "system",
+      actorUserId: null,
+      payload: { workItemId: w.id, dueAt: w.task_next_check, kind: w.kind },
+      dedupeKey: `${w.id}:${w.task_next_check}`,
+    });
+    if (r === "emitted") emitted += 1;
+  }
+  return emitted;
+}
+
+
+/** Live runs of a workflow on one subject — what an event about that subject wakes. */
+export async function liveRunsOn(db: SupabaseClient, organizationId: string, workflow: string, subjectId: string): Promise<string[]> {
+  const q = await db.from("workflow_runs").select("id").eq("organization_id", organizationId).eq("workflow", workflow).eq("subject_id", subjectId).not("state", "in", "(done,cancelled)");
+  return ((q.data ?? []) as { id: string }[]).map((r) => r.id);
+}
+
+/**
+ * The dispatcher's workflow consumer (D-140): every registered workflow that listens for this event
+ * starts or wakes its runs, and each run is advanced with its own definition. Idempotent: starting
+ * finds the live run, advancing a run already advanced does nothing more.
+ */
+export async function routeEventToWorkflows(db: SupabaseClient, logger: Logger, event: WorkflowEvent): Promise<{ consumer: string; result: "success" | "failure" | "skipped"; detail: string }[]> {
+  const out: { consumer: string; result: "success" | "failure" | "skipped"; detail: string }[] = [];
+  for (const entry of registry.values()) {
+    const handler = entry.on?.[event.event_type];
+    if (!handler) continue;
+    const consumer = `workflow.${entry.definition.workflow}`;
+    try {
+      const runIds = [...new Set(await handler(db, logger, event))];
+      const states: string[] = [];
+      for (const id of runIds) {
+        const o = await advanceAnyRun(db, logger, id);
+        states.push(o.skipped ? `run ${o.skipped}` : `run ${o.state}${o.stoppedAt ? ` at ${o.stoppedAt}` : ""}`);
+      }
+      out.push({ consumer, result: runIds.length ? "success" : "skipped", detail: runIds.length ? states.join("; ") : "No run starts or waits on this." });
+    } catch (e) {
+      out.push({ consumer, result: "failure", detail: (e as Error).message ?? "the workflow could not react" });
+    }
+  }
+  return out;
 }

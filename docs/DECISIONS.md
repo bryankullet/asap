@@ -2349,3 +2349,38 @@ missing.
 - Fixed while there: "Follow up now", or a follow-up moved to today, stored today's date at 06:00
   UTC. Before 06:00 UTC (09:00 in Nairobi) it chased nothing. A follow-up day that is today or past
   is now due at once.
+
+## D-140
+
+**Autonomy build, phase 2: ASAP notices things — semantic events.**
+
+- The ten facts are emitted from their existing write paths, at the moment each becomes true. Every
+  payload carries ids only, including `workItemId` where there is one.
+
+  | Event | Emitted when |
+  |---|---|
+  | `quote.received` | an insurer's answer is recorded (not "no response") |
+  | `client.instruction_recorded` | `executeRecordInstruction` succeeds |
+  | `cover.confirmed` | the cover check passes with no material or unclear difference, including the re-check after a client accepts the insurer's changes |
+  | `policy.issued` | an issued policy is applied |
+  | `endorsement.requested` | an endorsement is opened |
+  | `claim.reported` | a claim is opened |
+  | `claim.registered` | the insurer's claim reference is recorded |
+  | `check.overdue` | the sweep finds work past its next check |
+  | `run.could_not_finish` | the engine records an exception |
+  | `email.received` | sync stores a new inbound message |
+
+- *Once per fact.* Migration 0066 adds `events.dedupe_key` with a unique index per organization,
+  event type and key. The emitter names the fact: the response and outcome, the instruction, the
+  confirmation and basis, the application, the claim, the endorsement, the work item and due date,
+  the run and moment, or the message. A second report is "already" and writes nothing, even under a
+  race. Events without a key behave as before.
+- *Consumer.* Registered workflows declare the events they listen for (`on`). The dispatcher's
+  workflow consumer starts the run an event starts, or names the runs waiting on its subject, then
+  advances each with its own definition. It is idempotent, because `startRun` finds the live run
+  and advancing twice acts once. Each delivery is recorded as `workflow.<name>` in
+  `event_deliveries`.
+- *Automations.* The five registry triggers that are now emitted became executable: quote received,
+  cover confirmed, claim registered, check overdue, run could not finish. "Renewal approaching" and
+  "payment received" stay off. The other emitted events are not automation triggers; they drive
+  workflows.

@@ -30,6 +30,12 @@ export type EmittedEvent = {
    * a credential, and never a figure a consumer should read from the record itself.
    */
   payload?: Record<string, unknown>;
+  /**
+   * Names the fact, so it is recorded once however many times it is reported (0066, D-140): the
+   * record that became true, or the item and date of an overdue check. Omitted for events that may
+   * legitimately repeat.
+   */
+  dedupeKey?: string;
 };
 
 /**
@@ -41,9 +47,9 @@ export type EmittedEvent = {
  */
 export async function emitEvent(
   db: SupabaseClient,
-  logger: Logger,
+  logger: Logger | null,
   event: EmittedEvent,
-): Promise<void> {
+): Promise<"emitted" | "already" | "failed"> {
   const { error } = await db.from("events").insert({
     organization_id: event.organizationId,
     event_type: event.eventType,
@@ -52,11 +58,16 @@ export async function emitEvent(
     actor: event.actor,
     actor_user_id: event.actorUserId,
     payload: event.payload ?? {},
+    ...(event.dedupeKey ? { dedupe_key: event.dedupeKey } : {}),
   });
+  // The same fact reported again: already recorded, which is the point of the key.
+  if (error && error.code === "23505" && event.dedupeKey) return "already";
   if (error) {
-    logger.error(
+    logger?.error(
       { event: event.eventType, entity: event.entityType, code: error.code },
       "event not recorded: anything waiting for it will not fire",
     );
+    return "failed";
   }
+  return "emitted";
 }

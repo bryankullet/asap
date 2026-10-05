@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { hasPermission } from "../context.js";
 import { HttpError } from "../errors.js";
 import { pgMoney } from "../numeric.js";
+import { emitEvent } from "../events/emit.js";
 import { ISSUED_CLASS_WORDS, checkIssuedPolicy, type IssuedCheckItem, type IssuedEvidence as CheckEvidence } from "./issued-check.js";
 import { load, names, toPreparedView, type Ctx, type Env, type Outcome } from "./service.js";
 
@@ -741,6 +742,15 @@ export async function executeIssuanceAction(env: Env, placementId: string, input
       }
       await env.audit({ action: "issuance.policy_applied", objectType: "placement", objectId: placementId, result: "success", newState: { applicationId: out.application_id, mode: input.mode } });
       await sync();
+      // The insurer's issued policy is on the record (D-140): the issuance run writes its receipt.
+      if (!out.repeat) {
+        const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+        await emitEvent(db, null, {
+          organizationId: env.organizationId, eventType: "policy.issued", entityType: "placement", entityId: placementId, actor: "user", actorUserId: env.userId,
+          payload: { placementId, applicationId: out.application_id, workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+          dedupeKey: out.application_id,
+        });
+      }
       return done(out.repeat ? "already" : "done", receiptOf(await loadIssuance(env, placementId)));
     }
   }
