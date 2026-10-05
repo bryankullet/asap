@@ -83,6 +83,16 @@ export type WorkDeps = {
   streamPollMs: number;
 };
 
+/** `claim.changed` / `endorsement.changed` (D-143), about the claim or endorsement behind a Work item. */
+async function emitChanged(db: SupabaseClient, logger: Logger, kind: string, workItemId: string, userId: string) {
+  if (kind !== "claim" && kind !== "endorsement") return;
+  const table = kind === "claim" ? "claims" : "endorsements";
+  const r = await db.from(table).select("id, organization_id").eq("work_item_id", workItemId).maybeSingle();
+  const row = r.data as { id: string; organization_id: string } | null;
+  if (!row) return;
+  await emitEvent(db, logger, { organizationId: row.organization_id, eventType: `${kind}.changed`, entityType: kind, entityId: row.id, actor: "user", actorUserId: userId, payload: { [`${kind}Id`]: row.id, workItemId } });
+}
+
 async function loadItem(db: SupabaseClient, id: string): Promise<WorkItemRow> {
   const { data, error } = await db
     .from("work_items")
@@ -476,6 +486,7 @@ export function workRoutes(deps: WorkDeps) {
     }
     const wiR = await db.from("claims").select("work_item_id").eq("id", id).maybeSingle();
     if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    if (wiR.data) await emitChanged(db, deps.logger, "claim", (wiR.data as { work_item_id: string }).work_item_id, user.id);
     const detail = wiR.data
       ? await loadClaimDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
       : null;
@@ -483,7 +494,7 @@ export function workRoutes(deps: WorkDeps) {
   });
 
   app.post("/endorsements/:id/actions", async (c) => {
-    const { db } = c.get("auth");
+    const { db, user } = c.get("auth");
     const id = c.req.param("id");
     const input = await parseBody(c, endorsementActionSchema);
     let r: { error: { code?: string; message?: string } | null };
@@ -527,6 +538,7 @@ export function workRoutes(deps: WorkDeps) {
     if (r.error) return sendError(c, mapDatabaseError(r.error));
     const wiR = await db.from("endorsements").select("work_item_id").eq("id", id).maybeSingle();
     if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    if (wiR.data) await emitChanged(db, deps.logger, "endorsement", (wiR.data as { work_item_id: string }).work_item_id, user.id);
     const detail = wiR.data
       ? await loadEndorsementDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
       : null;
@@ -1272,6 +1284,8 @@ export function workRoutes(deps: WorkDeps) {
       p_exception: derived.exception,
       p_completed_at: derived.completedAt,
       p_audit_action: result.auditAction,
+      // The database function takes the inception date too (0026); without it no step could be applied.
+      p_cover_inception_at: req.inceptionAt ?? null,
       p_audit_new_state: {
         verb: req.verb,
         step_id: req.stepId,
@@ -1295,6 +1309,9 @@ export function workRoutes(deps: WorkDeps) {
       }
       return sendError(c, mapped);
     }
+    // A person moved a claim or an endorsement on (D-143): its run looks again. Not deduplicated —
+    // each step is its own fact, and a run that finds nothing new simply waits.
+    await emitChanged(db, deps.logger, item.kind, id, user.id);
     const fresh = await loadItem(db, id);
     return c.json(
       actResponseSchema.parse({ outcome: "applied", item: fresh, run: null, draft: null }),

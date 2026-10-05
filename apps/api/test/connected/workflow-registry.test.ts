@@ -9,7 +9,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { createApp } from "../../src/app.js";
 import { sha256, type StepContext, type StepResult } from "../../src/workflows/engine.js";
-import { advanceAnyRun, registerWorkflow, startRun } from "./_registry-harness.js";
+import { advanceAnyRun, registerWorkflow, startRun, withoutWorkflow } from "./_registry-harness.js";
 import { AMINA, buildApp, caller, newApiKey, ORG_A, OWNER, serviceClient } from "./_harness.js";
 import pino from "pino";
 
@@ -169,9 +169,8 @@ describe("a second workflow on the engine", () => {
       await sql`insert into work_items (organization_id, title, kind, task_status, steps) values (${ORG_A}, 'Orphan', 'endorsement', 'in_progress', '[]') returning id`;
     const [r] =
       await sql`insert into workflow_runs (organization_id, workflow, subject_type, subject_id, current_step) values (${ORG_A}, 'claim', 'work_item', ${w!["id"]}, 'x') returning id`;
-    const undoClaim = registerWorkflow({ definition: { workflow: "claim", steps: [] } });
-    undoClaim(); // make sure nothing is registered under the name
-    const out = await advanceAnyRun(serviceClient(), log, r!["id"] as string);
+    const restore = withoutWorkflow("claim"); // nothing registered under the name, for this run only
+    const out = await advanceAnyRun(serviceClient(), log, r!["id"] as string).finally(restore);
     expect(out.state).toBe("exception");
     const [row] = await sql`select state, exception from workflow_runs where id = ${r!["id"]}`;
     expect(row!["state"]).toBe("exception");

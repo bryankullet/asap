@@ -2450,3 +2450,37 @@ missing.
   `placement_request_digest`, as the API's own service connection prepares through it.
 - *Idempotent starts.* `startRun(..., { once: true })`: a subject that finished its run is not
   started again by a replayed event (placement, issuance, quotation). A cancelled run may restart.
+
+## D-143
+
+**Autonomy build, phase 5: claims and endorsements on the engine.**
+
+- *A run completes only its own steps.* Claim and endorsement Work items keep their step machines
+  (D-051). Migration 0069 adds `work_item_step_by_run`, callable only by the API's service
+  connection: a run may complete the current step when it is ASAP's (`actor = asap`), or a send step
+  when a message this run prepared was approved and recorded delivered by a person — never a
+  person's, insurer's, client's or the bank's step. It is audited as the automation. The claim's
+  cover-on-the-incident-date sentence goes through `claim_set_cover_review_by_run`. Both are on the
+  security-definer allowlist with their reasons.
+- *Claim* starts from `claim.reported` (`prepare_claim`, new on the ladder: cap `manage_exceptions`,
+  default `act_within_rules`). ASAP captures the incident, waits for a person to match the policy
+  period, reviews cover on the incident date and the clock as itself, chases whoever holds an
+  outstanding document (`claim.document_chase_days`, default 5), and waits for a person to notify
+  the insurer. The deadline is the wording's clause where recorded on the claim, otherwise
+  `claim.notification_days` (default 7 days from the incident, escalated 2 days before, said to be
+  a working deadline). A passed deadline is an exception that says whether a late notice matters is
+  the insurer's decision. ASAP then chases the insurer for its reference, finishes with a receipt
+  that says it made no coverage or claims decision, and hands the Work item back to its own steps.
+  The notice itself stays a person's (D-123) until Phase 7 gives verified insurer addresses.
+- *Endorsement* starts from `endorsement.requested` (`prepare_endorsement`, same cap and default).
+  ASAP completes the classification made at intake and the requirements check —
+  a transfer of ownership waits for the policyholder's own instruction
+  (TRANSFER_NEEDS_POLICYHOLDER). It prepares the request to the insurer as one approval bundle, a
+  person approves and delivers it, and ASAP completes the send step on that delivery. It chases on
+  `endorsement.chase` (3/10/2), waits for a person to record the itemised answer and apply the
+  change, and finishes with a receipt. Premium adjustment stays finance's step; ASAP moves no money.
+- *Events:* `claim.changed` and `endorsement.changed` are emitted when a person moves a step or
+  records a claim or endorsement fact, so the run looks again.
+- *Defect fixed:* `POST /work-items/:id/actions` never passed `p_cover_inception_at` to
+  `work_item_apply` (0026), so PostgREST found no matching function and every step action on a Work
+  item returned 500. The route now passes it.

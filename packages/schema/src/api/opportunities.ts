@@ -592,6 +592,8 @@ export const AUTONOMY_ACTIONS = {
   recommend_quote: "Name a recommended quote",
   prepare_quotation: "Start quotation work, prepare the insurer requests and the approval bundle",
   prepare_placement: "Prepare placement and issuance requests, run the cover and issued-policy checks, and file the insurer's policy document when exactly one placement fits it",
+  prepare_claim: "Start claim work, watch the notification clock, and chase the insurer and whoever holds an outstanding claim document",
+  prepare_endorsement: "Start endorsement work, check its requirements, prepare the insurer request and the approval bundle, and chase the insurer",
 } as const;
 export type AutonomyAction = keyof typeof AUTONOMY_ACTIONS;
 /** Never automatic, whatever a brokerage sets: a person does these. */
@@ -606,6 +608,8 @@ export const AUTONOMY_CAP: Record<AutonomyAction, AutonomyLevel> = {
   recommend_quote: "recommend",
   prepare_quotation: "manage_exceptions",
   prepare_placement: "manage_exceptions",
+  prepare_claim: "manage_exceptions",
+  prepare_endorsement: "manage_exceptions",
 };
 export const autonomyRuleSchema = z.object({
   actions: z.object({
@@ -621,6 +625,8 @@ export const autonomyRuleSchema = z.object({
      */
     prepare_quotation: AutonomyLevel.default("act_within_rules"),
     prepare_placement: AutonomyLevel.default("act_within_rules"),
+    prepare_claim: AutonomyLevel.default("act_within_rules"),
+    prepare_endorsement: AutonomyLevel.default("act_within_rules"),
   }),
   /** Who may approve what leaves the brokerage. */
   approver: z.enum(["any_approver", "admin_or_owner"]),
@@ -631,7 +637,7 @@ export const autonomyRuleSchema = z.object({
 });
 export type AutonomyRule = z.infer<typeof autonomyRuleSchema>;
 export const AUTONOMY_DEFAULT: AutonomyRule = {
-  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules", prepare_placement: "act_within_rules" },
+  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules", prepare_placement: "act_within_rules", prepare_claim: "act_within_rules", prepare_endorsement: "act_within_rules" },
   approver: "any_approver",
   assignment: "client_file_owner",
   alsoNever: [],
@@ -657,7 +663,15 @@ export const chaseRuleSchema = z.object({
 });
 export type ChaseRule = z.infer<typeof chaseRuleSchema>;
 
-export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase", "placement.chase", "issuance.chase"] as const;
+/**
+ * Claims (D-143). How many days after the incident the insurer must hear of it where the policy
+ * wording's own clause is not on the claim, and how often ASAP chases an outstanding claim document.
+ * A wording clause recorded on the claim always wins over the brokerage's rule.
+ */
+export const claimNotificationRuleSchema = z.object({ days: z.number().int().min(1).max(365), escalateDaysBefore: z.number().int().min(0).max(30).default(2) });
+export const claimDocumentChaseRuleSchema = z.object({ days: z.number().int().min(1).max(30) });
+
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase", "placement.chase", "issuance.chase", "claim.notification_days", "claim.document_chase_days", "endorsement.chase"] as const;
 export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
 export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
 

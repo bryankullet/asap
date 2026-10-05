@@ -39,6 +39,15 @@ export function registerWorkflow(entry: RegisteredWorkflow): () => void {
   };
 }
 
+/** Takes a workflow out for a moment — for the test of a run whose workflow nothing registers. */
+export function withoutWorkflow(name: string): () => void {
+  const before = registry.get(name);
+  registry.delete(name);
+  return () => {
+    if (before) registry.set(name, before);
+  };
+}
+
 export const workflowNamed = (name: string): RegisteredWorkflow | undefined => registry.get(name);
 export const registeredWorkflows = (): RegisteredWorkflow[] => [...registry.values()];
 
