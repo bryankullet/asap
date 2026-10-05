@@ -5,7 +5,7 @@ How ASAP becomes an operations worker instead of a screen a person drives:
 **detect → plan → do the safe internal steps → ask for approval only where it is required →
 carry on after approval → watch the outside party → record evidence → close or escalate.**
 
-This map was written from the code as it stands on `main` at `e1818d0`, and its "Missing" lines were brought up to date after the autonomy build (D-139 – D-148): the migrations, the API
+This map was written from the code as it stands on `main` at `e1818d0`, and its "Missing" lines were brought up to date after the autonomy build and its follow-up (D-139 – D-154): the migrations, the API
 routes, the worker, the event consumers, the Ask tools and the action contracts. Roadmap documents
 were not taken as evidence. "Exists" means there is a table, a route or a function that does it
 today.
@@ -78,7 +78,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Approval:** each request's exact text (bundle-able); presenting to the client.
 - **Evidence / success:** delivery evidence per insurer; responses with source; comparison generated from recorded terms.
 - **Reusable:** all of 0048–0053, 0057, 0060; `quotationNext`; comparison routes.
-- **Missing (after D-141, D-144, D-147):** nothing in the chase loop — runs start on `opportunity.opened`, chase per insurer on `quote.chase`, file each insurer's reply to the run and send routine chasers under a standing approval. Still missing: reading quoted terms straight into a proposed insurer response (a person records the reply).
+- **Missing (after D-141, D-144, D-147):** nothing in the chase loop — runs start on `opportunity.opened`, chase per insurer on `quote.chase`, file each insurer's reply to the run and send routine chasers under a standing approval. An insurer's reply is read into a proposed response — premium, currency, validity or decline, with the sentence each came from — for a person to confirm or correct (D-152). Still missing: renewal terms by email read into a proposal.
 - **F5 V5 R3 D2** (most parts exist)
 
 ### 4. Placement (client instruction to bound cover)
@@ -110,7 +110,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** finding the document, preparing the reply.
 - **Approval:** the reply.
 - **Reusable:** documents, `drafts`, `sendThroughMailbox`.
-- **Missing (after D-144, D-145):** inbound classification exists (`servicing_request` goes to a person as Unsorted); approved replies send through a connected mailbox. Still missing: a servicing workflow on the engine.
+- **Missing (after D-144, D-145):** inbound classification exists (`servicing_request` goes to a person as Unsorted); approved replies send through a connected mailbox. A claim or change email from exactly one client's contact opens a draft claim or endorsement, with its run (D-151). Still missing: a servicing workflow on the engine.
 - **F5 V2 R2 D2**
 
 ### 7. Endorsements
@@ -120,7 +120,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** classification, requirement list, chasing.
 - **Approval:** the request to the insurer; applying the change; any premium adjustment.
 - **Reusable:** `endorsements` (0028), `endorsementSteps`, `endorsement_apply`, `TRANSFER_NEEDS_POLICYHOLDER`.
-- **Missing (after D-143):** endorsement runs from `endorsement.requested`, prepares the insurer request as one approval, chases on `endorsement.chase`. Still missing: premium-adjustment money records.
+- **Missing (after D-143):** endorsement runs from `endorsement.requested`, prepares the insurer request as one approval, chases on `endorsement.chase`. The run waits for the premium adjustment — additional, return or none, from the insurer's note — recorded by a person, and names it on the receipt (D-154). Still missing: levies split out of an adjustment, and any money movement (needs 10).
 - **F4 V3 R4 D3**
 
 ### 8. Renewals — **built first (Renewal Autopilot)**
@@ -141,7 +141,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** policy matching candidates, document list, clocks, chasing, overdue detection.
 - **Approval:** notifying the insurer; registering; any acceptance on the client's behalf; never the cover decision.
 - **Reusable:** 0028, 0042 (`claims`, `claim_documents`, `claim_notes`, clock), claim recipe.
-- **Missing (after D-143):** claim runs from `claim.reported` with the notification clock (`claim.notification_days`, or the wording's clause), document chasing (`claim.document_chase_days`) and registration chasing. Still missing: the prepared claim notice (D-123, needs its own approval flow), settlement and payment records.
+- **Missing (after D-143):** claim runs from `claim.reported` with the notification clock (`claim.notification_days`, or the wording's clause), document chasing (`claim.document_chase_days`) and registration chasing. The claim notice is prepared for its own approval when the insurer has a verified address, and its delivery completes the submitted step (D-150). Settlement follows offer, acceptance and payment, each with its figure, to the money received (D-154). Still missing: nothing in the claim loop; payment allocation needs 10.
 - **F4 V5 R5 D4**
 
 ### 10. Premium collection
@@ -178,7 +178,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** extraction, filing suggestions, identity-conflict detection.
 - **Approval:** accepting values; applying them.
 - **Reusable:** 0034, 0043; extractor service; apply-preview with identity block.
-- **Missing (after D-142, D-144):** a read policy document is filed to the issuance run waiting for it when exactly one fits; email attachments are filed through the upload path. Still missing: routing renewal terms and claim forms by document alone.
+- **Missing (after D-142, D-144):** a read policy document is filed to the issuance run waiting for it when exactly one fits; email attachments are kept as documents and read by the extractor, proven end to end in the connected suite (D-153). Still missing: routing renewal terms and claim forms by document alone.
 - **F5 V4 R4 D2**
 
 ### 14. Communications
