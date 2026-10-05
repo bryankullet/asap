@@ -4,6 +4,7 @@ import { auditAutomation, startRun, type StepContext, type StepResult, type Work
 import { autonomyRule, automatic } from "./renewal.js";
 import { liveRunsOn, type EventHandler } from "./registry.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
+import { filedEmails, recordFiledWork } from "./inbound.js";
 
 /**
  * The claim workflow (D-143): from a reported claim to the insurer's registration, with every
@@ -191,6 +192,11 @@ async function notify(ctx: StepContext): Promise<StepResult> {
 
 /** One outside party, followed up on the brokerage's cadence; the Work names them and since when. */
 async function followUp(ctx: StepContext, o: { party: string; since: string; key: string; what: string; every: number; basis: string }): Promise<StepResult> {
+  const filed = filedEmails(ctx);
+  if (filed.length) {
+    await setWork(ctx, recordFiledWork(filed[0]!, "what arrived"));
+    return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY) };
+  }
   const autonomy = await autonomyRule(ctx.db, ctx.run.organization_id);
   const done = Number((ctx.step.output["followUps"] as Record<string, number> | undefined)?.[o.key] ?? 0);
   const nextAt = nextFollowUpAt(o.since, done, o.every);

@@ -4,6 +4,7 @@ import { auditAutomation, sha256, startRun, type StepContext, type StepResult, t
 import { autonomyRule, automatic } from "./renewal.js";
 import { liveRunsOn, type EventHandler } from "./registry.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
+import { filedEmails, recordFiledWork } from "./inbound.js";
 
 /**
  * The endorsement workflow (D-143): from a client's request to the confirmed change on the policy.
@@ -145,6 +146,11 @@ async function response(ctx: StepContext): Promise<StepResult> {
   if (stepDone(f.steps, "response")) return { kind: "done", output: { reference: f.e.response_reference }, evidence: [{ kind: "response", label: `${f.insurerName} answered item by item${f.e.response_reference ? ` (${f.e.response_reference})` : ""}`, ref: `endorsement:${f.e.id}` }] };
   if (f.e.items.length && f.e.items.every((i) => i.decision !== "pending")) {
     await setWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Record ${f.insurerName}'s written response on the Work item`, reason: "Every item has the insurer's decision; the written response completes the step." });
+    return { kind: "wait", on: "party", until: DAY_WAIT(ctx) };
+  }
+  const filed = filedEmails(ctx);
+  if (filed.length) {
+    await setWork(ctx, recordFiledWork(filed[0]!, "the itemised answer"));
     return { kind: "wait", on: "party", until: DAY_WAIT(ctx) };
   }
   const rule = await ruleOr(ctx.db, ctx.run.organization_id, "endorsement.chase", chaseRuleSchema, ENDORSEMENT_CHASE_DEFAULT, ENDORSEMENT_CHASE_BASIS);

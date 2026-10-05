@@ -8,6 +8,8 @@ import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
 import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
 import type { Extractor } from "../documents/extractor.js";
 import { HttpError, sendError } from "../errors.js";
+import type { AiProvider } from "@asap/schema";
+import { routeInbound } from "../inbound/router.js";
 
 /**
  * The surface the worker tier calls, and nothing else.
@@ -36,6 +38,8 @@ export function internalRoutes(deps: {
    * Absent on a deployment with no provider credentials, in which case a sync request is skipped
    * with that said out loud — rather than failing, which would look like a broken mailbox.
    */
+  /** The gateway's provider, for the inbound router's classification; null means it abstains. */
+  aiProvider?: AiProvider | null;
   mailbox?:
     | {
         providers: Partial<Record<"gmail" | "microsoft", MailboxProvider>>;
@@ -220,6 +224,11 @@ export function internalRoutes(deps: {
      * registered workflow says which events it listens for.
      */
     if (!event.event_type.startsWith("workflow.")) results.push(...(await routeEventToWorkflows(db, deps.logger, event)));
+    // An inbound email is sorted once (D-144): routed to the one run waiting for it, or Unsorted.
+    if (event.event_type === "email.received" && event.entity_id) {
+      const out = await routeInbound(db, deps.aiProvider ?? null, deps.logger, event.organization_id, event.entity_id);
+      results.push({ consumer: "inbound_router", result: "success", detail: out.runId ? `${out.outcome}:${out.runId}` : out.outcome });
+    }
 
     /*
      * Automations. They hang off a work item, so an event about something else — a document not

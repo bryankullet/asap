@@ -10,6 +10,7 @@ import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { workflowRoutes } from "./routes/workflows.js";
+import { inboundRoutes } from "./routes/inbound.js";
 import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
@@ -137,6 +138,7 @@ export function createApp(deps: AppDeps) {
         extractor: deps.extractor ?? null,
         bucket: deps.storage?.bucket ?? "insurance-documents",
         mailbox: deps.mailbox,
+        aiProvider: deps.aiProvider ?? null,
       }),
     );
   }
@@ -228,6 +230,9 @@ export function createApp(deps: AppDeps) {
     "/prepared-actions/*",
     /* What a creation form may preselect (4C-1). Found unguarded by the connected test. */
     "/creation-context",
+    /* Pasted and uploaded email, and settling what the router could not (D-144). */
+    "/inbound",
+    "/inbound/*",
   ]) {
     app.use(path, guard);
   }
@@ -257,6 +262,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
   app.route("/", workflowRoutes({ logger, service: () => supabase.service() }));
+  app.route("/", inboundRoutes({ logger, service: () => supabase.service(), bucket: deps.storage?.bucket ?? "insurance-documents" }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
   app.route("/", clientRoutes());

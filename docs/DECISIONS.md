@@ -2484,3 +2484,41 @@ missing.
 - *Defect fixed:* `POST /work-items/:id/actions` never passed `p_cover_inception_at` to
   `work_item_apply` (0026), so PostgREST found no matching function and every step action on a Work
   item returned 500. The route now passes it.
+
+## D-144
+
+**Autonomy build, phase 6: the inbound router — provider-neutral eyes.**
+
+- *Manual intake.* `POST /inbound/messages` takes a pasted email or the text of an `.eml`.
+  `inbound_message_record` (0070) files it as the signed-in person, in a per-brokerage intake
+  mailbox: provider `manual`, status `intake`. That status is never `connected`, so nothing that
+  asks "is a mailbox connected?" is fooled. Pasting the same email twice is one message. `.eml`
+  attachments go down the upload path (same rows, same `document.received`). If the file store
+  cannot be reached, the row is withdrawn and the response says the attachment was not kept.
+  `email.received` is emitted exactly as a mailbox sync emits it.
+- *Classifier.* The kinds are the brief's ten. The classification goes through the gateway, is
+  validated against the kind list and a 0–1 confidence, and is stored in
+  `inbound_classifications` (members read; only the API writes). With no model, or no usable answer,
+  ASAP abstains.
+- *Matcher.* Deterministic and pure (`inbound/match.ts`). A run is a candidate only if the kind is
+  one it can be waiting for, and only on evidence: same thread; a reference it owns (compared
+  without spaces, so `KDA123B` = `KDA 123B`); a reply to its subject; an address it wrote to; or the
+  same non-public domain. A name alone never qualifies. One candidate per run. The model may
+  tie-break only among these candidates.
+- *Routing.* ASAP routes by itself only with a model classification at or above
+  `inbound.auto_route_confidence` (default 0.9, basis stated) and exactly one run that fits. A
+  single candidate fits. So does a top candidate that leads the next by 4 points or more (a whole
+  reference or reply; the others share only the sender), or the model's tie-break choice at the
+  same confidence. Otherwise there is one Unsorted Work item (kind `inbound`), settled by a person
+  through `inbound_decide`. Routing records no fact: the email is filed to the run's step. That
+  waiting step then asks a person to record what arrived before chasing again — quotation per
+  insurer, placement, issuance, claim, endorsement.
+- *Evaluation* (`docs/evaluation/inbound-routing.json`, 36 emails, every kind; `pnpm eval:ask`).
+  With each email's true kind at 0.95: 22 routed, 22 correct — precision 1.00, coverage 22/22.
+  None of the 14 that belong to no run was routed. Below 0.9, or with no model, nothing routes.
+  Classification accuracy needs a real model: `INBOUND_EVAL_LIVE=1` with the gateway configured
+  measures it end to end. No key is configured in the build environment, so it is not yet measured.
+- *Not done in this phase.* An insurer quote is not turned into a proposed insurer response with
+  extracted terms; the run asks a person to record it. A claim notice or endorsement request is not
+  opened as a draft by ASAP; the Unsorted item says "Open the claim if it is one" and a person opens
+  it — `claim_create` needs a signed-in caller.

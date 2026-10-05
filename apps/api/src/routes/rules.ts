@@ -6,6 +6,7 @@ import {
   chaseRuleSchema,
   claimDocumentChaseRuleSchema,
   claimNotificationRuleSchema,
+  inboundAutoRouteRuleSchema,
   companyRulesResponseSchema,
   recommendationRuleSchema,
   setCompanyRuleRequestSchema,
@@ -84,6 +85,11 @@ const DEFAULTS: { key: CompanyRuleKey; summary: string; basis: string }[] = [
     basis: "ASAP's default (D-143) until this brokerage sets its own.",
   },
   {
+    key: "inbound.auto_route_confidence",
+    summary: "ASAP files an incoming email to the work waiting for it by itself only when exactly one piece of work fits and the model is at least 90% sure what the email is; anything else goes to a person as Unsorted.",
+    basis: "ASAP's default (D-144) until this brokerage sets its own. Set it from the routing evaluation: raise it if emails are filed to the wrong work.",
+  },
+  {
     key: "workflow.autonomy",
     summary: "ASAP starts and prepares renewals and follows up on its own; every external message waits for a person's approval; it never names a recommended quote; new work goes to the client file's owner.",
     basis: "ASAP's default (D-131) until this brokerage sets its own. Binding cover, client instructions, money and claims decisions are never automatic, whatever is set.",
@@ -95,6 +101,9 @@ function validate(key: CompanyRuleKey, value: unknown): string | null {
     return renewalWindowRuleSchema.safeParse(value).success
       ? null
       : "A renewal window is {leadDays 7–180, followUpDays 1–30, escalateDaysBeforeExpiry 1–60}, each a whole number of days.";
+  }
+  if (key === "inbound.auto_route_confidence") {
+    return inboundAutoRouteRuleSchema.safeParse(value).success ? null : "An auto-routing rule is {threshold 0.5–1}, the least confidence at which ASAP files an email by itself.";
   }
   if (key === "claim.notification_days") {
     return claimNotificationRuleSchema.safeParse(value).success ? null : "A claim notification rule is {days 1–365, escalateDaysBefore 0–30}, whole numbers of days.";

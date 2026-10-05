@@ -10,6 +10,7 @@ import { autonomyRule, automatic } from "./renewal.js";
 import { liveRunsOn, type EventHandler } from "./registry.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
 import { systemReadContext } from "./system-context.js";
+import { filedEmails, recordFiledWork } from "./inbound.js";
 
 /**
  * The quotation workflow (D-141): from an opened opportunity to the options handed to a person.
@@ -230,6 +231,12 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
   if (ctx.now >= deadline)
     return { kind: "exception", code: "no_quotes_by_deadline", message: `No insurer has quoted by ${human(deadline)}${answered.length ? ` (${list(answered.map((a) => a.insurerName))} declined)` : ""}.`, needs: `Call ${list(out.map((a) => a.insurerName))}, or approach another insurer, and tell the client where things stand.` };
 
+  // An answer filed here by the inbound router is recorded before anyone is chased (D-144).
+  const filed = filedEmails(ctx, (e) => out.some((a) => a.insurerName === e.party));
+  if (filed.length) {
+    await syncWork(ctx, recordFiledWork(filed[0]!, "the terms or decline"));
+    return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY) };
+  }
   // One cadence per insurer: each is chased on its own delivery date, never all at once.
   const followUps = (ctx.step.output["followUps"] as Record<string, number> | undefined) ?? {};
   const due = out.filter((a) => ctx.now >= nextFollowUpAt(a.delivery!.delivered_at, followUps[a.id] ?? 0, rule.followUpDays));

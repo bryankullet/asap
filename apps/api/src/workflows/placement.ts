@@ -8,6 +8,7 @@ import { liveRunsOn, type EventHandler } from "./registry.js";
 import { runEnv } from "./run-env.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
 import { systemReadContext } from "./system-context.js";
+import { filedEmails, recordFiledWork } from "./inbound.js";
 
 /**
  * Placement and issuance on the engine (D-142), chained:
@@ -43,6 +44,11 @@ async function setWork(ctx: StepContext, patch: Record<string, unknown>) {
 
 /** Chase one outside party on the brokerage's cadence: follow-ups recorded in the step, escalation once. */
 async function chase(ctx: StepContext, o: { party: string; sentAt: string; key: string; deadline: Date; rule: { followUpDays: number; escalateDaysBefore: number; basis: string }; what: string }): Promise<StepResult> {
+  const filed = filedEmails(ctx);
+  if (filed.length) {
+    await setWork(ctx, recordFiledWork(filed[0]!, o.what === "Cover confirmation" ? "the cover confirmation or answer" : "the policy or answer"));
+    return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY) };
+  }
   const autonomy = await autonomyRule(ctx.db, ctx.run.organization_id);
   const followUps = Number(ctx.step.output["followUps"] ?? 0);
   const escalated = Boolean(ctx.step.output["escalated"]);

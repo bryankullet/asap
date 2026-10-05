@@ -671,7 +671,7 @@ export type ChaseRule = z.infer<typeof chaseRuleSchema>;
 export const claimNotificationRuleSchema = z.object({ days: z.number().int().min(1).max(365), escalateDaysBefore: z.number().int().min(0).max(30).default(2) });
 export const claimDocumentChaseRuleSchema = z.object({ days: z.number().int().min(1).max(30) });
 
-export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase", "placement.chase", "issuance.chase", "claim.notification_days", "claim.document_chase_days", "endorsement.chase"] as const;
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase", "placement.chase", "issuance.chase", "claim.notification_days", "claim.document_chase_days", "endorsement.chase", "inbound.auto_route_confidence"] as const;
 export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
 export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
 

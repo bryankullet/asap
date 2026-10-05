@@ -125,6 +125,7 @@ describe("Drizzle schema conventions", () => {
       "events",
       "import_batches",
       "import_rows",
+      "inbound_classifications",
       "insurer_response_revisions",
       "insurer_responses",
       "insurers",
