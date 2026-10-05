@@ -146,6 +146,10 @@ describe("the inbound router", () => {
     const [w] = await sql`select kind, task_status, required_action, reason from work_items where id = ${c!["work_item_id"]}`;
     expect(w).toMatchObject({ kind: "inbound", task_status: "needs_you", required_action: "Sort the email from someone@unknown-agency.test" });
     expect(String(w!["reason"])).toMatch(/ASAP could not tell what this email is/);
+    // It is on Work like any other item a person owns, and Work still reads.
+    const listed = await call(AMINA, "GET", "/work?view=needs&limit=200");
+    expect(listed.status).toBe(200);
+    expect((listed.body.items as { item: { id: string } }[]).some((i) => i.item.id === c!["work_item_id"])).toBe(true);
     const decided = await call(AMINA, "POST", `/inbound/messages/${id}/decision`, { decision: "route", runId });
     expect(decided.body).toMatchObject({ outcome: "done", state: "routed" });
     expect(await classification(id)).toMatchObject({ state: "routed", routed_by: "person", routed_run_id: runId });

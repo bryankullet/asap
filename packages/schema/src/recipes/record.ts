@@ -37,6 +37,7 @@ export const RECORD_SECTIONS: Record<WorkItemKind, readonly RecordSection[]> = {
   wht: ["focus", "steps", "activity"],
   import: ["focus", "steps", "activity"],
   exception: ["focus", "steps", "activity"],
+  inbound: ["focus", "activity"],
 };
 
 /**

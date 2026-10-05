@@ -5,7 +5,7 @@ How ASAP becomes an operations worker instead of a screen a person drives:
 **detect → plan → do the safe internal steps → ask for approval only where it is required →
 carry on after approval → watch the outside party → record evidence → close or escalate.**
 
-This map was written from the code as it stands on `main` at `e1818d0`: the migrations, the API
+This map was written from the code as it stands on `main` at `e1818d0`, and its "Missing" lines were brought up to date after the autonomy build (D-139 – D-148): the migrations, the API
 routes, the worker, the event consumers, the Ask tools and the action contracts. Roadmap documents
 were not taken as evidence. "Exists" means there is a table, a route or a function that does it
 today.
@@ -56,7 +56,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Approval:** creating a new client from an ambiguous match; the acknowledgement to the client.
 - **Evidence / success:** an opportunity linked to the source email/document; requirements listed; owner set.
 - **Reusable:** `email_messages`, `documents`, `POST /opportunities`, `requirement_templates`, client matching in `/clients` preview.
-- **Missing:** a message classifier contract; an "enquiry" event; inbound mail only once a mailbox is connected.
+- **Missing (after D-144):** ASAP proposes a pasted or synced enquiry as new work (`new_enquiry`) on an Unsorted item; a person opens the quotation. Need extraction into the opportunity and the client acknowledgement are still to build.
 - **F5 V4 R2 D3**
 
 ### 2. Client onboarding and file (KYC) completeness
@@ -78,7 +78,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Approval:** each request's exact text (bundle-able); presenting to the client.
 - **Evidence / success:** delivery evidence per insurer; responses with source; comparison generated from recorded terms.
 - **Reusable:** all of 0048–0053, 0057, 0060; `quotationNext`; comparison routes.
-- **Missing:** automatic chasing and resumption — exactly what the foundation adds; reply matching from mail.
+- **Missing (after D-141, D-144, D-147):** nothing in the chase loop — runs start on `opportunity.opened`, chase per insurer on `quote.chase`, file each insurer's reply to the run and send routine chasers under a standing approval. Still missing: reading quoted terms straight into a proposed insurer response (a person records the reply).
 - **F5 V5 R3 D2** (most parts exist)
 
 ### 4. Placement (client instruction to bound cover)
@@ -89,7 +89,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Approval:** the client's instruction; the submission; any change accepted on the client's behalf.
 - **Evidence / success:** insurer confirmation matched to the instruction with no unresolved difference.
 - **Reusable:** 0054–0056 (`placements`, `placement_requests`, `cover_match_*`, conditions).
-- **Missing:** scheduled chasing; resumption after approval.
+- **Missing (after D-142):** placement runs on the engine from `client.instruction_recorded`, prepares its request as ASAP, chases on `placement.chase` and runs the cover check. Still a person's: approval, sending without a mailbox, accepting differences, conditions.
 - **F3 V5 R5 D3**
 
 ### 5. Policy issuance
@@ -100,7 +100,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Approval:** the request; accepting each reading; applying to the record.
 - **Evidence / success:** an issued policy document whose checked values match, applied with a key.
 - **Reusable:** 0058–0059, document extraction, `policy_issuance_apply`.
-- **Missing:** chasing and resumption.
+- **Missing (after D-142):** issuance runs from `cover.confirmed`, chases on `issuance.chase`, files the insurer's document itself when exactly one placement fits, runs the issued-policy check. Still a person's: approval, reviewing readings, applying.
 - **F3 V4 R5 D2**
 
 ### 6. Servicing requests (certificates, documents, small changes)
@@ -110,7 +110,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** finding the document, preparing the reply.
 - **Approval:** the reply.
 - **Reusable:** documents, `drafts`, `sendThroughMailbox`.
-- **Missing:** inbound classification; connected mailbox.
+- **Missing (after D-144, D-145):** inbound classification exists (`servicing_request` goes to a person as Unsorted); approved replies send through a connected mailbox. Still missing: a servicing workflow on the engine.
 - **F5 V2 R2 D2**
 
 ### 7. Endorsements
@@ -120,7 +120,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** classification, requirement list, chasing.
 - **Approval:** the request to the insurer; applying the change; any premium adjustment.
 - **Reusable:** `endorsements` (0028), `endorsementSteps`, `endorsement_apply`, `TRANSFER_NEEDS_POLICYHOLDER`.
-- **Missing:** scheduled chasing; premium-adjustment money records.
+- **Missing (after D-143):** endorsement runs from `endorsement.requested`, prepares the insurer request as one approval, chases on `endorsement.chase`. Still missing: premium-adjustment money records.
 - **F4 V3 R4 D3**
 
 ### 8. Renewals — **built first (Renewal Autopilot)**
@@ -141,7 +141,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** policy matching candidates, document list, clocks, chasing, overdue detection.
 - **Approval:** notifying the insurer; registering; any acceptance on the client's behalf; never the cover decision.
 - **Reusable:** 0028, 0042 (`claims`, `claim_documents`, `claim_notes`, clock), claim recipe.
-- **Missing:** scheduled clocks and chasing; settlement and payment records.
+- **Missing (after D-143):** claim runs from `claim.reported` with the notification clock (`claim.notification_days`, or the wording's clause), document chasing (`claim.document_chase_days`) and registration chasing. Still missing: the prepared claim notice (D-123, needs its own approval flow), settlement and payment records.
 - **F4 V5 R5 D4**
 
 ### 10. Premium collection
@@ -178,7 +178,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Automatic:** extraction, filing suggestions, identity-conflict detection.
 - **Approval:** accepting values; applying them.
 - **Reusable:** 0034, 0043; extractor service; apply-preview with identity block.
-- **Missing:** auto-routing a document to the workflow waiting for it (renewal terms, claim forms).
+- **Missing (after D-142, D-144):** a read policy document is filed to the issuance run waiting for it when exactly one fits; email attachments are filed through the upload path. Still missing: routing renewal terms and claim forms by document alone.
 - **F5 V4 R4 D2**
 
 ### 14. Communications
@@ -186,7 +186,7 @@ Scores: **F**requency, **V**alue (economic), **R**isk if wrong, **D**ifficulty t
 - **Trigger:** mailbox sync; workflow steps needing a message.
 - **Sequence:** thread → link to record → draft → **approve** → send through the provider → record the provider id.
 - **Reusable:** 0035, 0044, 0045, `sendThroughMailbox`.
-- **Missing:** a connected mailbox (deliberate). Workflows prepare messages through one boundary (`prepared_communications`, 0062) so connecting Gmail later changes delivery, not the workflows.
+- **Missing (after D-145, D-147):** the boundary is live: approved messages send through a connected mailbox to verified addresses; routine insurer chasers send under a standing approval (off by default). Connecting Gmail or Microsoft 365 is still deliberately out of this build.
 - **F5 V4 R4 D2**
 
 ### 15. Compliance

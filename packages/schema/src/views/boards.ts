@@ -118,4 +118,5 @@ export const WORK_KIND_LABELS: Readonly<Record<z.infer<typeof WorkItemKind>, str
   wht: "Withholding tax",
   import: "Import",
   exception: "Exception",
+  inbound: "Email to sort",
 };

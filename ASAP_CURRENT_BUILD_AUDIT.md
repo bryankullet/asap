@@ -1,5 +1,7 @@
 # ASAP — Current Build Audit
 
+> **Superseded (5 Oct 2026).** This audit describes the build of 10 September 2026. The autonomy build (D-139 – D-148) changed what runs on its own; read `docs/AUTONOMOUS-WORK-MAP.md` and `docs/DECISIONS.md` instead. Kept for history; not maintained.
+
 Date: 2026-09-10
 Commit audited: `6fcb5a8` on `main`
 Author of this audit: Claude Code, read-only pass. Nothing in the product was redesigned, refactored, deleted or modified for it.

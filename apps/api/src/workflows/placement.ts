@@ -37,10 +37,17 @@ export const ISSUANCE_CHASE_BASIS = "ASAP's default — chase the insurer 5 days
 
 const view = (ctx: StepContext) => load(ctx.db, systemReadContext(ctx.run.organization_id), ctx.run.organization_id, ctx.run.subject_id, { sync: true });
 
+/**
+ * The placement's live Work item. The placement keeps one open, reason-keyed item at a time
+ * (syncPlacementWork); the run writes to that one — not to the item the placement opened with,
+ * which is long done — so a chase or an arrived email reaches the person who owns the work.
+ */
 async function setWork(ctx: StepContext, patch: Record<string, unknown>) {
-  if (!ctx.run.work_item_id) return;
-  const w = await ctx.db.from("work_items").select("version").eq("id", ctx.run.work_item_id).maybeSingle();
-  await ctx.db.from("work_items").update({ ...patch, version: ((w.data as { version: number } | null)?.version ?? 1) + 1, updated_at: new Date().toISOString() }).eq("id", ctx.run.work_item_id);
+  const open = await ctx.db.from("work_items").select("id, version").eq("organization_id", ctx.run.organization_id).eq("source_id", ctx.run.subject_id).neq("task_status", "done").is("deleted_at", null).order("created_at", { ascending: false }).limit(1);
+  const live = ((open.data ?? []) as { id: string; version: number }[])[0];
+  const target = live ?? (ctx.run.work_item_id ? { id: ctx.run.work_item_id, version: ((await ctx.db.from("work_items").select("version").eq("id", ctx.run.work_item_id).maybeSingle()).data as { version: number } | null)?.version ?? 1 } : null);
+  if (!target) return;
+  await ctx.db.from("work_items").update({ ...patch, version: target.version + 1, updated_at: new Date().toISOString() }).eq("id", target.id);
 }
 
 /** Chase one outside party on the brokerage's cadence: follow-ups recorded in the step, escalation once. */
