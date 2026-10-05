@@ -57,6 +57,16 @@ const DEFAULTS: { key: CompanyRuleKey; summary: string; basis: string }[] = [
     basis: "ASAP's default (D-141) until this brokerage sets its own. Measure your insurers' real response times and set it.",
   },
   {
+    key: "placement.chase",
+    summary: "ASAP chases the insurer for cover confirmation 3 days after the placement request is sent, expects it within 7 days, and escalates 2 days before.",
+    basis: "ASAP's default (D-142) until this brokerage sets its own.",
+  },
+  {
+    key: "issuance.chase",
+    summary: "ASAP chases the insurer for the issued policy 5 days after the issuance request is sent, expects it within 21 days, and escalates 5 days before.",
+    basis: "ASAP's default (D-142) until this brokerage sets its own.",
+  },
+  {
     key: "workflow.autonomy",
     summary: "ASAP starts and prepares renewals and follows up on its own; every external message waits for a person's approval; it never names a recommended quote; new work goes to the client file's owner.",
     basis: "ASAP's default (D-131) until this brokerage sets its own. Binding cover, client instructions, money and claims decisions are never automatic, whatever is set.",
@@ -69,7 +79,7 @@ function validate(key: CompanyRuleKey, value: unknown): string | null {
       ? null
       : "A renewal window is {leadDays 7–180, followUpDays 1–30, escalateDaysBeforeExpiry 1–60}, each a whole number of days.";
   }
-  if (key === "quote.chase") {
+  if (key === "quote.chase" || key === "placement.chase" || key === "issuance.chase") {
     return chaseRuleSchema.safeParse(value).success
       ? null
       : "A chase rule is {followUpDays 1–30, deadlineDays 1–120, escalateDaysBefore 0–60}, each a whole number of days.";

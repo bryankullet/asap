@@ -334,7 +334,7 @@ export async function startQuotation(db: SupabaseClient, organizationId: string,
   const o = await db.from("opportunities").select("id, work_item_id, client_id, closed_at").eq("organization_id", organizationId).eq("id", opportunityId).maybeSingle();
   const row = o.data as { id: string; work_item_id: string; client_id: string; closed_at: string | null } | null;
   if (!row || row.closed_at) return null;
-  const s = await startRun(db, QUOTATION, { organizationId, subjectType: "opportunity", subjectId: row.id, workItemId: row.work_item_id, facts: { clientId: row.client_id, origin: "event" } });
+  const s = await startRun(db, QUOTATION, { organizationId, subjectType: "opportunity", subjectId: row.id, workItemId: row.work_item_id, facts: { clientId: row.client_id, origin: "event" }, once: true });
   return s.runId;
 }
 

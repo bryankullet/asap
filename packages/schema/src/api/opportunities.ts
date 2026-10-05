@@ -591,6 +591,7 @@ export const AUTONOMY_ACTIONS = {
   escalate: "Escalate to the work owner",
   recommend_quote: "Name a recommended quote",
   prepare_quotation: "Start quotation work, prepare the insurer requests and the approval bundle",
+  prepare_placement: "Prepare placement and issuance requests, run the cover and issued-policy checks, and file the insurer's policy document when exactly one placement fits it",
 } as const;
 export type AutonomyAction = keyof typeof AUTONOMY_ACTIONS;
 /** Never automatic, whatever a brokerage sets: a person does these. */
@@ -604,6 +605,7 @@ export const AUTONOMY_CAP: Record<AutonomyAction, AutonomyLevel> = {
   escalate: "manage_exceptions",
   recommend_quote: "recommend",
   prepare_quotation: "manage_exceptions",
+  prepare_placement: "manage_exceptions",
 };
 export const autonomyRuleSchema = z.object({
   actions: z.object({
@@ -618,6 +620,7 @@ export const autonomyRuleSchema = z.object({
      * before they existed still reads — with ASAP's stated default for the new action.
      */
     prepare_quotation: AutonomyLevel.default("act_within_rules"),
+    prepare_placement: AutonomyLevel.default("act_within_rules"),
   }),
   /** Who may approve what leaves the brokerage. */
   approver: z.enum(["any_approver", "admin_or_owner"]),
@@ -628,7 +631,7 @@ export const autonomyRuleSchema = z.object({
 });
 export type AutonomyRule = z.infer<typeof autonomyRuleSchema>;
 export const AUTONOMY_DEFAULT: AutonomyRule = {
-  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules" },
+  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules", prepare_placement: "act_within_rules" },
   approver: "any_approver",
   assignment: "client_file_owner",
   alsoNever: [],
@@ -654,7 +657,7 @@ export const chaseRuleSchema = z.object({
 });
 export type ChaseRule = z.infer<typeof chaseRuleSchema>;
 
-export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase"] as const;
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase", "placement.chase", "issuance.chase"] as const;
 export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
 export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
 

@@ -94,11 +94,15 @@ export async function auditAutomation(
   });
 }
 
-/** Creates a run and its steps, once. A second call for the same live subject returns the first. */
+/**
+ * Creates a run and its steps, once. A second call for the same live subject returns the first.
+ * With `once`, a subject that already finished its run is not started again: a replayed start
+ * event must not walk a placement through a second time (D-142). A cancelled run may restart.
+ */
 export async function startRun(
   db: SupabaseClient,
   def: WorkflowDefinition,
-  input: { organizationId: string; subjectType: string; subjectId: string; workItemId: string | null; facts: Record<string, unknown> },
+  input: { organizationId: string; subjectType: string; subjectId: string; workItemId: string | null; facts: Record<string, unknown>; once?: boolean },
 ): Promise<{ runId: string; created: boolean }> {
   const existing = await db
     .from("workflow_runs")
@@ -106,7 +110,9 @@ export async function startRun(
     .eq("organization_id", input.organizationId)
     .eq("workflow", def.workflow)
     .eq("subject_id", input.subjectId)
-    .not("state", "in", "(done,cancelled)")
+    .not("state", "in", input.once ? "(cancelled)" : "(done,cancelled)")
+    .order("started_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing.data) return { runId: (existing.data as { id: string }).id, created: false };
   const ins = await db

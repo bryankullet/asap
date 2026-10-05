@@ -26,7 +26,8 @@ export const issuanceRequests = pgTable(
     version: integer("version").notNull(),
     payload: jsonb("payload").notNull(),
     sha256: text("sha256").notNull(),
-    preparedBy: uuid("prepared_by").notNull().references(() => users.id),
+    preparedBy: uuid("prepared_by").references(() => users.id),
+    preparedByRunId: uuid("prepared_by_run_id"),
     preparedAt: timestamptz("prepared_at").notNull().defaultNow(),
     supersededAt: timestamptz("superseded_at"),
     supersededReason: text("superseded_reason"),
@@ -38,6 +39,7 @@ export const issuanceRequests = pgTable(
     index("issuance_requests_organization_id_idx").on(t.organizationId),
     index("issuance_requests_placement_id_idx").on(t.placementId),
     index("issuance_requests_prepared_by_idx").on(t.preparedBy),
+    index("issuance_requests_prepared_by_run_id_idx").on(t.preparedByRunId),
   ],
 );
 
@@ -97,7 +99,8 @@ export const issuedPolicyDocuments = pgTable(
     documentId: uuid("document_id").notNull().references(() => documents.id),
     issuanceRequestId: uuid("issuance_request_id").references(() => issuanceRequests.id),
     receivedAt: timestamptz("received_at").notNull(),
-    recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+    recordedBy: uuid("recorded_by").references(() => users.id),
+    recordedByRunId: uuid("recorded_by_run_id"),
     recordedAt: timestamptz("recorded_at").notNull().defaultNow(),
     note: text("note"),
   },
@@ -108,6 +111,7 @@ export const issuedPolicyDocuments = pgTable(
     index("issued_policy_documents_document_id_idx").on(t.documentId),
     index("issued_policy_documents_request_idx").on(t.issuanceRequestId),
     index("issued_policy_documents_recorded_by_idx").on(t.recordedBy),
+    index("issued_policy_documents_recorded_by_run_id_idx").on(t.recordedByRunId),
   ],
 );
 
@@ -123,6 +127,7 @@ export const issuedPolicyChecks = pgTable(
     placementInsurerResponseId: uuid("placement_insurer_response_id").notNull().references(() => placementInsurerResponses.id),
     reviewSha256: text("review_sha256").notNull(),
     comparedBy: uuid("compared_by").references(() => users.id),
+    comparedByRunId: uuid("compared_by_run_id"),
     comparedAt: timestamptz("compared_at").notNull().defaultNow(),
     materialDifferences: integer("material_differences").notNull(),
     unclearCount: integer("unclear_count").notNull(),
@@ -135,6 +140,7 @@ export const issuedPolicyChecks = pgTable(
     index("issued_policy_checks_basis_idx").on(t.basisVersionId),
     index("issued_policy_checks_response_idx").on(t.placementInsurerResponseId),
     index("issued_policy_checks_compared_by_idx").on(t.comparedBy),
+    index("issued_policy_checks_compared_by_run_id_idx").on(t.comparedByRunId),
   ],
 );
 

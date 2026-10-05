@@ -2426,3 +2426,27 @@ missing.
 - *Honest attribution.* Migration 0067 lets a comparison record `generated_by_run_id` instead of a
   person, exactly one of the two. The run never puts a person's name on what it did. Presenting a
   comparison remains a person's act.
+
+## D-142
+
+**Autonomy build, phase 4: placement and issuance on the engine, chained.**
+
+- *Placement* starts from `client.instruction_recorded`. ASAP prepares the placement request
+  through `executePlacementAction` — the same function and guards as the route — but only when the
+  client's file is cleared, the basis has not drifted, and `prepare_placement` (new on the autonomy
+  ladder: cap `manage_exceptions`, default `act_within_rules`) allows it. Approval, sending and
+  recording the insurer's answer stay with a person. ASAP chases the insurer on `placement.chase`
+  (3/7/2 days by default, basis stated), runs the cover check itself once confirmation is in, and
+  finishes with a receipt. A declined placement is an exception, never a silent stop.
+- *Issuance* starts from `cover.confirmed`, follows the issuance stage the service already derives,
+  prepares its request the same way, chases for the policy on `issuance.chase` (5/21/5), and runs
+  the issued-policy check itself. `document.read` from extraction matches an issued policy to a
+  placement only when exactly one placement fits on client, insurer and class; otherwise the
+  candidates are proposed in the run and a person confirms. Applying it to the policy record stays
+  a person's act.
+- *Honest attribution.* Migration 0068: placement and issuance requests, issued-policy documents
+  and checks record `*_by_run_id` instead of a person — exactly one of the two. `runEnv` gives a
+  step only `placement:edit`, never approve or send. The service role may execute
+  `placement_request_digest`, as the API's own service connection prepares through it.
+- *Idempotent starts.* `startRun(..., { once: true })`: a subject that finished its run is not
+  started again by a replayed event (placement, issuance, quotation). A cancelled run may restart.
