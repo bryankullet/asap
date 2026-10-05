@@ -156,7 +156,7 @@ describe("the endorsement workflow", () => {
     await pump(id);
     expect(await runOf(id)).toMatchObject({ current_step: "delivery" });
     expect(String((await work(workId))["required_action"])).toMatch(/^Deliver the approved endorsement request to /);
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
 
     const [m] = await sql`select id from prepared_communications where run_id = ${run["id"]}`;
     expect((await call(AMINA, "POST", `/prepared-communications/${m!["id"]}/delivery`, { method: "own_email", reference: "Sent from my mailbox at 09:40" })).status).toBe(200);

@@ -127,7 +127,7 @@ describe("Supervision on Renewal Autopilot", () => {
     const approved = await get(cases.waiting);
     expect(approved.operational.status).toBe("Approved — not delivered");
     expect(approved.operational.primaryAction.kind).toBe("record_delivery");
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
     await deliver(cases.waiting);
     const run = await get(cases.waiting);
     const o = run.operational;

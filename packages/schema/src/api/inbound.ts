@@ -74,3 +74,10 @@ export type InboundDecision = z.infer<typeof inboundDecisionSchema>;
 
 /** The brokerage's rule (D-144): the least confidence at which ASAP routes an email by itself. */
 export const inboundAutoRouteRuleSchema = z.object({ threshold: z.number().min(0.5).max(1) });
+
+/** A person records an insurer's verified address, and how they know it is the insurer's (D-145). */
+export const insurerContactRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(320),
+  label: z.string().trim().max(120).optional(),
+  source: z.string().trim().min(3, "Say how you know this is the insurer's address").max(300),
+});

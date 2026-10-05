@@ -72,7 +72,7 @@ describe("the quotation workflow", () => {
     expect(approvals).toHaveLength(1);
     expect((approvals[0]!["bundle"] as unknown[]).length).toBe(2);
     expect((await work())["required_action"]).toMatch(/^Review and approve the quotation requests to /);
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
   });
 
   it("one approval by a person approves each request's exact text; the run waits for deliveries", async () => {
@@ -130,7 +130,7 @@ describe("the quotation workflow", () => {
     expect(instr!["recorded_by"]).toBe(AMINA.id);
     const audits = await sql`select action from audit_log where object_id = ${runId} and actor_type = 'automation'`;
     expect(audits.map((a) => a["action"])).toEqual(expect.arrayContaining(["workflow.quotation.started", "workflow.quotation.requests_prepared", "workflow.quotation.approval_requested", "workflow.quotation.compared", "workflow.quotation.finished"]));
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
   });
 });
 

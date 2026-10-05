@@ -233,6 +233,7 @@ export function createApp(deps: AppDeps) {
     /* Pasted and uploaded email, and settling what the router could not (D-144). */
     "/inbound",
     "/inbound/*",
+    "/insurers/*",
   ]) {
     app.use(path, guard);
   }
@@ -261,7 +262,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
-  app.route("/", workflowRoutes({ logger, service: () => supabase.service() }));
+  app.route("/", workflowRoutes({ logger, service: () => supabase.service(), mailbox: deps.mailbox ? { providers: deps.mailbox.providers, encryptionKey: deps.mailbox.encryptionKey } : undefined }));
   app.route("/", inboundRoutes({ logger, service: () => supabase.service(), bucket: deps.storage?.bucket ?? "insurance-documents" }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));

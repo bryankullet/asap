@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { index, jsonb, numeric, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { timestamptz, uuidPrimaryKey } from "./_shared.js";
+import { insurers } from "./compliance.js";
 import { emailMessages } from "./email.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
@@ -35,5 +36,27 @@ export const inboundClassifications = pgTable(
     index("inbound_classifications_tie_break_run_id_idx").on(t.tieBreakRunId),
     index("inbound_classifications_work_item_id_idx").on(t.workItemId),
     index("inbound_classifications_decided_by_idx").on(t.decidedBy),
+  ],
+);
+
+/** An insurer's verified address, recorded by a person with its source (0071, D-145). */
+export const insurerContacts = pgTable(
+  "insurer_contacts",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    insurerId: uuid("insurer_id").notNull().references(() => insurers.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    label: text("label"),
+    source: text("source").notNull(),
+    verifiedBy: uuid("verified_by").notNull().references(() => users.id),
+    verifiedAt: timestamptz("verified_at").notNull().default(sql`now()`),
+    retiredAt: timestamptz("retired_at"),
+    createdAt: timestamptz("created_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    index("insurer_contacts_organization_id_idx").on(t.organizationId),
+    index("insurer_contacts_insurer_id_idx").on(t.insurerId),
+    index("insurer_contacts_verified_by_idx").on(t.verifiedBy),
   ],
 );

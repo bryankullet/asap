@@ -1,4 +1,4 @@
-import { inboundDecisionSchema, inboundMessageRequestSchema, inboundMessageResponseSchema } from "@asap/schema";
+import { inboundDecisionSchema, insurerContactRequestSchema, inboundMessageRequestSchema, inboundMessageResponseSchema } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono } from "hono";
 import type { Logger } from "pino";
@@ -62,6 +62,23 @@ export function inboundRoutes(deps: { logger: Logger; service: () => SupabaseCli
       if (msg) await fileToRun(svc, deps.logger, { organizationId: msg.organization_id, runId: input.runId, message: msg, kind: null, party: null, why: "Filed here by a person", by: "person", userId: user.id });
     }
     return c.json({ outcome: r.changed ? "done" : "already", state: r.state });
+  });
+
+  /** An insurer's verified address, recorded by a person with how they know it (D-145). */
+  app.post("/insurers/:id/contacts", async (c) => {
+    const { db } = c.get("auth");
+    const input = await parseBody(c, insurerContactRequestSchema);
+    const { data, error } = await db.rpc("insurer_contact_record", { p_insurer_id: c.req.param("id"), p_email: input.email, p_label: input.label ?? null, p_source: input.source });
+    if (error) return sendError(c, mapDatabaseError(error));
+    const r = data as { id: string; created: boolean };
+    return c.json({ outcome: r.created ? "recorded" : "already", contactId: r.id }, r.created ? 201 : 200);
+  });
+
+  app.get("/insurers/:id/contacts", async (c) => {
+    const { db } = c.get("auth");
+    const r = await db.from("insurer_contacts").select("id, email, label, source, verified_at").eq("insurer_id", c.req.param("id")).is("retired_at", null).order("verified_at");
+    if (r.error) return sendError(c, mapDatabaseError(r.error));
+    return c.json({ contacts: r.data ?? [] });
   });
 
   return app;

@@ -24,6 +24,7 @@ import { hasPermission, requireActiveOrganization, resolveContext } from "../con
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { autonomyRule, detectRenewalFor, RENEWAL_DEFAULTS, renewalWindow } from "../workflows/renewal.js";
 import { advanceAnyRun } from "../workflows/index.js";
+import { deliverApproved, type MailboxDeps } from "../workflows/deliver.js";
 import { load as loadRules } from "./rules.js";
 import { renewalOperational } from "../workflows/renewal-view.js";
 import { runOperational } from "../workflows/run-view.js";
@@ -152,7 +153,7 @@ export async function loadWorkflowDetail(db: SupabaseClient, runId: string, perm
   });
 }
 
-export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseClient }) {
+export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseClient; mailbox?: MailboxDeps }) {
   const app = new Hono();
 
   const perms = (ctx: Awaited<ReturnType<typeof resolveContext>>) => ({ canApprove: hasPermission(ctx, "email", "approve"), canAct: hasPermission(ctx, "space", "create") });
@@ -244,8 +245,28 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
       return sendError(c, mapDatabaseError(error));
     }
     const changed = (data as { changed: boolean }).changed;
+    // Approved messages leave through the connected mailbox where one is and the address is verified (D-145).
+    // The run first records the approval on what it covers (a quotation request's approved text);
+    // then each message is sent against that, and its delivery event moves the run on.
     if (changed) await advance(runId);
+    if (changed && input.decision === "approve") {
+      const out = await deliverApproved({ db, service: deps.service(), logger: deps.logger, c, mailbox: deps.mailbox, approverId: user.id, approvalId: c.req.param("id") });
+      if (out.some((d) => d.outcome === "sent")) await advance(runId);
+    }
     return respond(c, db, runId, ctx, changed ? "done" : "already", null);
+  });
+
+  /** Send an approved message again through the mailbox — the same intent, so it can never go twice. */
+  app.post("/prepared-communications/:id/send", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "email", "approve")) throw new HttpError(403, "permission_denied", "Your role cannot send what leaves the brokerage.");
+    const out = await deliverApproved({ db, service: deps.service(), logger: deps.logger, c, mailbox: deps.mailbox, approverId: user.id, communicationId: c.req.param("id") });
+    if (!out.length) throw new HttpError(404, "not_found", "No approved message with that id");
+    const runId = ((await db.from("prepared_communications").select("run_id").eq("id", c.req.param("id")).maybeSingle()).data as { run_id: string } | null)?.run_id;
+    if (runId && out[0]!.outcome === "sent") await advance(runId);
+    return c.json({ delivery: out[0] });
   });
 
   app.post("/prepared-communications/:id/delivery", async (c) => {

@@ -2522,3 +2522,32 @@ missing.
   extracted terms; the run asks a person to record it. A claim notice or endorsement request is not
   opened as a draft by ASAP; the Unsorted item says "Open the claim if it is one" and a person opens
   it — `claim_create` needs a signed-in caller.
+
+## D-145
+
+**Autonomy build, phase 7: approved messages leave through the mailbox boundary.**
+
+- *When ASAP sends.* When a person approves a bundle, the run first records the approval on what
+  it covers — for example a quotation request's approved text. Each message is then sent through
+  `sendThroughMailbox` only if:
+  - a mailbox is connected and the deployment holds its provider;
+  - the message has a verified address;
+  - its body still hashes to what was approved (the quotation request's approved digest too).
+
+  Otherwise it stays with a person, exactly as before: delivered by hand and recorded.
+- *Idempotent.* The idempotency key is the message id plus its body hash. Approving twice,
+  `POST /prepared-communications/:id/send`, or a retry all send once.
+- *Evidence.* The provider's id is the evidence. `prepared_communication_record_sent` (0071) marks
+  the message `sent` only on an attempt the provider accepted and the same person approved, keyed
+  to that message. It emits the delivery event that moves the run on.
+- *One path for quotation delivery.* A quotation request sent this way is recorded as delivered
+  through `recordQuoteDelivery`, the same function the person's route now uses.
+- *Refusal.* A body changed after approval is refused, audited as `email.send_refused`, and nothing
+  is sent.
+- *Verified insurer addresses.* `insurer_contacts`: recorded by a person, with how they know the
+  address is the insurer's (`POST /insurers/:id/contacts`, permission `quote:edit`). Members read
+  them; only the API writes. The inbound matcher (D-144) also reads them as the insurer's addresses.
+- *Unchanged.* External messages stay capped at `act_after_approval`. `NEVER_AUTOMATIC` still holds:
+  nothing leaves without a person's approval, and the approver is recorded on every attempt.
+  Claim notices are still not prepared (D-123): a claim notice needs its own approval flow on top
+  of verified addresses, which this phase does not add.

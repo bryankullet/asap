@@ -112,7 +112,7 @@ describe("placement and issuance workflows, chained", () => {
     expect(iss).toMatchObject({ state: "waiting_approval", current_step: "approval" });
     const [ir] = await sql`select prepared_by, prepared_by_run_id from issuance_requests where placement_id = ${placementId}`;
     expect(ir).toMatchObject({ prepared_by: null, prepared_by_run_id: iss!["id"] });
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
     // Replaying the events changes nothing.
     await sql`update events set processed_at = null where organization_id = ${ORG_A} and occurred_at >= ${started} and entity_id = ${placementId}`;
     await pump();

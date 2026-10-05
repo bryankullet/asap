@@ -87,3 +87,29 @@ export async function approveQuoteRequest(
   await db.from("quote_request_approvals").insert({ organization_id: input.organizationId, quote_request_id: row.id, body_sha256: digest, approved_by: input.approverId, approved_at: now });
   return { outcome: "approved", digest };
 }
+
+/**
+ * A quotation request recorded as delivered (D-145) — by a person's own account of it, or by the
+ * connected mailbox's send. One path, so the same checks hold either way: the request belongs to
+ * this quotation, a person approved its exact text, the delivered text is that text, it is
+ * delivered once, and never in the future.
+ */
+export async function recordQuoteDelivery(
+  db: SupabaseClient,
+  o: { organizationId: string; opportunityId: string; quoteRequestId: string; method: string; reference: string; deliveredAt: string; evidenceDocumentId: string | null; userId: string },
+): Promise<{ outcome: "done" } | { outcome: "already" } | { outcome: "blocked"; reason: string } | { outcome: "error"; error: { code?: string; message?: string } }> {
+  const req = await db.from("quote_requests").select("id, opportunity_id, approved_at, approved_body_sha256").eq("organization_id", o.organizationId).eq("id", o.quoteRequestId).maybeSingle();
+  const row = req.data as { id: string; opportunity_id: string; approved_at: string | null; approved_body_sha256: string | null } | null;
+  if (!row || row.opportunity_id !== o.opportunityId) return { outcome: "blocked", reason: "That request is not part of this quotation work." };
+  if (!row.approved_at || !row.approved_body_sha256) return { outcome: "blocked", reason: "This request has not been approved. Approve the exact text before it is delivered." };
+  const existing = await db.from("quote_request_deliveries").select("id").eq("organization_id", o.organizationId).eq("quote_request_id", row.id).maybeSingle();
+  if (existing.data) return { outcome: "already" };
+  if (new Date(o.deliveredAt).getTime() > Date.now() + 5 * 60_000) return { outcome: "blocked", reason: "A delivery cannot be dated in the future." };
+  const ins = await db.from("quote_request_deliveries").insert({
+    organization_id: o.organizationId, quote_request_id: row.id, method: o.method, reference: o.reference, evidence_document_id: o.evidenceDocumentId,
+    // Delivered text is the approved text; the database refuses anything else.
+    delivered_body_sha256: row.approved_body_sha256, delivered_at: o.deliveredAt, recorded_by: o.userId,
+  });
+  if (ins.error) return String(ins.error.code) === "23505" ? { outcome: "already" } : { outcome: "error", error: ins.error };
+  return { outcome: "done" };
+}

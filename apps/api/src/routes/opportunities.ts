@@ -16,7 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { emitEvent } from "../events/emit.js";
-import { approveQuoteRequest, prepareQuoteRequest, quoteRequestDigest } from "../quotation/requests.js";
+import { approveQuoteRequest, prepareQuoteRequest, recordQuoteDelivery, quoteRequestDigest } from "../quotation/requests.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
@@ -643,43 +643,11 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
 
       case "record_delivery": {
-        const req = await db
-          .from("quote_requests")
-          .select("id, opportunity_id, opportunity_insurer_id, approved_at, approved_body_sha256")
-          .eq("organization_id", org.id)
-          .eq("id", input.quoteRequestId)
-          .maybeSingle();
-        const row = req.data as
-          | { id: string; opportunity_id: string; opportunity_insurer_id: string; approved_at: string | null; approved_body_sha256: string | null }
-          | null;
-        if (!row || row.opportunity_id !== id) return blocked("That request is not part of this quotation work.");
-        if (!row.approved_at || !row.approved_body_sha256) {
-          return blocked("This request has not been approved. Approve the exact text before it is delivered.");
-        }
-        const existing = await db
-          .from("quote_request_deliveries")
-          .select("id")
-          .eq("organization_id", org.id)
-          .eq("quote_request_id", row.id)
-          .maybeSingle();
-        if (existing.data) return done("already");
         const deliveredAt = input.deliveredAt ?? now;
-        if (new Date(deliveredAt).getTime() > Date.now() + 5 * 60_000) return blocked("A delivery cannot be dated in the future.");
-        const ins = await db.from("quote_request_deliveries").insert({
-          organization_id: org.id,
-          quote_request_id: row.id,
-          method: input.method,
-          reference: input.reference,
-          evidence_document_id: input.evidenceDocumentId ?? null,
-          // Delivered text is the approved text; the database refuses anything else.
-          delivered_body_sha256: row.approved_body_sha256,
-          delivered_at: deliveredAt,
-          recorded_by: user.id,
-        });
-        if (ins.error) {
-          if (String(ins.error.code) === "23505") return done("already");
-          return sendError(c, mapDatabaseError(ins.error));
-        }
+        const r = await recordQuoteDelivery(db, { organizationId: org.id, opportunityId: id, quoteRequestId: input.quoteRequestId, method: input.method, reference: input.reference, deliveredAt, evidenceDocumentId: input.evidenceDocumentId ?? null, userId: user.id });
+        if (r.outcome === "blocked") return blocked(r.reason);
+        if (r.outcome === "already") return done("already");
+        if (r.outcome === "error") return sendError(c, mapDatabaseError(r.error));
         await recordAudit(db, deps.logger, c, {
           organizationId: org.id,
           actorUserId: user.id,
@@ -687,7 +655,7 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           objectType: "opportunity",
           objectId: id,
           result: "success",
-          newState: { quoteRequestId: row.id, method: input.method, deliveredAt, reference: input.reference, evidenceDocumentId: input.evidenceDocumentId ?? null },
+          newState: { quoteRequestId: input.quoteRequestId, method: input.method, deliveredAt, reference: input.reference, evidenceDocumentId: input.evidenceDocumentId ?? null },
         });
         return done();
       }
