@@ -1062,7 +1062,9 @@ export function workRoutes(deps: WorkDeps) {
       const mailbox = await db.from("mailboxes").select("id").eq("organization_id", item.organization_id).eq("status", "connected").limit(1);
       const why = [...((mailbox.data ?? []).length === 0 ? ["no mailbox is connected"] : []), "no verified insurer address is on file"];
       await recordAudit(db, deps.logger, c, { organizationId: item.organization_id, actorUserId: user.id, action: "work_item.draft", objectType: "work_item", objectId: item.id, result: "denied", failureReason: "unsafe_draft" });
-      return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason: `A claim notice cannot be prepared: ${why.join("; ")}. Nothing was prepared or sent.` } satisfies ActResponse), 409);
+      // D-150: the notice is prepared by the claim's own work for one approval, once the insurer has
+      // a verified address — never drafted freehand here.
+      return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason: `A claim notice is not drafted here. ASAP prepares it for your approval in this claim's work once the insurer has a verified address${why.length > 1 ? "" : ", and sends it through the connected mailbox"}. Nothing was prepared or sent.` } satisfies ActResponse), 409);
     }
     const result = applyAction(
       item,

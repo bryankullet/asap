@@ -1,6 +1,6 @@
 import { claimDocumentChaseRuleSchema, claimNotificationRuleSchema, clockState, coverReviewSentence, deriveTask, type Step } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { auditAutomation, startRun, type StepContext, type StepResult, type WorkflowDefinition } from "./engine.js";
+import { auditAutomation, sha256, startRun, type StepContext, type StepResult, type WorkflowDefinition } from "./engine.js";
 import { autonomyRule, automatic } from "./renewal.js";
 import { liveRunsOn, type EventHandler } from "./registry.js";
 import { nextFollowUpAt, ruleOr } from "./rules.js";
@@ -172,22 +172,81 @@ async function documents(ctx: StepContext): Promise<StepResult> {
   return r.kind === "wait" && r.until > w.escalateAt ? { ...r, until: w.escalateAt } : r;
 }
 
+/** The claim notice, in plain facts: who, which policy, what happened and when. Never a view on cover. */
+function noticeText(f: Facts, policyNumber: string | null) {
+  const insurer = f.insurerName ?? "the insurer";
+  const subject = `Claim notification — ${f.clientName}${policyNumber ? `, policy ${policyNumber}` : ""}, incident of ${human(f.claim.incident_on)}`;
+  const body = [
+    `Dear ${insurer} claims,`,
+    "",
+    `We notify you, on behalf of our client ${f.clientName}, of an incident on ${human(f.claim.incident_on)}${policyNumber ? ` under policy ${policyNumber}` : ""}:`,
+    "",
+    f.claim.incident_summary,
+    "",
+    "Please register the claim and send us your claim reference and the documents you will need. We will forward what the client provides.",
+    "",
+    "Kind regards",
+  ].join("\n");
+  return { subject, body };
+}
+
 async function notify(ctx: StepContext): Promise<StepResult> {
   const f = await facts(ctx);
   const insurer = f.insurerName ?? "the insurer";
   if (stepDone(f.steps, "submit") || f.claim.insurer_reference) {
     const at = recordedAt(f.steps, "submit") ?? ctx.now.toISOString();
-    return { kind: "done", output: { notifiedAt: at }, evidence: [{ kind: "communication", label: `${insurer} notified ${human(at)}, recorded by a person`, ref: `claim:${f.claim.id}` }] };
+    return { kind: "done", output: { notifiedAt: at }, evidence: [{ kind: "communication", label: `${insurer} notified ${human(at)}`, ref: `claim:${f.claim.id}` }] };
   }
   const w = await watchDeadline(ctx, f);
   if (isResult(w)) return w;
+  const until = w.escalated ? w.at : w.escalateAt;
+
+  // The notice ASAP prepared, if it did: approved and delivered, it completes the "submitted" step (D-150).
+  const ap = await ctx.db.from("workflow_approvals").select("id, state, note").eq("run_id", ctx.run.id).eq("step_key", "notify").order("created_at", { ascending: false }).limit(1);
+  const approval = ((ap.data ?? []) as { id: string; state: string; note: string | null }[])[0];
+  if (approval?.state === "approved") {
+    const m = await ctx.db.from("prepared_communications").select("id, state, delivered_at, updated_at").eq("approval_id", approval.id).maybeSingle();
+    const msg = m.data as { id: string; state: string; delivered_at: string | null; updated_at: string } | null;
+    if (msg && (msg.state === "delivered" || msg.state === "sent")) {
+      const at = msg.delivered_at ?? msg.updated_at;
+      const r = await ctx.db.rpc("work_item_step_by_run", { p_run_id: ctx.run.id, p_step_id: "submit", p_note: `Claim notice ${msg.state === "sent" ? "sent through the connected mailbox" : "delivered"} ${human(at)}.`, p_communication_id: msg.id });
+      if (r.error) return { kind: "retry", error: r.error.message };
+      return { kind: "done", output: { notifiedAt: at, communicationId: msg.id }, evidence: [{ kind: "communication", label: `${insurer} notified ${human(at)} with the approved notice`, ref: `prepared_communication:${msg.id}` }] };
+    }
+    await setWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Deliver the approved claim notice to ${insurer} and record how — due ${human(w.at)}`, reason: `The notice is approved but not yet delivered. ${w.basis}`, task_next_check: until.toISOString() });
+    return { kind: "wait", on: "party", until };
+  }
+  const autonomy = await autonomyRule(ctx.db, ctx.run.organization_id);
+  const address = await verifiedInsurerAddress(ctx, f);
+  if (!approval && address && automatic(autonomy.actions.prepare_claim)) {
+    const pol = f.claim.policy_id ? await ctx.db.from("policies").select("policy_number").eq("id", f.claim.policy_id).maybeSingle() : { data: null };
+    const t = noticeText(f, (pol.data as { policy_number: string | null } | null)?.policy_number ?? null);
+    const bodySha = sha256(`${t.subject}\n\n${t.body}`);
+    const bundle = [{ kind: "communication", audience: "insurer", label: `Claim notice to ${insurer}`, to: address, deliveredBy: "The connected mailbox, after your approval — or you, if none is connected", subject: t.subject, body: t.body, sha256: bodySha }];
+    const ins = await ctx.db.from("workflow_approvals").insert({ organization_id: ctx.run.organization_id, run_id: ctx.run.id, step_key: "notify", title: `Approve the claim notice for ${f.clientName}`, bundle, bundle_sha256: sha256(JSON.stringify(bundle)) }).select("id").maybeSingle();
+    if (ins.error || !ins.data) return { kind: "retry", error: ins.error?.message ?? "approval not written" };
+    const c = await ctx.db.from("prepared_communications").insert({ organization_id: ctx.run.organization_id, run_id: ctx.run.id, approval_id: (ins.data as { id: string }).id, audience: "insurer", party_name: insurer, to_address: address, subject: t.subject, body_text: t.body, body_sha256: bodySha });
+    if (c.error) return { kind: "retry", error: c.error.message };
+    await auditAutomation(ctx.db, ctx.run, "workflow.claim.notice_prepared", { approvalId: (ins.data as { id: string }).id });
+    await setWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Review and approve the claim notice to ${insurer} — due ${human(w.at)}`, reason: `Nothing leaves the brokerage until a person approves its exact content. ${w.basis}`, task_next_check: until.toISOString() });
+    return { kind: "wait", on: "approval", until };
+  }
+  if (approval?.state === "pending") return { kind: "wait", on: "approval", until };
   await setWork(ctx, {
     task_status: "needs_you", task_party: null, task_since: null,
     required_action: w.escalated ? `Notify ${insurer} of ${f.clientName}'s claim — due ${human(w.at)}` : `Notify ${insurer} of the claim by ${human(w.at)}`,
-    reason: `${w.basis} ASAP cannot prepare the notice: no verified insurer address is on file.`,
-    task_next_check: (w.escalated ? w.at : w.escalateAt).toISOString(),
+    reason: approval?.state === "rejected"
+      ? `The prepared notice was not approved${approval.note ? `: ${approval.note}` : ""}. Notify ${insurer} yourself. ${w.basis}`
+      : `${w.basis} ASAP prepares the notice for approval once ${insurer} has a verified address on file.`,
+    task_next_check: until.toISOString(),
   });
-  return { kind: "wait", on: "party", until: w.escalated ? w.at : w.escalateAt, output: { deadline: w.at.toISOString() } };
+  return { kind: "wait", on: "party", until, output: { deadline: w.at.toISOString() } };
+}
+
+async function verifiedInsurerAddress(ctx: StepContext, f: Facts): Promise<string | null> {
+  if (!f.insurerName) return null;
+  const r = await ctx.db.from("insurer_contacts").select("email, insurers!inner(name)").eq("organization_id", ctx.run.organization_id).eq("insurers.name", f.insurerName).is("retired_at", null).order("verified_at").limit(1);
+  return ((r.data ?? []) as { email: string }[])[0]?.email ?? null;
 }
 
 /** One outside party, followed up on the brokerage's cadence; the Work names them and since when. */

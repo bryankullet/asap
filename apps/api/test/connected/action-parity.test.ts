@@ -252,7 +252,7 @@ describe("7 · report claim", () => {
     if (!step) return; // no draft action offered on this claim's steps: nothing to refuse
     const r = await call(AMINA, "POST", `/work-items/${workItemId}/actions`, { stepId: step.id, verb: "draft", version: item.version, to: "claims@insurer.demo" });
     expect(r.status).toBe(409);
-    expect(r.body.reason).toMatch(/no verified insurer address/);
+    expect(r.body.reason).toMatch(/ASAP prepares it for your approval in this claim.s work once the insurer has a verified address/);
     expect((await sql<{ n: number }[]>`select count(*)::int as n from drafts where work_item_id = ${workItemId}`)[0]!.n).toBe(0);
   });
 });

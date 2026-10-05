@@ -2667,3 +2667,23 @@ connection bypasses it. The engine now has a reading connection that RLS confine
   outside a read-only transaction.
 - *Hosted note.* This needs the project's legacy (HS256) JWT secret to be accepted by PostgREST,
   which is the Supabase default while the legacy secret is not revoked.
+
+## D-150
+
+**The claim notice gets its own approval flow (amends D-123).**
+
+D-123 refused to prepare a claim notice at all: there was no verified insurer address and no safe
+path to send one. Both now exist (D-145).
+- *When ASAP prepares it.* The claim run's notify step prepares the notice once the claim's insurer
+  has a verified address and `prepare_claim` allows it. The notice is plain facts — client, policy,
+  incident date and the client's own account — and asks for the claim reference. It never states or
+  suggests a view on cover. It goes into one approval bundle (`workflow_approvals`, step `notify`)
+  with its exact text.
+- *After approval.* It is sent through the connected mailbox to the verified address (D-145).
+  Otherwise a person delivers it and records how.
+- *Completing the step.* The delivery completes the claim Work item's "submitted" step through
+  `work_item_step_by_run` with the message as evidence: a person approved it, and it was delivered
+  by a person or the mailbox. The run then waits on the insurer for its reference.
+- *Fallbacks.* A rejected notice, or no verified address, means a person notifies the insurer as
+  before, and the Work copy says which. The Work item's own "draft" button for a claim stays
+  refused: the notice is prepared in one place, through approval, never drafted freehand.

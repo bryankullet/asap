@@ -100,7 +100,7 @@ describe("the claim workflow", () => {
     expect(await runOf(claimId)).toMatchObject({ current_step: "notify" });
     const n = await work(workId);
     expect(String(n["required_action"])).toMatch(/^Notify .* of the claim by /);
-    expect(String(n["reason"])).toMatch(/ASAP cannot prepare the notice: no verified insurer address is on file/);
+    expect(String(n["reason"])).toMatch(/ASAP prepares the notice for approval once .* has a verified address on file/);
   });
 
   it("notified by a person: ASAP waits on the insurer for its reference, then finishes with a receipt and hands the claim back", async () => {
