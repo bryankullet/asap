@@ -2324,3 +2324,28 @@ missing.
     plainly that invoices and payments are not recorded yet.
 - *Imports say what they write.* Clients, contacts, policies and periods. A workbook sheet that is a
   vehicle schedule is labelled as not imported.
+
+## D-139
+
+**Autonomy build, phase 1: the engine stops being renewal-only.**
+
+- `apps/api/src/workflows/registry.ts` maps each workflow name to its definition and an optional
+  scheduled detector, with the contract `detectRenewals` has. `workflows/index.ts` registers what
+  exists.
+- `sweepWorkflows` moved out of `renewal.ts` and became generic. It runs every registered detector in
+  every brokerage, then advances each due run with its own definition, looked up by
+  `workflow_runs.workflow`.
+- The event consumer (`workflow.*`) and every person's control (approve, resume, pause, follow-up,
+  stop, escalate) advance through `advanceAnyRun`.
+- A run naming an unregistered workflow is stopped with an `unknown_workflow` exception and an audit
+  row. It does not crash the sweep.
+- Migration 0065 widens the run and receipt checks to the six workflow names: renewal, quotation,
+  placement, issuance, endorsement and claim. It also adds their subject types. The brief reserved
+  0065 for the manual intake mailbox; that moves to the phase that needs it, because migrations are
+  numbered in the order they are written.
+- Runs other than renewals get a generic operational reading (`workflows/run-view.ts`) in the same
+  shape as the renewal reading. Renewal keeps its own reading unchanged. Control messages name the
+  run's own workflow; renewal's wording is unchanged.
+- Fixed while there: "Follow up now", or a follow-up moved to today, stored today's date at 06:00
+  UTC. Before 06:00 UTC (09:00 in Nairobi) it chased nothing. A follow-up day that is today or past
+  is now due at once.

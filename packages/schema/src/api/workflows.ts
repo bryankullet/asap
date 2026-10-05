@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { uuidSchema } from "./common.js";
 
+/** Every workflow the engine carries (D-139). The database refuses any other name (0065). */
+export const WORKFLOW_NAMES = ["renewal", "quotation", "placement", "issuance", "endorsement", "claim"] as const;
+export type WorkflowName = (typeof WORKFLOW_NAMES)[number];
+/** How each is named in a sentence: "This quotation is finished." */
+export const WORKFLOW_NOUN: Record<WorkflowName, string> = { renewal: "renewal", quotation: "quotation", placement: "placement", issuance: "policy issue", endorsement: "endorsement", claim: "claim" };
+
 /** Durable workflow runs (0062, D-129), as Ask, Work, Activity and the Renewal Space read them. */
 export const workflowEvidenceSchema = z.object({ label: z.string(), kind: z.string(), ref: z.string().nullable().optional() });
 export const workflowStepSchema = z.object({
@@ -74,7 +80,7 @@ export type WorkflowOperational = z.infer<typeof workflowOperationalSchema>;
 
 export const workflowRunSchema = z.object({
   id: uuidSchema,
-  workflow: z.literal("renewal"),
+  workflow: z.enum(WORKFLOW_NAMES),
   subjectId: uuidSchema,
   workItemId: uuidSchema.nullable(),
   state: z.enum(["running", "waiting_approval", "waiting_party", "exception", "done", "cancelled"]),

@@ -375,7 +375,10 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
   }
   const scheduled = new Date(new Date(delivery.delivered_at).getTime() + (followUps + 1) * window.followUpDays * DAY);
   // A person may move the next follow-up ("move it to Friday") or stop chasing this insurer.
-  const override = typeof ctx.run.facts["followUpOn"] === "string" ? new Date(String(ctx.run.facts["followUpOn"]) + "T06:00:00Z") : null;
+  const overrideDay = typeof ctx.run.facts["followUpOn"] === "string" ? String(ctx.run.facts["followUpOn"]) : null;
+  // A follow-up moved to today (or "follow up now") is due now, not at 06:00 UTC — before then it
+  // read as moved and nothing was chased (D-139).
+  const override = overrideDay ? (overrideDay <= isoDay(ctx.now) ? ctx.now : new Date(overrideDay + "T06:00:00Z")) : null;
   const nextDue = override ?? scheduled;
   const escalation = new Date(new Date(s.period.period_end + "T06:00:00Z").getTime() - window.escalateDaysBeforeExpiry * DAY);
   const stopped = ctx.run.facts["chasing"] as { stopped?: boolean; byName?: string } | undefined;
@@ -585,35 +588,6 @@ async function ensureRenewalWork(db: SupabaseClient, organizationId: string, s: 
   if (ins.data) return (ins.data as { id: string }).id;
   const again = await db.from("work_items").select("id").eq("organization_id", organizationId).eq("source_type", "policy_period").eq("source_id", s.period.id).eq("reason_code", "renewal_due").neq("task_status", "done").maybeSingle();
   return (again.data as { id: string } | null)?.id ?? null;
-}
-
-/** The scheduled pass: detect in every brokerage, then advance every run that is due. */
-export async function sweepWorkflows(db: SupabaseClient, logger: Logger, now = new Date()) {
-  const orgs = await db.from("organizations").select("id");
-  let started = 0;
-  /*
-   * A run found in this pass is advanced in this pass (D-137). Its `next_run_at` is stamped by the
-   * database a moment after `now`, so the due query below missed it and the run sat at "0 of 11"
-   * until the next sweep — fifteen minutes that read as ASAP working when it was only queued.
-   */
-  const fresh: string[] = [];
-  for (const o of (orgs.data ?? []) as { id: string }[]) {
-    const d = await detectRenewals(db, logger, o.id, now);
-    started += d.started;
-    fresh.push(...d.startedRunIds);
-  }
-  const due = await db.from("workflow_runs").select("id").in("state", ["running", "waiting_approval", "waiting_party"]).lte("next_run_at", now.toISOString()).order("next_run_at").limit(100);
-  const outcomes = [];
-  const ids = [...new Set([...fresh, ...((due.data ?? []) as { id: string }[]).map((r) => r.id)])];
-  for (const id of ids) {
-    const r = { id };
-    try {
-      outcomes.push(await advanceRun(db, logger, RENEWAL, r.id, now));
-    } catch (e) {
-      logger.error({ runId: r.id, err: (e as Error).message }, "a workflow run could not be advanced; the next sweep tries again");
-    }
-  }
-  return { started, advanced: outcomes.length, outcomes };
 }
 
 export { advanceRun, type Evidence };

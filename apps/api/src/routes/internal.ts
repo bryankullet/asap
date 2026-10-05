@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
-import { advanceRun, RENEWAL, sweepWorkflows } from "../workflows/renewal.js";
+import { advanceAnyRun, sweepWorkflows } from "../workflows/index.js";
 import { extractDocument } from "../documents/extraction.js";
 import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
 import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
@@ -207,7 +207,7 @@ export function internalRoutes(deps: {
      */
     if (event.event_type.startsWith("workflow.") && event.entity_type === "workflow_run" && event.entity_id) {
       try {
-        const out = await advanceRun(db, deps.logger, RENEWAL, event.entity_id);
+        const out = await advanceAnyRun(db, deps.logger, event.entity_id);
         results.push({ consumer: "workflow", result: "success", detail: out.skipped ? `run ${out.skipped}` : `run ${out.state}${out.stoppedAt ? ` at ${out.stoppedAt}` : ""}` });
       } catch (e) {
         results.push({ consumer: "workflow", result: "failure", detail: (e as Error).message ?? "the run could not be advanced" });
