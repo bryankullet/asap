@@ -10,6 +10,7 @@ import type { Extractor } from "../documents/extractor.js";
 import { HttpError, sendError } from "../errors.js";
 import type { AiProvider } from "@asap/schema";
 import { routeInbound } from "../inbound/router.js";
+import { suggestFix } from "../workflows/exception-helper.js";
 
 /**
  * The surface the worker tier calls, and nothing else.
@@ -224,6 +225,11 @@ export function internalRoutes(deps: {
      * registered workflow says which events it listens for.
      */
     if (!event.event_type.startsWith("workflow.")) results.push(...(await routeEventToWorkflows(db, deps.logger, event)));
+    // A run that could not finish gets one suggested fix, when a model is configured (D-146).
+    if (event.event_type === "run.could_not_finish" && event.entity_id) {
+      const out = await suggestFix(db, deps.aiProvider ?? null, deps.logger, { id: event.id, organization_id: event.organization_id, entity_id: event.entity_id });
+      results.push({ consumer: "exception_helper", result: out === "suggested" ? "success" : "skipped", detail: out });
+    }
     // An inbound email is sorted once (D-144): routed to the one run waiting for it, or Unsorted.
     if (event.event_type === "email.received" && event.entity_id) {
       const out = await routeInbound(db, deps.aiProvider ?? null, deps.logger, event.organization_id, event.entity_id);

@@ -142,3 +142,9 @@ export const workflowActionResponseSchema = z.object({
   run: workflowDetailSchema.nullable(),
 });
 export type WorkflowActionResponse = z.infer<typeof workflowActionResponseSchema>;
+
+/** A person accepts or rejects ASAP's suggested fix for a stopped run (D-146). */
+export const decideSuggestionRequestSchema = z.object({
+  decision: z.enum(["accept", "reject"]),
+  note: z.string().trim().max(500).optional(),
+});

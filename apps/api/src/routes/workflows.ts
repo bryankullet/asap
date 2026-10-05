@@ -1,5 +1,6 @@
 import {
   decideApprovalRequestSchema,
+  decideSuggestionRequestSchema,
   escalateRunRequestSchema,
   moveFollowUpRequestSchema,
   pauseRunRequestSchema,
@@ -254,6 +255,31 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
       if (out.some((d) => d.outcome === "sent")) await advance(runId);
     }
     return respond(c, db, runId, ctx, changed ? "done" : "already", null);
+  });
+
+  /** The suggested fix for a stopped run, when ASAP has one (D-146). */
+  app.get("/workflows/runs/:id/suggestion", async (c) => {
+    const { db } = c.get("auth");
+    const r = await db.from("exception_suggestions").select("id, exception_code, suggestion, evidence, action, confidence, state, created_at").eq("run_id", c.req.param("id")).order("created_at", { ascending: false }).limit(1);
+    if (r.error) return sendError(c, mapDatabaseError(r.error));
+    return c.json({ suggestion: (r.data ?? [])[0] ?? null });
+  });
+
+  /**
+   * A person accepts or rejects it. Accepting runs the ordinary path as that person — recording the
+   * insurer's address is their act, with the correspondence as its source — and then they resume.
+   */
+  app.post("/exception-suggestions/:id/decide", async (c) => {
+    const { db } = c.get("auth");
+    const input = await parseBody(c, decideSuggestionRequestSchema);
+    const { data, error } = await db.rpc("exception_suggestion_decide", { p_id: c.req.param("id"), p_decision: input.decision, p_note: input.note ?? null });
+    if (error) return sendError(c, mapDatabaseError(error));
+    const r = data as { state: string; changed: boolean; action: { type: string; insurerId: string; email: string } | null };
+    if (r.changed && input.decision === "accept" && r.action?.type === "record_insurer_contact") {
+      const rec = await db.rpc("insurer_contact_record", { p_insurer_id: r.action.insurerId, p_email: r.action.email, p_label: null, p_source: "Seen in this brokerage's own correspondence; confirmed by the person accepting ASAP's suggestion" });
+      if (rec.error) return sendError(c, mapDatabaseError(rec.error));
+    }
+    return c.json({ outcome: r.changed ? "done" : "already", state: r.state, next: input.decision === "accept" ? "Resume the work when you are ready." : null });
   });
 
   /** Send an approved message again through the mailbox — the same intent, so it can never go twice. */

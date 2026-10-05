@@ -2551,3 +2551,27 @@ missing.
   nothing leaves without a person's approval, and the approver is recorded on every attempt.
   Claim notices are still not prepared (D-123): a claim notice needs its own approval flow on top
   of verified addresses, which this phase does not add.
+
+## D-146
+
+**Autonomy build, phase 8: the exception helper.**
+
+- On `run.could_not_finish`, ASAP gathers evidence about why the run stopped:
+  - the exception itself;
+  - the insurer the run was waiting on;
+  - that insurer's verified addresses;
+  - addresses in the brokerage's own inbound correspondence that mention it.
+
+  It asks the model, through the gateway, for one suggested fix that cites that evidence, and
+  stores it in `exception_suggestions` (0072): one per reported exception, a proposal with its
+  evidence, confidence and model. Members read; only the API writes.
+- *Code decides.* Cited evidence must exist. The only action a suggestion may carry is
+  `record_insurer_contact`, and only for an address the evidence shows. When a person accepts
+  (`POST /exception-suggestions/:id/decide`), the address is recorded through
+  `insurer_contact_record` as that person, with the correspondence as its source. They then resume
+  the run with the ordinary control. A rejection needs a reason.
+- *No model, or no usable answer:* nothing is written, and the exception shows as before.
+- *Departure from the brief:* the brief asked for the declared Ask tools. They are not used here:
+  they rely on a person's session for tenancy (RLS), and on the engine's connection they would read
+  across brokerages (§45 rule 1). The helper reads through queries that each filter on the run's
+  organization, and the model sees only what they return.

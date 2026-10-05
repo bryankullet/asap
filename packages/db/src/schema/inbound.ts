@@ -60,3 +60,30 @@ export const insurerContacts = pgTable(
     index("insurer_contacts_verified_by_idx").on(t.verifiedBy),
   ],
 );
+
+/** One suggested fix for a stopped run, with its evidence (0072, D-146). A proposal. */
+export const exceptionSuggestions = pgTable(
+  "exception_suggestions",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull().references(() => workflowRuns.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").notNull().unique(),
+    exceptionCode: text("exception_code").notNull(),
+    suggestion: text("suggestion").notNull(),
+    evidence: jsonb("evidence").notNull().default(sql`'[]'::jsonb`),
+    action: jsonb("action"),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    model: text("model").notNull(),
+    state: text("state").notNull().default("proposed"),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamptz("decided_at"),
+    decisionNote: text("decision_note"),
+    createdAt: timestamptz("created_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    index("exception_suggestions_organization_id_idx").on(t.organizationId),
+    index("exception_suggestions_run_id_idx").on(t.runId),
+    index("exception_suggestions_decided_by_idx").on(t.decidedBy),
+  ],
+);

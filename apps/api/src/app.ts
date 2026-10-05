@@ -234,6 +234,7 @@ export function createApp(deps: AppDeps) {
     "/inbound",
     "/inbound/*",
     "/insurers/*",
+    "/exception-suggestions/*",
   ]) {
     app.use(path, guard);
   }
