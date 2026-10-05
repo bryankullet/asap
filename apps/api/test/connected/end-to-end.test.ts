@@ -29,6 +29,7 @@ const script: FakeScript = [
   { match: new RegExp(`POL-${TAG}`), reply: as("policy_document") },
   { match: new RegExp(`CLAIM-${TAG}`), reply: as("claim_notice") },
   { match: new RegExp(`REG-${TAG}`), reply: as("claim_update") },
+  { match: new RegExp(`ENDT-${TAG}`), reply: as("endorsement_request") },
 ];
 const CLIENT = `Tausi Freight ${TAG} Ltd`;
 const CLIENT_EMAIL = `ops-${TAG.toLowerCase()}@tausifreight.test`;
@@ -237,23 +238,23 @@ describe("a claim reported by email, to its registration", () => {
   let workId = "";
   const act = async (body: Record<string, unknown>) => call(AMINA, "POST", `/work-items/${workId}/actions`, { ...body, version: (await sql`select version from work_items where id = ${workId}`)[0]!["version"] });
 
-  it("the claim email is proposed as a new claim; a person opens it as a draft, and the email is filed to the claim", async () => {
+  it("the claim email, from the client's own contact and saying when, opens a draft claim by itself (D-151)", async () => {
     policyId = (await sql`select id from policies where organization_id = ${ORG_A} and policy_number = ${POLICY_NUMBER}`)[0]!["id"] as string;
-    const incident = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     const id = await paste({ from: CLIENT_EMAIL, subject: "Accident — truck KDA 451T", body: `Our truck KDA 451T overturned at Salgaa yesterday under policy ${POLICY_NUMBER}. CLAIM-${TAG}` });
     const s = await sorted(id);
-    expect(s).toMatchObject({ kind: "claim_notice", state: "unsorted" });
-    expect((await sql`select required_action from work_items where id = ${s["work_item_id"]}`)[0]!["required_action"]).toBe("Open the claim if it is one");
-    const r = await call(AMINA, "POST", "/work-items", { kind: "claim", clientId, incidentOn: incident, incidentSummary: "Truck KDA 451T overturned at Salgaa.", policyId, source: "email" });
-    expect(r.status).toBe(201);
-    workId = r.body.item.id;
-    claimId = (await sql`select id, status from claims where work_item_id = ${workId}`)[0]!["id"] as string;
-    expect((await sql`select status from claims where id = ${claimId}`)[0]!["status"]).toBe("draft");
+    expect(s).toMatchObject({ kind: "claim_notice", state: "opened" });
+    workId = s["work_item_id"] as string;
+    const [claim] = await sql`select id, status, source, policy_id, incident_on::text as incident_on from claims where work_item_id = ${workId}`;
+    claimId = claim!["id"] as string;
+    // A draft for a person to confirm: not registered until they match the period.
+    expect(claim).toMatchObject({ status: "draft", source: "email", policy_id: policyId });
+    const sent = (await sql`select sent_at from email_messages where id = ${id}`)[0]!["sent_at"] as Date;
+    expect(claim!["incident_on"]).toBe(new Date(sent.getTime() + 3 * 3_600_000 - 86_400_000).toISOString().slice(0, 10));
+    expect((await sql`select work_item_id from email_threads t join email_messages m on m.thread_id = t.id where m.id = ${id}`)[0]!["work_item_id"]).toBe(workId);
+    expect((await sql`select count(*)::int as n from audit_log where action = 'claim.opened_from_email' and object_id = ${workId} and actor_type = 'automation'`)[0]!["n"]).toBe(1);
     watched.add(claimId);
     await pump();
-    const cr = await run("claim", claimId);
-    expect(cr).toMatchObject({ state: "waiting_party", current_step: "match" });
-    expect((await call(AMINA, "POST", `/inbound/messages/${id}/decision`, { decision: "route", runId: cr!["id"] })).body.state).toBe("routed");
+    expect(await run("claim", claimId)).toMatchObject({ state: "waiting_party", current_step: "match" });
   });
 
   it("matched, checked and notified by people; the insurer's registration is pasted in and filed; the run finishes", async () => {
@@ -276,5 +277,19 @@ describe("a claim reported by email, to its registration", () => {
     const [receipt] = await sql`select receipt from workflow_receipts where run_id = ${cr!["id"]}`;
     expect(JSON.stringify(receipt!["receipt"])).toMatch(/ASAP made no coverage or claims decision/);
     await noSends();
+  });
+});
+
+describe("a change asked for by email", () => {
+  it("opens a draft endorsement on the policy the email names; its run starts and asks for what is missing", async () => {
+    const id = await paste({ from: CLIENT_EMAIL, subject: `Add a truck to ${POLICY_NUMBER}`, body: `Please add truck KDB 222X to policy ${POLICY_NUMBER}. ENDT-${TAG}` });
+    const s = await sorted(id);
+    expect(s).toMatchObject({ kind: "endorsement_request", state: "opened" });
+    const [e] = await sql`select id, kind, requested_by, policy_id from endorsements where work_item_id = ${s["work_item_id"]}`;
+    expect(e).toMatchObject({ kind: "add_item", requested_by: "policyholder" });
+    watched.add(e!["id"] as string);
+    await pump();
+    expect((await sql`select current_step from workflow_runs where workflow = 'endorsement' and subject_id = ${e!["id"]}`)[0]!["current_step"]).toBe("requirements");
+    expect((await sql`select required_action from work_items where id = ${s["work_item_id"]}`)[0]!["required_action"]).toBe("Add the effective date, the items being changed");
   });
 });

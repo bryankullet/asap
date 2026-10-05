@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { emitEvent } from "../events/emit.js";
 import { ruleOr } from "../workflows/rules.js";
 import { classifyEmail, tieBreak } from "./classify.js";
+import { openDraftFromEmail } from "./drafts.js";
 import { decideRoute, matchCandidates, type RunSnapshot } from "./match.js";
 
 /**
@@ -102,7 +103,7 @@ export async function liveRunSnapshots(db: SupabaseClient, organizationId: strin
   return out;
 }
 
-export async function routeInbound(db: SupabaseClient, provider: AiProvider | null, logger: Logger, organizationId: string, emailMessageId: string): Promise<{ outcome: "routed" | "unsorted" | "already"; runId?: string }> {
+export async function routeInbound(db: SupabaseClient, provider: AiProvider | null, logger: Logger, organizationId: string, emailMessageId: string): Promise<{ outcome: "routed" | "unsorted" | "already" | "opened"; runId?: string }> {
   const existing = await db.from("inbound_classifications").select("state").eq("email_message_id", emailMessageId).maybeSingle();
   if (existing.data) return { outcome: "already" };
   const m = await db.from("email_messages").select("id, from_address, subject, body_text, sent_at, email_threads(work_item_id)").eq("id", emailMessageId).eq("organization_id", organizationId).maybeSingle();
@@ -132,10 +133,19 @@ export async function routeInbound(db: SupabaseClient, provider: AiProvider | nu
     return { outcome: "routed", runId: decision.route };
   }
 
-  const ins = await db.from("inbound_classifications").insert({ ...row, state: "unsorted" }).select("id").maybeSingle();
+  // A claim notice or a change request, sure enough, from a client's own contact: open a draft (D-151).
+  const opensDraft = classification && (classification.kind === "claim_notice" || classification.kind === "endorsement_request") && classification.confidence >= rule.threshold;
+  const ins = await db.from("inbound_classifications").insert({ ...row, state: opensDraft ? "proposed" : "unsorted" }).select("id").maybeSingle();
   if (ins.error) {
     if (ins.error.code === "23505") return { outcome: "already" };
     throw new Error(`inbound classification not written: ${ins.error.message}`);
+  }
+  let draftWhy = "";
+  if (opensDraft) {
+    const d = await openDraftFromEmail(db, logger, { organizationId, message: { id: msg.id, from_address: msg.from_address, subject: msg.subject, body_text: msg.body_text, sent_at: msg.sent_at }, kind: classification!.kind as "claim_notice" | "endorsement_request" });
+    if (d.opened) return { outcome: "opened", runId: d.workItemId };
+    draftWhy = ` ASAP did not open it: ${d.why.charAt(0).toLowerCase()}${d.why.slice(1)}`;
+    await db.from("inbound_classifications").update({ state: "unsorted" }).eq("id", (ins.data as { id: string }).id);
   }
   const proposal = classification
     ? `ASAP thinks this is: ${INBOUND_KIND_LABELS[classification.kind].toLowerCase()} (${Math.round(classification.confidence * 100)}% sure).`
@@ -145,7 +155,7 @@ export async function routeInbound(db: SupabaseClient, provider: AiProvider | nu
   const w = await db.from("work_items").insert({
     organization_id: organizationId, title: `Unsorted email — ${msg.subject || "(no subject)"}`.slice(0, 200), kind: "inbound",
     task_status: "needs_you", steps: [], source_type: "email_message", source_id: msg.id, reason_code: "unsorted_email",
-    required_action: next, reason: `${proposal}${options} ${decision.why}`.trim(),
+    required_action: next, reason: `${proposal}${options} ${decision.why}${draftWhy}`.trim(),
   }).select("id").maybeSingle();
   if (w.data) await db.from("inbound_classifications").update({ work_item_id: (w.data as { id: string }).id }).eq("id", (ins.data as { id: string }).id);
   await db.from("audit_log").insert({ organization_id: organizationId, actor_type: "automation", action: "email.unsorted", object_type: "email_message", object_id: msg.id, new_state: { kind: row.kind, confidence: row.confidence, candidates: candidates.length, why: decision.why } });

@@ -19,6 +19,7 @@ const script: FakeScript = [
   { match: new RegExp(`JUBQ-${TAG}`), reply: sure("insurer_quote", 0.96) },
   { match: new RegExp(`CICQ-${TAG}`), reply: sure("insurer_quote", 0.95) },
   { match: new RegExp(`UNSURE-${TAG}`), reply: sure("insurer_quote", 0.6) },
+  { match: new RegExp(`STRANGER-${TAG}`), reply: sure("claim_notice", 0.97) },
 ];
 let app: ReturnType<typeof createApp>;
 let sql: postgres.Sql;
@@ -172,5 +173,15 @@ describe("the inbound router", () => {
     const { emailMessageId: id } = await paste({ from: "underwriting@jubilee.test", subject: `RE: ${subject}`, body: `Second note UNSURE-${TAG}: revised wording to follow.` });
     expect(await classification(id)).toMatchObject({ state: "routed", routed_by: "auto", routed_run_id: runId });
     expect((await call(AMINA, "PUT", "/rules", { key: "inbound.auto_route_confidence", value: { threshold: 0.9 }, source: "ASAP default restored", verifiedAt: "2026-10-05" })).status).toBeLessThan(300);
+  });
+
+  it("a claim notice ASAP cannot open by itself stays Unsorted, and says why (D-151)", async () => {
+    const { emailMessageId: id } = await paste({ from: `driver-${TAG.toLowerCase()}@gmail.com`, subject: "Accident", body: `My car was hit yesterday at Kenol. STRANGER-${TAG}` });
+    const c = await classification(id);
+    expect(c).toMatchObject({ kind: "claim_notice", state: "unsorted" });
+    const [w] = await sql`select required_action, reason from work_items where id = ${c!["work_item_id"]}`;
+    expect(w!["required_action"]).toBe("Open the claim if it is one");
+    expect(String(w!["reason"])).toMatch(/ASAP did not open it: the sender is not a recorded client contact\./);
+    expect((await sql`select count(*)::int as n from claims where incident_summary like ${`%STRANGER-${TAG}%`}`)[0]!["n"]).toBe(0);
   });
 });

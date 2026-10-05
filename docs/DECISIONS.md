@@ -2687,3 +2687,29 @@ path to send one. Both now exist (D-145).
 - *Fallbacks.* A rejected notice, or no verified address, means a person notifies the insurer as
   before, and the Work copy says which. The Work item's own "draft" button for a claim stays
   refused: the notice is prepared in one place, through approval, never drafted freehand.
+
+## D-151
+
+**An email that reports a claim or asks for a policy change opens a draft.**
+
+D-144 sent every claim notice and change request to a person as Unsorted. Now ASAP opens a draft
+claim or endorsement itself when all of these hold:
+- the model classified the email as `claim_notice` or `endorsement_request` at or above
+  `inbound.auto_route_confidence`;
+- `prepare_claim` or `prepare_endorsement` allows it;
+- every fact the record needs is read deterministically, never from the model:
+  - *the client:* the sender is the recorded contact of exactly one client;
+  - *a claim's incident date:* stated in the email — a date, day first, or
+    "today"/"yesterday"/"last night" read against when it was sent, in Nairobi; never a date
+    after the email;
+  - *a claim's policy:* the one the email names, or the client's only live policy, or none;
+  - *an endorsement's policy:* the one the email names, or the client's only live policy.
+
+The draft is the same Work item, record and start event as a person's report or change. It has the
+same title, so the same claim reported twice is one claim. `inbound_open_draft` (0075) is
+service-only, checked against the proposal, and audited as the automation.
+
+A claim stays a draft until a person matches it to a policy period. An endorsement asks nothing of
+the insurer until a person approves the request. Anything missing leaves the email Unsorted, and
+the item says why ASAP did not open it. New enquiries still go to a person, because the quotation
+needs a class of business and a description the email does not reliably give.
