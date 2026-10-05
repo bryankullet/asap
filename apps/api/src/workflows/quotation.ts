@@ -235,6 +235,14 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
   // An answer filed here by the inbound router is recorded before anyone is chased (D-144).
   const filed = filedEmails(ctx, (e) => out.some((a) => a.insurerName === e.party));
   if (filed.length) {
+    // What ASAP read from it, if anything: the person confirms or corrects that, rather than typing it (D-152).
+    const pr = await ctx.db.from("insurer_response_proposals").select("outcome, premium_amount, premium_currency, valid_until, evidence").eq("email_message_id", filed[0]!.messageId).eq("state", "proposed").maybeSingle();
+    const p = pr.data as { outcome: string; premium_amount: string | null; premium_currency: string | null; valid_until: string | null; evidence: { words: string }[] } | null;
+    if (p) {
+      const read = p.outcome === "declined" ? "a decline" : `${p.premium_currency} ${Number(p.premium_amount).toLocaleString("en-KE", { minimumFractionDigits: 0 })}${p.valid_until ? `, valid until ${human(p.valid_until)}` : ""}`;
+      await syncWork(ctx, { task_status: "needs_you", task_party: null, task_since: null, required_action: `Confirm ${filed[0]!.party}'s reply as ASAP read it — ${read} — or correct it`, reason: `Read from the email's own words: “${p.evidence[0]?.words ?? ""}”. Nothing counts until you confirm it.` });
+      return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY) };
+    }
     await syncWork(ctx, recordFiledWork(filed[0]!, "the terms or decline"));
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY) };
   }

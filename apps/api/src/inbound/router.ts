@@ -5,6 +5,7 @@ import { emitEvent } from "../events/emit.js";
 import { ruleOr } from "../workflows/rules.js";
 import { classifyEmail, tieBreak } from "./classify.js";
 import { openDraftFromEmail } from "./drafts.js";
+import { readInsurerReply } from "./read-quote.js";
 import { decideRoute, matchCandidates, type RunSnapshot } from "./match.js";
 
 /**
@@ -176,6 +177,30 @@ export async function fileToRun(db: SupabaseClient, logger: Logger | null, o: { 
     const threadId = (t.data as { thread_id: string } | null)?.thread_id;
     if (threadId) await db.from("email_threads").update({ work_item_id: run.work_item_id }).eq("id", threadId).is("work_item_id", null);
   }
+  await proposeResponse(db, { organizationId: o.organizationId, runId: o.runId, message: o.message, kind: o.kind, party: o.party });
   await db.from("audit_log").insert({ organization_id: o.organizationId, actor_type: o.by === "auto" ? "automation" : "user", actor_user_id: o.userId ?? null, action: "email.routed", object_type: "email_message", object_id: o.message.id, new_state: { runId: o.runId, kind: o.kind, by: o.by, why: o.why } });
   await emitEvent(db, logger, { organizationId: o.organizationId, eventType: "workflow.email_routed", entityType: "workflow_run", entityId: o.runId, actor: o.by === "auto" ? "automation" : "user", actorUserId: o.userId ?? null, payload: { emailMessageId: o.message.id, kind: o.kind }, dedupeKey: `${o.runId}:${o.message.id}` });
+}
+
+/**
+ * An insurer's quote or decline filed to a quotation becomes a proposed response (D-152): read from
+ * the email's own words, never the model's, and kept until a person accepts or corrects it.
+ */
+async function proposeResponse(db: SupabaseClient, o: { organizationId: string; runId: string; message: { id: string; sent_at: string }; kind: string | null; party: string | null }) {
+  if (!o.party || (o.kind !== "insurer_quote" && o.kind !== "insurer_decline")) return;
+  const r = await db.from("workflow_runs").select("workflow, subject_id").eq("id", o.runId).maybeSingle();
+  const run = r.data as { workflow: string; subject_id: string } | null;
+  if (run?.workflow !== "quotation") return;
+  const oi = await db.from("opportunity_insurers").select("id, insurers!inner(name)").eq("opportunity_id", run.subject_id).eq("insurers.name", o.party).is("removed_at", null).maybeSingle();
+  const approach = oi.data as { id: string } | null;
+  if (!approach) return;
+  const m = await db.from("email_messages").select("subject, body_text").eq("id", o.message.id).maybeSingle();
+  const text = `${(m.data as { subject: string } | null)?.subject ?? ""}\n${(m.data as { body_text: string | null } | null)?.body_text ?? ""}`;
+  const read = readInsurerReply(text, o.message.sent_at, o.kind === "insurer_decline");
+  if (!read) return;
+  await db.from("insurer_response_proposals").upsert({
+    organization_id: o.organizationId, opportunity_id: run.subject_id, opportunity_insurer_id: approach.id, email_message_id: o.message.id,
+    outcome: read.outcome, premium_amount: read.premiumAmount, premium_currency: read.premiumCurrency, valid_until: read.validUntil,
+    decline_reason: read.declineReason, evidence: read.evidence, method: "email-text-patterns",
+  }, { onConflict: "opportunity_insurer_id,email_message_id", ignoreDuplicates: true });
 }

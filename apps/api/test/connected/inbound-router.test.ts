@@ -14,6 +14,7 @@ import { AMINA, buildApp, caller, CIC, JUBILEE, newApiKey, ORG_A, OWNER } from "
 
 const API_KEY = newApiKey();
 const TAG = randomUUID().slice(0, 6).toUpperCase();
+const JUB_UW = `uw-${TAG.toLowerCase()}@jubilee.test`;
 const sure = (kind: string, confidence: number) => ({ text: JSON.stringify({ kind, confidence, reason: "The sender answers a quotation request." }), toolCalls: [], stop: "end" as const });
 const script: FakeScript = [
   { match: new RegExp(`JUBQ-${TAG}`), reply: sure("insurer_quote", 0.96) },
@@ -74,7 +75,7 @@ describe("the inbound router", () => {
     await call(AMINA, "POST", `/workflow-approvals/${a!["id"]}/decide`, { decision: "approve", bundleSha256: a!["bundle_sha256"] });
     const o = (await call(AMINA, "GET", `/opportunities/${opportunityId}`)).body;
     for (const i of o.insurers) {
-      const address = i.insurerId === JUBILEE ? "underwriting@jubilee.test" : "quotes@cic.test";
+      const address = i.insurerId === JUBILEE ? JUB_UW : "quotes@cic.test";
       expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, { action: "record_delivery", quoteRequestId: i.request.id, method: "own_email", reference: `Emailed ${address}` })).body.outcome).toBe("done");
     }
     subject = o.insurers[0].request.subject;
@@ -83,13 +84,13 @@ describe("the inbound router", () => {
   });
 
   it("Jubilee's reply, pasted, is filed to the quotation by itself; the run asks a person to record it", async () => {
-    const body = { from: "underwriting@jubilee.test", subject: `RE: ${subject}`, body: `Dear broker,\n\nPlease find our quotation JUBQ-${TAG}: premium KES 5,310,000.\n\nRegards, Jubilee underwriting` };
+    const body = { from: JUB_UW, subject: `RE: ${subject}`, body: `Dear broker,\n\nPlease find our quotation JUBQ-${TAG}: premium KES 5,310,000.\n\nRegards, Jubilee underwriting` };
     const { emailMessageId: id } = await paste(body);
     expect(await classification(id)).toMatchObject({ kind: "insurer_quote", source: "model", state: "routed", routed_run_id: runId, routed_by: "auto" });
     const w = await work();
     expect(w["task_status"]).toBe("needs_you");
-    expect(String(w["required_action"])).toMatch(/^Record the terms or decline from Jubilee.* — it arrived /);
-    expect(String(w["reason"])).toMatch(/It reads nothing into it: a person records what it says/);
+    expect(String(w["required_action"])).toMatch(/^Confirm Jubilee.*'s reply as ASAP read it — KES 5,310,000 — or correct it$/);
+    expect(String(w["reason"])).toMatch(/Read from the email's own words: “.*premium KES 5,310,000.*”\. Nothing counts until you confirm it\./);
     expect((await sql`select count(*)::int as n from insurer_responses r join opportunity_insurers oi on oi.id = r.opportunity_insurer_id where oi.opportunity_id = ${opportunityId}`)[0]!["n"]).toBe(0);
     // The same email pasted again is the same email: one message, one proposal.
     const again = await call(AMINA, "POST", "/inbound/messages", body);
@@ -131,13 +132,13 @@ describe("the inbound router", () => {
     expect(r.attachments).toEqual([{ filename: "CIC-quote.pdf", documentId: null, outcome: "not_kept" }]);
     expect((await sql`select count(*)::int as n from documents where filename = 'CIC-quote.pdf' and deleted_at is null`)[0]!["n"]).toBe(0);
     expect(await classification(r.emailMessageId)).toMatchObject({ state: "routed", routed_run_id: runId, routed_by: "auto" });
-    expect(String((await work())["required_action"])).toMatch(/from Jubilee/);
+    expect(String((await work())["required_action"])).toMatch(/Jubilee/);
 
     const o = (await call(AMINA, "GET", `/opportunities/${opportunityId}`)).body;
     const jub = o.insurers.find((i: { insurerId: string }) => i.insurerId === JUBILEE);
     await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jub.id, outcome: "quoted", premiumAmount: "5310000.00", premiumCurrency: "KES", validUntil: "2027-06-30", sourceNote: "Jubilee's quotation, filed by ASAP." });
     await pump();
-    expect(String((await work())["required_action"])).toMatch(/^Record the terms or decline from CIC/);
+    expect(String((await work())["required_action"])).toMatch(/^Confirm CIC.*'s reply as ASAP read it — KES 5,620,000 — or correct it$/);
   });
 
   it("an email ASAP cannot place is one Unsorted Work item; a person files it, and the item is done", async () => {
@@ -159,7 +160,7 @@ describe("the inbound router", () => {
   });
 
   it("an email the model is unsure of is never routed by itself, even with one candidate", async () => {
-    const { emailMessageId: id } = await paste({ from: "underwriting@jubilee.test", subject: `RE: ${subject}`, body: `About UNSURE-${TAG}: we may revert next week.` });
+    const { emailMessageId: id } = await paste({ from: JUB_UW, subject: `RE: ${subject}`, body: `About UNSURE-${TAG}: we may revert next week.` });
     const c = await classification(id);
     expect(c).toMatchObject({ state: "unsorted", source: "model" });
     expect(Number(c!["confidence"])).toBeCloseTo(0.6);
@@ -170,7 +171,7 @@ describe("the inbound router", () => {
 
   it("the rule moves the bar: at 0.5, the same kind of email routes by itself", async () => {
     expect((await call(AMINA, "PUT", "/rules", { key: "inbound.auto_route_confidence", value: { threshold: 0.5 }, source: "Routing evaluation, Oct 2026", verifiedAt: "2026-10-05" })).status).toBeLessThan(300);
-    const { emailMessageId: id } = await paste({ from: "underwriting@jubilee.test", subject: `RE: ${subject}`, body: `Second note UNSURE-${TAG}: revised wording to follow.` });
+    const { emailMessageId: id } = await paste({ from: JUB_UW, subject: `RE: ${subject}`, body: `Second note UNSURE-${TAG}: revised wording to follow.` });
     expect(await classification(id)).toMatchObject({ state: "routed", routed_by: "auto", routed_run_id: runId });
     expect((await call(AMINA, "PUT", "/rules", { key: "inbound.auto_route_confidence", value: { threshold: 0.9 }, source: "ASAP default restored", verifiedAt: "2026-10-05" })).status).toBeLessThan(300);
   });

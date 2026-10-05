@@ -130,6 +130,7 @@ describe("Drizzle schema conventions", () => {
       "import_rows",
       "inbound_classifications",
       "insurer_contacts",
+      "insurer_response_proposals",
       "insurer_response_revisions",
       "insurer_responses",
       "insurers",

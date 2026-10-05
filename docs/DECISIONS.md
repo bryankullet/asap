@@ -2713,3 +2713,27 @@ A claim stays a draft until a person matches it to a policy period. An endorseme
 the insurer until a person approves the request. Anything missing leaves the email Unsorted, and
 the item says why ASAP did not open it. New enquiries still go to a person, because the quotation
 needs a class of business and a description the email does not reliably give.
+
+## D-152
+
+**An insurer's quote by email is read into a proposed response.**
+
+D-144 filed an insurer's reply to the quotation and asked a person to record it from scratch.
+- *The proposal.* When a quote or decline is filed to a quotation, ASAP reads the reply from the
+  email's own words — by fixed patterns, never the model — into `insurer_response_proposals`
+  (0076), keeping the sentence each value came from. Members read it; only the API writes it.
+  It reads:
+  - the premium and currency, from the sentence that says "premium", or the only amount in the email;
+  - the validity, from "valid for N days" (counted from the email) or "valid until" a date;
+  - a decline, and the sentence that gives its reason.
+
+  When the words are not clear, it reads nothing.
+- *Confirming it.* The quotation's Work then reads "Confirm Jubilee's reply as ASAP read it — KES
+  5,310,000 — or correct it". The person confirms through the same "record response" path, with
+  `fromProposalId`. Anything they type corrects the reading; anything left out is taken as read,
+  with the email as the source. The proposal records whether it was accepted, corrected or rejected,
+  and which response it became. Nothing counts until a person confirms it.
+- *Terms* (excesses, limits, conditions) still come from the quotation document through the
+  extractor, confirmed one at a time (D-138).
+- *Not yet:* renewal terms filed by email are not read into a proposal — renewal still asks a
+  person to record them.

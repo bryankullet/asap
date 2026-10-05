@@ -661,6 +661,24 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
 
       case "record_response": {
+        // Accepting ASAP's reading of the insurer's email (D-152): what the person gave corrects it.
+        type Proposal = { id: string; outcome: string; premium_amount: string | null; premium_currency: string | null; valid_until: string | null; decline_reason: string | null };
+        let proposal: Proposal | null = null;
+        if (input.fromProposalId) {
+          const pr = await db.from("insurer_response_proposals").select("id, opportunity_id, opportunity_insurer_id, email_message_id, outcome, premium_amount, premium_currency, valid_until, decline_reason, state, email_messages(sent_at)").eq("organization_id", org.id).eq("id", input.fromProposalId).maybeSingle();
+          const row = pr.data as unknown as (Proposal & { opportunity_id: string; opportunity_insurer_id: string; email_message_id: string; state: string; email_messages: { sent_at: string } | null }) | null;
+          if (!row || row.opportunity_id !== id || row.opportunity_insurer_id !== input.opportunityInsurerId) return blocked("That reading is not this insurer's answer on this quotation.");
+          if (row.state !== "proposed") return done("already");
+          proposal = row;
+          Object.assign(input, {
+            premiumAmount: input.premiumAmount ?? (row.premium_amount === null ? undefined : Number(row.premium_amount).toFixed(2)),
+            premiumCurrency: input.premiumCurrency ?? row.premium_currency ?? undefined,
+            validUntil: input.validUntil ?? row.valid_until ?? undefined,
+            declineReason: input.declineReason ?? row.decline_reason ?? undefined,
+            sourceEmailMessageId: input.sourceEmailMessageId ?? row.email_message_id,
+            receivedAt: input.receivedAt ?? row.email_messages?.sent_at,
+          });
+        }
         /*
          * A reply answers a request the insurer holds. Recording one against an insurer nobody
          * asked is allowed only when the person says so explicitly — a phone answer, a request
@@ -743,6 +761,11 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           responseId = (inserted.data as { id: string }).id;
         }
 
+        if (proposal) {
+          const same = input.outcome === proposal.outcome && (input.premiumAmount ?? null) === (proposal.premium_amount === null ? null : Number(proposal.premium_amount).toFixed(2)) && (input.premiumCurrency ?? null) === proposal.premium_currency && (input.validUntil ?? null) === proposal.valid_until;
+          const decided = await db.rpc("insurer_response_proposal_decide", { p_id: proposal.id, p_decision: same ? "accepted" : "corrected", p_insurer_response_id: responseId });
+          if (decided.error) return sendError(c, mapDatabaseError(decided.error));
+        }
         // The insurer has answered (D-140): once per response and outcome, so a quotation run waiting
         // on this insurer wakes. A "no response" is not an answer and wakes nothing.
         if (input.outcome !== "no_response") {

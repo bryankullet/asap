@@ -288,6 +288,11 @@ export const opportunityActionSchema = z.discriminatedUnion("action", [
      * recorded against a request that is with the insurer.
      */
     withoutRequest: z.boolean().optional(),
+    /**
+     * Accepting what ASAP read from the insurer's email (D-152). Any value given here corrects the
+     * reading; anything left out is taken as read, and the email is the source.
+     */
+    fromProposalId: uuidSchema.optional(),
   }),
   z.object({
     action: z.literal("record_term"),

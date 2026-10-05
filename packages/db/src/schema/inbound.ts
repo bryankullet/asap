@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, jsonb, numeric, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
+import { date, index, integer, jsonb, numeric, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { timestamptz, uuidPrimaryKey } from "./_shared.js";
 import { insurers } from "./compliance.js";
 import { emailMessages } from "./email.js";
@@ -128,5 +128,37 @@ export const chaserSends = pgTable(
     index("chaser_sends_organization_id_idx").on(t.organizationId),
     index("chaser_sends_template_id_idx").on(t.templateId),
     index("chaser_sends_send_attempt_id_idx").on(t.sendAttemptId),
+  ],
+);
+
+/** An insurer's reply as ASAP read it from the email (0076, D-152). A proposal. */
+export const insurerResponseProposals = pgTable(
+  "insurer_response_proposals",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    opportunityId: uuid("opportunity_id").notNull(),
+    opportunityInsurerId: uuid("opportunity_insurer_id").notNull(),
+    emailMessageId: uuid("email_message_id").notNull().references(() => emailMessages.id, { onDelete: "cascade" }),
+    outcome: text("outcome").notNull(),
+    premiumAmount: numeric("premium_amount", { precision: 14, scale: 2 }),
+    premiumCurrency: text("premium_currency"),
+    validUntil: date("valid_until"),
+    declineReason: text("decline_reason"),
+    evidence: jsonb("evidence").notNull().default(sql`'[]'::jsonb`),
+    method: text("method").notNull(),
+    state: text("state").notNull().default("proposed"),
+    insurerResponseId: uuid("insurer_response_id"),
+    decidedBy: uuid("decided_by").references(() => users.id),
+    decidedAt: timestamptz("decided_at"),
+    createdAt: timestamptz("created_at").notNull().default(sql`now()`),
+  },
+  (t) => [
+    unique("insurer_response_proposals_one_per_email").on(t.opportunityInsurerId, t.emailMessageId),
+    index("insurer_response_proposals_organization_id_idx").on(t.organizationId),
+    index("insurer_response_proposals_opportunity_id_idx").on(t.opportunityId),
+    index("insurer_response_proposals_email_message_id_idx").on(t.emailMessageId),
+    index("insurer_response_proposals_insurer_response_id_idx").on(t.insurerResponseId),
+    index("insurer_response_proposals_decided_by_idx").on(t.decidedBy),
   ],
 );

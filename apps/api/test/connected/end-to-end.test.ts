@@ -137,12 +137,22 @@ describe("one client, from an enquiry email to an issued policy", () => {
     const j = await paste({ from: "underwriting@jubilee.test", subject: `RE: ${subjectOf(JUBILEE)}`, body: `Our quotation JQ-${TAG}: premium KES 5,310,000 for the five trucks.` });
     const c = await paste({ from: "quotes@cic.test", subject: `RE: ${subjectOf(CIC)}`, body: `CIC terms CQ-${TAG}: premium KES 5,620,000.` });
     for (const m of [j, c]) expect(await sorted(m)).toMatchObject({ state: "routed", routed_by: "auto", routed_run_id: q!["id"] });
-    expect(String((await oppWork())["required_action"])).toMatch(/^Record the terms or decline from /);
-    for (const [insurerId, premium] of [[JUBILEE, "5310000.00"], [CIC, "5620000.00"]] as const) {
-      const oi = o.insurers.find((i: { insurerId: string }) => i.insurerId === insurerId);
-      expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, { action: "record_response", opportunityInsurerId: oi.id, outcome: "quoted", receivedAt: new Date().toISOString(), premiumAmount: premium, premiumCurrency: "KES", validUntil: "2027-06-30", sourceNote: "The insurer's email, filed here by ASAP." })).body.outcome).toBe("done");
-      await pump();
-    }
+    // ASAP read each reply's own words into a proposal (D-152); a person confirms or corrects it.
+    expect(String((await oppWork())["required_action"])).toMatch(/^Confirm .*'s reply as ASAP read it — KES 5,(310|620),000 — or correct it$/);
+    const proposals = await sql`select id, opportunity_insurer_id, premium_amount::text as premium, state from insurer_response_proposals where opportunity_id = ${opportunityId}`;
+    expect(proposals.map((p) => p["premium"]).sort()).toEqual(["5310000.00", "5620000.00"]);
+    expect((await sql`select count(*)::int as n from insurer_responses where opportunity_id = ${opportunityId}`)[0]!["n"]).toBe(0);
+    const jub = o.insurers.find((i: { insurerId: string }) => i.insurerId === JUBILEE);
+    const cic = o.insurers.find((i: { insurerId: string }) => i.insurerId === CIC);
+    const pOf = (oiId: string) => proposals.find((p) => p["opportunity_insurer_id"] === oiId)!["id"];
+    expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jub.id, outcome: "quoted", validUntil: "2027-06-30", fromProposalId: pOf(jub.id) })).body.outcome).toBe("done");
+    await pump();
+    expect((await call(AMINA, "POST", `/opportunities/${opportunityId}/actions`, { action: "record_response", opportunityInsurerId: cic.id, outcome: "quoted", premiumAmount: "5600000.00", validUntil: "2027-06-30", fromProposalId: pOf(cic.id) })).body.outcome).toBe("done");
+    await pump();
+    const [jr] = await sql`select premium_amount::text as premium, source_email_message_id from insurer_responses where opportunity_insurer_id = ${jub.id}`;
+    expect(jr).toMatchObject({ premium: "5310000.00", source_email_message_id: j });
+    expect((await sql`select state from insurer_response_proposals where id = ${pOf(jub.id)}`)[0]!["state"]).toBe("corrected");
+    expect((await sql`select state from insurer_response_proposals where id = ${pOf(cic.id)}`)[0]!["state"]).toBe("corrected");
     expect(await run("quotation", opportunityId)).toMatchObject({ state: "waiting_party", current_step: "hand_over" });
     const [cmp] = await sql`select generated_by, generated_by_run_id from quote_comparisons where opportunity_id = ${opportunityId} and superseded_at is null`;
     expect(cmp).toMatchObject({ generated_by: null, generated_by_run_id: q!["id"] });
