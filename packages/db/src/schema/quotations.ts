@@ -492,9 +492,9 @@ export const quoteComparisons = pgTable(
     opportunityId: uuid("opportunity_id")
       .notNull()
       .references(() => opportunities.id, { onDelete: "cascade" }),
-    generatedBy: uuid("generated_by")
-      .notNull()
-      .references(() => users.id),
+    // A person, or the quotation run (0067, D-141): exactly one is recorded.
+    generatedBy: uuid("generated_by").references(() => users.id),
+    generatedByRunId: uuid("generated_by_run_id"),
     generatedAt: timestamptz("generated_at").notNull().defaultNow(),
     presentedAt: timestamptz("presented_at"),
     presentedBy: uuid("presented_by").references(() => users.id),

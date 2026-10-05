@@ -3,6 +3,7 @@ import {
   AUTONOMY_LEVELS,
   autonomyRuleSchema,
   renewalWindowRuleSchema,
+  chaseRuleSchema,
   companyRulesResponseSchema,
   recommendationRuleSchema,
   setCompanyRuleRequestSchema,
@@ -51,6 +52,11 @@ const DEFAULTS: { key: CompanyRuleKey; summary: string; basis: string }[] = [
     basis: "ASAP's default (D-130) until this brokerage sets its own.",
   },
   {
+    key: "quote.chase",
+    summary: "ASAP chases each insurer 3 days after the quotation request reaches them, expects answers within 10 days, and escalates 2 days before.",
+    basis: "ASAP's default (D-141) until this brokerage sets its own. Measure your insurers' real response times and set it.",
+  },
+  {
     key: "workflow.autonomy",
     summary: "ASAP starts and prepares renewals and follows up on its own; every external message waits for a person's approval; it never names a recommended quote; new work goes to the client file's owner.",
     basis: "ASAP's default (D-131) until this brokerage sets its own. Binding cover, client instructions, money and claims decisions are never automatic, whatever is set.",
@@ -62,6 +68,11 @@ function validate(key: CompanyRuleKey, value: unknown): string | null {
     return renewalWindowRuleSchema.safeParse(value).success
       ? null
       : "A renewal window is {leadDays 7–180, followUpDays 1–30, escalateDaysBeforeExpiry 1–60}, each a whole number of days.";
+  }
+  if (key === "quote.chase") {
+    return chaseRuleSchema.safeParse(value).success
+      ? null
+      : "A chase rule is {followUpDays 1–30, deadlineDays 1–120, escalateDaysBefore 0–60}, each a whole number of days.";
   }
   if (key === "workflow.autonomy") {
     const r = autonomyRuleSchema.safeParse(value);

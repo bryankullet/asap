@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { AUTONOMY_DEFAULT, AUTONOMY_LEVELS, autonomyRuleSchema, recommendationRuleSchema, type AutonomyLevel, type AutonomyRule } from "@asap/schema";
-import { quoteRequestDigest } from "../routes/opportunities.js";
+import { approveQuoteRequest, prepareQuoteRequest, quoteRequestDigest } from "../quotation/requests.js";
+import { nextFollowUpAt } from "./rules.js";
 import { advanceRun, auditAutomation, sha256, startRun, type Evidence, type StepContext, type StepResult, type WorkflowDefinition } from "./engine.js";
 
 /**
@@ -325,18 +326,20 @@ async function openTerms(ctx: StepContext): Promise<StepResult> {
 
   let quoteRequestId = insurerMsg.quote_request_id;
   if (!quoteRequestId) {
-    const existingQr = await ctx.db.from("quote_requests").select("id").eq("opportunity_insurer_id", opportunityInsurerId).maybeSingle();
-    quoteRequestId = (existingQr.data as { id: string } | null)?.id ?? null;
-    if (!quoteRequestId) {
-      const qr = await ctx.db.from("quote_requests").insert({ organization_id: ctx.run.organization_id, opportunity_id: opportunityId, opportunity_insurer_id: opportunityInsurerId, subject: insurerMsg.subject, body_text: insurerMsg.body_text, prepared_by: approverId }).select("id").maybeSingle();
-      quoteRequestId = (qr.data as { id: string } | null)?.id ?? null;
-      if (!quoteRequestId) return { kind: "retry", error: qr.error?.message ?? "the insurer request could not be recorded" };
-    }
-    // The person approved this exact text in the bundle; the request carries that approval.
+    // The shared paths a person's clicks use (D-141): prepare the approved text, then record the
+    // approval of the person who approved the bundle — never a direct write past their guards.
     const at = new Date().toISOString();
-    const digest = quoteRequestDigest(insurerMsg.subject, insurerMsg.body_text);
-    await ctx.db.from("quote_requests").update({ approved_by: approverId, approved_at: at, approved_body_sha256: digest, updated_at: at }).eq("id", quoteRequestId).is("approved_at", null);
-    await ctx.db.from("quote_request_approvals").insert({ organization_id: ctx.run.organization_id, quote_request_id: quoteRequestId, body_sha256: digest, approved_by: approverId, approved_at: at });
+    const prepared = await prepareQuoteRequest(ctx.db, { organizationId: ctx.run.organization_id, opportunityId, opportunityInsurerId, subject: insurerMsg.subject, body: insurerMsg.body_text, preparedBy: approverId, now: at });
+    if (prepared.outcome === "blocked") {
+      // Already prepared and approved on an earlier attempt: read it.
+      const existingQr = await ctx.db.from("quote_requests").select("id").eq("opportunity_insurer_id", opportunityInsurerId).maybeSingle();
+      quoteRequestId = (existingQr.data as { id: string } | null)?.id ?? null;
+      if (!quoteRequestId) return { kind: "retry", error: prepared.reason };
+    } else {
+      quoteRequestId = prepared.quoteRequestId;
+      const approved = await approveQuoteRequest(ctx.db, { organizationId: ctx.run.organization_id, quoteRequestId, approverId, expectedDigest: quoteRequestDigest(insurerMsg.subject, insurerMsg.body_text), now: at });
+      if (approved.outcome === "blocked") return { kind: "retry", error: approved.reason };
+    }
     await ctx.db.from("prepared_communications").update({ quote_request_id: quoteRequestId, updated_at: at }).eq("id", insurerMsg.id);
   }
   return {
@@ -373,7 +376,8 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
     await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "needs_you", task_party: null, required_action: `Deliver the approved renewal request to ${s.insurer!.name} and record how`, reason: "The request is approved but nothing has been sent — ASAP has no mailbox connected.", task_next_check: new Date(ctx.now.getTime() + DAY).toISOString() });
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY), output: { followUps, delivered: false } };
   }
-  const scheduled = new Date(new Date(delivery.delivered_at).getTime() + (followUps + 1) * window.followUpDays * DAY);
+  // The per-insurer cadence the quotation workflow uses too (D-141).
+  const scheduled = nextFollowUpAt(delivery.delivered_at, followUps, window.followUpDays);
   // A person may move the next follow-up ("move it to Friday") or stop chasing this insurer.
   const overrideDay = typeof ctx.run.facts["followUpOn"] === "string" ? String(ctx.run.facts["followUpOn"]) : null;
   // A follow-up moved to today (or "follow up now") is due now, not at 06:00 UTC — before then it

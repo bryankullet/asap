@@ -2384,3 +2384,45 @@ missing.
   cover confirmed, claim registered, check overdue, run could not finish. "Renewal approaching" and
   "payment received" stay off. The other emitted events are not automation triggers; they drive
   workflows.
+
+## D-141
+
+**Autonomy build, phase 3: the quotation workflow.**
+
+- *Start.* Opening an opportunity, by a person or by Ask, emits `opportunity.opened`, once. The
+  quotation run starts unless the brokerage sets the new autonomy action `prepare_quotation` below
+  "act within rules". Its cap is "manage exceptions" and its default is "act within rules". Actions
+  added after brokerages saved a rule carry a schema default, so an older stored rule still reads.
+  `opportunity.changed` is emitted after any quotation action and wakes the run.
+- *Steps.*
+  1. List requirements against what is held.
+  2. Wait for a person to choose insurers. ASAP never picks one.
+  3. Prepare one request per insurer.
+  4. Ask for one approval of every request's exact text.
+  5. Wait for each delivery. The client holds this step while a required item is outstanding.
+     That follows D-119, where requirements stand in front of delivery rather than preparation,
+     which is how the brief's "wait on the party" is honoured.
+  6. Chase each insurer on its own delivery date. Escalate before the deadline, and stop with
+     `no_quotes_by_deadline` if none quoted.
+  7. Generate the comparison once every insurer has answered, or the deadline arrives with at least
+     one quote. Terms a person has not confirmed (D-138) hold this step.
+  8. Hand the options to a person.
+  9. When a person records the instruction, finish with a receipt. Placement starts from the same
+     event (phase 4).
+- *Shared paths.*
+  - `quotation/requests.ts` (`prepareQuoteRequest`, `approveQuoteRequest`) is the one path for the
+    route, the quotation workflow and renewal's `openTerms`. Renewal no longer inserts or approves
+    `quote_requests` directly.
+  - Approval checks the digest the person was shown, so a text changed since is refused.
+  - `generateComparison` is shared by a person's "Generate" and the run.
+  - Renewal and quotation share the per-insurer cadence (`nextFollowUpAt`) and the rule reader
+    (`ruleOr`).
+- *Work* is written from the same derivation the quotation Space reads (D-119, `workStateFrom`),
+  with the run's own step where the derivation cannot know it: the bundle approval, a chase, an
+  escalation, handing over.
+- *Rules.* `quote.chase` = {followUpDays, deadlineDays, escalateDaysBefore}. ASAP's default is
+  3/10/2 with a stated basis, until a brokerage sets its own. The deadline is never after the day
+  before cover starts.
+- *Honest attribution.* Migration 0067 lets a comparison record `generated_by_run_id` instead of a
+  person, exactly one of the two. The run never puts a person's name on what it did. Presenting a
+  comparison remains a person's act.

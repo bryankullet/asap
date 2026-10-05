@@ -4,12 +4,15 @@
  */
 import { registerWorkflow } from "./registry.js";
 import { detectRenewals, RENEWAL } from "./renewal.js";
+import { QUOTATION, QUOTATION_EVENTS } from "./quotation.js";
 
 registerWorkflow({
   definition: RENEWAL,
   detect: async (db, logger, organizationId, now) =>
     detectRenewals(db, logger, organizationId, now),
 });
+
+registerWorkflow({ definition: QUOTATION, on: QUOTATION_EVENTS });
 
 export {
   advanceAnyRun,

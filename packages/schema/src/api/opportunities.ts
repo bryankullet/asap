@@ -590,6 +590,7 @@ export const AUTONOMY_ACTIONS = {
   follow_up: "Follow up with insurers on the schedule",
   escalate: "Escalate to the work owner",
   recommend_quote: "Name a recommended quote",
+  prepare_quotation: "Start quotation work, prepare the insurer requests and the approval bundle",
 } as const;
 export type AutonomyAction = keyof typeof AUTONOMY_ACTIONS;
 /** Never automatic, whatever a brokerage sets: a person does these. */
@@ -602,6 +603,7 @@ export const AUTONOMY_CAP: Record<AutonomyAction, AutonomyLevel> = {
   follow_up: "manage_exceptions",
   escalate: "manage_exceptions",
   recommend_quote: "recommend",
+  prepare_quotation: "manage_exceptions",
 };
 export const autonomyRuleSchema = z.object({
   actions: z.object({
@@ -611,6 +613,11 @@ export const autonomyRuleSchema = z.object({
     follow_up: AutonomyLevel,
     escalate: AutonomyLevel,
     recommend_quote: AutonomyLevel,
+    /*
+     * Actions added after brokerages had saved a rule carry a default (D-141), so a rule saved
+     * before they existed still reads — with ASAP's stated default for the new action.
+     */
+    prepare_quotation: AutonomyLevel.default("act_within_rules"),
   }),
   /** Who may approve what leaves the brokerage. */
   approver: z.enum(["any_approver", "admin_or_owner"]),
@@ -621,7 +628,7 @@ export const autonomyRuleSchema = z.object({
 });
 export type AutonomyRule = z.infer<typeof autonomyRuleSchema>;
 export const AUTONOMY_DEFAULT: AutonomyRule = {
-  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare" },
+  actions: { detect_renewals: "act_within_rules", prepare_renewal: "act_within_rules", external_messages: "act_after_approval", follow_up: "act_within_rules", escalate: "act_within_rules", recommend_quote: "prepare", prepare_quotation: "act_within_rules" },
   approver: "any_approver",
   assignment: "client_file_owner",
   alsoNever: [],
@@ -635,7 +642,19 @@ export const renewalWindowRuleSchema = z.object({
 export type RenewalWindowRule = z.infer<typeof renewalWindowRuleSchema>;
 
 /** Every key this deployment understands, and what a value for it must look like. */
-export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy"] as const;
+/**
+ * How often ASAP chases an outside party, and when it escalates (D-141). One shape for every
+ * workflow's cadence: follow up every N days after the request reached them; expect an answer within
+ * a deadline; escalate some days before it.
+ */
+export const chaseRuleSchema = z.object({
+  followUpDays: z.number().int().min(1).max(30),
+  deadlineDays: z.number().int().min(1).max(120),
+  escalateDaysBefore: z.number().int().min(0).max(60),
+});
+export type ChaseRule = z.infer<typeof chaseRuleSchema>;
+
+export const COMPANY_RULE_KEYS = ["quote.recommendation", "quote.validity", "renewal.window", "workflow.autonomy", "quote.chase"] as const;
 export const CompanyRuleKey = z.enum(COMPANY_RULE_KEYS);
 export type CompanyRuleKey = z.infer<typeof CompanyRuleKey>;
 
