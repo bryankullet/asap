@@ -94,7 +94,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   }, [orgKey, logic, go]);
 
   // ---------------------------------------------------------------- the URL drives the logic
-  const [conversation, setConversation] = useState<{ id: string; title: string; statusLabel: string } | null>(null);
+  const [conversation, setConversation] = useState<{ id: string; title: string; statusLabel: string; spaceRef: Ref | null } | null>(null);
   useEffect(() => {
     if (!ready) return;
     const ref = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
@@ -104,10 +104,26 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     if (wantsChat && (cid || null) !== (logic.state.conversationId || null)) void logic.openConversation(cid);
     if (!wantsChat && logic.state.conversationId) void logic.openConversation(null);
     if (cid && A?.shell) {
-      void A.shell.session(cid).then((c) => setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel })).catch(() => setConversation(null));
+      void A.shell
+        .session(cid)
+        .then((c) => {
+          setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel, spaceRef: (c.spaceRef as Ref | null) ?? null });
+          if (c.client) logic.setScope({ ws: "client", clientId: c.client.id });
+        })
+        .catch(() => setConversation(null));
       void A.shell.recordOpen({ conversationId: cid }).then(refreshLists);
     } else setConversation(null);
   }, [ready, surface, logic, A, refreshLists]);
+
+  // The Space shown beside a conversation is the one it controls: the server keeps the link, so the
+  // conversation can bring it back after the Space is closed, or after a refresh.
+  const splitKey = surface.mode === "conversation" && surface.space ? JSON.stringify(surface.space) : "";
+  useEffect(() => {
+    if (!splitKey || surface.mode !== "conversation" || !surface.conversationId || !A?.shell) return;
+    if (conversation?.id === surface.conversationId && conversation.spaceRef && sameRef(conversation.spaceRef, surface.space)) return;
+    const space = surface.space as Ref;
+    void A.shell.update(surface.conversationId, { spaceRef: space }).then((c) => setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel, spaceRef: (c.spaceRef as Ref | null) ?? null })).catch(() => {});
+  }, [splitKey, conversation?.id]); // eslint-disable-line
 
   // A Space opened is a Space in Recent, named as the Space names itself.
   const ws = v["ws"] as { kind?: string; title?: string; statusLabel?: string } | undefined;
@@ -147,8 +163,12 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     try {
       const r = await A.shell.start({ text, scope, workItemId: ctxRef && typeof ctxRef["workItemId"] === "string" ? (ctxRef["workItemId"] as string) : null, spaceRef: ctxRef });
       const id = r.conversation.id;
+      // The message that started it is sent, so it is no longer anyone's draft.
+      writeDraft("new", "");
+      if (surface.mode === "space") writeDraft(`space:${toPath(surface)}`, "");
       await logic.openConversation(id);
-      setConversation({ id, title: r.conversation.title, statusLabel: r.conversation.statusLabel });
+      setConversation({ id, title: r.conversation.title, statusLabel: r.conversation.statusLabel, spaceRef: (r.conversation.spaceRef as Ref | null) ?? null });
+      if (r.conversation.client) logic.setScope({ ws: "client", clientId: r.conversation.client.id });
       if (surface.mode === "space") go({ mode: "space", ref: surface.ref, drawer: id }, { replace: true });
       else go({ mode: "conversation", conversationId: id, space: surface.mode === "conversation" ? surface.space : null }, { replace: surface.mode === "conversation" });
       void refreshLists();
@@ -170,6 +190,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     el.addEventListener("input", onInput);
     return () => el.removeEventListener("input", onInput);
   });
+  controller.sent = () => writeDraft(draftKey, "");
   // A sent message is no longer a draft.
   const threadLen = (logic.state.thread || []).length;
   useEffect(() => {
@@ -229,19 +250,17 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const closeDrawer = () => surface.mode === "space" && go({ mode: "space", ref: surface.ref, drawer: null });
   const closeChatKeepSpace = () => surface.mode === "conversation" && surface.space && go({ mode: "space", ref: surface.space, drawer: null });
   const closeSpaceKeepChat = () => surface.mode === "conversation" && go({ mode: "conversation", conversationId: surface.conversationId, space: null });
+  const besideSpace = surface.mode === "conversation" && !surface.space && conversation?.id === surface.conversationId ? conversation?.spaceRef ?? null : null;
   const reopenSpace = () => {
-    if (surface.mode !== "conversation") return;
-    const fromSession = conversation && A?.shell ? null : null;
-    void fromSession;
-    const last = logic.state.ref as Ref | null;
-    if (last) go({ mode: "conversation", conversationId: surface.conversationId, space: last });
+    if (surface.mode !== "conversation" || !besideSpace) return;
+    go({ mode: "conversation", conversationId: surface.conversationId, space: besideSpace });
   };
 
   const rename = async (title: string) => {
     if (!conversation || !A?.shell) return;
     try {
       const c = await A.shell.update(conversation.id, { title });
-      setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel });
+      setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel, spaceRef: (c.spaceRef as Ref | null) ?? null });
       void refreshLists();
     } catch {
       logic.flash("That name could not be saved. Use 3 to 120 characters.");
@@ -262,8 +281,8 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   else if (surface.mode === "conversation" && (!surface.space || mobile)) {
     main = (
       <div className="sh-conv-center" data-layout="conversation">
-        {mobile && surface.space ? <div className="sh-mobile-switch"><button type="button" onClick={() => go({ mode: "space", ref: surface.space!, drawer: surface.conversationId ?? "new" })}>Open Space · {spaceTitle || "workspace"} →</button></div> : null}
-        {!mobile && logic.state.ref ? <div className="sh-conv-reopen"><button type="button" onClick={reopenSpace}>Show {spaceTitle || "the Space"} beside the conversation</button></div> : null}
+        {mobile && surface.space ? <div className="sh-mobile-switch"><button type="button" onClick={() => go(surface.conversationId ? { mode: "space", ref: surface.space!, drawer: null, back: surface.conversationId } : { mode: "space", ref: surface.space!, drawer: null })}>Open Space · {spaceTitle || "workspace"} →</button></div> : null}
+        {!mobile && besideSpace ? <div className="sh-conv-reopen"><button type="button" onClick={reopenSpace}>Show its Space beside the conversation</button></div> : null}
         {conversationEl}
       </div>
     );
@@ -299,6 +318,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
       </div>
     ) : (
       <div className={drawerOpen ? "sh-space sh-space-drawer" : "sh-space"} data-layout="space">
+        {mobile && surface.back ? <div className="sh-mobile-switch"><button type="button" onClick={() => go({ mode: "conversation", conversationId: surface.back!, space: surface.ref })}>← Back to conversation</button></div> : null}
         <div className="sh-space-main">{spaceEl}</div>
         {drawerOpen ? (
           <aside className="sh-drawer" aria-label={`Ask about ${spaceTitle}`}>
@@ -365,14 +385,14 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
           </div>
           <div className="sh-header-actions">
             {surface.mode === "space" && !surface.drawer ? (
-              <button type="button" className="sh-primary-ghost" onClick={askAbout}>✦ Ask about this</button>
+              <button type="button" className="sh-primary-ghost" onClick={askAbout} aria-label="Ask about this">{mobile ? "✦ Ask" : "✦ Ask about this"}</button>
             ) : null}
             {surface.mode === "space" && spaceRef && typeof spaceRef["clientId"] === "string" && !mobile ? (
               <button type="button" onClick={() => go({ mode: "activity", filter: { clientId: spaceRef["clientId"] as string } })}>Activity</button>
             ) : null}
             {pinTarget ? (
-              <button type="button" aria-pressed={pinned} onClick={() => void togglePin()} title={pinned ? "Unpin" : "Pin — keep it at the top of Recent"}>
-                {pinned ? "★ Pinned" : "☆ Pin"}
+              <button type="button" aria-pressed={pinned} aria-label={pinned ? "Pinned — unpin" : "Pin"} onClick={() => void togglePin()} title={pinned ? "Unpin" : "Pin — keep it at the top of Recent"}>
+                {mobile ? (pinned ? "★" : "☆") : pinned ? "★ Pinned" : "☆ Pin"}
               </button>
             ) : null}
             {!mobile ? (

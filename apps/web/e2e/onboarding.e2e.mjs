@@ -88,8 +88,14 @@ const expectText = async (where, re) => {
   const t = await where.innerText();
   if (!(typeof re === "string" ? t.includes(re) : re.test(t))) throw new Error(`expected ${re} on screen`);
 };
+// D-155: the address is the surface — a Space opens beside the conversation at its own address.
+const packRef = (ref) => {
+  const q = new URLSearchParams(Object.entries(ref).filter(([k, v]) => k !== "ws" && v != null).map(([k, v]) => [k, String(v)])).toString();
+  return ref.ws + (q ? "?" + q : "");
+};
 const openRef = async (page, ref) => {
-  await page.evaluate((r) => sessionStorage.setItem("asap.openRef", JSON.stringify(r)), ref);
+  const conv = (new URL(page.url()).hash.match(/^#\/ask\/([0-9a-f-]{36})/) || [])[1];
+  await page.goto(process.env.E2E_URL.replace(/#.*$/, "") + `#/ask${conv ? "/" + conv : ""}?space=` + encodeURIComponent(packRef(ref)));
   await page.reload();
   await page.getByPlaceholder("Tell ASAP what you need").waitFor({ timeout: 30000 });
   await settle(page, 1800);
@@ -139,7 +145,7 @@ for (const w of [1440, 390]) {
     await expectText(page.locator("body"), /Setup · \d of 4 done|Your book is in/);
   });
   await step(page, "07-typed-import-request", async () => {
-    if (w === 390) { const b = page.getByRole("button", { name: /Back to the conversation/ }); if (await b.count()) await b.first().click(); await settle(page, 500); }
+    if (w === 390) { const b = page.getByRole("button", { name: /Back to conversation/ }); if (await b.count()) await b.first().click(); await settle(page, 500); }
     await ask(page, "Import these policy schedules");
     await expectText(page.locator("body"), "Choose files");
   });

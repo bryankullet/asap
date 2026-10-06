@@ -40,7 +40,7 @@ function refForItem(w) {
 
 /** Where a run opens: a renewal's own Space, otherwise the Work item it drives. */
 export function runRef(r) {
-  if (r.workflow === "renewal") return runRef(r);
+  if (r.workflow === "renewal") return { ws: "renewal", runId: r.id };
   if (r.workItemId) return { ws: "workitem", workItemId: r.workItemId };
   return { ws: "renewal" };
 }
@@ -55,8 +55,9 @@ function runsByWorkItem(supervision) {
  * Work, as the operational inbox: one row per unfinished outcome, in the view it is genuinely in.
  *  - Needs me: a person must act, and it is mine or nobody's — including a run asking for approval.
  *  - ASAP is handling: a run of ASAP's is live on it and nobody needs to act.
- *  - Waiting on others: an outside party holds it — named, since a date.
- *  - Upcoming: someone's work in progress whose next check or due date is ahead.
+ *  - Waiting on others: an outside party holds it — named, since a date — or a colleague owns the
+ *    next step, named.
+ *  - Upcoming: work whose next check or due date is still ahead.
  *  - Done: finished.
  */
 export function workInbox({ supervision, meId }) {
@@ -66,18 +67,20 @@ export function workInbox({ supervision, meId }) {
     const run = runs.get(w.id) || null;
     const live = run && run.state !== "done" && run.state !== "cancelled";
     const op = run?.operational || null;
-    const party = status === "with_party" ? (w.parties?.[0]?.name || null) : op?.waitingFor?.party || null;
+    const mine = !w.assigneeId || w.assigneeId === meId;
+    const colleague = !mine && status !== "done" && status !== "with_party" ? personName(w.assigneeId) : null;
+    const party = status === "with_party" ? (w.parties?.[0]?.name || null) : op?.waitingFor?.party || colleague || null;
     const since = status === "with_party" ? w.parties?.[0]?.since || null : null;
     const next = w.nextCheckAt || w.dueAt || null;
-    const mine = !w.assigneeId || w.assigneeId === meId;
     let view;
     if (status === "done") view = "done";
     else if (live && run.views?.includes("needs_me")) view = "needs_me";
     else if (status === "with_party") view = "waiting";
     else if (live && run.views?.includes("asap_handling")) view = "handling";
     else if (status === "needs_you" && mine) view = "needs_me";
+    else if (colleague) view = "waiting";
     else if (next && new Date(next).getTime() > Date.now()) view = "upcoming";
-    else view = mine ? "needs_me" : "upcoming";
+    else view = "needs_me";
     const client = w.clientId ? S.sel.client(w.clientId) : null;
     const overdue = next && new Date(next).getTime() < Date.now() && status !== "done";
     const urgency = status === "done" ? "none" : overdue || w.priority === "high" || run?.state === "exception" ? "high" : w.priority === "low" ? "low" : "medium";

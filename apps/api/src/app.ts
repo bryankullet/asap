@@ -106,7 +106,7 @@ export function createApp(deps: AppDeps) {
     cors({
       origin: deps.webBaseUrl,
       allowHeaders: ["Authorization", "Content-Type"],
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       maxAge: 600,
     }),
   );

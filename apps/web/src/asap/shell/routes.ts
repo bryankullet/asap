@@ -11,6 +11,7 @@
  *   /ask/<id>?space=<ref>      the conversation beside the Space it opened (split)
  *   /s/<ws>?<ref fields>       a Space, full width
  *   /s/<ws>?…&ask=<id|new>     the Space with its contextual conversation drawer
+ *   /s/<ws>?…&back=<id>        on a phone, the Space opened from a conversation, with the way back
  */
 export type Ref = Record<string, unknown> & { ws: string };
 
@@ -20,9 +21,9 @@ export type Surface =
   | { mode: "automations" }
   | { mode: "activity"; filter: Record<string, string> }
   | { mode: "conversation"; conversationId: string | null; space: Ref | null }
-  | { mode: "space"; ref: Ref; drawer: string | null };
+  | { mode: "space"; ref: Ref; drawer: string | null; back?: string | null };
 
-const RESERVED = new Set(["ask", "space"]);
+const RESERVED = new Set(["ask", "space", "back"]);
 const enc = (v: unknown) => (typeof v === "string" ? v : `j:${JSON.stringify(v)}`);
 const dec = (v: string): unknown => {
   if (!v.startsWith("j:")) return v;
@@ -74,7 +75,7 @@ export function parse(pathname: string, search: string): Surface {
   if (head === "automations" && second) return { mode: "space", ref: { ws: "automation", automationId: second }, drawer: params.get("ask") };
   if (head === "activity") return { mode: "activity", filter: Object.fromEntries(params) };
   if (head === "ask") return { mode: "conversation", conversationId: second ?? null, space: unpackRef(params.get("space")) };
-  if (head === "s" && second) return { mode: "space", ref: queryToRef(second, params), drawer: params.get("ask") };
+  if (head === "s" && second) return params.get("back") ? { mode: "space", ref: queryToRef(second, params), drawer: params.get("ask"), back: params.get("back") } : { mode: "space", ref: queryToRef(second, params), drawer: params.get("ask") };
   // Older addresses (/today, /clients/…) open Home rather than a dead page.
   return { mode: "home" };
 }
@@ -100,6 +101,7 @@ export function toPath(s: Surface): string {
         return `/automations/${s.ref["automationId"]}${s.drawer ? `?ask=${encodeURIComponent(s.drawer)}` : ""}`;
       const q = refToQuery(s.ref);
       if (s.drawer) q.set("ask", s.drawer);
+      if (s.back) q.set("back", s.back);
       const qs = q.toString();
       return `/s/${s.ref.ws}${qs ? `?${qs}` : ""}`;
     }

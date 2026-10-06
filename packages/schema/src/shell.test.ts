@@ -18,6 +18,9 @@ describe("conversation titles (D-155)", () => {
   it("a question keeps its own words, trimmed", () => {
     expect(deriveConversationTitle({ text: "Can you tell me which policies expire next month?" })).toBe("Which policies expire next month");
   });
+  it("a question from a workflow's Space is named after the workflow", () => {
+    expect(deriveConversationTitle({ text: "Assign this to Kamau", recordLabel: "Acme Motors — renewal terms from Jubilee" })).toBe("Acme Motors — renewal terms from Jubilee");
+  });
   it("is deterministic", () => {
     expect(conversationPurpose("Get a quotation for Acme's fleet")).toBe("quotation");
     expect(deriveConversationTitle({ text: "Get a quotation for Acme's fleet", clientName: "Acme" })).toBe(deriveConversationTitle({ text: "Get a quotation for Acme's fleet", clientName: "Acme" }));
@@ -28,6 +31,7 @@ describe("conversation status is derived, never authored", () => {
   it("follows the linked work", () => {
     expect(deriveConversationStatus({ turns: 0, workItem: null, runState: null })).toBe("draft");
     expect(deriveConversationStatus({ turns: 2, workItem: null, runState: null })).toBe("completed");
+    expect(deriveConversationStatus({ turns: 4, purpose: "renewal", workItem: null, runState: null })).toBe("draft");
     const w = (taskStatus: string, exception = false) => ({ taskStatus, exception, completed: false });
     expect(deriveConversationStatus({ turns: 2, workItem: w("in_progress"), runState: "waiting_approval" })).toBe("needs_approval");
     expect(deriveConversationStatus({ turns: 2, workItem: w("with_party"), runState: "waiting_party" })).toBe("waiting");

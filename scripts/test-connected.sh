@@ -27,7 +27,8 @@ PORT="${CONNECTED_PORT:-3399}"
 SECRET="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48)"
 AUTH_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
 WORK="$(mktemp -d)"
-trap 'kill "${PGRST_PID:-0}" "${STORAGE_PID:-0}" "${EXTRACTOR_PID:-0}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
+# The stand-ins run in their own process groups, so the whole group (npx and the node it starts) stops.
+trap 'kill "${PGRST_PID:-0}" 2>/dev/null; for p in ${STORAGE_PID:-} ${EXTRACTOR_PID:-}; do kill -- "-$p" 2>/dev/null || kill "$p" 2>/dev/null; done; rm -rf "$WORK"' EXIT
 
 # The role PostgREST logs in as. It holds no privilege of its own; it can only become anon or
 # authenticated, as Supabase's `authenticator` does.
@@ -62,8 +63,9 @@ done
 curl -s -o /dev/null "http://127.0.0.1:$PORT/" || { cat "$WORK/postgrest.log" >&2; exit 1; }
 
 # A storage stand-in, so documents and email attachments are really kept (D-153).
-STORAGE_PORT="${CONNECTED_STORAGE_PORT:-3398}"
-(cd apps/api && exec npx tsx test/connected/storage-standin.ts "$STORAGE_PORT") > "$WORK/storage.log" 2>&1 &
+# Not 3398: that is the browser end-to-end run's API port.
+STORAGE_PORT="${CONNECTED_STORAGE_PORT:-3396}"
+setsid bash -c "cd apps/api && exec npx tsx test/connected/storage-standin.ts $STORAGE_PORT" > "$WORK/storage.log" 2>&1 &
 STORAGE_PID=$!
 for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$STORAGE_PORT/storage/v1/object/x" && break; sleep 0.2; done
 export CONNECTED_SUPABASE_URL="http://127.0.0.1:$STORAGE_PORT"
@@ -74,7 +76,7 @@ if [ -n "${EXTRACTOR_PYTHON:-}" ]; then
   EXTRACTOR_PORT="${CONNECTED_EXTRACTOR_PORT:-8198}"
   EXTRACTOR_SECRET="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)"
   APP_ENV=local EXTRACTOR_PORT="$EXTRACTOR_PORT" EXTRACTOR_SHARED_SECRET="$EXTRACTOR_SECRET" \
-    "$EXTRACTOR_PYTHON" -m asap_extractor.main > "$WORK/extractor.log" 2>&1 &
+    setsid "$EXTRACTOR_PYTHON" -m asap_extractor.main > "$WORK/extractor.log" 2>&1 &
   EXTRACTOR_PID=$!
   for _ in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$EXTRACTOR_PORT/health" && break; sleep 0.3; done
   export CONNECTED_EXTRACTOR_URL="http://127.0.0.1:$EXTRACTOR_PORT" CONNECTED_EXTRACTOR_SECRET="$EXTRACTOR_SECRET"

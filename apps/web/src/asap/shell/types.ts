@@ -44,6 +44,7 @@ export type Logic = {
   setSurface(ref: Ref | null): void;
   openConversation(id: string | null): Promise<void>;
   clearContext(): void;
+  setScope(ref: Ref | null): void;
   ask(text: string): Promise<void>;
   chatFiles(files: File[]): Promise<void>;
   act(action: string, payload: unknown, opts?: Record<string, unknown>): void;
@@ -59,4 +60,6 @@ export type ShellController = {
   search(): void;
   ensureConversation(text: string): Promise<string | null>;
   ready?(logic: Logic): void;
+  /** A message left the composer: it is no longer a draft. */
+  sent?(): void;
 };

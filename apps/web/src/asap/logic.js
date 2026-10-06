@@ -62,7 +62,8 @@ class Component extends DCLogic {
   setSurface = (ref) => {
     const same = JSON.stringify(ref || null) === JSON.stringify(this.state.ref || null);
     if (same) return;
-    this.setState({ ref: ref || null, sheet: null, contextRef: ref && ref.clientId ? ref : this.state.contextRef && ref ? this.state.contextRef : null });
+    // A Space about a client sets the context; leaving a Space keeps the conversation's own scope.
+    this.setState({ ref: ref || null, sheet: null, contextRef: ref && ref.clientId ? ref : this.state.contextRef });
   };
   openRef = (ref, opts = {}) => {
     if (!ref) return;
@@ -72,13 +73,16 @@ class Component extends DCLogic {
   /** A conversation by its server identity: its turns become the thread. */
   openConversation = async (id) => {
     if (id && id === this.state.conversationId) return;
-    this.setState({ conversationId: id || null, thread: [], thinking: false, lastPlan: null, selection: null });
+    // A different conversation inherits nothing from the last one; its own scope is set by the shell.
+    this.setState({ conversationId: id || null, thread: [], thinking: false, lastPlan: null, selection: null, contextRef: this.state.ref && this.state.ref.clientId ? this.state.ref : null });
     let messages = [];
     try { messages = this.A.shell ? await this.A.shell.open(id || null) : []; }
     catch (e) { this.flash('That conversation could not be loaded. Nothing was changed — try again.'); }
     if ((id || null) !== (this.state.conversationId || null)) return;
     this.setState({ thread: messages && messages.length ? messages : [] });
   };
+  /** The conversation's own scope, from the server: the client it is about. */
+  setScope = (ref) => { if (!this.state.ref || !this.state.ref.clientId) this.setState({ contextRef: ref }); };
   /** Tenant or person changed: nothing inherited survives (D-155). */
   clearContext = () => { this.setState({ ref: null, conversationId: null, thread: [], contextRef: null, selection: null, lastPlan: null, staged: [] }); };
 
@@ -193,7 +197,7 @@ class Component extends DCLogic {
       if (r.plan && !r.pending) this.act(r.plan.action, r.plan.payload, { actionId: r.plan.actionId });
     }, this.A.ai.latencyMs);
   };
-  send = () => { const el = this.inputRef.current; if (!el) return; const v = el.value; el.value = ''; this.ask(v); };
+  send = () => { const el = this.inputRef.current; if (!el) return; const v = el.value; el.value = ''; if (this.props.shell && this.props.shell.sent) this.props.shell.sent(); this.ask(v); };
   onKeyDown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); } };
 
   // ---------------- sheets

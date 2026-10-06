@@ -2776,3 +2776,51 @@ offer, acceptance and payment were references with no figure, and nothing held a
   person's record of the insurer's or bank's paper, and a wrong figure is corrected by an exception,
   never overwritten. Levies on an adjustment are not split out. That waits for the levy rules to be
   confirmed per brokerage.
+
+## D-155 — The adaptive shell: the interface follows what the person is doing
+
+The owner directed a structural change: the same Chat + Space layout everywhere made ASAP feel
+static, and the permanent conversation took space it rarely needed. This supersedes D-118's
+permanent Chat + Space, D-074's sidebar and Ask-everywhere rule, and D-075's Work view names. It
+keeps D-115's substance (the approved interface's logic, Spaces and sheets) and every rule in §45.
+
+- *Layout modes.* Home (full width, calm, no transcript); Conversation (centred); Space (full width,
+  chat closed); Split (the conversation beside the Space it opened, resizable 360–720px, either side
+  closable and reopenable); Work, Automations and Activity (full-width surfaces, no chat). Phones get
+  a bottom bar (Home · Work · Ask · Automations · More), full-screen conversation and Space with
+  "Open Space" and "Back to conversation", and never a split.
+- *Removed.* The Gmail-style tab strip, its tab state and its sessionStorage reopen; the permanent
+  Ask column and its resize; the old sidebar and mobile bar; and the D-115 compiler with its
+  generated files. The approved `.dc.html` source is not in this repository, so the logic class and
+  the Space, conversation and sheet renderers are now maintained source
+  (`apps/web/src/asap/logic.js`, `views/space-views.js`), changed in place like any other code.
+- *The address is the surface* (`shell/routes.ts`): `/`, `/work?view=`, `/automations`,
+  `/activity?…`, `/ask/<id>[?space=<ref>]`, `/s/<ws>?<ref>[&ask=<id|new>]`. Refresh reopens it, Back and
+  Forward move between surfaces, opening the same record focuses it. Older addresses open Home.
+- *Named sessions, Recent, Pins* (0078). A conversation is a server session: titled
+  deterministically from its purpose and the records it names (`deriveConversationTitle`, no model
+  in the path, never "New chat"), renamable, linked to its Work item and Space, with a status
+  derived from that work — never stored. The same Work item, or the same purpose for the same client
+  while unfinished, reopens one session. An explicit client in the request overrides inherited
+  context. `recent_items` and `space_pins` are personal and per brokerage under RLS; Recent re-reads
+  each title from its record and drops what is gone or unreadable. Search finds sessions by title,
+  client, workflow, policy number and claim reference. Only an unsent message stays in the browser.
+- *When chat opens.* From Home or + New, an earlier conversation, "Ask about this" in a Space (a
+  drawer scoped to that record), a clarification, an approval, or controlling a running workflow.
+  Never on Work, Automations, Activity, Search or a Space by default. Closing a conversation does not
+  touch its workflow; closing a Space does not delete its conversation.
+- *Surfaces* (`asap/surfaces.js`), read from the records Spaces read. Home: one command box, up to
+  five genuine attention items each with why and one action, what ASAP is handling and whether it is
+  safe to leave, Recent; a brokerage with nothing yet gets the setup entry point instead. Work: Needs
+  me · ASAP is handling · Waiting on others (an outside party, or a colleague, named) · Upcoming ·
+  Done, one row per outcome, opening its Space. Automations: ASAP's workflows grouped from
+  supervision, and standing instructions with health, last firing and pause. Activity: meaningful
+  actions as sentences, technical events and raw ids left out, filtered by people, ASAP, client,
+  workflow, approvals and external communication.
+- *+ New* opens the real workflow or conversation; choosing creates nothing.
+- *Tenancy.* A brokerage or person switch remounts the application and opens Home: nothing
+  inherited survives.
+- *Not built.* Title generation by a model (the deterministic path is the only one); a "next sweep
+  in N minutes" figure for Renewal Autopilot (the worker's schedule is not exposed to the browser,
+  and the card does not invent one); pausing a whole workflow engine from its card (it is governed by
+  the autonomy rule, opened from its Space).

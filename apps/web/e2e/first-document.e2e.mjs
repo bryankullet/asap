@@ -198,7 +198,8 @@ check("12 the premium is recorded from the document, gross, with it as evidence"
 
 /* 10 · confirming twice creates nothing twice */
 await step(page, "13-confirm-twice-nothing-twice", async () => {
-  await page.evaluate((id) => sessionStorage.setItem("asap.openRef", JSON.stringify({ ws: "document", documentId: id })), docId);
+  // D-155: the document review has its own address; a reload reopens it.
+  await page.goto(process.env.E2E_URL.replace(/#.*$/, "") + `#/ask?space=${encodeURIComponent("document?documentId=" + docId)}`);
   await reload(page);
   const again = await api("POST", "/policies", { clientName: V.insured, insurerName: V.insurer, classOfBusiness: V.cls, policyNumber: V.policy, periodStart: V.from, periodEnd: V.to });
   if (again.body.outcome === "recorded" && again.body.created) throw new Error("a second policy was created");

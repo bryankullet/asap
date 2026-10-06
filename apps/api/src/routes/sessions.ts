@@ -83,6 +83,7 @@ function summarize(r: Row, f: Awaited<ReturnType<typeof linkedFacts>>): Conversa
   const clientName = clientId ? f.clients.get(clientId) ?? null : null;
   const status = deriveConversationStatus({
     turns: f.turns.get(r.id) ?? 0,
+    purpose: r.purpose,
     workItem: w ? { taskStatus: w.task_status, exception: !!w.exception, completed: !!w.completed_at } : null,
     runState: run?.state ?? null,
   });
@@ -229,9 +230,11 @@ export function sessionRoutes(deps: { logger: Logger }) {
       if (!client) throw new HttpError(404, "not_found", "That client is not available.");
     }
     let workItemId = input.workItemId;
+    let workTitle: string | null = null;
     if (workItemId) {
-      const w = await db.from("work_items").select("id, client_id").eq("organization_id", o.id).eq("id", workItemId).is("deleted_at", null).maybeSingle();
+      const w = await db.from("work_items").select("id, client_id, title").eq("organization_id", o.id).eq("id", workItemId).is("deleted_at", null).maybeSingle();
       if (!w.data) throw new HttpError(404, "not_found", "That work is not available.");
+      workTitle = (w.data as { title: string }).title;
       // An explicit client in the request overrides inherited context; a Work item's own client does not override it.
       if (!client && (w.data as { client_id: string | null }).client_id) {
         const r = await db.from("clients").select("id, name").eq("organization_id", o.id).eq("id", (w.data as { client_id: string }).client_id).maybeSingle();
@@ -260,7 +263,9 @@ export function sessionRoutes(deps: { logger: Logger }) {
     const title = deriveConversationTitle({
       text: input.text,
       purpose,
-      clientName: client?.name ?? null,
+      // Named after the workflow it is about when it was asked from that workflow's Space.
+      clientName: workItemId && workTitle && purpose === "question" ? null : client?.name ?? null,
+      recordLabel: workItemId ? workTitle : null,
       insurerNames: purpose === "comparison" ? await insurersNamedIn(db, o.id, input.text) : [],
       brokerageName: o.name,
     });
@@ -309,10 +314,14 @@ export function sessionRoutes(deps: { logger: Logger }) {
     const pins = table === "recent_items" ? await db.from("space_pins").select("ref_key").eq("organization_id", orgId).eq("user_id", userId) : { data: rows.map((x) => ({ ref_key: x.ref_key })) };
     const pinned = new Set(((pins.data ?? []) as { ref_key: string }[]).map((x) => x.ref_key));
     const out: RecentItem[] = [];
+    const seen = new Set<string>();
     for (const x of rows) {
       const title = currentTitle(labels, x);
       // A record that is gone, or no longer readable, drops out of the list instead of naming nothing.
       if (title == null) continue;
+      // Two addresses for what a person sees as one thing (the same board, named the same) are one entry.
+      if (seen.has(`${x.kind}\u0001${title}`)) continue;
+      seen.add(`${x.kind}\u0001${title}`);
       out.push(recentItemSchema.parse({ key: x.ref_key, kind: x.kind, ref: x.ref, conversationId: x.conversation_id, title, openedAt: (x.opened_at ?? x.created_at)!, pinned: pinned.has(x.ref_key) }));
       if (out.length >= limit) break;
     }

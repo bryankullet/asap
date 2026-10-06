@@ -97,10 +97,12 @@ export const CONVERSATION_STATUS_LABEL: Record<ConversationStatus, string> = {
  */
 export function deriveConversationStatus(f: {
   turns: number;
+  /** A question is finished once answered; work (a renewal, a claim…) is a draft until it is linked to its work. */
+  purpose?: ConversationPurpose;
   workItem: { taskStatus: string; exception: boolean; completed: boolean } | null;
   runState: string | null;
 }): ConversationStatus {
-  if (!f.workItem) return f.turns > 1 ? "completed" : "draft";
+  if (!f.workItem) return f.turns > 1 && (f.purpose ?? "question") === "question" ? "completed" : "draft";
   if (f.workItem.completed || f.workItem.taskStatus === "done") return "completed";
   if (f.workItem.exception || f.runState === "exception") return "blocked";
   if (f.runState === "waiting_approval") return "needs_approval";
@@ -242,6 +244,11 @@ export function deriveConversationTitle(o: {
       break;
     }
     default: {
+      // A question asked from a workflow's Space is a session about that workflow: named after it.
+      if (o.recordLabel && !o.clientName) {
+        title = o.recordLabel;
+        break;
+      }
       const q = text
         .replace(/^(hi|hello|hey)[,!.\s]+/i, "")
         .replace(/^(please\s+)?(can|could|would) you\s+(please\s+)?/i, "")
