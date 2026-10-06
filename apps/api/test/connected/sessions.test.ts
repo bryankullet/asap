@@ -119,7 +119,7 @@ describe("Recent and Pins", () => {
   });
 
   it("Recent and Pins are per person and per brokerage, under RLS too", async () => {
-    expect((await call(KAMAU, "GET", "/recent")).body.items.find((x: { title: string }) => x.title === acmeName && x.kind === "client")).toBeUndefined();
+    expect((await call(KAMAU, "GET", "/recent")).body.items.find((x: { title: string; kind: string }) => x.title === acmeName && x.kind === "client")).toBeUndefined();
     expect((await call(BETA, "GET", "/recent")).body.items).toHaveLength(0);
     // Straight at the table, the browser's own way: another person's rows are invisible and unwritable.
     const read = await browser(KAMAU, "GET", `recent_items?user_id=eq.${AMINA.id}`);
