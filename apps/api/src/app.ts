@@ -14,6 +14,7 @@ import { inboundRoutes } from "./routes/inbound.js";
 import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
+import { sessionRoutes } from "./routes/sessions.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { mailboxOAuthRoutes } from "./routes/mailbox-oauth.js";
 import { onboardingRoutes } from "./routes/onboarding.js";
@@ -197,6 +198,10 @@ export function createApp(deps: AppDeps) {
     "/mailboxes",
     "/mailboxes/*",
     "/conversations",
+    "/sessions",
+    "/sessions/*",
+    "/recent",
+    "/pins",
     "/conversations/*",
     "/spaces/*",
     "/work",
@@ -246,6 +251,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", meRoutes());
   app.route("/", askRoutes());
   app.route("/", conversationRoutes({ logger, provider: deps.aiProvider ?? null }));
+  app.route("/", sessionRoutes({ logger }));
   app.route(
     "/",
     documentRoutes({

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
-import { createdAt } from "./_shared.js";
+import { check, index, jsonb, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
+import { createdAt, timestamptz } from "./_shared.js";
+import { conversations } from "./conversations.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
 import { workItems } from "./work.js";
@@ -35,3 +36,45 @@ export const workItemPins = pgTable(
 );
 
 export type WorkItemPin = typeof workItemPins.$inferSelect;
+
+/** Migration 0078 (D-155). Personal, per brokerage; a convenience, never a record. */
+export const recentItems = pgTable(
+  "recent_items",
+  {
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    refKey: text("ref_key").notNull(),
+    kind: text("kind").notNull(),
+    ref: jsonb("ref"),
+    conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    openedAt: timestamptz("opened_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.organizationId, t.userId, t.refKey] }),
+    index("recent_items_person_idx").on(t.organizationId, t.userId, t.openedAt.desc()),
+    index("recent_items_user_id_idx").on(t.userId),
+    index("recent_items_conversation_id_idx").on(t.conversationId),
+  ],
+);
+
+/** Migration 0078 (D-155). Personal, per brokerage; a convenience, never a record. */
+export const spacePins = pgTable(
+  "space_pins",
+  {
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    refKey: text("ref_key").notNull(),
+    kind: text("kind").notNull(),
+    ref: jsonb("ref"),
+    conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.organizationId, t.userId, t.refKey] }),
+    index("space_pins_person_idx").on(t.organizationId, t.userId, t.createdAt.desc()),
+    index("space_pins_user_id_idx").on(t.userId),
+    index("space_pins_conversation_id_idx").on(t.conversationId),
+  ],
+);
