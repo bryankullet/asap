@@ -79,10 +79,11 @@ describe("every destination requires authentication", () => {
   }
 
   it("brings an unauthenticated visitor back to the application after sign-in", { timeout: TIMEOUT }, async () => {
-    // Every older address now opens the one application, so that is where sign-in returns.
+    // Every address is the adaptive shell's (D-155): sign-in returns to the one asked for, and an
+    // older address like /today opens Home inside the application rather than a dead page.
     const { router } = await visit("/today");
     await waitFor(() => expect(router.state.location.pathname).toBe("/sign-in"));
-    expect(router.state.location.search).toMatchObject({ next: "/" });
+    expect(router.state.location.search).toMatchObject({ next: "/today" });
   });
 });
 
