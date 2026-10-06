@@ -209,7 +209,7 @@ export function deriveConversationTitle(o: {
     const m = MONTHS.find((x) => new RegExp(`\\b${x.slice(0, 3)}`, "i").test(text));
     return m ?? null;
   })();
-  let title: string | null = null;
+  let title: string | null;
   switch (purpose) {
     case "renewal":
       title = client ? `Renew ${client}${cls ? ` ${cls}` : ""} policy` : cls ? `Renew ${cls} policies` : "Prepare a renewal";
