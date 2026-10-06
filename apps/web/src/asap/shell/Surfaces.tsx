@@ -101,7 +101,26 @@ export function HomeSurface({ logic, A, recent, onOpenRecent, onOpen, onAsk, onF
             <button type="button" onClick={() => onOpen({ ws: "clients" })}>Explore empty workspace</button>
           </div>
         </section>
-      ) : (
+      ) : null}
+      {data.firstUse && data.attention.length ? (
+        <section className="sh-card" aria-labelledby="h-matters-first">
+          <h2 id="h-matters-first">What matters today</h2>
+          <ul className="sh-list">
+            {data.attention.map((a, i) => (
+              <li key={i} className="sh-row">
+                <span className={`sh-dot sh-${KIND_TONE[a.kind] ?? "gold"}`} aria-hidden />
+                <div className="sh-row-main">
+                  <div className="sh-row-kicker">{KIND_WORDS[a.kind] ?? "Attention"}</div>
+                  <strong>{a.title}</strong>
+                  <p>{a.why}</p>
+                </div>
+                <button type="button" className="sh-btn-primary" onClick={() => onOpen(a.action.ref as Ref)}>{a.action.label}</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {data.firstUse ? null : (
         <div className="sh-home-grid">
           <section className="sh-card" aria-labelledby="h-matters">
             <h2 id="h-matters">What matters today</h2>

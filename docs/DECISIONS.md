@@ -2802,7 +2802,7 @@ keeps D-115's substance (the approved interface's logic, Spaces and sheets) and 
   in the path, never "New chat"), renamable, linked to its Work item and Space, with a status
   derived from that work — never stored. The same Work item, or the same purpose for the same client
   while unfinished, reopens one session. An explicit client in the request overrides inherited
-  context. `recent_items` and `space_pins` are personal and per brokerage under RLS; Recent re-reads
+  context. `recent_items` and `space_pins` (`/recent`, `/space-pins`; Work-item pins keep `/pins`) are personal and per brokerage under RLS; Recent re-reads
   each title from its record and drops what is gone or unreadable. Search finds sessions by title,
   client, workflow, policy number and claim reference. Only an unsent message stays in the browser.
 - *When chat opens.* From Home or + New, an earlier conversation, "Ask about this" in a Space (a

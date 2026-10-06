@@ -356,12 +356,12 @@ export function sessionRoutes(deps: { logger: Logger }) {
     return c.json({ key: e.ref_key });
   });
 
-  app.get("/pins", async (c) => {
+  app.get("/space-pins", async (c) => {
     const { db, user, org: o } = await org(c);
     return c.json({ items: await list(db, o.id, user.id, "space_pins", 30) });
   });
 
-  app.put("/pins", async (c) => {
+  app.put("/space-pins", async (c) => {
     const { db, user, org: o } = await org(c);
     const e = await entry(db, o.id, user.id, await c.req.json().catch(() => null));
     const up = await db.from("space_pins").upsert({ organization_id: o.id, user_id: user.id, ...e }, { onConflict: "organization_id,user_id,ref_key", ignoreDuplicates: true });
@@ -369,7 +369,7 @@ export function sessionRoutes(deps: { logger: Logger }) {
     return c.json({ key: e.ref_key, pinned: true });
   });
 
-  app.delete("/pins", async (c) => {
+  app.delete("/space-pins", async (c) => {
     const { db, user, org: o } = await org(c);
     const key = c.req.query("key");
     if (!key) throw new HttpError(400, "validation_failed", "Say which pin to remove.");

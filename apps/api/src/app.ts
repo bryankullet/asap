@@ -201,7 +201,7 @@ export function createApp(deps: AppDeps) {
     "/sessions",
     "/sessions/*",
     "/recent",
-    "/pins",
+    "/space-pins",
     "/conversations/*",
     "/spaces/*",
     "/work",

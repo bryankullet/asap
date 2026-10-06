@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+// @ts-expect-error -- the engine store is untyped JS
 import * as S from "./engine/store.js";
 import { automationsBoard, homeSurface, runRef, workInbox } from "./surfaces.js";
 

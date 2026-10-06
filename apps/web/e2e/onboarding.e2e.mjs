@@ -145,7 +145,7 @@ for (const w of [1440, 390]) {
     await expectText(page.locator("body"), /Setup · \d of 4 done|Your book is in/);
   });
   await step(page, "07-typed-import-request", async () => {
-    if (w === 390) { const b = page.getByRole("button", { name: /Back to conversation/ }); if (await b.count()) await b.first().click(); await settle(page, 500); }
+    if (w === 390) { const b = page.getByRole("button", { name: /Back to conversation/ }); if (await b.count()) await b.first().click(); else await page.goBack(); await settle(page, 800); }
     await ask(page, "Import these policy schedules");
     await expectText(page.locator("body"), "Choose files");
   });

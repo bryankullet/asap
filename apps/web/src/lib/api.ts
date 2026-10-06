@@ -239,9 +239,9 @@ export const api = {
   /** Recent and Pins: per person, per brokerage, on the server — never browser storage. */
   recent: () => request("GET", "/recent", z.object({ items: z.array(recentItemSchema) })),
   recordOpen: (body: RecordOpenRequest) => request("POST", "/recent", z.object({ key: z.string() }), body),
-  pinsList: () => request("GET", "/pins", z.object({ items: z.array(recentItemSchema) })),
-  pin: (body: RecordOpenRequest) => request("PUT", "/pins", z.object({ key: z.string(), pinned: z.boolean() }), body),
-  unpin: (key: string) => request("DELETE", `/pins?key=${encodeURIComponent(key)}`, z.object({ key: z.string(), pinned: z.boolean() })),
+  pinsList: () => request("GET", "/space-pins", z.object({ items: z.array(recentItemSchema) })),
+  pin: (body: RecordOpenRequest) => request("PUT", "/space-pins", z.object({ key: z.string(), pinned: z.boolean() }), body),
+  unpin: (key: string) => request("DELETE", `/space-pins?key=${encodeURIComponent(key)}`, z.object({ key: z.string(), pinned: z.boolean() })),
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */

@@ -25,3 +25,23 @@ process.stdout.write(`e2e api listening on ${port}\n`);
 // Storage stand-in (opt-in: E2E_STORAGE_PORT), shared with the connected suite.
 const storagePort = Number(process.env["E2E_STORAGE_PORT"] ?? 0);
 if (storagePort) startStorageStandIn(storagePort);
+
+/*
+ * The worker's event dispatch, for the browser run (opt-in: E2E_DISPATCH=1): every two seconds,
+ * each unprocessed event goes to the API's internal dispatch route, exactly as asap-worker sends it,
+ * so "document.received" reaches the extractor.
+ */
+if (process.env["E2E_DISPATCH"]) {
+  const db = postgres(OWNER, { max: 1, onnotice: () => {} });
+  const tick = async () => {
+    const due = await db<{ id: string }[]>`select id from events where processed_at is null and processing_attempts < 5 order by occurred_at limit 20`.catch(() => []);
+    for (const e of due) {
+      const r = await app.request(`/internal/events/${e.id}/dispatch`, { method: "POST", headers: { "x-asap-internal-key": key } });
+      const body = (await r.json().catch(() => ({}))) as { results?: { result: string; consumer: string; detail?: string }[] };
+      const failed = (body.results ?? []).filter((x) => x.result === "failure");
+      if (r.ok && !failed.length) await db`select app.mark_event_processed(${e.id})`;
+      else await db`select app.mark_event_attempted(${e.id}, ${failed.map((f) => f.consumer + ": " + (f.detail ?? "")).join("; ") || "dispatch " + r.status})`;
+    }
+  };
+  setInterval(() => void tick().catch(() => {}), 2000);
+}

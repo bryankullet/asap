@@ -198,7 +198,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1360, height: 900
     await page.locator(".sh-root").waitFor();
     await settle(page, 1500);
     await page.getByRole("button", { name: "Pinned — unpin" }).waitFor();
-    const pins = await apiAs(AMINA, "GET", "/pins");
+    const pins = await apiAs(AMINA, "GET", "/space-pins");
     must(pins.body.items.some((p) => p.ref?.clientId === ACME), "the pin is not on the server");
   }, { shot: false });
 

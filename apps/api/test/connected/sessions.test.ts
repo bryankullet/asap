@@ -110,12 +110,12 @@ describe("Recent and Pins", () => {
   });
 
   it("a pin persists on the server and shows in Recent; unpinning removes only the pin", async () => {
-    const p = await call(AMINA, "PUT", "/pins", { ref: { ws: "client", clientId: ACME }, title: acmeName });
+    const p = await call(AMINA, "PUT", "/space-pins", { ref: { ws: "client", clientId: ACME }, title: acmeName });
     expect(p.body.pinned).toBe(true);
-    expect((await call(AMINA, "GET", "/pins")).body.items.map((x: { title: string }) => x.title)).toContain(acmeName);
+    expect((await call(AMINA, "GET", "/space-pins")).body.items.map((x: { title: string }) => x.title)).toContain(acmeName);
     expect((await call(AMINA, "GET", "/recent")).body.items.find((x: { key: string }) => x.key === p.body.key).pinned).toBe(true);
-    await call(AMINA, "DELETE", `/pins?key=${encodeURIComponent(p.body.key)}`);
-    expect((await call(AMINA, "GET", "/pins")).body.items.find((x: { key: string }) => x.key === p.body.key)).toBeUndefined();
+    await call(AMINA, "DELETE", `/space-pins?key=${encodeURIComponent(p.body.key)}`);
+    expect((await call(AMINA, "GET", "/space-pins")).body.items.find((x: { key: string }) => x.key === p.body.key)).toBeUndefined();
   });
 
   it("Recent and Pins are per person and per brokerage, under RLS too", async () => {
