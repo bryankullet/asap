@@ -143,7 +143,7 @@ describe("setting one", () => {
     expect(body.rules[0].verifiedAt).toBe("2026-09-04");
     expect(body.rules[0].setByName).toBe("Amina");
     /* And the default for that key stops being offered, because it no longer applies. */
-    expect(body.defaults.map((d: { key: string }) => d.key)).toEqual(["quote.validity", "renewal.window", "workflow.autonomy"]);
+    expect(body.defaults.map((d: { key: string }) => d.key)).toEqual(["quote.validity", "renewal.window", "quote.chase", "placement.chase", "issuance.chase", "claim.notification_days", "claim.document_chase_days", "endorsement.chase", "inbound.auto_route_confidence", "workflow.autonomy"]);
   });
 
   it("updates rather than duplicating", async () => {

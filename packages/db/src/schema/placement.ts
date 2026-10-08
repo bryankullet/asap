@@ -200,7 +200,8 @@ export const placementRequests = pgTable(
     effectiveAt: timestamptz("effective_at").notNull(),
     outstandingConditions: text("outstanding_conditions"),
     sha256: text("sha256").notNull(),
-    preparedBy: uuid("prepared_by").notNull().references(() => users.id),
+    preparedBy: uuid("prepared_by").references(() => users.id),
+    preparedByRunId: uuid("prepared_by_run_id"),
     preparedAt: timestamptz("prepared_at").notNull().defaultNow(),
     supersededAt: timestamptz("superseded_at"),
     supersededReason: text("superseded_reason"),
@@ -221,6 +222,7 @@ export const placementRequests = pgTable(
     index("placement_requests_organization_id_idx").on(t.organizationId),
     index("placement_requests_placement_id_idx").on(t.placementId),
     index("placement_requests_prepared_by_idx").on(t.preparedBy),
+    index("placement_requests_prepared_by_run_id_idx").on(t.preparedByRunId),
     uniqueIndex("placement_requests_one_live_per_placement")
       .on(t.placementId)
       .where(sql`${t.supersededAt} is null`),

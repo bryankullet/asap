@@ -36,6 +36,7 @@ async function open(token, viewport) {
   page.errors = [];
   page.on("console", (m) => { if (m.type() === "error" && !/favicon|Failed to load resource: the server responded with a status of 404/.test(m.text())) page.errors.push(m.text()); });
   page.on("pageerror", (e) => page.errors.push(String(e)));
+  page.on("console", (m) => { if (m.type() === "error" && /%o/.test(m.text())) page.errors.push("detail: " + m.args().map(String).join(" ").slice(0, 400)); });
   await page.goto(URL_);
   await page.getByPlaceholder("Tell ASAP what you need").waitFor({ timeout: 20000 });
   await page.getByText(/What matters now|Tell me what you need/).first().waitFor({ timeout: 30000 }).catch(() => {});
@@ -43,8 +44,22 @@ async function open(token, viewport) {
   return page;
 }
 const settle = async (page, ms = 900) => { await page.waitForLoadState("networkidle").catch(() => {}); await page.waitForTimeout(ms); };
+const BASE = URL_.replace(/#.*$/, "");
+/**
+ * Ask from wherever the journey is. Work and Activity are full-width surfaces with no chat (D-155),
+ * so after one of them the journey returns to its conversation (Back), or starts a new one.
+ */
 async function ask(page, text) {
-  const box = page.getByPlaceholder("Tell ASAP what you need");
+  let box = page.getByPlaceholder("Tell ASAP what you need");
+  if (!(await box.first().isVisible().catch(() => false))) {
+    await page.goBack();
+    await settle(page, 900);
+    if (!(await box.first().isVisible().catch(() => false))) {
+      await page.goto(BASE + "#/ask");
+      await settle(page, 900);
+    }
+    box = page.getByPlaceholder("Tell ASAP what you need");
+  }
   await box.fill(text);
   await page.getByRole("button", { name: "Send" }).click();
   await settle(page, 1200);
@@ -88,12 +103,17 @@ const expectText = async (page, re, where = page.locator("body")) => {
 /* ------------------------------------------------------------------ desktop, 1440×900 ---- */
 {
   const page = await open(AMINA, { width: 1440, height: 900 });
-  await step(page, "01-today-on-the-right", async () => { await expectText(page, "What matters now"); await expectText(page, "Ask ASAP"); });
+  // D-155: Home is calm and full width; a conversation is centred until it opens a Space.
+  await step(page, "01-home-no-transcript", async () => {
+    await page.goto(BASE + "#/");
+    await settle(page, 600);
+    await expectText(page, "What would you like ASAP to handle?");
+    if (await page.locator(".asap-ask").count()) throw new Error("Home shows a transcript");
+  });
   await step(page, "02-centred-ask-no-space", async () => {
-    await page.getByRole("button", { name: "Close workspace" }).first().click();
-    await settle(page, 500);
-    const pane = await page.locator(".asap-pane").first().isVisible();
-    if (pane) throw new Error("a Space is still shown after closing the last tab");
+    await page.goto(BASE + "#/ask");
+    await settle(page, 600);
+    if (await page.locator(".asap-pane").count()) throw new Error("a Space is shown beside a new conversation");
     await page.getByPlaceholder("Tell ASAP what you need").waitFor();
   });
 
@@ -176,11 +196,21 @@ const expectText = async (page, re, where = page.locator("body")) => {
 
   // Work: assign and due date, previewed from the server, from the Work item in front.
   await step(page, "15-work-assignment", async () => {
+    // Work is the full-width inbox (D-155); its row opens the Work item's Space, and "Ask about
+    // this" opens the conversation scoped to it.
     await ask(page, "Show my work");
-    await expectText(page, "Your work, from your records.");
-    await page.locator(".asap-pane").getByRole("button", { name: /^Open/ }).first().click();
-    await settle(page, 800);
-    await ask(page, "Assign this to Kamau");
+    await page.getByRole("tablist", { name: "Work views" }).waitFor();
+    if (await page.locator(".asap-ask").count()) throw new Error("chat opened with Work");
+    // Whichever view holds work: a colleague's items are with them, not in "Needs me".
+    const counts = await page.locator(".sh-tab .sh-count").allInnerTexts();
+    const at = counts.findIndex((c) => Number(c) > 0);
+    if (at < 0) throw new Error("Work is empty");
+    await page.getByRole("tab").nth(at).click();
+    await page.locator(".sh-work").getByRole("button", { name: /^(Open|Review)$/ }).first().click();
+    await settle(page, 1000);
+    await page.getByRole("button", { name: "Ask about this" }).click();
+    await settle(page, 600);
+    await ask(page, "Assign this to Amina");
     await expectText(page, /Owner: .+ → /, lastPending(page));
     await confirm(page, "Assign");
     await expectText(page, /Work assigned|already/);
@@ -212,8 +242,9 @@ const expectText = async (page, re, where = page.locator("body")) => {
   await step(page, "19-activity-manager-view", async () => {
     await page.evaluate(() => { const el = document.querySelector("body"); return el; });
     await ask(page, "Show activity");
-    const body = await page.locator("body").innerText();
-    if (!/Activity/.test(body)) throw new Error("activity not shown");
+    await page.locator(".sh-activity-row").first().waitFor();
+    const body = await page.locator(".sh-activity").innerText();
+    if (/\bsystem\b/i.test(body)) throw new Error("an action is attributed to “system”");
   });
 
   // Renewal Autopilot (D-129): start from Ask, ASAP prepares everything, one approval, then it carries on.
@@ -250,7 +281,8 @@ const expectText = async (page, re, where = page.locator("body")) => {
     await ask(page, `Which policies does ${CLIENT} have?`);
     await expectText(page, CLIENT);
     const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
-    if (/Parity Freight|premium|incident/i.test(stored.replace(/"asap\.openRef":"[^"]*"/, ""))) throw new Error("business records in browser storage");
+    const hit = stored.replace(/"asap\.openRef":"[^"]*"/, "").match(/.{0,60}(Parity Freight|premium|incident).{0,60}/i);
+    if (hit) throw new Error("business records in browser storage: " + hit[0]);
   });
   await page.context().close();
 }
@@ -273,7 +305,7 @@ const expectText = async (page, re, where = page.locator("body")) => {
 /* ---------------------------------------------------------------- 1360×900 ---- */
 {
   const page = await open(AMINA, { width: 1360, height: 900 });
-  await step(page, "01-today-on-the-right", async () => { await expectText(page, "What matters now"); });
+  await step(page, "01-home", async () => { await page.goto(BASE + "#/"); await settle(page, 600); await expectText(page, "What would you like ASAP to handle?"); });
   await step(page, "05-client-space", async () => { await ask(page, "Open Acme Motors"); await expectText(page, "Acme Motors"); });
   await step(page, "19-activity", async () => { await ask(page, "Show activity"); });
   await page.context().close();
@@ -282,7 +314,11 @@ const expectText = async (page, re, where = page.locator("body")) => {
 /* ---------------------------------------------------------------- mobile 390×844 ---- */
 {
   const page = await open(AMINA, { width: 390, height: 844 });
-  await step(page, "22-mobile-ask", async () => { await expectText(page, "Ask ASAP"); });
+  await step(page, "22-mobile-ask", async () => {
+    // Ask is the prominent middle action of the bottom navigation (D-155).
+    await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: /Ask/ }).waitFor();
+    await page.getByPlaceholder("Tell ASAP what you need").waitFor();
+  });
   await step(page, "23-mobile-full-screen-space", async () => {
     await ask(page, "Open Acme Motors");
     await page.getByText(/Open Space/).first().click();
@@ -291,7 +327,7 @@ const expectText = async (page, re, where = page.locator("body")) => {
     await expectText(page, "Acme Motors");
   });
   await step(page, "24-mobile-return-to-conversation", async () => {
-    await page.getByRole("button", { name: /Back to the conversation/ }).first().click();
+    await page.getByRole("button", { name: /Back to conversation/ }).first().click();
     await settle(page, 600);
     await page.getByPlaceholder("Tell ASAP what you need").waitFor();
   });

@@ -102,79 +102,11 @@ export function comparisonRoutes(deps: { logger: Logger }) {
       /* Already current, and nothing has moved: making a second is not a different photograph. */
       if (view.comparison !== null && !view.comparison.stale) return done("already");
 
-      const opp = await loadOpportunity(db, ctx, org.id, id);
-      const quoted = opp.insurers.filter((i) => i.removedAt === null && i.response?.outcome === "quoted");
-
-      /* The old one is superseded by hand, because it is a person generating, not a change. */
-      if (view.comparison !== null) {
-        const stood = await db
-          .from("quote_comparisons")
-          .update({
-            superseded_at: now,
-            superseded_reason: "A newer comparison was generated.",
-          })
-          .eq("organization_id", org.id)
-          .eq("id", view.comparison.id)
-          .is("superseded_at", null)
-          .select("id")
-          .maybeSingle();
-        if (stood.error) return sendError(c, mapDatabaseError(stood.error));
-      }
-
-      const made = await db
-        .from("quote_comparisons")
-        .insert({ organization_id: org.id, opportunity_id: id, generated_by: user.id, generated_at: now })
-        .select("id")
-        .maybeSingle();
-      /* The one-live-per-opportunity index refuses a race; whoever lost reads what won. */
-      if (made.error || !made.data) return done("already");
-      const comparisonId = (made.data as { id: string }).id;
-
-      for (const insurer of quoted) {
-        const response = insurer.response!;
-        /*
-         * The revision, not the row. This is what makes the comparison reproducible: the id
-         * recorded here names one immutable reading, and nothing that happens to the answer
-         * afterwards can change what this comparison shows.
-         */
-        const responseRevisionId = await latestRevision(
-          db, org.id, "insurer_response_revisions", "insurer_response_id", response.id);
-        if (responseRevisionId === null) {
-          return blocked(
-            `${insurer.insurerName}'s answer has no recorded revision, so a comparison including it could not be reproduced later. Record the answer again.`,
-          );
-        }
-
-        const input_ = await db
-          .from("quote_comparison_inputs")
-          .insert({
-            organization_id: org.id,
-            comparison_id: comparisonId,
-            insurer_response_id: response.id,
-            insurer_id: insurer.insurerId,
-            response_sha256: responseDigest(response),
-            response_revision_id: responseRevisionId,
-          })
-          .select("id")
-          .maybeSingle();
-        if (input_.error || !input_.data) continue;
-        const inputId = (input_.data as { id: string }).id;
-
-        for (const term of response.terms) {
-          const termRevisionId = await latestRevision(
-            db, org.id, "quote_term_revisions", "quote_term_id", term.id);
-          if (termRevisionId === null) continue;
-          await db.from("quote_comparison_terms").insert({
-            organization_id: org.id,
-            comparison_input_id: inputId,
-            quote_term_id: term.id,
-            term_type: term.termType,
-            label: term.label,
-            term_sha256: termDigest(term),
-            term_revision_id: termRevisionId,
-          });
-        }
-      }
+      const made = await generateComparison(db, ctx, org.id, id, { userId: user.id }, view, now);
+      if (made.outcome === "blocked") return blocked(made.reason);
+      if (made.outcome === "already") return done("already");
+      const comparisonId = made.comparisonId;
+      const quoted = { length: made.insurers };
 
       await recordAudit(db, deps.logger, c, {
         organizationId: org.id,
@@ -324,7 +256,7 @@ async function load(
         id: r.id,
         version: r.version ?? 1,
         generatedAt: r.generated_at,
-        generatedByName: names.get(r.generated_by) ?? null,
+        generatedByName: r.generated_by ? (names.get(r.generated_by) ?? null) : "ASAP, from the quotation work",
         presentedAt: r.presented_at,
         supersededAt: r.superseded_at,
         supersededReason: r.superseded_reason,
@@ -339,7 +271,7 @@ async function load(
 type ComparisonRowRaw = {
   id: string;
   version: number | null;
-  generated_by: string;
+  generated_by: string | null;
   generated_at: string;
   presented_at: string | null;
   presented_by: string | null;
@@ -492,7 +424,7 @@ async function assemble(
     id: row.id,
     version: row.version ?? 1,
     generatedAt: row.generated_at,
-    generatedByName: names.get(row.generated_by) ?? null,
+    generatedByName: row.generated_by ? (names.get(row.generated_by) ?? null) : "ASAP, from the quotation work",
     presentedAt: row.presented_at,
     presentedByName: row.presented_by === null ? null : (names.get(row.presented_by) ?? null),
     stale,
@@ -981,4 +913,96 @@ function recommend(
     caveats,
     rule: configured,
   };
+}
+
+
+/**
+ * Generates the comparison: the one shared path for a person's "Generate" and for the quotation run
+ * (D-141). The comparison names who generated it — a person, or the run — never one for the other.
+ */
+export async function generateComparison(
+  db: SupabaseClient,
+  ctx: Ctx,
+  organizationId: string,
+  id: string,
+  by: { userId: string } | { runId: string },
+  view: ComparisonResponse,
+  now: string,
+): Promise<{ outcome: "done"; comparisonId: string; insurers: number } | { outcome: "already" } | { outcome: "blocked"; reason: string }> {
+  const opp = await loadOpportunity(db, ctx, organizationId, id);
+  const quoted = opp.insurers.filter((i) => i.removedAt === null && i.response?.outcome === "quoted");
+
+  /* The old one is superseded by hand, because it is a person generating, not a change. */
+  if (view.comparison !== null) {
+    const stood = await db
+      .from("quote_comparisons")
+      .update({
+        superseded_at: now,
+        superseded_reason: "A newer comparison was generated.",
+      })
+      .eq("organization_id", organizationId)
+      .eq("id", view.comparison.id)
+      .is("superseded_at", null)
+      .select("id")
+      .maybeSingle();
+    if (stood.error) throw mapDatabaseError(stood.error);
+  }
+
+  const made = await db
+    .from("quote_comparisons")
+    .insert({ organization_id: organizationId, opportunity_id: id, generated_at: now, ...("userId" in by ? { generated_by: by.userId } : { generated_by_run_id: by.runId }) })
+    .select("id")
+    .maybeSingle();
+  /* The one-live-per-opportunity index refuses a race; whoever lost reads what won. */
+  if (made.error || !made.data) return { outcome: "already" };
+  const comparisonId = (made.data as { id: string }).id;
+
+  for (const insurer of quoted) {
+    const response = insurer.response!;
+    /*
+     * The revision, not the row. This is what makes the comparison reproducible: the id
+     * recorded here names one immutable reading, and nothing that happens to the answer
+     * afterwards can change what this comparison shows.
+     */
+    const responseRevisionId = await latestRevision(
+      db, organizationId, "insurer_response_revisions", "insurer_response_id", response.id);
+    if (responseRevisionId === null) {
+      return {
+        outcome: "blocked",
+        reason: `${insurer.insurerName}'s answer has no recorded revision, so a comparison including it could not be reproduced later. Record the answer again.`,
+      };
+    }
+
+    const input_ = await db
+      .from("quote_comparison_inputs")
+      .insert({
+        organization_id: organizationId,
+        comparison_id: comparisonId,
+        insurer_response_id: response.id,
+        insurer_id: insurer.insurerId,
+        response_sha256: responseDigest(response),
+        response_revision_id: responseRevisionId,
+      })
+      .select("id")
+      .maybeSingle();
+    if (input_.error || !input_.data) continue;
+    const inputId = (input_.data as { id: string }).id;
+
+    for (const term of response.terms) {
+      const termRevisionId = await latestRevision(
+        db, organizationId, "quote_term_revisions", "quote_term_id", term.id);
+      if (termRevisionId === null) continue;
+      await db.from("quote_comparison_terms").insert({
+        organization_id: organizationId,
+        comparison_input_id: inputId,
+        quote_term_id: term.id,
+        term_type: term.termType,
+        label: term.label,
+        term_sha256: termDigest(term),
+        term_revision_id: termRevisionId,
+      });
+    }
+  }
+
+  return { outcome: "done", comparisonId, insurers: quoted.length };
 }

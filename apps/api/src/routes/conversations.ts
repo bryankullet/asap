@@ -12,6 +12,8 @@ import {
   askResponseV2Schema,
   conversationMessageSchema,
   conversationSchema,
+  conversationPurpose,
+  deriveConversationTitle,
   type AiProvider,
   type AskResponseV2,
   type AskScope,
@@ -203,7 +205,8 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
       const firstQuestion = input.turns.find((t) => t.role === "person")?.body ?? "Ask ASAP";
       const { data, error } = await db
         .from("conversations")
-        .insert({ organization_id: org.id, created_by: user.id, title: firstQuestion.slice(0, 120), scope_kind: "brokerage", scope_id: null })
+        // Named for what it is for (D-155), deterministically; a model never names it.
+        .insert({ organization_id: org.id, created_by: user.id, title: deriveConversationTitle({ text: firstQuestion, brokerageName: org.name }), title_source: "derived", purpose: conversationPurpose(firstQuestion), scope_kind: "brokerage", scope_id: null })
         .select("id")
         .single();
       if (error) return sendError(c, mapDatabaseError(error));
@@ -281,8 +284,11 @@ export function conversationRoutes(deps: { logger: Logger; provider: AiProvider 
         .insert({
           organization_id: org.id,
           created_by: user.id,
-          // The title is the question as asked. A model never names a person's conversation.
-          title: request.question.slice(0, 120),
+          // Named for what it is for (D-155), from the question and the record in scope —
+          // deterministically. A model never names a person's conversation.
+          title: deriveConversationTitle({ text: request.question, clientName: scope.kind === "client" ? scope.label : null, recordLabel: scope.kind === "brokerage" ? null : scope.label, brokerageName: org.name }),
+          title_source: "derived",
+          purpose: conversationPurpose(request.question),
           scope_kind: scope.kind,
           scope_id: scope.id,
         })

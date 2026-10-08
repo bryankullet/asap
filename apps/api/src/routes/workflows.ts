@@ -1,5 +1,6 @@
 import {
   decideApprovalRequestSchema,
+  decideSuggestionRequestSchema,
   escalateRunRequestSchema,
   moveFollowUpRequestSchema,
   pauseRunRequestSchema,
@@ -13,6 +14,8 @@ import {
   workflowListSchema,
   type WorkflowActionResponse,
   type WorkflowDetail,
+  type WorkflowName,
+  WORKFLOW_NOUN,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { Hono, type Context } from "hono";
@@ -20,9 +23,12 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
-import { advanceRun, autonomyRule, detectRenewalFor, RENEWAL, RENEWAL_DEFAULTS, renewalWindow } from "../workflows/renewal.js";
+import { autonomyRule, detectRenewalFor, RENEWAL_DEFAULTS, renewalWindow } from "../workflows/renewal.js";
+import { advanceAnyRun } from "../workflows/index.js";
+import { deliverApproved, type MailboxDeps } from "../workflows/deliver.js";
 import { load as loadRules } from "./rules.js";
 import { renewalOperational } from "../workflows/renewal-view.js";
+import { runOperational } from "../workflows/run-view.js";
 import { parseBody } from "./_parse.js";
 
 /**
@@ -34,7 +40,7 @@ import { parseBody } from "./_parse.js";
  */
 
 type RunDb = {
-  id: string; organization_id: string; workflow: "renewal"; subject_id: string; work_item_id: string | null; state: string; current_step: string | null;
+  id: string; organization_id: string; workflow: WorkflowName; subject_id: string; work_item_id: string | null; state: string; current_step: string | null;
   exception: { code: string; message: string; needs: string; stepLabel?: string } | null; next_run_at: string; started_at: string; finished_at: string | null;
   facts: { clientId?: string; periodEnd?: string; startedBy?: string; origin?: string; [k: string]: unknown };
 };
@@ -45,14 +51,14 @@ async function summaries(db: SupabaseClient, runs: RunDb[], can: { act: boolean;
   const clientIds = runs.map((r) => r.facts?.clientId).filter(Boolean) as string[];
   const orgId = runs[0]?.organization_id ?? null;
   const [steps, works, clients, approvals, comms, window] = await Promise.all([
-    ids.length ? db.from("workflow_steps").select("run_id, step_key, state, output, finished_at").in("run_id", ids) : Promise.resolve({ data: [] }),
+    ids.length ? db.from("workflow_steps").select("run_id, step_key, label, state, output, finished_at").in("run_id", ids) : Promise.resolve({ data: [] }),
     workIds.length ? db.from("work_items").select("id, title, owner_id").in("id", workIds) : Promise.resolve({ data: [] }),
     clientIds.length ? db.from("clients").select("id, name").in("id", clientIds) : Promise.resolve({ data: [] }),
     ids.length ? db.from("workflow_approvals").select("run_id, state, decided_by, created_at").in("run_id", ids).order("created_at", { ascending: false }) : Promise.resolve({ data: [] }),
     ids.length ? db.from("prepared_communications").select("run_id, audience, state, party_name, quote_request_id").in("run_id", ids).neq("state", "superseded") : Promise.resolve({ data: [] }),
     orgId ? renewalWindow(db, orgId) : Promise.resolve({ ...RENEWAL_DEFAULTS }),
   ]);
-  const st = (steps.data ?? []) as { run_id: string; step_key: string; state: string; output: Record<string, unknown>; finished_at: string | null }[];
+  const st = (steps.data ?? []) as { run_id: string; step_key: string; label: string; state: string; output: Record<string, unknown>; finished_at: string | null }[];
   const workRows = new Map(((works.data ?? []) as { id: string; title: string; owner_id: string | null }[]).map((w) => [w.id, w]));
   const names = new Map(((clients.data ?? []) as { id: string; name: string }[]).map((c) => [c.id, c.name]));
   const approvalRows = (approvals.data ?? []) as { run_id: string; state: string; decided_by: string | null }[];
@@ -79,7 +85,17 @@ async function summaries(db: SupabaseClient, runs: RunDb[], can: { act: boolean;
     const delivery = insurerQr ? deliveryByQr.get(insurerQr) : undefined;
     const approval = approvalRows.find((a) => a.run_id === r.id) ?? null;
     const completeness = mine.find((s) => s.step_key === "completeness")?.output ?? {};
-    const operational = renewalOperational({
+    // Renewal keeps its own reading (D-131); every other workflow reads the same generic way (D-139).
+    const operational = r.workflow !== "renewal" ? runOperational({
+      workflow: r.workflow,
+      can,
+      run: { state: r.state, currentStep: r.current_step, exception: r.exception, facts: (r.facts ?? {}) as Record<string, unknown> },
+      steps: mine.map((s) => ({ key: s.step_key, label: s.label, state: s.state, output: s.output ?? {} })),
+      approval: approval ? { state: approval.state, decidedByName: approval.decided_by ? (userName.get(approval.decided_by) ?? null) : null } : null,
+      owner,
+      startedByName: typeof r.facts?.startedBy === "string" ? (userName.get(r.facts.startedBy) ?? null) : null,
+      waitingFor: typeof r.facts?.["withParty"] === "string" ? { party: r.facts["withParty"] as string, since: typeof r.facts?.["withPartySince"] === "string" ? (r.facts["withPartySince"] as string) : null } : null,
+    }) : renewalOperational({
       now,
       can,
       run: { state: r.state, currentStep: r.current_step, exception: r.exception, facts: (r.facts ?? {}) as Record<string, unknown>, startedAt: r.started_at },
@@ -97,7 +113,7 @@ async function summaries(db: SupabaseClient, runs: RunDb[], can: { act: boolean;
     return {
       id: r.id, workflow: r.workflow, subjectId: r.subject_id, workItemId: r.work_item_id, state: r.state as WorkflowDetail["state"], stateLabel: operational.status,
       currentStep: r.current_step, exception: r.exception, nextRunAt: r.next_run_at, startedAt: r.started_at, finishedAt: r.finished_at,
-      title: work?.title || "Renewal",
+      title: work?.title || (r.workflow === "renewal" ? "Renewal" : WORKFLOW_NOUN[r.workflow].replace(/^./, (c) => c.toUpperCase())),
       client: clientId && names.has(clientId) ? { id: clientId, name: names.get(clientId)! } : null,
       periodEnd: r.facts?.periodEnd ?? null,
       progress: { done: mine.filter((s) => s.state === "done" || s.state === "skipped").length, steps: mine.length },
@@ -138,17 +154,22 @@ export async function loadWorkflowDetail(db: SupabaseClient, runId: string, perm
   });
 }
 
-export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseClient }) {
+export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseClient; mailbox?: MailboxDeps }) {
   const app = new Hono();
 
   const perms = (ctx: Awaited<ReturnType<typeof resolveContext>>) => ({ canApprove: hasPermission(ctx, "email", "approve"), canAct: hasPermission(ctx, "space", "create") });
   /** Continue the run with the engine's own connection; a failure here leaves the event to finish it. */
   const advance = async (runId: string) => {
     try {
-      await advanceRun(deps.service(), deps.logger, RENEWAL, runId);
+      await advanceAnyRun(deps.service(), deps.logger, runId);
     } catch (e) {
       deps.logger.warn({ runId, err: (e as Error).message }, "the run will continue on the next sweep");
     }
+  };
+  /** The run's own noun, for its sentences — "renewal" stays "renewal" (D-139). */
+  const nounOf = async (db: SupabaseClient, runId: string) => {
+    const w = await db.from("workflow_runs").select("workflow").eq("id", runId).maybeSingle();
+    return WORKFLOW_NOUN[((w.data as { workflow: WorkflowName } | null)?.workflow ?? "renewal")] ?? "work";
   };
   const respond = async (c: Context, db: SupabaseClient, runId: string, ctx: Awaited<ReturnType<typeof resolveContext>>, outcome: WorkflowActionResponse["outcome"], reason: string | null, status: 200 | 403 | 409 | 422 = 200) =>
     c.json(workflowActionResponseSchema.parse({ outcome, reason, run: await loadWorkflowDetail(db, runId, perms(ctx)) } satisfies WorkflowActionResponse), status);
@@ -214,7 +235,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const rule = await autonomyRule(db, requireActiveOrganization(ctx).id);
     if (rule.approver === "admin_or_owner" && !(ctx.activeMembership?.is_owner || ctx.activeMembership?.role.key === "brokerage_admin")) {
       await recordAudit(db, deps.logger, c, { organizationId: requireActiveOrganization(ctx).id, actorUserId: user.id, action: "workflow.approval.decided", objectType: "workflow_approval", objectId: c.req.param("id"), result: "denied", failureReason: "autonomy_rule_approver" });
-      return respond(c, db, runId, ctx, "blocked", "This brokerage's rule reserves renewal approvals to an administrator or the owner. Nothing was approved.", 403);
+      return respond(c, db, runId, ctx, "blocked", `This brokerage's rule reserves ${await nounOf(db, runId)} approvals to an administrator or the owner. Nothing was approved.`, 403);
     }
     const { data, error } = await db.rpc("workflow_approval_decide", { p_approval_id: c.req.param("id"), p_decision: input.decision, p_bundle_sha256: input.bundleSha256, p_note: input.note ?? null });
     if (error) {
@@ -225,8 +246,53 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
       return sendError(c, mapDatabaseError(error));
     }
     const changed = (data as { changed: boolean }).changed;
+    // Approved messages leave through the connected mailbox where one is and the address is verified (D-145).
+    // The run first records the approval on what it covers (a quotation request's approved text);
+    // then each message is sent against that, and its delivery event moves the run on.
     if (changed) await advance(runId);
+    if (changed && input.decision === "approve") {
+      const out = await deliverApproved({ db, service: deps.service(), logger: deps.logger, c, mailbox: deps.mailbox, approverId: user.id, approvalId: c.req.param("id") });
+      if (out.some((d) => d.outcome === "sent")) await advance(runId);
+    }
     return respond(c, db, runId, ctx, changed ? "done" : "already", null);
+  });
+
+  /** The suggested fix for a stopped run, when ASAP has one (D-146). */
+  app.get("/workflows/runs/:id/suggestion", async (c) => {
+    const { db } = c.get("auth");
+    const r = await db.from("exception_suggestions").select("id, exception_code, suggestion, evidence, action, confidence, state, created_at").eq("run_id", c.req.param("id")).order("created_at", { ascending: false }).limit(1);
+    if (r.error) return sendError(c, mapDatabaseError(r.error));
+    return c.json({ suggestion: (r.data ?? [])[0] ?? null });
+  });
+
+  /**
+   * A person accepts or rejects it. Accepting runs the ordinary path as that person — recording the
+   * insurer's address is their act, with the correspondence as its source — and then they resume.
+   */
+  app.post("/exception-suggestions/:id/decide", async (c) => {
+    const { db } = c.get("auth");
+    const input = await parseBody(c, decideSuggestionRequestSchema);
+    const { data, error } = await db.rpc("exception_suggestion_decide", { p_id: c.req.param("id"), p_decision: input.decision, p_note: input.note ?? null });
+    if (error) return sendError(c, mapDatabaseError(error));
+    const r = data as { state: string; changed: boolean; action: { type: string; insurerId: string; email: string } | null };
+    if (r.changed && input.decision === "accept" && r.action?.type === "record_insurer_contact") {
+      const rec = await db.rpc("insurer_contact_record", { p_insurer_id: r.action.insurerId, p_email: r.action.email, p_label: null, p_source: "Seen in this brokerage's own correspondence; confirmed by the person accepting ASAP's suggestion" });
+      if (rec.error) return sendError(c, mapDatabaseError(rec.error));
+    }
+    return c.json({ outcome: r.changed ? "done" : "already", state: r.state, next: input.decision === "accept" ? "Resume the work when you are ready." : null });
+  });
+
+  /** Send an approved message again through the mailbox — the same intent, so it can never go twice. */
+  app.post("/prepared-communications/:id/send", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    requireActiveOrganization(ctx);
+    if (!hasPermission(ctx, "email", "approve")) throw new HttpError(403, "permission_denied", "Your role cannot send what leaves the brokerage.");
+    const out = await deliverApproved({ db, service: deps.service(), logger: deps.logger, c, mailbox: deps.mailbox, approverId: user.id, communicationId: c.req.param("id") });
+    if (!out.length) throw new HttpError(404, "not_found", "No approved message with that id");
+    const runId = ((await db.from("prepared_communications").select("run_id").eq("id", c.req.param("id")).maybeSingle()).data as { run_id: string } | null)?.run_id;
+    if (runId && out[0]!.outcome === "sent") await advance(runId);
+    return c.json({ delivery: out[0] });
   });
 
   app.post("/prepared-communications/:id/delivery", async (c) => {
@@ -260,7 +326,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     if (!r.data) throw new HttpError(404, "not_found", "No run with that id");
     if (!hasPermission(ctx, "policy", "edit")) {
       await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action: "workflow.resume", objectType: "workflow_run", objectId: runId, result: "denied", failureReason: "permission_denied" });
-      return respond(c, db, runId, ctx, "blocked", "Your role cannot resume renewal work.", 403);
+      return respond(c, db, runId, ctx, "blocked", `Your role cannot resume ${await nounOf(db, runId)} work.`, 403);
     }
     const service = deps.service();
     const now = new Date().toISOString();
@@ -298,7 +364,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     if (!r.data) throw new HttpError(404, "not_found", "No run with that id");
     if (!hasPermission(ctx, "policy", "edit")) {
       await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: user.id, action, objectType: "workflow_run", objectId: runId, result: "denied", failureReason: "permission_denied" });
-      return { blocked: await respond(c, db, runId, ctx, "blocked", "Your role cannot change renewal follow-ups.", 403) } as const;
+      return { blocked: await respond(c, db, runId, ctx, "blocked", `Your role cannot change ${await nounOf(db, runId)} follow-ups.`, 403) } as const;
     }
     return { db, user, ctx, org, run: r.data as { id: string; state: string; current_step: string | null; facts: Record<string, unknown> } } as const;
   };
@@ -308,7 +374,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const got = await controlRun(c, c.req.param("id"), "workflow.follow_up.moved");
     if ("blocked" in got) return got.blocked;
     const { db, user, ctx, org, run } = got;
-    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to follow up.", 409);
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", `This ${await nounOf(db, run.id)} is finished — there is nothing to follow up.`, 409);
     const today = new Date().toISOString().slice(0, 10);
     if (input.on < today) return respond(c, db, run.id, ctx, "blocked", "A follow-up cannot be moved into the past.", 422);
     if (run.facts["followUpOn"] === input.on) return respond(c, db, run.id, ctx, "already", null);
@@ -349,7 +415,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const got = await controlRun(c, c.req.param("id"), "workflow.paused");
     if ("blocked" in got) return got.blocked;
     const { db, user, ctx, org, run } = got;
-    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to pause.", 409);
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", `This ${await nounOf(db, run.id)} is finished — there is nothing to pause.`, 409);
     if (run.facts["paused"]) return respond(c, db, run.id, ctx, "already", null);
     const byName = await nameOf(db, user.id);
     const set = await deps.service().from("workflow_runs").update({ facts: { ...run.facts, paused: { by: user.id, byName, at: new Date().toISOString(), reason: input.reason ?? null } }, updated_at: new Date().toISOString() }).eq("id", run.id).is("facts->>paused", null).select("id");
@@ -364,7 +430,7 @@ export function workflowRoutes(deps: { logger: Logger; service: () => SupabaseCl
     const got = await controlRun(c, c.req.param("id"), "workflow.escalated");
     if ("blocked" in got) return got.blocked;
     const { db, user, ctx, org, run } = got;
-    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", "This renewal is finished — there is nothing to escalate.", 409);
+    if (run.state === "done" || run.state === "cancelled") return respond(c, db, run.id, ctx, "blocked", `This ${await nounOf(db, run.id)} is finished — there is nothing to escalate.`, 409);
     if (run.facts["escalated"]) return respond(c, db, run.id, ctx, "already", null);
     const byName = await nameOf(db, user.id);
     const service = deps.service();

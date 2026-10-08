@@ -2324,3 +2324,503 @@ missing.
     plainly that invoices and payments are not recorded yet.
 - *Imports say what they write.* Clients, contacts, policies and periods. A workbook sheet that is a
   vehicle schedule is labelled as not imported.
+
+## D-139
+
+**Autonomy build, phase 1: the engine stops being renewal-only.**
+
+- `apps/api/src/workflows/registry.ts` maps each workflow name to its definition and an optional
+  scheduled detector, with the contract `detectRenewals` has. `workflows/index.ts` registers what
+  exists.
+- `sweepWorkflows` moved out of `renewal.ts` and became generic. It runs every registered detector in
+  every brokerage, then advances each due run with its own definition, looked up by
+  `workflow_runs.workflow`.
+- The event consumer (`workflow.*`) and every person's control (approve, resume, pause, follow-up,
+  stop, escalate) advance through `advanceAnyRun`.
+- A run naming an unregistered workflow is stopped with an `unknown_workflow` exception and an audit
+  row. It does not crash the sweep.
+- Migration 0065 widens the run and receipt checks to the six workflow names: renewal, quotation,
+  placement, issuance, endorsement and claim. It also adds their subject types. The brief reserved
+  0065 for the manual intake mailbox; that moves to the phase that needs it, because migrations are
+  numbered in the order they are written.
+- Runs other than renewals get a generic operational reading (`workflows/run-view.ts`) in the same
+  shape as the renewal reading. Renewal keeps its own reading unchanged. Control messages name the
+  run's own workflow; renewal's wording is unchanged.
+- Fixed while there: "Follow up now", or a follow-up moved to today, stored today's date at 06:00
+  UTC. Before 06:00 UTC (09:00 in Nairobi) it chased nothing. A follow-up day that is today or past
+  is now due at once.
+
+## D-140
+
+**Autonomy build, phase 2: ASAP notices things — semantic events.**
+
+- The ten facts are emitted from their existing write paths, at the moment each becomes true. Every
+  payload carries ids only, including `workItemId` where there is one.
+
+  | Event | Emitted when |
+  |---|---|
+  | `quote.received` | an insurer's answer is recorded (not "no response") |
+  | `client.instruction_recorded` | `executeRecordInstruction` succeeds |
+  | `cover.confirmed` | the cover check passes with no material or unclear difference, including the re-check after a client accepts the insurer's changes |
+  | `policy.issued` | an issued policy is applied |
+  | `endorsement.requested` | an endorsement is opened |
+  | `claim.reported` | a claim is opened |
+  | `claim.registered` | the insurer's claim reference is recorded |
+  | `check.overdue` | the sweep finds work past its next check |
+  | `run.could_not_finish` | the engine records an exception |
+  | `email.received` | sync stores a new inbound message |
+
+- *Once per fact.* Migration 0066 adds `events.dedupe_key` with a unique index per organization,
+  event type and key. The emitter names the fact: the response and outcome, the instruction, the
+  confirmation and basis, the application, the claim, the endorsement, the work item and due date,
+  the run and moment, or the message. A second report is "already" and writes nothing, even under a
+  race. Events without a key behave as before.
+- *Consumer.* Registered workflows declare the events they listen for (`on`). The dispatcher's
+  workflow consumer starts the run an event starts, or names the runs waiting on its subject, then
+  advances each with its own definition. It is idempotent, because `startRun` finds the live run
+  and advancing twice acts once. Each delivery is recorded as `workflow.<name>` in
+  `event_deliveries`.
+- *Automations.* The five registry triggers that are now emitted became executable: quote received,
+  cover confirmed, claim registered, check overdue, run could not finish. "Renewal approaching" and
+  "payment received" stay off. The other emitted events are not automation triggers; they drive
+  workflows.
+
+## D-141
+
+**Autonomy build, phase 3: the quotation workflow.**
+
+- *Start.* Opening an opportunity, by a person or by Ask, emits `opportunity.opened`, once. The
+  quotation run starts unless the brokerage sets the new autonomy action `prepare_quotation` below
+  "act within rules". Its cap is "manage exceptions" and its default is "act within rules". Actions
+  added after brokerages saved a rule carry a schema default, so an older stored rule still reads.
+  `opportunity.changed` is emitted after any quotation action and wakes the run.
+- *Steps.*
+  1. List requirements against what is held.
+  2. Wait for a person to choose insurers. ASAP never picks one.
+  3. Prepare one request per insurer.
+  4. Ask for one approval of every request's exact text.
+  5. Wait for each delivery. The client holds this step while a required item is outstanding.
+     That follows D-119, where requirements stand in front of delivery rather than preparation,
+     which is how the brief's "wait on the party" is honoured.
+  6. Chase each insurer on its own delivery date. Escalate before the deadline, and stop with
+     `no_quotes_by_deadline` if none quoted.
+  7. Generate the comparison once every insurer has answered, or the deadline arrives with at least
+     one quote. Terms a person has not confirmed (D-138) hold this step.
+  8. Hand the options to a person.
+  9. When a person records the instruction, finish with a receipt. Placement starts from the same
+     event (phase 4).
+- *Shared paths.*
+  - `quotation/requests.ts` (`prepareQuoteRequest`, `approveQuoteRequest`) is the one path for the
+    route, the quotation workflow and renewal's `openTerms`. Renewal no longer inserts or approves
+    `quote_requests` directly.
+  - Approval checks the digest the person was shown, so a text changed since is refused.
+  - `generateComparison` is shared by a person's "Generate" and the run.
+  - Renewal and quotation share the per-insurer cadence (`nextFollowUpAt`) and the rule reader
+    (`ruleOr`).
+- *Work* is written from the same derivation the quotation Space reads (D-119, `workStateFrom`),
+  with the run's own step where the derivation cannot know it: the bundle approval, a chase, an
+  escalation, handing over.
+- *Rules.* `quote.chase` = {followUpDays, deadlineDays, escalateDaysBefore}. ASAP's default is
+  3/10/2 with a stated basis, until a brokerage sets its own. The deadline is never after the day
+  before cover starts.
+- *Honest attribution.* Migration 0067 lets a comparison record `generated_by_run_id` instead of a
+  person, exactly one of the two. The run never puts a person's name on what it did. Presenting a
+  comparison remains a person's act.
+
+## D-142
+
+**Autonomy build, phase 4: placement and issuance on the engine, chained.**
+
+- *Placement* starts from `client.instruction_recorded`. ASAP prepares the placement request
+  through `executePlacementAction` — the same function and guards as the route — but only when the
+  client's file is cleared, the basis has not drifted, and `prepare_placement` (new on the autonomy
+  ladder: cap `manage_exceptions`, default `act_within_rules`) allows it. Approval, sending and
+  recording the insurer's answer stay with a person. ASAP chases the insurer on `placement.chase`
+  (3/7/2 days by default, basis stated), runs the cover check itself once confirmation is in, and
+  finishes with a receipt. A declined placement is an exception, never a silent stop.
+- *Issuance* starts from `cover.confirmed`, follows the issuance stage the service already derives,
+  prepares its request the same way, chases for the policy on `issuance.chase` (5/21/5), and runs
+  the issued-policy check itself. `document.read` from extraction matches an issued policy to a
+  placement only when exactly one placement fits on client, insurer and class; otherwise the
+  candidates are proposed in the run and a person confirms. Applying it to the policy record stays
+  a person's act.
+- *Honest attribution.* Migration 0068: placement and issuance requests, issued-policy documents
+  and checks record `*_by_run_id` instead of a person — exactly one of the two. `runEnv` gives a
+  step only `placement:edit`, never approve or send. The service role may execute
+  `placement_request_digest`, as the API's own service connection prepares through it.
+- *Idempotent starts.* `startRun(..., { once: true })`: a subject that finished its run is not
+  started again by a replayed event (placement, issuance, quotation). A cancelled run may restart.
+
+## D-143
+
+**Autonomy build, phase 5: claims and endorsements on the engine.**
+
+- *A run completes only its own steps.* Claim and endorsement Work items keep their step machines
+  (D-051). Migration 0069 adds `work_item_step_by_run`, callable only by the API's service
+  connection: a run may complete the current step when it is ASAP's (`actor = asap`), or a send step
+  when a message this run prepared was approved and recorded delivered by a person — never a
+  person's, insurer's, client's or the bank's step. It is audited as the automation. The claim's
+  cover-on-the-incident-date sentence goes through `claim_set_cover_review_by_run`. Both are on the
+  security-definer allowlist with their reasons.
+- *Claim* starts from `claim.reported` (`prepare_claim`, new on the ladder: cap `manage_exceptions`,
+  default `act_within_rules`). ASAP captures the incident, waits for a person to match the policy
+  period, reviews cover on the incident date and the clock as itself, chases whoever holds an
+  outstanding document (`claim.document_chase_days`, default 5), and waits for a person to notify
+  the insurer. The deadline is the wording's clause where recorded on the claim, otherwise
+  `claim.notification_days` (default 7 days from the incident, escalated 2 days before, said to be
+  a working deadline). A passed deadline is an exception that says whether a late notice matters is
+  the insurer's decision. ASAP then chases the insurer for its reference, finishes with a receipt
+  that says it made no coverage or claims decision, and hands the Work item back to its own steps.
+  The notice itself stays a person's (D-123) until Phase 7 gives verified insurer addresses.
+- *Endorsement* starts from `endorsement.requested` (`prepare_endorsement`, same cap and default).
+  ASAP completes the classification made at intake and the requirements check —
+  a transfer of ownership waits for the policyholder's own instruction
+  (TRANSFER_NEEDS_POLICYHOLDER). It prepares the request to the insurer as one approval bundle, a
+  person approves and delivers it, and ASAP completes the send step on that delivery. It chases on
+  `endorsement.chase` (3/10/2), waits for a person to record the itemised answer and apply the
+  change, and finishes with a receipt. Premium adjustment stays finance's step; ASAP moves no money.
+- *Events:* `claim.changed` and `endorsement.changed` are emitted when a person moves a step or
+  records a claim or endorsement fact, so the run looks again.
+- *Defect fixed:* `POST /work-items/:id/actions` never passed `p_cover_inception_at` to
+  `work_item_apply` (0026), so PostgREST found no matching function and every step action on a Work
+  item returned 500. The route now passes it.
+
+## D-144
+
+**Autonomy build, phase 6: the inbound router — provider-neutral eyes.**
+
+- *Manual intake.* `POST /inbound/messages` takes a pasted email or the text of an `.eml`.
+  `inbound_message_record` (0070) files it as the signed-in person, in a per-brokerage intake
+  mailbox: provider `manual`, status `intake`. That status is never `connected`, so nothing that
+  asks "is a mailbox connected?" is fooled. Pasting the same email twice is one message. `.eml`
+  attachments go down the upload path (same rows, same `document.received`). If the file store
+  cannot be reached, the row is withdrawn and the response says the attachment was not kept.
+  `email.received` is emitted exactly as a mailbox sync emits it.
+- *Classifier.* The kinds are the brief's ten. The classification goes through the gateway, is
+  validated against the kind list and a 0–1 confidence, and is stored in
+  `inbound_classifications` (members read; only the API writes). With no model, or no usable answer,
+  ASAP abstains.
+- *Matcher.* Deterministic and pure (`inbound/match.ts`). A run is a candidate only if the kind is
+  one it can be waiting for, and only on evidence: same thread; a reference it owns (compared
+  without spaces, so `KDA123B` = `KDA 123B`); a reply to its subject; an address it wrote to; or the
+  same non-public domain. A name alone never qualifies. One candidate per run. The model may
+  tie-break only among these candidates.
+- *Routing.* ASAP routes by itself only with a model classification at or above
+  `inbound.auto_route_confidence` (default 0.9, basis stated) and exactly one run that fits. A
+  single candidate fits. So does a top candidate that leads the next by 4 points or more (a whole
+  reference or reply; the others share only the sender), or the model's tie-break choice at the
+  same confidence. Otherwise there is one Unsorted Work item (kind `inbound`), settled by a person
+  through `inbound_decide`. Routing records no fact: the email is filed to the run's step. That
+  waiting step then asks a person to record what arrived before chasing again — quotation per
+  insurer, placement, issuance, claim, endorsement.
+- *Evaluation* (`docs/evaluation/inbound-routing.json`, 36 emails, every kind; `pnpm eval:ask`).
+  With each email's true kind at 0.95: 22 routed, 22 correct — precision 1.00, coverage 22/22.
+  None of the 14 that belong to no run was routed. Below 0.9, or with no model, nothing routes.
+  Classification accuracy needs a real model: `INBOUND_EVAL_LIVE=1` with the gateway configured
+  measures it end to end. No key is configured in the build environment, so it is not yet measured.
+- *Not done in this phase.* An insurer quote is not turned into a proposed insurer response with
+  extracted terms; the run asks a person to record it. A claim notice or endorsement request is not
+  opened as a draft by ASAP; the Unsorted item says "Open the claim if it is one" and a person opens
+  it — `claim_create` needs a signed-in caller.
+
+## D-145
+
+**Autonomy build, phase 7: approved messages leave through the mailbox boundary.**
+
+- *When ASAP sends.* When a person approves a bundle, the run first records the approval on what
+  it covers — for example a quotation request's approved text. Each message is then sent through
+  `sendThroughMailbox` only if:
+  - a mailbox is connected and the deployment holds its provider;
+  - the message has a verified address;
+  - its body still hashes to what was approved (the quotation request's approved digest too).
+
+  Otherwise it stays with a person, exactly as before: delivered by hand and recorded.
+- *Idempotent.* The idempotency key is the message id plus its body hash. Approving twice,
+  `POST /prepared-communications/:id/send`, or a retry all send once.
+- *Evidence.* The provider's id is the evidence. `prepared_communication_record_sent` (0071) marks
+  the message `sent` only on an attempt the provider accepted and the same person approved, keyed
+  to that message. It emits the delivery event that moves the run on.
+- *One path for quotation delivery.* A quotation request sent this way is recorded as delivered
+  through `recordQuoteDelivery`, the same function the person's route now uses.
+- *Refusal.* A body changed after approval is refused, audited as `email.send_refused`, and nothing
+  is sent.
+- *Verified insurer addresses.* `insurer_contacts`: recorded by a person, with how they know the
+  address is the insurer's (`POST /insurers/:id/contacts`, permission `quote:edit`). Members read
+  them; only the API writes. The inbound matcher (D-144) also reads them as the insurer's addresses.
+- *Unchanged.* External messages stay capped at `act_after_approval`. `NEVER_AUTOMATIC` still holds:
+  nothing leaves without a person's approval, and the approver is recorded on every attempt.
+  Claim notices are still not prepared (D-123): a claim notice needs its own approval flow on top
+  of verified addresses, which this phase does not add.
+
+## D-146
+
+**Autonomy build, phase 8: the exception helper.**
+
+- On `run.could_not_finish`, ASAP gathers evidence about why the run stopped:
+  - the exception itself;
+  - the insurer the run was waiting on;
+  - that insurer's verified addresses;
+  - addresses in the brokerage's own inbound correspondence that mention it.
+
+  It asks the model, through the gateway, for one suggested fix that cites that evidence, and
+  stores it in `exception_suggestions` (0072): one per reported exception, a proposal with its
+  evidence, confidence and model. Members read; only the API writes.
+- *Code decides.* Cited evidence must exist. The only action a suggestion may carry is
+  `record_insurer_contact`, and only for an address the evidence shows. When a person accepts
+  (`POST /exception-suggestions/:id/decide`), the address is recorded through
+  `insurer_contact_record` as that person, with the correspondence as its source. They then resume
+  the run with the ordinary control. A rejection needs a reason.
+- *No model, or no usable answer:* nothing is written, and the exception shows as before.
+- *Departure from the brief:* the brief asked for the declared Ask tools. They are not used here:
+  they rely on a person's session for tenancy (RLS), and on the engine's connection they would read
+  across brokerages (§45 rule 1). The helper reads through queries that each filter on the run's
+  organization, and the model sees only what they return.
+
+## D-147
+
+**Autonomy build, phase 9: standing approvals for routine insurer chasers — default off.**
+
+Written before the code, because it changes how the external-messages cap applies.
+
+- *What a person approves.* A chaser template, once: subject and body wording, audience `insurer`
+  only, and the fewest days between two chasers to the same insurer on the same work
+  (`chaser_templates`, 0073). Each approval is a new version with its own digest. The previous
+  version is retired, never edited. Client-facing messages cannot be templated: the audience check
+  is in the database.
+- *When ASAP may send without a fresh approval.* All of these must hold:
+  - a follow-up is due on the brokerage's chase rule;
+  - `insurer_chasers` (new on the ladder: cap `act_within_rules`, default `prepare`, which is off)
+    is set to `act_within_rules`;
+  - a mailbox is connected;
+  - the insurer has a verified address (D-145);
+  - an approved template for that purpose is live;
+  - the last chaser to that insurer on that work was at least the template's minimum days ago;
+  - the message renders exactly from the approved version: the placeholders are filled only from
+    the run's own facts, and the rendered text is hashed with the template version.
+
+  Otherwise the follow-up stays a person's job, exactly as before.
+- *The approval behind each send.* Each send goes through `sendThroughMailbox` with the template's
+  approver as the approving person — the standing approval is that person's approval of exactly
+  this wording. It is keyed on run, insurer, follow-up number and template digest, so it is sent
+  once. Each send is recorded in `chaser_sends` and in the audit history as the automation, naming
+  the template version.
+- *What does not change.* `external_messages` stays capped at `act_after_approval`. The
+  `NEVER_AUTOMATIC` line "Send an external message without a person's approval" stays true and
+  unchanged: nothing leaves without a person having approved its exact wording.
+- *As built (D-147).* Migration 0073 (`chaser_templates`, `chaser_sends`,
+  `chaser_template_approve`, `chaser_template_withdraw`); routes `GET/POST /chaser-templates` and
+  `POST /chaser-templates/:id/withdraw`. Wired into quotation chasing (per insurer) and into
+  placement and issuance chasing. A send that cannot happen for any reason falls back to the
+  person's "Chase …" Work, unchanged. `sendThroughMailbox` records such a send in the audit history
+  as the automation, naming the standing approver.
+
+## D-148
+
+**Autonomy build, phase 10: proven end to end.**
+
+- `test/connected/end-to-end.test.ts` drives one client through the real API and database:
+  1. an enquiry email pasted in, proposed as new work, opened by a person and filed to the new
+     quotation;
+  2. insurers chosen; one approval; both requests delivered;
+  3. both insurer replies pasted in and auto-routed to the quotation;
+  4. responses recorded; the comparison generated by the run;
+  5. the instruction recorded by a person; placement prepared by the run, approved and sent;
+  6. the confirmation pasted in and auto-routed; cover confirmed;
+  7. issuance prepared by the run, approved and sent; the policy email pasted in and auto-routed;
+  8. the policy document filed by the run itself; readings confirmed; check run; applied;
+  9. `policy.issued`, with both receipts.
+
+  Separately, a claim emailed in is proposed as a new claim, opened as a draft by a person, matched,
+  notified, and registered when the insurer's email arrives and is auto-routed. Throughout, the
+  test checks run states, the Work copy and the audit rows, and that no send attempt exists: every
+  message was approved, then delivered by a person.
+- Stand-ins, named in the test: the client's KYC clearance (no route yet), and the extractor's
+  output for the policy schedule (no file store in the test).
+- *Defects the proof found, fixed:*
+  - Placement and issuance runs wrote their Work copy to the placement's opening Work item, long
+    done, so their chases never reached a person. They now write to the placement's live
+    reason-keyed item.
+  - An Unsorted email (kind `inbound`) was missing from the shared Work item schema, which broke
+    the Work and Today lists for its brokerage. It is now a kind, labelled "Email to sort".
+- `docs/AUTONOMOUS-WORK-MAP.md` "Missing" lines are updated. `ASAP_CURRENT_BUILD_AUDIT.md` is marked
+  superseded. `render.yaml` needs no change: no new environment variable, and the worker already
+  dispatches every event and runs the generic sweep.
+
+## D-149
+
+**The engine reads one brokerage through RLS; the exception helper uses the declared tools.**
+
+D-146 did not use the declared Ask tools, because they rely on RLS and the engine's service
+connection bypasses it. The engine now has a reading connection that RLS confines to one brokerage:
+- *The token.* `forEngine(organizationId)` signs a five-minute token with the project's JWT secret,
+  for the worker role (which never bypasses RLS), naming the organization.
+- *How RLS honours it (0074).* `app.worker_org()` — already the workers' tenancy — reads that claim
+  only when the role really is the worker and the transaction is read-only. PostgREST runs a GET
+  read-only, so the token can read and can never write, even though the worker role's grants would
+  allow writes. A person cannot make such a token: only the server holds the secret.
+- *The exception helper.* It now runs a short tool loop over the declared tools that only read,
+  never the `prepare_*` ones, on that connection. Whatever a tool reads becomes evidence the
+  suggestion may cite. On a deployment without a JWT secret it falls back to the organization-filtered
+  queries of D-146.
+- *Proven* by a connected test: the token sees only its own brokerage's clients, and its write is
+  refused. pgTAP checks that a person's forged claim means nothing, and that the claim is ignored
+  outside a read-only transaction.
+- *Hosted note.* This needs the project's legacy (HS256) JWT secret to be accepted by PostgREST,
+  which is the Supabase default while the legacy secret is not revoked.
+
+## D-150
+
+**The claim notice gets its own approval flow (amends D-123).**
+
+D-123 refused to prepare a claim notice at all: there was no verified insurer address and no safe
+path to send one. Both now exist (D-145).
+- *When ASAP prepares it.* The claim run's notify step prepares the notice once the claim's insurer
+  has a verified address and `prepare_claim` allows it. The notice is plain facts — client, policy,
+  incident date and the client's own account — and asks for the claim reference. It never states or
+  suggests a view on cover. It goes into one approval bundle (`workflow_approvals`, step `notify`)
+  with its exact text.
+- *After approval.* It is sent through the connected mailbox to the verified address (D-145).
+  Otherwise a person delivers it and records how.
+- *Completing the step.* The delivery completes the claim Work item's "submitted" step through
+  `work_item_step_by_run` with the message as evidence: a person approved it, and it was delivered
+  by a person or the mailbox. The run then waits on the insurer for its reference.
+- *Fallbacks.* A rejected notice, or no verified address, means a person notifies the insurer as
+  before, and the Work copy says which. The Work item's own "draft" button for a claim stays
+  refused: the notice is prepared in one place, through approval, never drafted freehand.
+
+## D-151
+
+**An email that reports a claim or asks for a policy change opens a draft.**
+
+D-144 sent every claim notice and change request to a person as Unsorted. Now ASAP opens a draft
+claim or endorsement itself when all of these hold:
+- the model classified the email as `claim_notice` or `endorsement_request` at or above
+  `inbound.auto_route_confidence`;
+- `prepare_claim` or `prepare_endorsement` allows it;
+- every fact the record needs is read deterministically, never from the model:
+  - *the client:* the sender is the recorded contact of exactly one client;
+  - *a claim's incident date:* stated in the email — a date, day first, or
+    "today"/"yesterday"/"last night" read against when it was sent, in Nairobi; never a date
+    after the email;
+  - *a claim's policy:* the one the email names, or the client's only live policy, or none;
+  - *an endorsement's policy:* the one the email names, or the client's only live policy.
+
+The draft is the same Work item, record and start event as a person's report or change. It has the
+same title, so the same claim reported twice is one claim. `inbound_open_draft` (0075) is
+service-only, checked against the proposal, and audited as the automation.
+
+A claim stays a draft until a person matches it to a policy period. An endorsement asks nothing of
+the insurer until a person approves the request. Anything missing leaves the email Unsorted, and
+the item says why ASAP did not open it. New enquiries still go to a person, because the quotation
+needs a class of business and a description the email does not reliably give.
+
+## D-152
+
+**An insurer's quote by email is read into a proposed response.**
+
+D-144 filed an insurer's reply to the quotation and asked a person to record it from scratch.
+- *The proposal.* When a quote or decline is filed to a quotation, ASAP reads the reply from the
+  email's own words — by fixed patterns, never the model — into `insurer_response_proposals`
+  (0076), keeping the sentence each value came from. Members read it; only the API writes it.
+  It reads:
+  - the premium and currency, from the sentence that says "premium", or the only amount in the email;
+  - the validity, from "valid for N days" (counted from the email) or "valid until" a date;
+  - a decline, and the sentence that gives its reason.
+
+  When the words are not clear, it reads nothing.
+- *Confirming it.* The quotation's Work then reads "Confirm Jubilee's reply as ASAP read it — KES
+  5,310,000 — or correct it". The person confirms through the same "record response" path, with
+  `fromProposalId`. Anything they type corrects the reading; anything left out is taken as read,
+  with the email as the source. The proposal records whether it was accepted, corrected or rejected,
+  and which response it became. Nothing counts until a person confirms it.
+- *Terms* (excesses, limits, conditions) still come from the quotation document through the
+  extractor, confirmed one at a time (D-138).
+- *Not yet:* renewal terms filed by email are not read into a proposal — renewal still asks a
+  person to record them.
+
+## D-153
+
+**Attachments are kept in the connected suite, and the end-to-end test runs without stand-ins.**
+
+D-146's end-to-end test cleared KYC by a database update and inserted the extractor's output by hand,
+and attachments in connected tests were not kept (no file store).
+- *Storage.* `scripts/test-connected.sh` always starts the storage stand-in
+  (`test/connected/storage-standin.ts`, the same one `serve.ts` uses), so an inbound attachment is
+  filed as a document, queued, and announced with `document.received`.
+- *Extractor.* When `EXTRACTOR_PYTHON` is set, the script starts the real Python extractor and
+  passes its URL to the tests.
+- *End to end.* The client is opened with `POST /clients` and cleared through `POST /clients/:id/file`
+  (identity and beneficial-ownership documents with references, review, clearance). The policy
+  schedule arrives as a PDF attachment on the insurer's email; the extractor reads it, and the
+  issuance run files it. The inserted extractor output remains only where no extractor is running,
+  and the test says so where it happens.
+
+## D-154
+
+**Claim settlement and endorsement premium adjustments are recorded, with their figures, and the runs follow them.**
+
+A claim's run ended at the insurer's registration, and an endorsement's at the applied change. The
+offer, acceptance and payment were references with no figure, and nothing held a premium adjustment.
+- *Claims.* Migration 0077 gives the claim its offer amount and currency, and the amount, currency and
+  date of the payment. `claim_amount_record` takes each one once, and only after its reference.
+  The Work item's offer and payment steps require the figure from the voucher or the receipt.
+  The claim run gains a `settlement` step. It follows up the insurer for its offer, the client for the
+  signed voucher (naming the offer), and the insurer for payment, on `claim.document_chase_days`.
+  It finishes when the payment is recorded, with a receipt naming the amount received.
+- *Endorsements.* `endorsement_premium_adjustments` (0077) holds one record per endorsement:
+  additional or return premium, with its amount, currency and the insurer's note number; or none,
+  with the person's reason. Members can read it; only `endorsement_premium_record`, through the API,
+  writes it. The Work item's premium step records it. The endorsement run waits for it after the
+  change is applied and names it on the receipt.
+- *What ASAP does not do.* No money moves. ASAP decides no claim, offer or premium: every figure is a
+  person's record of the insurer's or bank's paper, and a wrong figure is corrected by an exception,
+  never overwritten. Levies on an adjustment are not split out. That waits for the levy rules to be
+  confirmed per brokerage.
+
+## D-155 — The adaptive shell: the interface follows what the person is doing
+
+The owner directed a structural change: the same Chat + Space layout everywhere made ASAP feel
+static, and the permanent conversation took space it rarely needed. This supersedes D-118's
+permanent Chat + Space, D-074's sidebar and Ask-everywhere rule, and D-075's Work view names. It
+keeps D-115's substance (the approved interface's logic, Spaces and sheets) and every rule in §45.
+
+- *Layout modes.* Home (full width, calm, no transcript); Conversation (centred); Space (full width,
+  chat closed); Split (the conversation beside the Space it opened, resizable 360–720px, either side
+  closable and reopenable); Work, Automations and Activity (full-width surfaces, no chat). Phones get
+  a bottom bar (Home · Work · Ask · Automations · More), full-screen conversation and Space with
+  "Open Space" and "Back to conversation", and never a split.
+- *Removed.* The Gmail-style tab strip, its tab state and its sessionStorage reopen; the permanent
+  Ask column and its resize; the old sidebar and mobile bar; and the D-115 compiler with its
+  generated files. The approved `.dc.html` source is not in this repository, so the logic class and
+  the Space, conversation and sheet renderers are now maintained source
+  (`apps/web/src/asap/logic.js`, `views/space-views.js`), changed in place like any other code.
+- *The address is the surface* (`shell/routes.ts`): `/`, `/work?view=`, `/automations`,
+  `/activity?…`, `/ask/<id>[?space=<ref>]`, `/s/<ws>?<ref>[&ask=<id|new>]`. Refresh reopens it, Back and
+  Forward move between surfaces, opening the same record focuses it. Older addresses open Home.
+- *Named sessions, Recent, Pins* (0078). A conversation is a server session: titled
+  deterministically from its purpose and the records it names (`deriveConversationTitle`, no model
+  in the path, never "New chat"), renamable, linked to its Work item and Space, with a status
+  derived from that work — never stored. The same Work item, or the same purpose for the same client
+  while unfinished, reopens one session. An explicit client in the request overrides inherited
+  context. `recent_items` and `space_pins` (`/recent`, `/space-pins`; Work-item pins keep `/pins`) are personal and per brokerage under RLS; Recent re-reads
+  each title from its record and drops what is gone or unreadable. Search finds sessions by title,
+  client, workflow, policy number and claim reference. Only an unsent message stays in the browser.
+- *When chat opens.* From Home or + New, an earlier conversation, "Ask about this" in a Space (a
+  drawer scoped to that record), a clarification, an approval, or controlling a running workflow.
+  Never on Work, Automations, Activity, Search or a Space by default. Closing a conversation does not
+  touch its workflow; closing a Space does not delete its conversation.
+- *Surfaces* (`asap/surfaces.js`), read from the records Spaces read. Home: one command box, up to
+  five genuine attention items each with why and one action, what ASAP is handling and whether it is
+  safe to leave, Recent; a brokerage with nothing yet gets the setup entry point instead. Work: Needs
+  me · ASAP is handling · Waiting on others (an outside party, or a colleague, named) · Upcoming ·
+  Done, one row per outcome, opening its Space. Automations: ASAP's workflows grouped from
+  supervision, and standing instructions with health, last firing and pause. Activity: meaningful
+  actions as sentences, technical events and raw ids left out, filtered by people, ASAP, client,
+  workflow, approvals and external communication.
+- *+ New* opens the real workflow or conversation; choosing creates nothing.
+- *Tenancy.* A brokerage or person switch remounts the application and opens Home: nothing
+  inherited survives.
+- *Not built.* Title generation by a model (the deterministic path is the only one); a "next sweep
+  in N minutes" figure for Renewal Autopilot (the worker's schedule is not exposed to the browser,
+  and the card does not invent one); pausing a whole workflow engine from its card (it is governed by
+  the autonomy rule, opened from its Space).

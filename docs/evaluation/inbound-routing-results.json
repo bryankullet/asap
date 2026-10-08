@@ -1,0 +1,11 @@
+{
+ "mode": "kind given at 0.95; no tie-break model",
+ "threshold": 0.9,
+ "total": 36,
+ "routed": 22,
+ "correct": 22,
+ "precision": 1,
+ "coverage": 1,
+ "wrong": [],
+ "missed": []
+}

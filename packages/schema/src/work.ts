@@ -66,7 +66,7 @@ export const ExceptionRecord = z.object({
 });
 export type ExceptionRecord = z.infer<typeof ExceptionRecord>;
 
-/** The fourteen Part 6 workflows. */
+/** The fourteen Part 6 workflows, and an Unsorted email for a person to settle (D-144). */
 export const WorkItemKind = z.enum([
   "new_business",
   "placement",
@@ -82,6 +82,7 @@ export const WorkItemKind = z.enum([
   "wht",
   "import",
   "exception",
+  "inbound",
 ]);
 export type WorkItemKind = z.infer<typeof WorkItemKind>;
 

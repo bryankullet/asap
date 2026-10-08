@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { AUTONOMY_DEFAULT, AUTONOMY_LEVELS, autonomyRuleSchema, recommendationRuleSchema, type AutonomyLevel, type AutonomyRule } from "@asap/schema";
-import { quoteRequestDigest } from "../routes/opportunities.js";
+import { approveQuoteRequest, prepareQuoteRequest, quoteRequestDigest } from "../quotation/requests.js";
+import { nextFollowUpAt } from "./rules.js";
 import { advanceRun, auditAutomation, sha256, startRun, type Evidence, type StepContext, type StepResult, type WorkflowDefinition } from "./engine.js";
 
 /**
@@ -325,18 +326,20 @@ async function openTerms(ctx: StepContext): Promise<StepResult> {
 
   let quoteRequestId = insurerMsg.quote_request_id;
   if (!quoteRequestId) {
-    const existingQr = await ctx.db.from("quote_requests").select("id").eq("opportunity_insurer_id", opportunityInsurerId).maybeSingle();
-    quoteRequestId = (existingQr.data as { id: string } | null)?.id ?? null;
-    if (!quoteRequestId) {
-      const qr = await ctx.db.from("quote_requests").insert({ organization_id: ctx.run.organization_id, opportunity_id: opportunityId, opportunity_insurer_id: opportunityInsurerId, subject: insurerMsg.subject, body_text: insurerMsg.body_text, prepared_by: approverId }).select("id").maybeSingle();
-      quoteRequestId = (qr.data as { id: string } | null)?.id ?? null;
-      if (!quoteRequestId) return { kind: "retry", error: qr.error?.message ?? "the insurer request could not be recorded" };
-    }
-    // The person approved this exact text in the bundle; the request carries that approval.
+    // The shared paths a person's clicks use (D-141): prepare the approved text, then record the
+    // approval of the person who approved the bundle — never a direct write past their guards.
     const at = new Date().toISOString();
-    const digest = quoteRequestDigest(insurerMsg.subject, insurerMsg.body_text);
-    await ctx.db.from("quote_requests").update({ approved_by: approverId, approved_at: at, approved_body_sha256: digest, updated_at: at }).eq("id", quoteRequestId).is("approved_at", null);
-    await ctx.db.from("quote_request_approvals").insert({ organization_id: ctx.run.organization_id, quote_request_id: quoteRequestId, body_sha256: digest, approved_by: approverId, approved_at: at });
+    const prepared = await prepareQuoteRequest(ctx.db, { organizationId: ctx.run.organization_id, opportunityId, opportunityInsurerId, subject: insurerMsg.subject, body: insurerMsg.body_text, preparedBy: approverId, now: at });
+    if (prepared.outcome === "blocked") {
+      // Already prepared and approved on an earlier attempt: read it.
+      const existingQr = await ctx.db.from("quote_requests").select("id").eq("opportunity_insurer_id", opportunityInsurerId).maybeSingle();
+      quoteRequestId = (existingQr.data as { id: string } | null)?.id ?? null;
+      if (!quoteRequestId) return { kind: "retry", error: prepared.reason };
+    } else {
+      quoteRequestId = prepared.quoteRequestId;
+      const approved = await approveQuoteRequest(ctx.db, { organizationId: ctx.run.organization_id, quoteRequestId, approverId, expectedDigest: quoteRequestDigest(insurerMsg.subject, insurerMsg.body_text), now: at });
+      if (approved.outcome === "blocked") return { kind: "retry", error: approved.reason };
+    }
     await ctx.db.from("prepared_communications").update({ quote_request_id: quoteRequestId, updated_at: at }).eq("id", insurerMsg.id);
   }
   return {
@@ -373,9 +376,13 @@ async function awaitTerms(ctx: StepContext): Promise<StepResult> {
     await updateWork(ctx.db, ctx.run.work_item_id, { task_status: "needs_you", task_party: null, required_action: `Deliver the approved renewal request to ${s.insurer!.name} and record how`, reason: "The request is approved but nothing has been sent — ASAP has no mailbox connected.", task_next_check: new Date(ctx.now.getTime() + DAY).toISOString() });
     return { kind: "wait", on: "party", until: new Date(ctx.now.getTime() + DAY), output: { followUps, delivered: false } };
   }
-  const scheduled = new Date(new Date(delivery.delivered_at).getTime() + (followUps + 1) * window.followUpDays * DAY);
+  // The per-insurer cadence the quotation workflow uses too (D-141).
+  const scheduled = nextFollowUpAt(delivery.delivered_at, followUps, window.followUpDays);
   // A person may move the next follow-up ("move it to Friday") or stop chasing this insurer.
-  const override = typeof ctx.run.facts["followUpOn"] === "string" ? new Date(String(ctx.run.facts["followUpOn"]) + "T06:00:00Z") : null;
+  const overrideDay = typeof ctx.run.facts["followUpOn"] === "string" ? String(ctx.run.facts["followUpOn"]) : null;
+  // A follow-up moved to today (or "follow up now") is due now, not at 06:00 UTC — before then it
+  // read as moved and nothing was chased (D-139).
+  const override = overrideDay ? (overrideDay <= isoDay(ctx.now) ? ctx.now : new Date(overrideDay + "T06:00:00Z")) : null;
   const nextDue = override ?? scheduled;
   const escalation = new Date(new Date(s.period.period_end + "T06:00:00Z").getTime() - window.escalateDaysBeforeExpiry * DAY);
   const stopped = ctx.run.facts["chasing"] as { stopped?: boolean; byName?: string } | undefined;
@@ -585,35 +592,6 @@ async function ensureRenewalWork(db: SupabaseClient, organizationId: string, s: 
   if (ins.data) return (ins.data as { id: string }).id;
   const again = await db.from("work_items").select("id").eq("organization_id", organizationId).eq("source_type", "policy_period").eq("source_id", s.period.id).eq("reason_code", "renewal_due").neq("task_status", "done").maybeSingle();
   return (again.data as { id: string } | null)?.id ?? null;
-}
-
-/** The scheduled pass: detect in every brokerage, then advance every run that is due. */
-export async function sweepWorkflows(db: SupabaseClient, logger: Logger, now = new Date()) {
-  const orgs = await db.from("organizations").select("id");
-  let started = 0;
-  /*
-   * A run found in this pass is advanced in this pass (D-137). Its `next_run_at` is stamped by the
-   * database a moment after `now`, so the due query below missed it and the run sat at "0 of 11"
-   * until the next sweep — fifteen minutes that read as ASAP working when it was only queued.
-   */
-  const fresh: string[] = [];
-  for (const o of (orgs.data ?? []) as { id: string }[]) {
-    const d = await detectRenewals(db, logger, o.id, now);
-    started += d.started;
-    fresh.push(...d.startedRunIds);
-  }
-  const due = await db.from("workflow_runs").select("id").in("state", ["running", "waiting_approval", "waiting_party"]).lte("next_run_at", now.toISOString()).order("next_run_at").limit(100);
-  const outcomes = [];
-  const ids = [...new Set([...fresh, ...((due.data ?? []) as { id: string }[]).map((r) => r.id)])];
-  for (const id of ids) {
-    const r = { id };
-    try {
-      outcomes.push(await advanceRun(db, logger, RENEWAL, r.id, now));
-    } catch (e) {
-      logger.error({ runId: r.id, err: (e as Error).message }, "a workflow run could not be advanced; the next sweep tries again");
-    }
-  }
-  return { started, advanced: outcomes.length, outcomes };
 }
 
 export { advanceRun, type Evidence };

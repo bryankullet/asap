@@ -3,6 +3,10 @@ import {
   AUTONOMY_LEVELS,
   autonomyRuleSchema,
   renewalWindowRuleSchema,
+  chaseRuleSchema,
+  claimDocumentChaseRuleSchema,
+  claimNotificationRuleSchema,
+  inboundAutoRouteRuleSchema,
   companyRulesResponseSchema,
   recommendationRuleSchema,
   setCompanyRuleRequestSchema,
@@ -51,6 +55,41 @@ const DEFAULTS: { key: CompanyRuleKey; summary: string; basis: string }[] = [
     basis: "ASAP's default (D-130) until this brokerage sets its own.",
   },
   {
+    key: "quote.chase",
+    summary: "ASAP chases each insurer 3 days after the quotation request reaches them, expects answers within 10 days, and escalates 2 days before.",
+    basis: "ASAP's default (D-141) until this brokerage sets its own. Measure your insurers' real response times and set it.",
+  },
+  {
+    key: "placement.chase",
+    summary: "ASAP chases the insurer for cover confirmation 3 days after the placement request is sent, expects it within 7 days, and escalates 2 days before.",
+    basis: "ASAP's default (D-142) until this brokerage sets its own.",
+  },
+  {
+    key: "issuance.chase",
+    summary: "ASAP chases the insurer for the issued policy 5 days after the issuance request is sent, expects it within 21 days, and escalates 5 days before.",
+    basis: "ASAP's default (D-142) until this brokerage sets its own.",
+  },
+  {
+    key: "claim.notification_days",
+    summary: "Where the policy wording's notification clause is not recorded on a claim, ASAP expects the insurer to hear of it within 7 days of the incident, and escalates 2 days before.",
+    basis: "ASAP's default (D-143) until this brokerage sets its own. It is a working deadline, not the policy's: record the wording clause on the claim and the clause's own days apply.",
+  },
+  {
+    key: "claim.document_chase_days",
+    summary: "ASAP chases whoever holds an outstanding claim document every 5 days.",
+    basis: "ASAP's default (D-143) until this brokerage sets its own.",
+  },
+  {
+    key: "endorsement.chase",
+    summary: "ASAP chases the insurer for its answer to an endorsement request 3 days after it is sent, expects it within 10 days, and escalates 2 days before.",
+    basis: "ASAP's default (D-143) until this brokerage sets its own.",
+  },
+  {
+    key: "inbound.auto_route_confidence",
+    summary: "ASAP files an incoming email to the work waiting for it by itself only when exactly one piece of work fits and the model is at least 90% sure what the email is; anything else goes to a person as Unsorted.",
+    basis: "ASAP's default (D-144) until this brokerage sets its own. Set it from the routing evaluation: raise it if emails are filed to the wrong work.",
+  },
+  {
     key: "workflow.autonomy",
     summary: "ASAP starts and prepares renewals and follows up on its own; every external message waits for a person's approval; it never names a recommended quote; new work goes to the client file's owner.",
     basis: "ASAP's default (D-131) until this brokerage sets its own. Binding cover, client instructions, money and claims decisions are never automatic, whatever is set.",
@@ -62,6 +101,20 @@ function validate(key: CompanyRuleKey, value: unknown): string | null {
     return renewalWindowRuleSchema.safeParse(value).success
       ? null
       : "A renewal window is {leadDays 7–180, followUpDays 1–30, escalateDaysBeforeExpiry 1–60}, each a whole number of days.";
+  }
+  if (key === "inbound.auto_route_confidence") {
+    return inboundAutoRouteRuleSchema.safeParse(value).success ? null : "An auto-routing rule is {threshold 0.5–1}, the least confidence at which ASAP files an email by itself.";
+  }
+  if (key === "claim.notification_days") {
+    return claimNotificationRuleSchema.safeParse(value).success ? null : "A claim notification rule is {days 1–365, escalateDaysBefore 0–30}, whole numbers of days.";
+  }
+  if (key === "claim.document_chase_days") {
+    return claimDocumentChaseRuleSchema.safeParse(value).success ? null : "A claim document chase rule is {days 1–30}, a whole number of days.";
+  }
+  if (key === "quote.chase" || key === "placement.chase" || key === "issuance.chase" || key === "endorsement.chase") {
+    return chaseRuleSchema.safeParse(value).success
+      ? null
+      : "A chase rule is {followUpDays 1–30, deadlineDays 1–120, escalateDaysBefore 0–60}, each a whole number of days.";
   }
   if (key === "workflow.autonomy") {
     const r = autonomyRuleSchema.safeParse(value);

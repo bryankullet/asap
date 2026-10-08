@@ -64,7 +64,7 @@ const transport: typeof fetch = async (input, init) => {
 export const newApiKey = () => `connected-internal-key-${randomUUID()}`;
 
 const silentMailer = { send: async () => ({ ok: true as const }), sendInvitation: async () => {} } as unknown as Mailer;
-export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl = "http://localhost:5173") =>
+export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl = "http://localhost:5173", extra: Partial<Parameters<typeof createApp>[0]> = {}) =>
   createApp({
     logger: pino({ level: process.env["CONNECTED_LOG"] ?? "silent" }),
     build: { version: "connected", commit: "connected" },
@@ -74,6 +74,7 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
       // The engine's own connection (internal routes, D-129): a service_role token for local PostgREST only.
       serviceRoleKey: jwt({ role: "service_role" }),
       apiInternalKey: apiKey,
+      jwtSecret: SECRET,
       fetch: transport,
     }),
     mailer: silentMailer,
@@ -89,6 +90,7 @@ export const buildApp = (apiKey: string, askScript: FakeScript = [], webBaseUrl 
       : null,
     // The worker's surface (sweeps, event dispatch), reachable with the same server key.
     apiInternalKey: apiKey,
+    ...extra,
   });
 
 // Test-only: bodies are asserted field by field against the contracts.

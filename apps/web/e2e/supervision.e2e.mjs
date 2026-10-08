@@ -138,18 +138,20 @@ const expectText = async (where, re) => {
   const t = await where.innerText();
   if (!(typeof re === "string" ? t.includes(re) : re.test(t))) throw new Error(`expected ${re} on screen`);
 };
-const openRun = async (page, runId, view) => {
-  await page.evaluate(([r, v]) => sessionStorage.setItem("asap.openRef", JSON.stringify({ ws: "renewal", runId: r, ...(v ? { view: v } : {}) })), [runId, view]);
-  await page.reload();
-  await page.getByPlaceholder("Tell ASAP what you need").waitFor({ timeout: 30000 });
-  await settle(page, 1800);
+/* D-155: the address is the surface. A run opens as the Space beside a conversation (split; on a
+   phone, the conversation with "Open Space"), so Ask and the Space are both on the page. */
+const BASE_URL = process.env.E2E_URL.replace(/#.*$/, "");
+const packRef = (ref) => {
+  const q = new URLSearchParams(Object.entries(ref).filter(([k, v]) => k !== "ws" && v != null).map(([k, v]) => [k, String(v)])).toString();
+  return ref.ws + (q ? "?" + q : "");
 };
 const openRef = async (page, ref) => {
-  await page.evaluate((r) => sessionStorage.setItem("asap.openRef", JSON.stringify(r)), ref);
+  await page.goto(BASE_URL + "#/ask?space=" + encodeURIComponent(packRef(ref)));
   await page.reload();
   await page.getByPlaceholder("Tell ASAP what you need").waitFor({ timeout: 30000 });
   await settle(page, 1800);
 };
+const openRun = async (page, runId, view) => openRef(page, { ws: "renewal", runId, ...(view ? { view } : {}) });
 
 {
   const page = await open({ width: 1440, height: 900 });

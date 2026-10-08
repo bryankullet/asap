@@ -11,6 +11,7 @@ import {
   type RecordInstructionRequest,
 } from "@asap/schema";
 import { pgMoney } from "../numeric.js";
+import { emitEvent } from "../events/emit.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AuditEntry } from "../audit.js";
 import { hasPermission, type resolveContext } from "../context.js";
@@ -56,7 +57,12 @@ export type Env = {
   organizationId: string;
   userId: string;
   audit: (entry: Omit<AuditEntry, "organizationId" | "actorUserId">) => Promise<void>;
+  /** Set when a workflow run is the actor (D-142): what it prepares names the run, never a person. */
+  runId?: string;
 };
+
+/** Who did it, for a column that names the actor: the person, or the run (0068). */
+export const actor = (env: Env, column: string): Record<string, string> => (env.runId ? { [`${column}_run_id`]: env.runId } : { [column]: env.userId });
 
 export type Outcome = { outcome: "done" | "already" | "blocked"; reason: string | null };
 
@@ -403,6 +409,18 @@ export async function executeRecordInstruction(
 
   /* And the first lifecycle Work, keyed on the placement: prepare the request. */
   await load(env.db, env.ctx, org, placementId, { sync: true });
+  // A person recorded the client's instruction (D-140): the quotation run finishes and placement starts.
+  const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+  await emitEvent(db, null, {
+    organizationId: org,
+    eventType: "client.instruction_recorded",
+    entityType: "placement",
+    entityId: placementId,
+    actor: "user",
+    actorUserId: env.userId,
+    payload: { opportunityId, clientInstructionId: instructionId, placementId, workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+    dedupeKey: instructionId,
+  });
   return { ...done(), placementId };
 }
 
@@ -410,7 +428,7 @@ export async function executeRecordInstruction(
  * Everything after the instruction.
  * ============================================================================================= */
 
-export async function executePlacementAction(env: Env, placementId: string, input: PlacementAction): Promise<Outcome> {
+async function executePlacementActionInner(env: Env, placementId: string, input: PlacementAction): Promise<Outcome> {
   const { db, ctx } = env;
   const org = env.organizationId;
   const view = await load(db, ctx, org, placementId);
@@ -461,7 +479,7 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
           effective_at: view.placement.requestedEffectiveAt,
           outstanding_conditions: input.outstandingConditions ?? null,
           sha256: "0".repeat(64),
-          prepared_by: env.userId,
+          ...actor(env, "prepared_by"),
         })
         .select("id, version")
         .maybeSingle();
@@ -704,7 +722,7 @@ export async function executePlacementAction(env: Env, placementId: string, inpu
         return blocked("There is no confirmation to check.");
       }
       if (view.coverMatch?.current) return done("already");
-      await runCoverMatch(env, placementId, env.userId);
+      await runCoverMatch(env, placementId, env.runId ? null : env.userId);
       await after();
       return done();
     }
@@ -862,6 +880,25 @@ async function runCoverMatch(env: Env, placementId: string, comparedBy: string |
     result: "success",
     newState: { coverMatchId: resultId, basisVersionId: basis.id, materialDifferences: totals.material },
   });
+  /*
+   * Cover is confirmed when the insurer's confirmation matches what the client accepted — no material
+   * difference, nothing unclear (D-140). Once per confirmation and basis: a client accepting the
+   * insurer's changes makes a new basis, and the re-check that passes is that fact.
+   */
+  const outcome = response["outcome"] as string | undefined;
+  if (totals.material === 0 && totals.unclear === 0 && (outcome === "confirmed_as_requested" || outcome === "confirmed_with_changes")) {
+    const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+    await emitEvent(db, null, {
+      organizationId: org,
+      eventType: "cover.confirmed",
+      entityType: "placement",
+      entityId: placementId,
+      actor: comparedBy ? "user" : "system",
+      actorUserId: comparedBy,
+      payload: { placementId, coverMatchId: resultId, placementInsurerResponseId: response["id"], workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+      dedupeKey: `${response["id"] as string}:${basis.id}`,
+    });
+  }
   return resultId;
 }
 
@@ -1336,7 +1373,7 @@ export async function load(
             effectiveAt: liveRequest["effective_at"] as string,
             outstandingConditions: (liveRequest["outstanding_conditions"] as string | null) ?? null,
             sha256: liveRequest["sha256"] as string,
-            preparedByName: people.get(liveRequest["prepared_by"] as string) ?? null,
+            preparedByName: liveRequest["prepared_by"] ? (people.get(liveRequest["prepared_by"] as string) ?? null) : liveRequest["prepared_by_run_id"] ? "ASAP, from the placement work" : null,
             preparedAt: liveRequest["prepared_at"] as string,
             approval: liveApproval === null ? null : { approvedByName: people.get(liveApproval["approved_by"] as string) ?? null, approvedAt: liveApproval["approved_at"] as string },
             submission:
@@ -2066,4 +2103,22 @@ export function coverOf(
   if (submission !== null) return { state: "submitted", line: `Sent to ${insurerName} on ${day(submission["sent_at"] as string)}. Not confirmed — there is no cover yet.` };
   if (request !== null) return { state: "requested", line: "A request is prepared. It has not been sent, and there is no cover." };
   return { state: null, line: "Nothing has been requested from the insurer yet." };
+}
+
+
+/**
+ * executePlacementAction, and then the fact that the placement moved (D-142): the placement or issuance run waiting
+ * on it looks again. Every caller — the route, a confirmed prepared action, a workflow step — goes
+ * through here, so none can change a placement without the run noticing.
+ */
+export async function executePlacementAction(env: Env, placementId: string, input: PlacementAction): Promise<Outcome> {
+  const out = await executePlacementActionInner(env, placementId, input);
+  if (out.outcome === "done") {
+    await emitEvent(env.db, null, {
+      organizationId: env.organizationId, eventType: "placement.changed", entityType: "placement", entityId: placementId,
+      actor: env.runId ? "automation" : "user", actorUserId: env.runId ? null : env.userId,
+      payload: { placementId, action: input.action, scope: "placement" },
+    });
+  }
+  return out;
 }

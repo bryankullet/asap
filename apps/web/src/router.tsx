@@ -100,19 +100,15 @@ const member = createRoute({
   component: RequireMembership,
 });
 
-const index = createRoute({ getParentRoute: () => member, path: "/", component: AsapApp });
-
 /*
- * Every older address — /today, /work, /clients/…, bookmarks and `?next=` values — lands in the
- * application rather than on a dead page.
+ * The application owns every address under the guards (D-155): `/`, `/work`, `/automations`,
+ * `/activity`, `/ask/…` and `/s/…` are surfaces of the one adaptive shell, which reads the address
+ * itself. One layout route renders it, so moving between surfaces never remounts the application;
+ * older addresses (/today, /clients/…) open Home inside it rather than a dead page.
  */
-const legacy = createRoute({
-  getParentRoute: () => member,
-  path: "$",
-  beforeLoad: () => {
-    throw redirect({ to: "/", replace: true });
-  },
-});
+const app = createRoute({ getParentRoute: () => member, id: "app", component: AsapApp });
+const index = createRoute({ getParentRoute: () => app, path: "/", component: () => null });
+const everything = createRoute({ getParentRoute: () => app, path: "$", component: () => null });
 
 const routeTree = rootRoute.addChildren([
   signIn,
@@ -121,7 +117,7 @@ const routeTree = rootRoute.addChildren([
   resetPassword,
   authCallback,
   invite,
-  authed.addChildren([onboarding, onboardingCreate, member.addChildren([index, legacy])]),
+  authed.addChildren([onboarding, onboardingCreate, member.addChildren([app.addChildren([index, everything])])]),
 ]);
 
 /**

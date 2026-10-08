@@ -1,0 +1,479 @@
+{
+ "description": "Inbound routing evaluation (D-144): a fixed world of live runs and Kenyan broker emails, each with its true kind and the run it belongs to (null: it belongs to no run in progress — new work, or a person decides).",
+ "runs": [
+  {
+   "runId": "00000000-0000-4000-8000-000000000001",
+   "workflow": "quotation",
+   "party": "Jubilee Insurance",
+   "partyAddresses": [
+    "underwriting@jubilee.co.ke"
+   ],
+   "clientName": "Acme Motors",
+   "clientAddresses": [
+    "fleet@acmemotors.co.ke"
+   ],
+   "references": [],
+   "subjects": [
+    "Quotation request — Acme Motors, Commercial motor"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000001",
+   "workflow": "quotation",
+   "party": "CIC General",
+   "partyAddresses": [
+    "quotes@cic.co.ke"
+   ],
+   "clientName": "Acme Motors",
+   "clientAddresses": [
+    "fleet@acmemotors.co.ke"
+   ],
+   "references": [],
+   "subjects": [
+    "Quotation request — Acme Motors, Commercial motor"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000003",
+   "workflow": "quotation",
+   "party": "Britam",
+   "partyAddresses": [
+    "motorquotes@britam.com"
+   ],
+   "clientName": "Tausi Logistics",
+   "clientAddresses": [
+    "ops@tausi.co.ke"
+   ],
+   "references": [],
+   "subjects": [
+    "Quotation request — Tausi Logistics, Goods in transit"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000004",
+   "workflow": "renewal",
+   "party": "APA Insurance",
+   "partyAddresses": [
+    "renewals@apainsurance.org"
+   ],
+   "clientName": "Mwangaza Schools",
+   "clientAddresses": [
+    "bursar@mwangaza.ac.ke"
+   ],
+   "references": [
+    "APA/MED/22/0091"
+   ],
+   "subjects": [
+    "Renewal terms — Mwangaza Schools, Medical"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000005",
+   "workflow": "placement",
+   "party": "Jubilee Insurance",
+   "partyAddresses": [
+    "underwriting@jubilee.co.ke"
+   ],
+   "clientName": "Acme Motors",
+   "clientAddresses": [
+    "fleet@acmemotors.co.ke"
+   ],
+   "references": [
+    "CN-JUB-5521"
+   ],
+   "subjects": [
+    "Placement instruction — Acme Motors, Commercial motor"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000006",
+   "workflow": "issuance",
+   "party": "ICEA Lion",
+   "partyAddresses": [
+    "policies@icealion.co.ke"
+   ],
+   "clientName": "Kilimo Farm Supplies",
+   "clientAddresses": [
+    "accounts@kilimofarm.co.ke"
+   ],
+   "references": [],
+   "subjects": [
+    "Issuance request — Kilimo Farm Supplies, Fire"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000007",
+   "workflow": "claim",
+   "party": "Britam",
+   "partyAddresses": [],
+   "clientName": "Tausi Logistics",
+   "clientAddresses": [
+    "ops@tausi.co.ke"
+   ],
+   "references": [
+    "CLM-BRT-77812",
+    "BRT/MTR/24/1187"
+   ],
+   "subjects": [],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000008",
+   "workflow": "claim",
+   "party": "Jubilee Insurance",
+   "partyAddresses": [],
+   "clientName": "Acme Motors",
+   "clientAddresses": [
+    "fleet@acmemotors.co.ke"
+   ],
+   "references": [
+    "JUB/MTR/24/3301",
+    "KDA 123B"
+   ],
+   "subjects": [],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000009",
+   "workflow": "endorsement",
+   "party": "ICEA Lion",
+   "partyAddresses": [
+    "policies@icealion.co.ke"
+   ],
+   "clientName": "Kilimo Farm Supplies",
+   "clientAddresses": [
+    "accounts@kilimofarm.co.ke"
+   ],
+   "references": [
+    "ICEA/FIR/23/0456"
+   ],
+   "subjects": [
+    "Endorsement request — Kilimo Farm Supplies, policy ICEA/FIR/23/0456"
+   ],
+   "step": null,
+   "workItemId": null
+  },
+  {
+   "runId": "00000000-0000-4000-8000-000000000010",
+   "workflow": "quotation",
+   "party": "Britam",
+   "partyAddresses": [
+    "motorquotes@britam.com"
+   ],
+   "clientName": "Kilimo Farm Supplies",
+   "clientAddresses": [
+    "accounts@kilimofarm.co.ke"
+   ],
+   "references": [],
+   "subjects": [
+    "Quotation request — Kilimo Farm Supplies, Motor"
+   ],
+   "step": null,
+   "workItemId": null
+  }
+ ],
+ "emails": [
+  {
+   "id": "jub-quote-reply",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000001",
+   "subject": "RE: Quotation request — Acme Motors, Commercial motor",
+   "body": "Dear Broker, please find our quotation for the 12 units: premium KES 5,310,000 inclusive of levies. Valid 30 days. Regards, Motor Underwriting, Jubilee.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "cic-quote-reply",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000001",
+   "subject": "RE: Quotation request — Acme Motors, Commercial motor",
+   "body": "Habari, attached is CIC's offer for Acme Motors fleet. Basic premium KES 5,620,000, excess 2.5% min KES 20,000.",
+   "from": "quotes@cic.co.ke"
+  },
+  {
+   "id": "britam-quote-tausi",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000003",
+   "subject": "RE: Quotation request — Tausi Logistics, Goods in transit",
+   "body": "Our GIT terms for Tausi: rate 0.35% on annual carry of KES 400M, minimum premium KES 950,000.",
+   "from": "motorquotes@britam.com"
+  },
+  {
+   "id": "britam-decline-tausi",
+   "kind": "insurer_decline",
+   "expectedRun": "00000000-0000-4000-8000-000000000003",
+   "subject": "RE: Quotation request — Tausi Logistics, Goods in transit",
+   "body": "Regret we are unable to offer terms on this risk owing to the claims experience on the Mombasa–Malaba route.",
+   "from": "motorquotes@britam.com"
+  },
+  {
+   "id": "apa-renewal-terms",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000004",
+   "subject": "Renewal terms — Mwangaza Schools, Medical",
+   "body": "Renewal of APA/MED/22/0091: premium revised to KES 3,480,000 given the loss ratio of 92%.",
+   "from": "renewals@apainsurance.org"
+  },
+  {
+   "id": "jub-confirm-placement",
+   "kind": "insurer_confirmation",
+   "expectedRun": "00000000-0000-4000-8000-000000000005",
+   "subject": "RE: Placement instruction — Acme Motors, Commercial motor",
+   "body": "We confirm cover held from 1 November under cover note CN-JUB-5521. Debit note to follow.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "jub-query-placement",
+   "kind": "insurer_confirmation",
+   "expectedRun": "00000000-0000-4000-8000-000000000005",
+   "subject": "RE: Placement instruction — Acme Motors, Commercial motor",
+   "body": "Before we confirm, kindly share the valuation reports for KCX 441L and KCX 442L.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "icea-schedule",
+   "kind": "policy_document",
+   "expectedRun": "00000000-0000-4000-8000-000000000006",
+   "subject": "RE: Issuance request — Kilimo Farm Supplies, Fire",
+   "body": "Find attached the policy schedule and wording for the fire policy, policy number ICEA/FIR/24/0912.",
+   "from": "policies@icealion.co.ke"
+  },
+  {
+   "id": "icea-endorse-confirm",
+   "kind": "insurer_confirmation",
+   "expectedRun": "00000000-0000-4000-8000-000000000009",
+   "subject": "Endorsement ICEA/FIR/23/0456",
+   "body": "We have endorsed the additional warehouse at Nakuru on ICEA/FIR/23/0456 with effect from 15 October; additional premium KES 48,200.",
+   "from": "policies@icealion.co.ke"
+  },
+  {
+   "id": "britam-claim-ref",
+   "kind": "claim_update",
+   "expectedRun": "00000000-0000-4000-8000-000000000007",
+   "subject": "Your claim CLM-BRT-77812",
+   "body": "The assessor, Integrated Loss Adjusters, will inspect the truck on Thursday. Please have the driver's licence available.",
+   "from": "claims@britam.com"
+  },
+  {
+   "id": "tausi-claim-docs",
+   "kind": "claim_update",
+   "expectedRun": "00000000-0000-4000-8000-000000000007",
+   "subject": "Claim documents BRT/MTR/24/1187",
+   "body": "Attached the police abstract and repair estimate for the accident on Mombasa Road.",
+   "from": "ops@tausi.co.ke"
+  },
+  {
+   "id": "acme-police-abstract",
+   "kind": "claim_update",
+   "expectedRun": "00000000-0000-4000-8000-000000000008",
+   "subject": "Police abstract",
+   "body": "Please find the abstract OB 23/10/2026 for the Probox under policy JUB/MTR/24/3301.",
+   "from": "fleet@acmemotors.co.ke"
+  },
+  {
+   "id": "acme-new-claim",
+   "kind": "claim_notice",
+   "expectedRun": null,
+   "subject": "Accident yesterday",
+   "body": "Our van KCY 908Q was hit at the Westlands roundabout last evening. Driver is fine, rear doors damaged.",
+   "from": "fleet@acmemotors.co.ke"
+  },
+  {
+   "id": "prospect-enquiry",
+   "kind": "new_enquiry",
+   "expectedRun": null,
+   "subject": "Quote for my matatu",
+   "body": "Hello, I need comprehensive cover for a 14-seater matatu, 2019 model, value KES 3.2M.",
+   "from": "mary.wanjiku@gmail.com"
+  },
+  {
+   "id": "acme-add-vehicle",
+   "kind": "endorsement_request",
+   "expectedRun": null,
+   "subject": "Add new van",
+   "body": "Kindly add KDK 551J, Toyota Hiace, value KES 4.1M, to our fleet policy from Monday.",
+   "from": "fleet@acmemotors.co.ke"
+  },
+  {
+   "id": "cert-copy",
+   "kind": "servicing_request",
+   "expectedRun": null,
+   "subject": "Insurance certificate",
+   "body": "Kindly resend the certificate of insurance; KRA has asked for a copy.",
+   "from": "accounts@kilimofarm.co.ke"
+  },
+  {
+   "id": "jub-newsletter",
+   "kind": "other",
+   "expectedRun": null,
+   "subject": "Jubilee Health — October newsletter",
+   "body": "Discover our new wellness benefits for corporate schemes.",
+   "from": "marketing@jubilee.co.ke"
+  },
+  {
+   "id": "ira-circular",
+   "kind": "other",
+   "expectedRun": null,
+   "subject": "Circular: premium levy reporting",
+   "body": "All intermediaries are reminded of the quarterly levy returns deadline.",
+   "from": "communications@ira.go.ke"
+  },
+  {
+   "id": "jub-quote-no-subject",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000001",
+   "subject": "Acme Motors fleet terms",
+   "body": "Terms for Acme Motors as discussed: KES 5,250,000 net of 10% fleet discount.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "jub-other-uw",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000001",
+   "subject": "Acme Motors",
+   "body": "Following up on Acme Motors: revised terms attached, premium KES 5,200,000.",
+   "from": "p.otieno@jubilee.co.ke"
+  },
+  {
+   "id": "madison-unsolicited",
+   "kind": "insurer_quote",
+   "expectedRun": null,
+   "subject": "Acme Motors fleet",
+   "body": "We would like to offer competitive terms for Acme Motors.",
+   "from": "quotes@madison.co.ke"
+  },
+  {
+   "id": "jub-confirm-no-ref",
+   "kind": "insurer_confirmation",
+   "expectedRun": "00000000-0000-4000-8000-000000000005",
+   "subject": "Acme Motors cover",
+   "body": "Cover for Acme Motors is confirmed on the agreed terms. Policy documents to follow.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "jub-policy-no-run",
+   "kind": "policy_document",
+   "expectedRun": null,
+   "subject": "Policy document — Acme Motors",
+   "body": "Attached is the motor policy schedule for Acme Motors.",
+   "from": "underwriting@jubilee.co.ke"
+  },
+  {
+   "id": "britam-claim-no-ref",
+   "kind": "claim_update",
+   "expectedRun": null,
+   "subject": "Tausi Logistics claim",
+   "body": "We need the logbook copy to process the claim.",
+   "from": "claims@britam.com"
+  },
+  {
+   "id": "fwd-britam-quote",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000003",
+   "subject": "Fwd: RE: Quotation request — Tausi Logistics, Goods in transit",
+   "body": "FYI — Britam terms below. Rate 0.35%, minimum premium KES 950,000.",
+   "from": "broker@ourbrokerage.co.ke"
+  },
+  {
+   "id": "apa-renewal-reply",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000004",
+   "subject": "RE: Renewal terms — Mwangaza Schools, Medical",
+   "body": "Revised: we can hold at KES 3,300,000 with a 10% co-pay on outpatient.",
+   "from": "renewals@apainsurance.org"
+  },
+  {
+   "id": "cic-decline-acme",
+   "kind": "insurer_decline",
+   "expectedRun": "00000000-0000-4000-8000-000000000001",
+   "subject": "RE: Quotation request — Acme Motors, Commercial motor",
+   "body": "CIC declines to quote on this fleet at present.",
+   "from": "quotes@cic.co.ke"
+  },
+  {
+   "id": "acme-regno-claim",
+   "kind": "claim_update",
+   "expectedRun": "00000000-0000-4000-8000-000000000008",
+   "subject": "KDA123B repair",
+   "body": "Garage says KDA123B will be ready Friday; please ask Jubilee for the release letter.",
+   "from": "fleet@acmemotors.co.ke"
+  },
+  {
+   "id": "britam-generic-quote",
+   "kind": "insurer_quote",
+   "expectedRun": null,
+   "subject": "Quotation",
+   "body": "Please see attached quotation as requested.",
+   "from": "motorquotes@britam.com"
+  },
+  {
+   "id": "britam-kilimo-reply",
+   "kind": "insurer_quote",
+   "expectedRun": "00000000-0000-4000-8000-000000000010",
+   "subject": "RE: Quotation request — Kilimo Farm Supplies, Motor",
+   "body": "Terms for Kilimo's three pickups: KES 612,000.",
+   "from": "motorquotes@britam.com"
+  },
+  {
+   "id": "gmail-spoof",
+   "kind": "insurer_quote",
+   "expectedRun": null,
+   "subject": "Acme Motors quote",
+   "body": "Jubilee quotation for Acme Motors attached, pay to the account below.",
+   "from": "jubilee.underwriting@gmail.com"
+  },
+  {
+   "id": "tausi-new-incident",
+   "kind": "claim_notice",
+   "expectedRun": null,
+   "subject": "New loss — BRT/MTR/24/1187",
+   "body": "Another of our trucks overturned at Salgaa this morning.",
+   "from": "ops@tausi.co.ke"
+  },
+  {
+   "id": "icea-endorse-reply",
+   "kind": "insurer_confirmation",
+   "expectedRun": "00000000-0000-4000-8000-000000000009",
+   "subject": "RE: Endorsement request — Kilimo Farm Supplies, policy ICEA/FIR/23/0456",
+   "body": "Endorsement effected; please find the endorsement slip.",
+   "from": "policies@icealion.co.ke"
+  },
+  {
+   "id": "icea-certificate",
+   "kind": "policy_document",
+   "expectedRun": "00000000-0000-4000-8000-000000000006",
+   "subject": "Kilimo Farm Supplies — certificate",
+   "body": "Attached the fire certificate for Kilimo Farm Supplies.",
+   "from": "policies@icealion.co.ke"
+  },
+  {
+   "id": "tausi-thanks",
+   "kind": "other",
+   "expectedRun": null,
+   "subject": "Thanks",
+   "body": "Thank you for the quick help last week.",
+   "from": "ops@tausi.co.ke"
+  },
+  {
+   "id": "mwangaza-question",
+   "kind": "servicing_request",
+   "expectedRun": null,
+   "subject": "Medical cards",
+   "body": "When will the new medical cards for staff be ready?",
+   "from": "bursar@mwangaza.ac.ke"
+  }
+ ]
+}

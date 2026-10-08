@@ -2,12 +2,15 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { fireAutomationsFor } from "../automations/runner.js";
-import { advanceRun, RENEWAL, sweepWorkflows } from "../workflows/renewal.js";
+import { advanceAnyRun, routeEventToWorkflows, sweepWorkflows } from "../workflows/index.js";
 import { extractDocument } from "../documents/extraction.js";
 import { AlreadySyncing, syncMailbox } from "../mailbox/sync.js";
 import type { MailboxProvider, SyncLimits } from "../mailbox/types.js";
 import type { Extractor } from "../documents/extractor.js";
 import { HttpError, sendError } from "../errors.js";
+import type { AiProvider } from "@asap/schema";
+import { routeInbound } from "../inbound/router.js";
+import { suggestFix } from "../workflows/exception-helper.js";
 
 /**
  * The surface the worker tier calls, and nothing else.
@@ -36,6 +39,10 @@ export function internalRoutes(deps: {
    * Absent on a deployment with no provider credentials, in which case a sync request is skipped
    * with that said out loud — rather than failing, which would look like a broken mailbox.
    */
+  /** The gateway's provider, for the inbound router's classification; null means it abstains. */
+  aiProvider?: AiProvider | null;
+  /** A connection that reads one brokerage under RLS (D-149); null without a JWT secret. */
+  engineDb?: (organizationId: string) => SupabaseClient | null;
   mailbox?:
     | {
         providers: Partial<Record<"gmail" | "microsoft", MailboxProvider>>;
@@ -207,11 +214,28 @@ export function internalRoutes(deps: {
      */
     if (event.event_type.startsWith("workflow.") && event.entity_type === "workflow_run" && event.entity_id) {
       try {
-        const out = await advanceRun(db, deps.logger, RENEWAL, event.entity_id);
+        const out = await advanceAnyRun(db, deps.logger, event.entity_id);
         results.push({ consumer: "workflow", result: "success", detail: out.skipped ? `run ${out.skipped}` : `run ${out.state}${out.stoppedAt ? ` at ${out.stoppedAt}` : ""}` });
       } catch (e) {
         results.push({ consumer: "workflow", result: "failure", detail: (e as Error).message ?? "the run could not be advanced" });
       }
+    }
+
+    /*
+     * Semantic events start and wake workflows (D-140): `quote.received` wakes the quotation run
+     * waiting on that insurer, `client.instruction_recorded` starts placement, and so on — each
+     * registered workflow says which events it listens for.
+     */
+    if (!event.event_type.startsWith("workflow.")) results.push(...(await routeEventToWorkflows(db, deps.logger, event)));
+    // A run that could not finish gets one suggested fix, when a model is configured (D-146).
+    if (event.event_type === "run.could_not_finish" && event.entity_id) {
+      const out = await suggestFix(db, deps.engineDb?.(event.organization_id) ?? null, deps.aiProvider ?? null, deps.logger, { id: event.id, organization_id: event.organization_id, entity_id: event.entity_id });
+      results.push({ consumer: "exception_helper", result: out === "suggested" ? "success" : "skipped", detail: out });
+    }
+    // An inbound email is sorted once (D-144): routed to the one run waiting for it, or Unsorted.
+    if (event.event_type === "email.received" && event.entity_id) {
+      const out = await routeInbound(db, deps.aiProvider ?? null, deps.logger, event.organization_id, event.entity_id);
+      results.push({ consumer: "inbound_router", result: "success", detail: out.runId ? `${out.outcome}:${out.runId}` : out.outcome });
     }
 
     /*

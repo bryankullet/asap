@@ -1,4 +1,9 @@
 import {
+  conversationSummarySchema,
+  recentItemSchema,
+  type RecordOpenRequest,
+  type StartConversationRequest,
+  type SurfaceRef,
   clientSpaceResponseSchema,
   comparisonActionResponseSchema,
   placementActionResponseSchema,
@@ -226,6 +231,17 @@ export const api = {
   conversationMessages: (id: string) => request("GET", `/conversations/${id}/messages`, conversationMessagesResponseSchema),
   /** Append turns answered in the app from the records to the caller's server conversation. */
   saveTurns: (body: SaveTurnsRequest) => request("POST", "/conversations/turns", saveTurnsResponseSchema, body),
+  /** Named work sessions (D-155): started, reopened, renamed and linked on the server. */
+  sessions: (q?: string) => request("GET", `/sessions${q ? `?q=${encodeURIComponent(q)}` : ""}`, z.object({ conversations: z.array(conversationSummarySchema) })),
+  session: (id: string) => request("GET", `/sessions/${id}`, z.object({ conversation: conversationSummarySchema })),
+  startSession: (body: Partial<StartConversationRequest> & { text: string }) => request("POST", "/sessions", z.object({ conversation: conversationSummarySchema, reopened: z.boolean() }), body),
+  updateSession: (id: string, body: { title?: string; workItemId?: string | null; spaceRef?: SurfaceRef | null }) => request("PATCH", `/sessions/${id}`, z.object({ conversation: conversationSummarySchema }), body),
+  /** Recent and Pins: per person, per brokerage, on the server — never browser storage. */
+  recent: () => request("GET", "/recent", z.object({ items: z.array(recentItemSchema) })),
+  recordOpen: (body: RecordOpenRequest) => request("POST", "/recent", z.object({ key: z.string() }), body),
+  pinsList: () => request("GET", "/space-pins", z.object({ items: z.array(recentItemSchema) })),
+  pin: (body: RecordOpenRequest) => request("PUT", "/space-pins", z.object({ key: z.string(), pinned: z.boolean() }), body),
+  unpin: (key: string) => request("DELETE", `/space-pins?key=${encodeURIComponent(key)}`, z.object({ key: z.string(), pinned: z.boolean() })),
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */

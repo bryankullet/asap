@@ -210,39 +210,46 @@ older frontend decision conflicts with it, amend the decision — do not omit th
 
 There is still no insurance-module navigation. No `Work / Clients / Policies / Renewals / Claims /
 Money` menu tree: §45 rule 16 forbids it, and no insurance module ever becomes a destination. The
-permanent shell is (D-074, superseding D-064):
+shell is **adaptive** (D-155, superseding D-118's permanent Chat + Space and D-074's sidebar):
 
 ```text
 ASAP
 ────────────────
-✦ Today
+⌂ Home
 ▱ Work
 ⌘ Automations
-────────────────
+◷ Activity
 ⌕ Search
 ＋ New
 ────────────────
-Profile
+Recent            conversations, workflows, records — told apart by a small icon
+────────────────
+Settings · Connections · brokerage and person
 ```
 
-**Ask ASAP is the centre of the screen** (D-118, amending D-074/D-115): the conversation is the
-central surface and the live Space sits on its right; on phones Ask is first and the Space opens
-full screen. It is still not a destination in the sidebar.
-**Ask ASAP is persistent, not a destination** (D-074). It is present on every screen. It
-keeps the address `/ask` so a conversation can be linked and reopened, and so the composer has
-somewhere to open into — but it is not in the sidebar, because something always in reach is never
-somewhere to go.
+**The interface adapts to what the person is doing** (D-155). Home is full width and calm with no
+transcript; a conversation is centred while someone asks, creates, clarifies or approves; a Space
+is full width with chat closed; split (conversation beside the Space it opened) only while both are
+useful; Work, Automations and Activity are full-width surfaces with no chat. There is no tab strip.
+Chat opens only from Home or + New, an earlier conversation, "Ask about this" in a Space (a drawer
+scoped to that record), a clarification, an approval, or controlling a running workflow.
+**The address is the open surface** (`apps/web/src/asap/shell/routes.ts`): refresh reopens it, Back
+and Forward work. **Conversations are named work sessions on the server** (0078): titled
+deterministically from purpose and record, editable, status derived from the linked Work item, and
+the same work reopens the same session. **Recent and Pins are per person and brokerage on the
+server**; only an unsent message lives in the browser.
 
-**Jobs is not a destination** (D-074, restoring D-060). Runs arrive through the **Activity chip**
-beside Ask, and a run opens in full from there, from its Work item, from an import or from
+**Jobs is not a destination** (D-074, restoring D-060). Runs surface on Home ("ASAP is handling"),
+in Work and on Automations, and a run opens in full from there, from its Work item, from an import or from
 automation history. Jobs is what *ASAP* is processing; Work is what a *person* owns — a finished Job
 means ASAP produced an output, never that a policy renewed, a claim was accepted or money arrived.
 A run may never be the only place something important lives: anything needing a person is in Work
 first, so Activity can be ignored at no cost.
 
-**Work's main views are Your work · With others · In progress · Done · Recent** (D-075), and four
-of them are the task-status layer itself. "Needs you" and a bare "Waiting" are both retired from
-every visible surface.
+**Work's views are Needs me · ASAP is handling · Waiting on others · Upcoming · Done** (D-155,
+superseding D-075's names). A row is an outcome — title, client, status, owner, waiting party, next
+date, urgency, one action — and opens its workflow Space, never chat. A colleague who holds the next
+step is named like an outside party.
 
 **When an outside party holds the work, name them:** *With CIC since 12 Aug*, *With client since
 14 Aug*, *With assessor since 16 Aug*. `<TaskStatus>` refuses to render `with_party` without both
@@ -259,10 +266,11 @@ destination, unconditionally, and there is no flag that turns either off.
 `apps/web/src/routing/auth-entry.test.tsx` drives the real route tree and fails if any destination
 becomes reachable without signing in.
 
-**The approved offline interface is the application** (D-115, superseding the React boards of
-D-066). `apps/web/scripts/compile-dc.mjs` (`pnpm compile:ui <ASAP.dc.html>`) compiles its markup and
-logic into `apps/web/src/asap/generated/` at build time — never edit those files; change the approved
-source or the compiler's asserted patches. Its engine lives in `apps/web/src/asap/engine/`. **Live
+**The approved offline interface is the application** (D-115). Since D-155 its logic
+(`apps/web/src/asap/logic.js`) and its Space, conversation and sheet renderers
+(`apps/web/src/asap/views/space-views.js`) are maintained source: the approved `.dc.html` is not in
+this repository, and the compiler and its generated files are retired. The adaptive shell
+(`apps/web/src/asap/shell/`) lays them out. Its engine lives in `apps/web/src/asap/engine/`. **Live
 mode** (`asap/live.js`) hydrates that engine from the authenticated API and writes back through it;
 a workspace with no API behind it says "not connected yet" rather than drawing example content, and
 cover is active only where the server's cover check verified it. **Demo mode** (`asap/demo.js`) runs

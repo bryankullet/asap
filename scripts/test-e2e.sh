@@ -63,4 +63,4 @@ for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$API_PORT/healt
 curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" || { cat "$WORK/api.log" >&2; exit 1; }
 trap 'cp "$WORK"/*.log /tmp/ 2>/dev/null || true; cleanup' EXIT
 
-E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"
+E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html${E2E_HASH:-#/ask}" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"

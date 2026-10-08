@@ -1,5 +1,4 @@
 import { insurerStage, quotationNext, workStateFrom } from "../quotation/next.js";
-import { createHash } from "node:crypto";
 import {
   createOpportunityRequestSchema,
   opportunityActionResponseSchema,
@@ -16,6 +15,8 @@ import { Hono } from "hono";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
+import { emitEvent } from "../events/emit.js";
+import { approveQuoteRequest, prepareQuoteRequest, recordQuoteDelivery, quoteRequestDigest } from "../quotation/requests.js";
 import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { parseBody } from "./_parse.js";
@@ -39,11 +40,7 @@ import { parseBody } from "./_parse.js";
  * which cannot occur in a subject line; without one, a subject ending "x" with body "y" and a
  * subject "x" with body starting "y" would hash alike.
  */
-export function quoteRequestDigest(subject: string, body: string): string {
-  return createHash("sha256")
-    .update(`${subject}\u001e${body}`, "utf8")
-    .digest("hex");
-}
+export { quoteRequestDigest };
 
 /** No response shape carries a status. What has happened is read from the rows. */
 export function opportunityRoutes(deps: { logger: Logger }) {
@@ -241,6 +238,8 @@ export function opportunityRoutes(deps: { logger: Logger }) {
 
     // From its first moment the work item carries the same next action as the quotation (D-120).
     await syncQuotationWork(db, await loadOpportunity(db, ctx, org.id, opportunityId));
+    // Quotation work was opened (D-141): the quotation run starts. Once per opportunity.
+    await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "opportunity.opened", entityType: "opportunity", entityId: opportunityId, actor: "user", actorUserId: user.id, payload: { opportunityId, workItemId }, dedupeKey: opportunityId });
     return c.json({ opportunityId, workItemId }, 201);
   });
 
@@ -328,6 +327,9 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       const opportunity = await loadOpportunity(db, ctx, org.id, id);
       // The work item carries the same next action the Space shows (D-119).
       await syncQuotationWork(db, opportunity);
+      // Something on the quotation changed (an insurer added, a requirement supplied, a delivery
+      // recorded): the quotation run waiting on it looks again (D-141). Not a fact to dedupe.
+      if (outcome === "done") await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "opportunity.changed", entityType: "opportunity", entityId: id, actor: "user", actorUserId: user.id, payload: { opportunityId: id, action: input.action, workItemId: opportunity.workItem.id } });
       return c.json(opportunityActionResponseSchema.parse({ outcome, reason: null, opportunity }));
     };
 
@@ -604,58 +606,9 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
 
       case "prepare_request": {
-        const approach = await db
-          .from("opportunity_insurers")
-          .select("id, removed_at")
-          .eq("organization_id", org.id)
-          .eq("id", input.opportunityInsurerId)
-          .maybeSingle();
-        const row = approach.data as { id: string; removed_at: string | null } | null;
-        if (!row) return blocked("That insurer is not part of this quotation work.");
-        if (row.removed_at !== null) return blocked("That insurer is no longer being approached.");
-
-        /*
-         * Preparing again replaces the text and clears any approval: an approval covers one exact
-         * body, and re-preparing is by definition a different one.
-         */
-        const existing = await db
-          .from("quote_requests")
-          .select("id")
-          .eq("organization_id", org.id)
-          .eq("opportunity_insurer_id", input.opportunityInsurerId)
-          .maybeSingle();
-
-        if (existing.data) {
-          const updated = await db
-            .from("quote_requests")
-            .update({
-              subject: input.subject,
-              body_text: input.body,
-              approved_body_sha256: null,
-              approved_by: null,
-              approved_at: null,
-              updated_at: now,
-            })
-            .eq("organization_id", org.id)
-            .eq("id", (existing.data as { id: string }).id)
-            .select("id")
-            .maybeSingle();
-          if (updated.error) return sendError(c, mapDatabaseError(updated.error));
-        } else {
-          const inserted = await db
-            .from("quote_requests")
-            .insert({
-              organization_id: org.id,
-              opportunity_id: id,
-              opportunity_insurer_id: input.opportunityInsurerId,
-              subject: input.subject,
-              body_text: input.body,
-              prepared_by: user.id,
-            })
-            .select("id")
-            .maybeSingle();
-          if (inserted.error || !inserted.data) return done("already");
-        }
+        // The one shared path (D-141): the same guards a workflow step meets.
+        const prepared = await prepareQuoteRequest(db, { organizationId: org.id, opportunityId: id, opportunityInsurerId: input.opportunityInsurerId, subject: input.subject, body: input.body, preparedBy: user.id, now });
+        if (prepared.outcome === "blocked") return blocked(prepared.reason);
 
         await recordAudit(db, deps.logger, c, {
           organizationId: org.id,
@@ -671,44 +624,11 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
 
       case "approve_request": {
-        const req = await db
-          .from("quote_requests")
-          .select("id, subject, body_text, approved_at")
-          .eq("organization_id", org.id)
-          .eq("id", input.quoteRequestId)
-          .maybeSingle();
-        const row = req.data as
-          | { id: string; subject: string; body_text: string; approved_at: string | null }
-          | null;
-        if (!row) return blocked("That request is not part of this quotation work.");
-        if (row.approved_at !== null) return done("already");
-
-        const updated = await db
-          .from("quote_requests")
-          .update({
-            approved_by: user.id,
-            approved_at: now,
-            /* The approval covers this exact text; editing it afterwards clears it. */
-            approved_body_sha256: quoteRequestDigest(row.subject, row.body_text),
-            updated_at: now,
-          })
-          .eq("organization_id", org.id)
-          .eq("id", row.id)
-          .select("id")
-          .maybeSingle();
-        if (updated.error) return sendError(c, mapDatabaseError(updated.error));
-
-        /*
-         * The standing approval, kept where superseding it leaves a trace. The digest only: a
-         * quotation request quotes the client's own information, and this is an audit table.
-         */
-        await db.from("quote_request_approvals").insert({
-          organization_id: org.id,
-          quote_request_id: row.id,
-          body_sha256: quoteRequestDigest(row.subject, row.body_text),
-          approved_by: user.id,
-          approved_at: now,
-        });
+        // The one shared path (D-141): the approval names the person, and covers this exact text.
+        const approved = await approveQuoteRequest(db, { organizationId: org.id, quoteRequestId: input.quoteRequestId, approverId: user.id, now });
+        if (approved.outcome === "blocked") return blocked(approved.reason);
+        if (approved.outcome === "already") return done("already");
+        const row = { id: input.quoteRequestId };
 
         await recordAudit(db, deps.logger, c, {
           organizationId: org.id,
@@ -723,43 +643,11 @@ export function opportunityRoutes(deps: { logger: Logger }) {
       }
 
       case "record_delivery": {
-        const req = await db
-          .from("quote_requests")
-          .select("id, opportunity_id, opportunity_insurer_id, approved_at, approved_body_sha256")
-          .eq("organization_id", org.id)
-          .eq("id", input.quoteRequestId)
-          .maybeSingle();
-        const row = req.data as
-          | { id: string; opportunity_id: string; opportunity_insurer_id: string; approved_at: string | null; approved_body_sha256: string | null }
-          | null;
-        if (!row || row.opportunity_id !== id) return blocked("That request is not part of this quotation work.");
-        if (!row.approved_at || !row.approved_body_sha256) {
-          return blocked("This request has not been approved. Approve the exact text before it is delivered.");
-        }
-        const existing = await db
-          .from("quote_request_deliveries")
-          .select("id")
-          .eq("organization_id", org.id)
-          .eq("quote_request_id", row.id)
-          .maybeSingle();
-        if (existing.data) return done("already");
         const deliveredAt = input.deliveredAt ?? now;
-        if (new Date(deliveredAt).getTime() > Date.now() + 5 * 60_000) return blocked("A delivery cannot be dated in the future.");
-        const ins = await db.from("quote_request_deliveries").insert({
-          organization_id: org.id,
-          quote_request_id: row.id,
-          method: input.method,
-          reference: input.reference,
-          evidence_document_id: input.evidenceDocumentId ?? null,
-          // Delivered text is the approved text; the database refuses anything else.
-          delivered_body_sha256: row.approved_body_sha256,
-          delivered_at: deliveredAt,
-          recorded_by: user.id,
-        });
-        if (ins.error) {
-          if (String(ins.error.code) === "23505") return done("already");
-          return sendError(c, mapDatabaseError(ins.error));
-        }
+        const r = await recordQuoteDelivery(db, { organizationId: org.id, opportunityId: id, quoteRequestId: input.quoteRequestId, method: input.method, reference: input.reference, deliveredAt, evidenceDocumentId: input.evidenceDocumentId ?? null, userId: user.id });
+        if (r.outcome === "blocked") return blocked(r.reason);
+        if (r.outcome === "already") return done("already");
+        if (r.outcome === "error") return sendError(c, mapDatabaseError(r.error));
         await recordAudit(db, deps.logger, c, {
           organizationId: org.id,
           actorUserId: user.id,
@@ -767,12 +655,30 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           objectType: "opportunity",
           objectId: id,
           result: "success",
-          newState: { quoteRequestId: row.id, method: input.method, deliveredAt, reference: input.reference, evidenceDocumentId: input.evidenceDocumentId ?? null },
+          newState: { quoteRequestId: input.quoteRequestId, method: input.method, deliveredAt, reference: input.reference, evidenceDocumentId: input.evidenceDocumentId ?? null },
         });
         return done();
       }
 
       case "record_response": {
+        // Accepting ASAP's reading of the insurer's email (D-152): what the person gave corrects it.
+        type Proposal = { id: string; outcome: string; premium_amount: string | null; premium_currency: string | null; valid_until: string | null; decline_reason: string | null };
+        let proposal: Proposal | null = null;
+        if (input.fromProposalId) {
+          const pr = await db.from("insurer_response_proposals").select("id, opportunity_id, opportunity_insurer_id, email_message_id, outcome, premium_amount, premium_currency, valid_until, decline_reason, state, email_messages(sent_at)").eq("organization_id", org.id).eq("id", input.fromProposalId).maybeSingle();
+          const row = pr.data as unknown as (Proposal & { opportunity_id: string; opportunity_insurer_id: string; email_message_id: string; state: string; email_messages: { sent_at: string } | null }) | null;
+          if (!row || row.opportunity_id !== id || row.opportunity_insurer_id !== input.opportunityInsurerId) return blocked("That reading is not this insurer's answer on this quotation.");
+          if (row.state !== "proposed") return done("already");
+          proposal = row;
+          Object.assign(input, {
+            premiumAmount: input.premiumAmount ?? (row.premium_amount === null ? undefined : Number(row.premium_amount).toFixed(2)),
+            premiumCurrency: input.premiumCurrency ?? row.premium_currency ?? undefined,
+            validUntil: input.validUntil ?? row.valid_until ?? undefined,
+            declineReason: input.declineReason ?? row.decline_reason ?? undefined,
+            sourceEmailMessageId: input.sourceEmailMessageId ?? row.email_message_id,
+            receivedAt: input.receivedAt ?? row.email_messages?.sent_at,
+          });
+        }
         /*
          * A reply answers a request the insurer holds. Recording one against an insurer nobody
          * asked is allowed only when the person says so explicitly — a phone answer, a request
@@ -838,18 +744,42 @@ export function opportunityRoutes(deps: { logger: Logger }) {
           .eq("opportunity_insurer_id", input.opportunityInsurerId)
           .maybeSingle();
 
+        let responseId: string;
         if (existing.data) {
+          responseId = (existing.data as { id: string }).id;
           const updated = await db
             .from("insurer_responses")
             .update(row)
             .eq("organization_id", org.id)
-            .eq("id", (existing.data as { id: string }).id)
+            .eq("id", responseId)
             .select("id")
             .maybeSingle();
           if (updated.error) return sendError(c, mapDatabaseError(updated.error));
         } else {
           const inserted = await db.from("insurer_responses").insert(row).select("id").maybeSingle();
           if (inserted.error || !inserted.data) return done("already");
+          responseId = (inserted.data as { id: string }).id;
+        }
+
+        if (proposal) {
+          const same = input.outcome === proposal.outcome && (input.premiumAmount ?? null) === (proposal.premium_amount === null ? null : Number(proposal.premium_amount).toFixed(2)) && (input.premiumCurrency ?? null) === proposal.premium_currency && (input.validUntil ?? null) === proposal.valid_until;
+          const decided = await db.rpc("insurer_response_proposal_decide", { p_id: proposal.id, p_decision: same ? "accepted" : "corrected", p_insurer_response_id: responseId });
+          if (decided.error) return sendError(c, mapDatabaseError(decided.error));
+        }
+        // The insurer has answered (D-140): once per response and outcome, so a quotation run waiting
+        // on this insurer wakes. A "no response" is not an answer and wakes nothing.
+        if (input.outcome !== "no_response") {
+          const w = await db.from("opportunities").select("work_item_id").eq("organization_id", org.id).eq("id", id).maybeSingle();
+          await emitEvent(db, deps.logger, {
+            organizationId: org.id,
+            eventType: "quote.received",
+            entityType: "opportunity",
+            entityId: id,
+            actor: "user",
+            actorUserId: user.id,
+            payload: { insurerResponseId: responseId, opportunityInsurerId: input.opportunityInsurerId, outcome: input.outcome, workItemId: (w.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+            dedupeKey: `${responseId}:${input.outcome}`,
+          });
         }
 
         await recordAudit(db, deps.logger, c, {

@@ -30,6 +30,8 @@ export const events = pgTable(
     processedAt: timestamptz("processed_at"),
     processingAttempts: integer("processing_attempts").notNull().default(0),
     lastError: text("last_error"),
+    /** Names the fact, so it is recorded once (0066, D-140). */
+    dedupeKey: text("dedupe_key"),
   },
   (t) => [
     check("events_actor_check", sql`${t.actor} in ('user','ai','automation','system')`),

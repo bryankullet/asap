@@ -124,7 +124,7 @@ function toField(row: FieldRow): DocumentField {
 }
 
 /** Only what the storage layer will accept in a key, so a filename cannot escape its folder. */
-function safeName(filename: string): string {
+export function safeName(filename: string): string {
   // Dot runs go entirely: `..` cannot traverse once the slashes are gone, but a name carrying it
   // is still a name that reads like an attempt, and nothing needs it.
   const cleaned = filename.replace(/[^A-Za-z0-9._-]/g, "_").replace(/\.{2,}/g, ".").replace(/^[._]+/, "");

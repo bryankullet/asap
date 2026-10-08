@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
 import { ExtractorUnavailable, type Extractor } from "./extractor.js";
+import { emitEvent } from "../events/emit.js";
 
 /**
  * Reading a filed document, and proposing what it says.
@@ -203,6 +204,23 @@ export async function extractDocument(
     })
     .eq("id", doc.id);
   if (done.error) return await failRecording(db, logger, doc.id, "state", done.error);
+
+  /*
+   * The document has been read (D-142): what it is, now that its heading may have said. A waiting
+   * workflow — issuance waiting for a policy, the inbound router — reads it from here. Ids and the
+   * kind only.
+   */
+  const finalKind = doc.kind === "other" && result.suggestedKind ? result.suggestedKind : doc.kind;
+  const cl = await db.from("documents").select("client_id").eq("id", doc.id).maybeSingle();
+  await emitEvent(db, logger, {
+    organizationId: doc.organization_id,
+    eventType: "document.read",
+    entityType: "document",
+    entityId: doc.id,
+    actor: "system",
+    actorUserId: null,
+    payload: { documentId: doc.id, kind: finalKind, clientId: (cl.data as { client_id: string | null } | null)?.client_id ?? null, fields: result.fields.filter((f) => f.value).length },
+  });
 
   return { state: "extracted", pages: result.pages.length, fields: result.fields.length };
 }

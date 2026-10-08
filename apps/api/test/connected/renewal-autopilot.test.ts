@@ -135,7 +135,7 @@ describe("Renewal Autopilot", () => {
     expect(qr!.approved_at).toBeTruthy();
     expect(qr!.sent_at).toBeNull();
     expect(qr!.sent_email_message_id).toBeNull();
-    expect((await sql`select count(*)::int as n from email_send_attempts`)[0]!["n"]).toBe(0);
+    expect((await sql`select count(*)::int as n from email_send_attempts where organization_id = '10000000-0000-4000-8000-00000000000a'`)[0]!["n"]).toBe(0);
     const [w] = await sql<{ required_action: string }[]>`select required_action from work_items where id = ${workItemId}`;
     expect(w!.required_action).toMatch(/^Deliver the approved renewal request to Jubilee/);
     expect((await sql`select count(*)::int as n from audit_log where object_id = ${runId} and action = 'workflow.bundle_approved'`)[0]!["n"]).toBe(1);

@@ -12,8 +12,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { hasPermission } from "../context.js";
 import { HttpError } from "../errors.js";
 import { pgMoney } from "../numeric.js";
+import { emitEvent } from "../events/emit.js";
 import { ISSUED_CLASS_WORDS, checkIssuedPolicy, type IssuedCheckItem, type IssuedEvidence as CheckEvidence } from "./issued-check.js";
-import { load, names, toPreparedView, type Ctx, type Env, type Outcome } from "./service.js";
+import { actor, load, names, toPreparedView, type Ctx, type Env, type Outcome } from "./service.js";
 
 /**
  * Policy issuance (4B-5): a placement ready for issuance, to a verified policy and period.
@@ -357,7 +358,7 @@ export async function loadIssuance(env: Env, placementId: string, opts: { readOn
       sha256: r["sha256"] as string,
       payload: r["payload"] as IssuanceRequestPayload,
       preparedAt: r["prepared_at"] as string,
-      preparedByName: people.get(r["prepared_by"] as string) ?? null,
+      preparedByName: r["prepared_by"] ? (people.get(r["prepared_by"] as string) ?? null) : r["prepared_by_run_id"] ? "ASAP, from the issuance work" : null,
       approval: facts.approval === null ? null : { approvedByName: people.get(facts.approval["approved_by"] as string) ?? null, approvedAt: facts.approval["approved_at"] as string },
       submission: facts.submission === null ? null : {
         method: facts.submission["method"] as string,
@@ -405,7 +406,7 @@ export async function loadIssuance(env: Env, placementId: string, opts: { readOn
       current: currency.current,
       staleReason: currency.reason,
       comparedAt: facts.check["compared_at"] as string,
-      comparedByName: facts.check["compared_by"] === null ? null : (people.get(facts.check["compared_by"] as string) ?? null),
+      comparedByName: facts.check["compared_by"] === null ? (facts.check["compared_by_run_id"] ? "ASAP, from the issuance work" : null) : (people.get(facts.check["compared_by"] as string) ?? null),
       materialDifferences: facts.check["material_differences"] as number,
       unresolved,
       items: facts.items.map((it) => {
@@ -496,7 +497,7 @@ function blockersOf(v: IssuanceResponse): string[] {
  * Acting.
  * ============================================================================================= */
 
-export async function executeIssuanceAction(env: Env, placementId: string, input: IssuanceAction): Promise<IssuanceOutcome> {
+async function executeIssuanceActionInner(env: Env, placementId: string, input: IssuanceAction): Promise<IssuanceOutcome> {
   const { db, ctx } = env;
   const org = env.organizationId;
   const current = await loadIssuance(env, placementId);
@@ -516,7 +517,7 @@ export async function executeIssuanceAction(env: Env, placementId: string, input
       const payload = await payloadOf(db, org, view, input);
       if (facts.request !== null && canonical(facts.request["payload"]) === canonical(payload)) return done("already");
       const inserted = await db.from("issuance_requests").insert({
-        organization_id: org, placement_id: placementId, version: 1, payload, sha256: "0".repeat(64), prepared_by: env.userId,
+        organization_id: org, placement_id: placementId, version: 1, payload, sha256: "0".repeat(64), ...actor(env, "prepared_by"),
       }).select("id, version, sha256").maybeSingle();
       if (inserted.error || !inserted.data) return blocked("The issuance request could not be prepared. Try again.");
       const row = inserted.data as Row;
@@ -574,7 +575,7 @@ export async function executeIssuanceAction(env: Env, placementId: string, input
       if (facts.documents.some((d) => d["document_id"] === input.documentId)) return done("already");
       const ins = await db.from("issued_policy_documents").insert({
         organization_id: org, placement_id: placementId, document_id: input.documentId, issuance_request_id: facts.request?.["id"] ?? null,
-        received_at: input.receivedAt, recorded_by: env.userId, note: input.note ?? null,
+        received_at: input.receivedAt, ...actor(env, "recorded_by"), note: input.note ?? null,
       });
       if (ins.error) return done("already");
       await env.audit({ action: "issuance.policy_document_received", objectType: "placement", objectId: placementId, result: "success", newState: { documentId: input.documentId, receivedAt: input.receivedAt } });
@@ -659,7 +660,7 @@ export async function executeIssuanceAction(env: Env, placementId: string, input
       const check = await db.from("issued_policy_checks").insert({
         organization_id: org, placement_id: placementId, issued_policy_document_id: latest["id"], client_instruction_id: view.instruction.id,
         basis_version_id: (await basisVersionId(db, org, placementId, view.basis.version)), placement_insurer_response_id: ir.id,
-        review_sha256: reading.digest, compared_by: env.userId, material_differences: material,
+        review_sha256: reading.digest, ...(env.runId ? { compared_by_run_id: env.runId } : { compared_by: env.userId }), material_differences: material,
         unclear_count: items.filter((i) => i.classification === "unclear").length,
       }).select("id").maybeSingle();
       const checkId = (check.data as Row | null)?.["id"] as string | undefined;
@@ -741,6 +742,15 @@ export async function executeIssuanceAction(env: Env, placementId: string, input
       }
       await env.audit({ action: "issuance.policy_applied", objectType: "placement", objectId: placementId, result: "success", newState: { applicationId: out.application_id, mode: input.mode } });
       await sync();
+      // The insurer's issued policy is on the record (D-140): the issuance run writes its receipt.
+      if (!out.repeat) {
+        const pw = await db.from("placements").select("work_item_id").eq("id", placementId).maybeSingle();
+        await emitEvent(db, null, {
+          organizationId: env.organizationId, eventType: "policy.issued", entityType: "placement", entityId: placementId, actor: "user", actorUserId: env.userId,
+          payload: { placementId, applicationId: out.application_id, workItemId: (pw.data as { work_item_id: string | null } | null)?.work_item_id ?? null },
+          dedupeKey: out.application_id,
+        });
+      }
       return done(out.repeat ? "already" : "done", receiptOf(await loadIssuance(env, placementId)));
     }
   }
@@ -882,3 +892,21 @@ export function issuanceFingerprint(v: IssuanceResponse): { versions: Record<str
 
 export { toPreparedView };
 export type { Ctx };
+
+
+/**
+ * executeIssuanceAction, and then the fact that the placement moved (D-142): the placement or issuance run waiting
+ * on it looks again. Every caller — the route, a confirmed prepared action, a workflow step — goes
+ * through here, so none can change a placement without the run noticing.
+ */
+export async function executeIssuanceAction(env: Env, placementId: string, input: IssuanceAction): Promise<IssuanceOutcome> {
+  const out = await executeIssuanceActionInner(env, placementId, input);
+  if (out.outcome === "done") {
+    await emitEvent(env.db, null, {
+      organizationId: env.organizationId, eventType: "placement.changed", entityType: "placement", entityId: placementId,
+      actor: env.runId ? "automation" : "user", actorUserId: env.runId ? null : env.userId,
+      payload: { placementId, action: input.action, scope: "issuance" },
+    });
+  }
+  return out;
+}

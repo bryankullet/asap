@@ -67,6 +67,7 @@ import {
   loadPolicy,
   today,
 } from "../servicing.js";
+import { emitEvent } from "../events/emit.js";
 import { recordAudit } from "../audit.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import type { Executor, RunFacts } from "../runs/executor.js";
@@ -81,6 +82,16 @@ export type WorkDeps = {
   /** How long the SSE stream polls for new events between checks. */
   streamPollMs: number;
 };
+
+/** `claim.changed` / `endorsement.changed` (D-143), about the claim or endorsement behind a Work item. */
+async function emitChanged(db: SupabaseClient, logger: Logger, kind: string, workItemId: string, userId: string) {
+  if (kind !== "claim" && kind !== "endorsement") return;
+  const table = kind === "claim" ? "claims" : "endorsements";
+  const r = await db.from(table).select("id, organization_id").eq("work_item_id", workItemId).maybeSingle();
+  const row = r.data as { id: string; organization_id: string } | null;
+  if (!row) return;
+  await emitEvent(db, logger, { organizationId: row.organization_id, eventType: `${kind}.changed`, entityType: kind, entityId: row.id, actor: "user", actorUserId: userId, payload: { [`${kind}Id`]: row.id, workItemId } });
+}
 
 async function loadItem(db: SupabaseClient, id: string): Promise<WorkItemRow> {
   const { data, error } = await db
@@ -294,6 +305,11 @@ export function workRoutes(deps: WorkDeps) {
         p_source: input.source ?? "ask",
       });
       if (r.error) return sendError(c, mapDatabaseError(r.error));
+      // A claim was reported (D-140): the claim run starts. Once per claim.
+      const claimRow = await db.from("claims").select("id").eq("work_item_id", id).maybeSingle();
+      const claimId = (claimRow.data as { id: string } | null)?.id;
+      if (claimId)
+        await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "claim.reported", entityType: "claim", entityId: claimId, actor: "user", actorUserId: user.id, payload: { claimId, workItemId: id, clientId: client.id }, dedupeKey: claimId });
       /*
        * A new claim is looked at again in two days: the documents an insurer assesses are what a
        * late claim is refused for. Written through the same contract as every derived work state.
@@ -325,6 +341,11 @@ export function workRoutes(deps: WorkDeps) {
         p_items: [],
       });
       if (r.error) return sendError(c, mapDatabaseError(r.error));
+      // An endorsement was asked for (D-140): the endorsement run starts. Once per endorsement.
+      const endRow = await db.from("endorsements").select("id").eq("work_item_id", id).maybeSingle();
+      const endorsementId = (endRow.data as { id: string } | null)?.id;
+      if (endorsementId)
+        await emitEvent(db, deps.logger, { organizationId: org.id, eventType: "endorsement.requested", entityType: "endorsement", entityId: endorsementId, actor: "user", actorUserId: user.id, payload: { endorsementId, workItemId: id, clientId: client.id, policyId: policy!.id }, dedupeKey: endorsementId });
     }
     const item = await loadItem(db, id);
     return c.json(
@@ -456,17 +477,24 @@ export function workRoutes(deps: WorkDeps) {
         break;
     }
     if (r.error) return sendError(c, mapDatabaseError(r.error));
+    // The insurer has registered the claim (D-140): its reference is the evidence. Once per claim.
+    if (input.action === "set_insurer_reference") {
+      const cl = await db.from("claims").select("organization_id, work_item_id").eq("id", id).maybeSingle();
+      const row = cl.data as { organization_id: string; work_item_id: string } | null;
+      if (row)
+        await emitEvent(db, deps.logger, { organizationId: row.organization_id, eventType: "claim.registered", entityType: "claim", entityId: id, actor: "user", actorUserId: user.id, payload: { claimId: id, workItemId: row.work_item_id }, dedupeKey: id });
+    }
     const wiR = await db.from("claims").select("work_item_id").eq("id", id).maybeSingle();
     if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    if (wiR.data) await emitChanged(db, deps.logger, "claim", (wiR.data as { work_item_id: string }).work_item_id, user.id);
     const detail = wiR.data
       ? await loadClaimDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
       : null;
-    void user;
     return c.json({ claim: detail });
   });
 
   app.post("/endorsements/:id/actions", async (c) => {
-    const { db } = c.get("auth");
+    const { db, user } = c.get("auth");
     const id = c.req.param("id");
     const input = await parseBody(c, endorsementActionSchema);
     let r: { error: { code?: string; message?: string } | null };
@@ -510,6 +538,7 @@ export function workRoutes(deps: WorkDeps) {
     if (r.error) return sendError(c, mapDatabaseError(r.error));
     const wiR = await db.from("endorsements").select("work_item_id").eq("id", id).maybeSingle();
     if (wiR.error) return sendError(c, mapDatabaseError(wiR.error));
+    if (wiR.data) await emitChanged(db, deps.logger, "endorsement", (wiR.data as { work_item_id: string }).work_item_id, user.id);
     const detail = wiR.data
       ? await loadEndorsementDetail(db, (wiR.data as { work_item_id: string }).work_item_id)
       : null;
@@ -1033,7 +1062,9 @@ export function workRoutes(deps: WorkDeps) {
       const mailbox = await db.from("mailboxes").select("id").eq("organization_id", item.organization_id).eq("status", "connected").limit(1);
       const why = [...((mailbox.data ?? []).length === 0 ? ["no mailbox is connected"] : []), "no verified insurer address is on file"];
       await recordAudit(db, deps.logger, c, { organizationId: item.organization_id, actorUserId: user.id, action: "work_item.draft", objectType: "work_item", objectId: item.id, result: "denied", failureReason: "unsafe_draft" });
-      return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason: `A claim notice cannot be prepared: ${why.join("; ")}. Nothing was prepared or sent.` } satisfies ActResponse), 409);
+      // D-150: the notice is prepared by the claim's own work for one approval, once the insurer has
+      // a verified address — never drafted freehand here.
+      return c.json(actResponseSchema.parse({ outcome: "blocked", item, guard: "evidence_present", reason: `A claim notice is not drafted here. ASAP prepares it for your approval in this claim's work once the insurer has a verified address${why.length > 1 ? "" : ", and sends it through the connected mailbox"}. Nothing was prepared or sent.` } satisfies ActResponse), 409);
     }
     const result = applyAction(
       item,
@@ -1210,6 +1241,26 @@ export function workRoutes(deps: WorkDeps) {
       });
       if (error) return sendError(c, mapDatabaseError(error));
     }
+    if (effects.claimFact?.amount && facts.claim) {
+      const { error } = await db.rpc("claim_amount_record", {
+        p_claim_id: facts.claim.claim.id,
+        p_fact: effects.claimFact.fact,
+        p_amount: effects.claimFact.amount.amount,
+        p_currency: effects.claimFact.amount.currency,
+        p_paid_on: effects.claimFact.amount.paidOn,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
+    if (effects.endorsementPremium && facts.endorsement) {
+      const { error } = await db.rpc("endorsement_premium_record", {
+        p_endorsement_id: facts.endorsement.endorsement.id,
+        p_direction: effects.endorsementPremium.direction,
+        p_amount: effects.endorsementPremium.amount,
+        p_currency: effects.endorsementPremium.currency,
+        p_reference: effects.endorsementPremium.reference,
+      });
+      if (error) return sendError(c, mapDatabaseError(error));
+    }
     if (effects.applyEndorsement && facts.endorsement) {
       const { error } = await db.rpc("endorsement_apply", {
         p_id: facts.endorsement.endorsement.id,
@@ -1255,6 +1306,8 @@ export function workRoutes(deps: WorkDeps) {
       p_exception: derived.exception,
       p_completed_at: derived.completedAt,
       p_audit_action: result.auditAction,
+      // The database function takes the inception date too (0026); without it no step could be applied.
+      p_cover_inception_at: req.inceptionAt ?? null,
       p_audit_new_state: {
         verb: req.verb,
         step_id: req.stepId,
@@ -1278,6 +1331,9 @@ export function workRoutes(deps: WorkDeps) {
       }
       return sendError(c, mapped);
     }
+    // A person moved a claim or an endorsement on (D-143): its run looks again. Not deduplicated —
+    // each step is its own fact, and a run that finds nothing new simply waits.
+    await emitChanged(db, deps.logger, item.kind, id, user.id);
     const fresh = await loadItem(db, id);
     return c.json(
       actResponseSchema.parse({ outcome: "applied", item: fresh, run: null, draft: null }),

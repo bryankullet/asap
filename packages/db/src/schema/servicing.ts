@@ -133,6 +133,12 @@ export const claims = pgTable(
     acceptanceRecordedAt: timestamptz("acceptance_recorded_at"),
     paymentReference: text("payment_reference"),
     paymentRecordedAt: timestamptz("payment_recorded_at"),
+    // Migration 0077 (D-154): the figures on the voucher and the receipt.
+    offerAmount: numeric("offer_amount", { precision: 14, scale: 2 }),
+    offerCurrency: text("offer_currency"),
+    paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }),
+    paidCurrency: text("paid_currency"),
+    paidOn: date("paid_on"),
     registeredBy: uuid("registered_by").references(() => users.id),
     registeredAt: timestamptz("registered_at"),
     createdAt: createdAt(),
@@ -207,5 +213,26 @@ export const endorsements = pgTable(
     index("endorsements_policy_id_idx").on(t.policyId),
     index("endorsements_applied_version_id_idx").on(t.appliedVersionId),
     index("endorsements_created_by_idx").on(t.createdBy),
+  ],
+);
+
+/** Migration 0077 (D-154). */
+export const endorsementPremiumAdjustments = pgTable(
+  "endorsement_premium_adjustments",
+  {
+    id: uuidPrimaryKey(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    endorsementId: uuid("endorsement_id").notNull().references(() => endorsements.id, { onDelete: "cascade" }),
+    direction: text("direction").notNull(),
+    amount: numeric("amount", { precision: 14, scale: 2 }),
+    currency: text("currency"),
+    reference: text("reference").notNull(),
+    recordedBy: uuid("recorded_by").notNull().references(() => users.id),
+    recordedAt: timestamptz("recorded_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("endorsement_premium_adjustments_one").on(t.endorsementId),
+    index("endorsement_premium_adjustments_organization_id_idx").on(t.organizationId),
+    index("endorsement_premium_adjustments_recorded_by_idx").on(t.recordedBy),
   ],
 );

@@ -24,3 +24,4 @@ export * from "./imports.js";
 export * from "./issuance.js";
 export * from "./workflows.js";
 export * from "./supervision.js";
+export * from "./inbound.js";

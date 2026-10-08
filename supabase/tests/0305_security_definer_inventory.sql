@@ -9,6 +9,9 @@ create temp table sd_allowlist (proname text primary key, reason text not null);
 insert into sd_allowlist values
   ('api_key_register', 'service_role only: the API registers its own key hash on boot (0025, D-047); no user session exists yet'),
   ('runs_recover',     'service_role only: run recovery on boot ends runs from a dead process (0024, D-045); no user session exists yet'),
+  ('work_item_step_by_run', 'service_role only: a workflow run completes ASAP''s own Work step, or a send step on a delivered message (0069, D-143); checked against the run, never a session'),
+  ('claim_set_cover_review_by_run', 'service_role only: the claim run records its cover-on-the-incident-date sentence (0069, D-143); checked against the run'),
+  ('inbound_open_draft', 'service_role only: the inbound router opens a draft claim or endorsement from a sorted email (0075, D-151); checked against the proposal'),
   ('rls_auto_enable',  'event trigger from 0017: enables RLS on any new table; not callable through the API (0203 proves anon/authenticated cannot execute it)');
 
 -- Every allowlisted function exists and is not executable by authenticated or anon.

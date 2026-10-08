@@ -168,6 +168,19 @@ export async function syncMailbox(
           attachmentBudget -= 1;
         }
       }
+      // A new inbound message is on file, with its attachments (D-140): the inbound router reads it.
+      // Ids only — never the body. Once per message, so a second pass reports nothing new.
+      if (saved.created && message.direction === "inbound")
+        await emitEvent(deps.db, deps.logger, {
+          organizationId: box.organization_id,
+          eventType: "email.received",
+          entityType: "email_message",
+          entityId: messageId,
+          actor: "automation",
+          actorUserId: null,
+          payload: { emailMessageId: messageId, threadId, mailboxId: box.id, source: "sync" },
+          dedupeKey: messageId,
+        });
     }
 
     /*

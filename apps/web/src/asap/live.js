@@ -113,7 +113,8 @@ async function hydrate(me) {
   // Every load that depends on nothing else starts now, together: the API is far from its
   // database, so each call costs seconds and waves run one after another add up (a 20 s load).
   const clientListsP = Promise.all(CLIENT_VIEWS.map((v) => api.clientFiles(v).catch(() => ({ items: [] }))));
-  const convoP = loadConversation();
+  // Each conversation is opened by its own address and loaded then (D-155); none is preloaded.
+  const convoP = Promise.resolve({ id: null, messages: [] });
   // Every document in the brokerage — including ones not yet attached to a client, which no client
   // page lists. Without this an upload awaiting review vanished on refresh (D-132).
   const allDocsP = (typeof api.documents === "function" ? api.documents() : Promise.resolve(null)).catch(() => null);
@@ -469,12 +470,10 @@ async function hydrate(me) {
   return { db, extras: { unfinishedImport, renewals, supervision, rules, receipts, members: members.members, mailboxes, opportunities: opportunityDetails, documents, applyTargets, claims: claimDetails, modelConfigured, conversationId: convo.id } };
 }
 
-/** The newest server conversation, as the interface's thread. Empty when there is none. */
-async function loadConversation() {
+/** One server conversation's turns, as the interface's thread (D-155). */
+export async function loadConversationTurns(id) {
   try {
-    const list = await api.conversations();
-    const latest = list.conversations[0];
-    if (!latest) return { id: null, messages: [] };
+    const latest = { id };
     const turns = await api.conversationMessages(latest.id);
     const messages = turns.messages.slice(-40).map((m) => {
       if (m.role === "person") return { role: "user", text: m.body };
@@ -660,14 +659,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   const pendingFiles = new Map();
   let conversationId = loaded.extras.conversationId;
   // How many thread messages the server already holds; new ones are appended after these.
-  // Documents still waiting to be read or reviewed come back into the conversation after a
-  // refresh or a new sign-in, as a live card read from the server — never lost with the tab (D-132).
-  {
-    const thread = db.conversations.find((c) => c.id === "cnv_main");
-    const waiting = [...loaded.extras.documents.values()].filter((d) => !["failed", "not_applicable"].includes(d.document.extractionState) && (d.document.extractionState !== "extracted" || d.fields.some((f) => f.state === "proposed")));
-    if (thread && waiting.length)
-      thread.messages = [...(thread.messages || []), { role: "ai", lead: plural(waiting.length, "document is", "documents are") + " waiting for you", text: "Pick up where you left off — nothing needs uploading again.", ingest: waiting.map((d) => d.document.id), pending: { status: "open" }, restored: true }];
-  }
+  // Documents still waiting to be read or reviewed are named on Home (D-132, D-155), read from the
+  // server on every load — never lost with the page, and never injected into someone's conversation.
   // Restored cards are rebuilt from the server on every load, so they are never saved as turns.
   let savedCount = (db.conversations.find((c) => c.id === "cnv_main")?.messages || []).filter((m) => !m.restored).length;
   // Set when the server's Ask stored the last question and its answer itself.
@@ -3249,7 +3242,39 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
 
   S.useBackend({ db, dispatch });
 
+  /** Documents still waiting to be read or reviewed — Home names them (D-132, D-155). */
+  const waitingDocuments = () =>
+    [...state.documents.values()].filter((d) => !["failed", "not_applicable"].includes(d.document.extractionState) && (d.document.extractionState !== "extracted" || d.fields.some((f) => f.state === "proposed"))).map((d) => d.document.id);
+
   return {
+    supervision: () => state.supervision,
+    waitingDocuments,
+    /**
+     * The adaptive shell's server-backed state (D-155): named sessions, Recent and Pins. Every call
+     * is the API's; nothing here is kept in browser storage.
+     */
+    shell: {
+      sessions: (q) => api.sessions(q).then((r) => r.conversations),
+      session: (id) => api.session(id).then((r) => r.conversation),
+      start: (body) => api.startSession(body),
+      update: (id, body) => api.updateSession(id, body).then((r) => r.conversation),
+      recent: () => api.recent().then((r) => r.items),
+      recordOpen: (body) => api.recordOpen(body).catch(() => null),
+      pins: () => api.pinsList().then((r) => r.items),
+      pin: (body) => api.pin(body),
+      unpin: (key) => api.unpin(key),
+      /** Opens one conversation: its turns become the thread, and new turns are appended to it. */
+      async open(id) {
+        const turns = id ? await loadConversationTurns(id) : { id: null, messages: [] };
+        conversationId = id || null;
+        const c = db.conversations.find((x) => x.id === "cnv_main");
+        if (c) c.messages = turns.messages;
+        savedCount = turns.messages.length;
+        serverStoredLast = false;
+        return turns.messages;
+      },
+      currentId: () => conversationId,
+    },
     greetingChips: db.clients.length === 0 ? WELCOME_CHIPS : LIVE_CHIPS,
     savingNote: "Saving to your brokerage's records…",
     // A brand-new brokerage is welcomed with somewhere to start; it can skip and come back (D-132).

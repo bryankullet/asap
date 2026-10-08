@@ -107,9 +107,12 @@ check("01 create brokerage; a retry with the same request is the same brokerage"
 check("01 one membership for Stacy", Number(sql(`select count(*) from organization_memberships where user_id = '${STACY}'`)) === 1);
 
 const page = await open();
+// D-155: a brokerage with nothing yet is welcomed on Home with the setup entry point.
 await step(page, "02-welcome", async () => {
-  await expectText(page.locator("body"), "Your brokerage is ready.");
+  await page.goto(process.env.E2E_URL.replace(/#.*$/, "") + "#/"); await settle(page, 1500);
+  await expectText(page.locator("body"), "Add the records you already have. ASAP will organize your clients, policies and current work.");
   await expectText(page.locator("body"), "Upload documents");
+  await page.goBack(); await settle(page, 1200);
 });
 await step(page, "03-refresh-setup-still-there", async () => {
   await reload(page);
@@ -145,14 +148,18 @@ await step(page, "06-refresh-before-confirming-keeps-document", async () => {
   await expectText(pane(page), `ASAP_QA_TEST_${TAG}.pdf`);
   await expectText(pane(page), /values? needs? confirmation/);
   await expectText(pane(page), "Documents");
-  await expectText(page.locator("body"), /waiting for you/);
+  // D-155: documents still waiting are named on Home, with one action.
+  await page.goto(process.env.E2E_URL.replace(/#.*$/, "") + "#/"); await settle(page, 1500);
+  await expectText(page.locator("body"), /waiting for review/);
 });
 
 /* 5 · each review entry point opens that exact document */
 await step(page, "07-chat-card-review-values", async () => {
-  await lastPending(page).getByRole("button", { name: "Review values", exact: true }).click();
+  await page.locator(".sh-row", { hasText: /waiting for review/ }).getByRole("button", { name: "Review" }).click();
   await settle(page, 2000);
   await reviewIsOpen(page);
+  // Back to the conversation the journey continues in.
+  await page.goBack(); await settle(page, 800); await page.goBack(); await settle(page, 1500);
 });
 await step(page, "08-setup-confirm-what-asap-read", async () => {
   await openFromSetup(page);
@@ -198,7 +205,8 @@ check("12 the premium is recorded from the document, gross, with it as evidence"
 
 /* 10 · confirming twice creates nothing twice */
 await step(page, "13-confirm-twice-nothing-twice", async () => {
-  await page.evaluate((id) => sessionStorage.setItem("asap.openRef", JSON.stringify({ ws: "document", documentId: id })), docId);
+  // D-155: the document review has its own address; a reload reopens it.
+  await page.goto(process.env.E2E_URL.replace(/#.*$/, "") + `#/ask?space=${encodeURIComponent("document?documentId=" + docId)}`);
   await reload(page);
   const again = await api("POST", "/policies", { clientName: V.insured, insurerName: V.insurer, classOfBusiness: V.cls, policyNumber: V.policy, periodStart: V.from, periodEnd: V.to });
   if (again.body.outcome === "recorded" && again.body.created) throw new Error("a second policy was created");

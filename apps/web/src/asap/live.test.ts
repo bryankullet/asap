@@ -1080,7 +1080,7 @@ describe("live mode", () => {
       const A = await live();
       const list = A.ai.workspace({ ws: "automation" }) as { blocks: { t: string; fields?: { key: string; options?: { value: string }[] }[] }[] };
       const builder = list.blocks.find((b) => b.t === "builder")!;
-      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received"]);
+      expect(builder.fields!.find((f) => f.key === "trigger")!.options!.map((o) => o.value)).toEqual(["document.received", "quote.received", "cover.confirmed", "claim.registered", "check.overdue", "run.could_not_finish"]);
       const bad = (await A.ai.route("Create an automation: when a renewal is approaching, email the client automatically", {})) as { pending?: unknown; lead: string; text: string };
       expect(bad.pending).toBeUndefined();
       expect(bad.lead).toBe("That cannot be saved as a working automation.");
@@ -1129,14 +1129,14 @@ describe("live mode", () => {
 
     it("after a reload the document, its 12 waiting values and a live review card come back from the server", async () => {
       undocState = "extracted";
-      const A = (await live()) as unknown as { ai: { workspace: (r: unknown) => unknown }; records: { sel: { conversation: (id: string) => { messages: { ingest?: string[]; restored?: boolean; lead?: string }[] } } }; ingestCard: (ids: string[], base?: unknown) => { reviewRef?: { documentId: string }; confirmLabel?: string; sections: { items: string[] }[] } };
+      const A = (await live()) as unknown as { ai: { workspace: (r: unknown) => unknown }; waitingDocuments: () => string[]; ingestCard: (ids: string[], base?: unknown) => { reviewRef?: { documentId: string }; confirmLabel?: string; sections: { items: string[] }[] } };
       const setup = text(A.ai.workspace({ ws: "setup" }));
       expect(setup).toContain("ASAP_QA_TEST_20261002.pdf");
       expect(setup).toContain("12 values need confirmation");
-      const card = A.records.sel.conversation("cnv_main").messages.find((m) => m.restored);
-      // The card lists every document still awaiting review; the unattached upload must be among them.
-      expect(card?.ingest).toContain(UNDOC);
-      const live2 = A.ingestCard(card!.ingest!, { status: "open" });
+      // Home names every document still awaiting review (D-155); the unattached upload is among them.
+      const waiting = A.waitingDocuments();
+      expect(waiting).toContain(UNDOC);
+      const live2 = A.ingestCard(waiting, { status: "open" });
       expect(live2.confirmLabel).toBe("Review values");
       expect(live2.reviewRef?.documentId).toBe(UNDOC);
     });

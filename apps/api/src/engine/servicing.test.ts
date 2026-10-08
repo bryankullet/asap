@@ -368,7 +368,7 @@ describe("claims — documents, response, and the three facts", () => {
     ] as const) {
       const r = applyAction(
         at("claim", stepId),
-        req({ stepId, verb: "record_evidence", evidence: `${fact} ref` }),
+        req({ stepId, verb: "record_evidence", evidence: `${fact} ref`, ...(fact === "acceptance" ? {} : { amount: "1000", currency: "KES", paidOn: "2026-01-02" }) }),
         CTX,
         claimFacts(),
       );
@@ -379,6 +379,9 @@ describe("claims — documents, response, and the three facts", () => {
       // An offer or an acceptance never finishes the claim; only the receipt, the tenth step, does.
       if (r.kind === "applied") expect(r.derived.task.status === "done").toBe(stepId === "payment");
     }
+    // The offer and the payment carry the figure on the voucher or the receipt (D-154).
+    const bare = applyAction(at("claim", "offer"), req({ stepId: "offer", verb: "record_evidence", evidence: "DV-1" }), CTX, claimFacts());
+    expect(bare).toMatchObject({ kind: "blocked", reason: "Record the amount and currency on the discharge voucher." });
     const steps = claimSteps({ clientName: "x", insurerName: null });
     expect(steps.map((s) => s.id).slice(-3)).toEqual(["offer", "acceptance", "payment"]);
     expect(steps).toHaveLength(10);

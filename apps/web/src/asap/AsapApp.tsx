@@ -1,22 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import { createElement, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
 import { useMe } from "../lib/me.js";
-import Component from "./generated/logic.gen.js";
-import { renderTemplate } from "./generated/template.gen.js";
-import "./generated/asap.css";
+import Component from "./logic.js";
+import "./asap.css";
+import { AdaptiveShell } from "./shell/AdaptiveShell.js";
+import type { Logic, ShellController } from "./shell/types.js";
 import { loadDemoAdapters } from "./demo.js";
 import { loadLiveAdapters } from "./live.js";
 
 /*
- * The approved interface's logic is an ordinary React class; its markup is compiled to a render
- * function. Rendering is exactly what the approved runtime does: the template over the component's
- * props merged with its `renderVals()`.
+ * The approved interface's logic is an ordinary React class (D-115). Since D-155 it renders the
+ * adaptive shell, which lays out the approved Space, conversation and sheet renderers by what the
+ * person is doing and owns the address.
  */
-type Logic = { props: Record<string, unknown>; renderVals(): Record<string, unknown>; forceUpdate(): void };
-const proto = (Component as unknown as { prototype: Logic & { render(): unknown } }).prototype;
-proto.render = function render(this: Logic) {
-  return renderTemplate({ ...this.props, ...this.renderVals() });
+type LogicClass = Logic & { props: Record<string, unknown> & { shell: ShellController; orgKey: string }; renderVals(): Record<string, unknown> };
+const proto = (Component as unknown as { prototype: LogicClass & { render(): unknown } }).prototype;
+proto.render = function render(this: LogicClass) {
+  return createElement(AdaptiveShell, { logic: this, v: { ...this.props, ...this.renderVals() }, controller: this.props.shell, orgKey: this.props.orgKey });
 };
-const AsapComponent = Component as unknown as React.ComponentType<{ loadAdapters: () => Promise<unknown> }>;
+const AsapComponent = Component as unknown as React.ComponentType<{ loadAdapters: () => Promise<unknown>; shell: ShellController; orgKey: string }>;
 
 type Mode = "live" | "demo";
 const MODE_KEY = "asap.mode";
@@ -38,6 +40,10 @@ export function AsapApp() {
   const me = useMe();
   const [mode, setMode] = useState<Mode>(readMode);
   const [failure, setFailure] = useState<string | null>(null);
+  // Filled in by the shell on every render; the logic calls it to navigate (D-155).
+  const controller = useRef<ShellController>({ open: () => {}, home: () => {}, search: () => {}, ensureConversation: async () => null }).current;
+  const router = useRouter();
+  const orgKey = me.data ? `${me.data.active_organization?.id ?? "none"}:${me.data.user.id}` : "loading";
 
   const choose = useCallback((next: Mode) => {
     try {
@@ -48,6 +54,15 @@ export function AsapApp() {
     setFailure(null);
     setMode(next);
   }, []);
+
+  // A brokerage or person switch clears inherited context at once: the app remounts (its key) and
+  // opens Home, so no address from the previous brokerage stays open (D-155).
+  const firstOrg = useRef(orgKey);
+  useEffect(() => {
+    if (orgKey === "loading" || firstOrg.current === orgKey) return;
+    if (firstOrg.current !== "loading") router.history.replace("/");
+    firstOrg.current = orgKey;
+  }, [orgKey, router]);
 
   useEffect(() => {
     document.title = mode === "demo" ? "ASAP — demo" : "ASAP";
@@ -104,7 +119,7 @@ export function AsapApp() {
           </button>
         </div>
       )}
-      <AsapComponent key={mode} loadAdapters={loadAdapters} />
+      <AsapComponent key={`${mode}:${orgKey}`} loadAdapters={loadAdapters} shell={controller} orgKey={orgKey} />
     </>
   );
 }

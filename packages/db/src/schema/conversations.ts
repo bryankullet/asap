@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
-import { createdAt, deletedAt, updatedAt, uuidPrimaryKey } from "./_shared.js";
+import { createdAt, deletedAt, timestamptz, updatedAt, uuidPrimaryKey } from "./_shared.js";
+import { workItems } from "./work.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
 
@@ -28,6 +29,12 @@ export const conversations = pgTable(
     /** A brokerage-wide conversation has no subject; any other scope names one. */
     scopeKind: text("scope_kind").notNull(),
     scopeId: uuid("scope_id"),
+    // Migration 0078 (D-155): a named work session.
+    titleSource: text("title_source").notNull().default("question"),
+    purpose: text("purpose").notNull().default("question"),
+    workItemId: uuid("work_item_id").references(() => workItems.id, { onDelete: "set null" }),
+    spaceRef: jsonb("space_ref"),
+    lastActivityAt: timestamptz("last_activity_at").notNull().defaultNow(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: deletedAt(),
@@ -46,6 +53,8 @@ export const conversations = pgTable(
     index("conversations_organization_id_updated_at_idx").on(t.organizationId, t.updatedAt.desc()),
     index("conversations_scope_idx").on(t.organizationId, t.scopeKind, t.scopeId),
     index("conversations_created_by_idx").on(t.createdBy),
+    index("conversations_work_item_id_idx").on(t.workItemId),
+    index("conversations_person_activity_idx").on(t.organizationId, t.createdBy, t.lastActivityAt.desc()),
   ],
 );
 

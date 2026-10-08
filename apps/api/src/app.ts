@@ -10,9 +10,11 @@ import type { Mailer } from "./mail/index.js";
 import { askRoutes } from "./routes/ask.js";
 import { attentionRoutes } from "./routes/attention.js";
 import { workflowRoutes } from "./routes/workflows.js";
+import { inboundRoutes } from "./routes/inbound.js";
 import { automationRoutes } from "./routes/automations.js";
 import { complianceRoutes } from "./routes/compliance.js";
 import { conversationRoutes } from "./routes/conversations.js";
+import { sessionRoutes } from "./routes/sessions.js";
 import { mailboxRoutes, type MailboxOAuthConfig } from "./routes/mailboxes.js";
 import { mailboxOAuthRoutes } from "./routes/mailbox-oauth.js";
 import { onboardingRoutes } from "./routes/onboarding.js";
@@ -37,6 +39,8 @@ import type { AiProvider } from "@asap/schema";
 import type { Executor } from "./runs/executor.js";
 import type { Extractor } from "./documents/extractor.js";
 import type { SupabaseFactory } from "./supabase.js";
+import { configureEngineMailbox } from "./workflows/chasers.js";
+import { chaserRoutes } from "./routes/chasers.js";
 
 export type AppDeps = {
   logger: Logger;
@@ -102,7 +106,7 @@ export function createApp(deps: AppDeps) {
     cors({
       origin: deps.webBaseUrl,
       allowHeaders: ["Authorization", "Content-Type"],
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       maxAge: 600,
     }),
   );
@@ -137,6 +141,8 @@ export function createApp(deps: AppDeps) {
         extractor: deps.extractor ?? null,
         bucket: deps.storage?.bucket ?? "insurance-documents",
         mailbox: deps.mailbox,
+        aiProvider: deps.aiProvider ?? null,
+        engineDb: (organizationId: string) => supabase.forEngine?.(organizationId) ?? null,
       }),
     );
   }
@@ -192,6 +198,10 @@ export function createApp(deps: AppDeps) {
     "/mailboxes",
     "/mailboxes/*",
     "/conversations",
+    "/sessions",
+    "/sessions/*",
+    "/recent",
+    "/space-pins",
     "/conversations/*",
     "/spaces/*",
     "/work",
@@ -228,12 +238,20 @@ export function createApp(deps: AppDeps) {
     "/prepared-actions/*",
     /* What a creation form may preselect (4C-1). Found unguarded by the connected test. */
     "/creation-context",
+    /* Pasted and uploaded email, and settling what the router could not (D-144). */
+    "/inbound",
+    "/inbound/*",
+    "/insurers/*",
+    "/exception-suggestions/*",
+    "/chaser-templates",
+    "/chaser-templates/*",
   ]) {
     app.use(path, guard);
   }
   app.route("/", meRoutes());
   app.route("/", askRoutes());
   app.route("/", conversationRoutes({ logger, provider: deps.aiProvider ?? null }));
+  app.route("/", sessionRoutes({ logger }));
   app.route(
     "/",
     documentRoutes({
@@ -256,7 +274,11 @@ export function createApp(deps: AppDeps) {
   app.route("/", importRoutes({ logger, aiProvider: deps.aiProvider ?? null }));
   app.route("/", attentionRoutes());
   app.route("/", automationRoutes({ logger }));
-  app.route("/", workflowRoutes({ logger, service: () => supabase.service() }));
+  // The engine sends standing-approved chasers through the same adapters (D-147).
+  configureEngineMailbox(deps.mailbox ? { providers: deps.mailbox.providers, encryptionKey: deps.mailbox.encryptionKey } : undefined);
+  app.route("/", workflowRoutes({ logger, service: () => supabase.service(), mailbox: deps.mailbox ? { providers: deps.mailbox.providers, encryptionKey: deps.mailbox.encryptionKey } : undefined }));
+  app.route("/", chaserRoutes());
+  app.route("/", inboundRoutes({ logger, service: () => supabase.service(), bucket: deps.storage?.bucket ?? "insurance-documents" }));
   app.route("/", spaceRoutes({ logger }));
   app.route("/", complianceRoutes({ logger }));
   app.route("/", clientRoutes());

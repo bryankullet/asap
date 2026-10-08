@@ -102,6 +102,7 @@ export const preparedCommunications = pgTable(
     deliveredAt: timestamptz("delivered_at"),
     deliveredBy: uuid("delivered_by").references(() => users.id),
     providerMessageId: text("provider_message_id"),
+    sendAttemptId: uuid("send_attempt_id"),
     createdAt: timestamptz("created_at").notNull().default(sql`now()`),
     updatedAt: timestamptz("updated_at").notNull().default(sql`now()`),
   },
@@ -111,5 +112,6 @@ export const preparedCommunications = pgTable(
     index("prepared_communications_approval_id_idx").on(t.approvalId),
     index("prepared_communications_quote_request_id_idx").on(t.quoteRequestId),
     index("prepared_communications_delivered_by_idx").on(t.deliveredBy),
+    index("prepared_communications_send_attempt_id_idx").on(t.sendAttemptId),
   ],
 );

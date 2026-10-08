@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Logger } from "pino";
+import { emitEvent } from "../events/emit.js";
 
 /**
  * The execution foundation (D-129): one durable, resumable run of multi-step work.
@@ -93,11 +94,15 @@ export async function auditAutomation(
   });
 }
 
-/** Creates a run and its steps, once. A second call for the same live subject returns the first. */
+/**
+ * Creates a run and its steps, once. A second call for the same live subject returns the first.
+ * With `once`, a subject that already finished its run is not started again: a replayed start
+ * event must not walk a placement through a second time (D-142). A cancelled run may restart.
+ */
 export async function startRun(
   db: SupabaseClient,
   def: WorkflowDefinition,
-  input: { organizationId: string; subjectType: string; subjectId: string; workItemId: string | null; facts: Record<string, unknown> },
+  input: { organizationId: string; subjectType: string; subjectId: string; workItemId: string | null; facts: Record<string, unknown>; once?: boolean },
 ): Promise<{ runId: string; created: boolean }> {
   const existing = await db
     .from("workflow_runs")
@@ -105,7 +110,9 @@ export async function startRun(
     .eq("organization_id", input.organizationId)
     .eq("workflow", def.workflow)
     .eq("subject_id", input.subjectId)
-    .not("state", "in", "(done,cancelled)")
+    .not("state", "in", input.once ? "(cancelled)" : "(done,cancelled)")
+    .order("started_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (existing.data) return { runId: (existing.data as { id: string }).id, created: false };
   const ins = await db
@@ -276,6 +283,17 @@ async function except(
       .eq("id", run.work_item_id);
   }
   await auditAutomation(db, run, `workflow.${run.workflow}.exception`, { step: row.step_key, code: exception.code, message: exception.message, needs: exception.needs }, [], "failure", exception.code);
+  // The run could not finish (D-140): the exception helper looks into why, an automation may react.
+  await emitEvent(db, null, {
+    organizationId: run.organization_id,
+    eventType: "run.could_not_finish",
+    entityType: "workflow_run",
+    entityId: run.id,
+    actor: "automation",
+    actorUserId: null,
+    payload: { runId: run.id, workflow: run.workflow, step: row.step_key, code: exception.code, workItemId: run.work_item_id },
+    dedupeKey: `${run.id}:${at}`,
+  });
   return { runId: run.id, state: "exception", stepsDone, stoppedAt: row.step_key };
 }
 
