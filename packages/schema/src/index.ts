@@ -31,3 +31,4 @@ export * from "./spaces/blocks.js";
 export * from "./views/boards.js";
 export * from "./draft-safety.js";
 export * from "./shell.js";
+export * from "./living.js";
