@@ -363,7 +363,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1360, height: 900
     must(r.status === 404, `another brokerage read the Living surface (${r.status})`);
     await beta.goto(BASE + "#/s/living?workItemId=30000000-0000-4000-8000-000000000001");
     await settle(beta, 1800);
-    await beta.getByText("This renewal is not available to you").waitFor({ timeout: 10000 });
+    await beta.getByText("This work is not available to you").waitFor({ timeout: 10000 });
     must(!/Acme Motors/.test(await beta.locator(".sh-main").innerText()), "another brokerage's renewal is visible");
     beta.errors = beta.errors.filter((e) => !/404 GET \/living\//.test(e));
   });

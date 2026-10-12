@@ -34,7 +34,8 @@ beforeAll(async () => {
   await app.request("/internal/workflows/sweep", { method: "POST", headers: { "x-asap-internal-key": API_KEY } });
   const [run] = await sql<{ work_item_id: string }[]>`select work_item_id from workflow_runs where subject_id = ${per!.id}`;
   workItemId = run!.work_item_id;
-  const [other] = await sql<{ id: string }[]>`select id from work_items where organization_id = ${ORG_A} and kind <> 'renewal' and deleted_at is null limit 1`;
+  // Renewals, claims and policy changes have workspaces (D-161); any other kind does not.
+  const [other] = await sql<{ id: string }[]>`select id from work_items where organization_id = ${ORG_A} and kind not in ('renewal', 'claim', 'endorsement') and deleted_at is null limit 1`;
   otherItemId = other?.id ?? "";
 });
 afterAll(async () => {
@@ -78,11 +79,12 @@ describe("GET /living/:workItemId", () => {
       where m.user_id = ${READER.id} and m.organization_id = ${ORG_A} and p.object_type = 'audit' and p.verb = 'view'`;
     const n = rows[0]!.n;
     // Whichever way the role is configured, the audit history follows the permission, never the screen.
-    if (n === 0) expect(s.blocks.some((b) => b.component === "Timeline")).toBe(false);
+    // The audit history is the "recent" block; "This cover before" (also a Timeline) is not audit.
+    if (n === 0) expect(s.blocks.some((b) => b.id === "recent")).toBe(false);
     expect(n === 0 || n === 1).toBe(true);
   });
 
-  it("refuses what is not a renewal, an unknown id and a malformed id alike", async () => {
+  it("refuses a kind with no workspace, an unknown id and a malformed id alike", async () => {
     if (otherItemId) expect((await call(AMINA, "GET", `/living/${otherItemId}`)).status).toBe(404);
     expect((await call(AMINA, "GET", `/living/${randomUUID()}`)).status).toBe(404);
     expect((await call(AMINA, "GET", "/living/not-an-id")).status).toBe(404);

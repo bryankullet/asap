@@ -2974,7 +2974,8 @@ instructed — the decision is then a record, not an exploration.
 - *Visual regression:* the UI Lab at 1440 and 390 px against baselines in `apps/web/e2e/baselines`;
   more than 0.5% of pixels changed fails. Baselines are refreshed only deliberately
   (`UPDATE_BASELINES=1`) after the new screenshots are reviewed.
-- *Performance:* render time per stage in the browser, and composition p95 on a real database in
-  the connected suite (both bounded; numbers are printed with each run).
+- *Performance:* render time per stage in the browser (printed: p50 about 50 ms, p95 under 0.8 s
+  locally, first load included), and composition p95 on a real database in the connected suite,
+  held under 1.5 s for the renewal workspace and the portfolio.
 - *Security:* record text renders as text (markup in a title is not interpreted), in addition to the
   tenant, role, tampered-command and preference-scope tests.

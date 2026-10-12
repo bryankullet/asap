@@ -159,6 +159,18 @@ How commands behave:
 - **Home (D-159):** semantic events since the start of this visit, from colleagues, insurers and ASAP. The viewer's own actions are left out and no figures are shown.
 - **Exploration (D-160):** up to three alternatives, from records, labelled hypothetical, kept in the address. It disappears once the client has instructed.
 
-## 9. Verification
+## 9. Verification (latest full gate, on `cf8c85f` plus test fixes)
 
-Recorded at the end of the latest milestone; see the final report for the run.
+| Check | Result |
+|---|---|
+| Typecheck, lint | clean |
+| Unit | api 910 (1 skipped) · web 182 · schema 118 · workers 25 (10 skipped) · db 3 |
+| Build | 6/6 packages; only `VITE_PUBLIC_*` reaches the browser; the UI Lab is not bundled |
+| Ask evaluation | 41 passed (1 skipped) |
+| Connected (real Postgres, PostgREST, RLS) | 211 passed |
+| pgTAP RLS | 1217 passed |
+| Browser | shell 36/36 · journey 32/32 · supervision 28/28 · onboarding 14/14 · acceptance 8/8 · quote-comparison 19/19 · staging-findings 7/7 · first-document 23/23 · living-lab 32/32 · living-actions 10/10 · living-portfolio 10/10 · living-servicing 4/4 · living-quality 16/16 |
+
+The first gate run failed four checks, all fixed: two connected expectations predating claims and
+the memory timeline, one shell step on changed wording, and quote-comparison run without the
+document extractor environment it requires (it passes with it).
