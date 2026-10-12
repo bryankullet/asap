@@ -9,6 +9,7 @@ import {
   type LivingSurface,
   type RenewalStage,
 } from "@asap/schema";
+import { pendingApprovals, quotationCommands, runCommands, submissionCommands } from "./commands.js";
 import type { RenewalLivingFacts } from "./facts.js";
 
 /**
@@ -71,14 +72,14 @@ export function progressOpportunities(f: RenewalLivingFacts) {
   const op = f.run?.operational;
   if (f.run && op) {
     if (f.run.state === "waiting_approval")
-      items.push({ id: "run-approval", title: f.run.approval?.title ?? "Approve the renewal bundle", why: op.needsFromYou ?? "Nothing leaves the brokerage until a person approves its exact content.", responsible: op.owner?.name ?? null, deadline: f.period?.periodEnd ?? null, actionableNow: f.run.permissions.canApprove, requiresApproval: true, blockedBy: f.run.permissions.canApprove ? [] : ["Your role cannot approve; a principal officer can."], tone: "gold", action: primary(openRun(f, "Review the bundle")) });
+      items.push({ id: "run-approval", title: f.run.approval?.title ?? "Approve the renewal bundle", why: op.needsFromYou ?? "Nothing leaves the brokerage until a person approves its exact content.", responsible: op.owner?.name ?? null, deadline: f.period?.periodEnd ?? null, actionableNow: f.run.permissions.canApprove, requiresApproval: true, blockedBy: f.run.permissions.canApprove ? [] : ["Your role cannot approve; a principal officer can."], tone: "gold", action: null });
     else if (f.run.state === "exception")
-      items.push({ id: "run-exception", title: f.run.exception?.message ?? "ASAP stopped and needs a person", why: f.run.exception?.needs ?? "The renewal cannot continue until this is resolved.", responsible: op.owner?.name ?? null, deadline: f.period?.periodEnd ?? null, actionableNow: f.run.permissions.canAct, requiresApproval: false, blockedBy: op.blockers.filter((b) => b.blocking).map((b) => b.label), tone: "red", action: primary(openRun(f, "Resolve it")) });
+      items.push({ id: "run-exception", title: f.run.exception?.message ?? "ASAP stopped and needs a person", why: f.run.exception?.needs ?? "The renewal cannot continue until this is resolved.", responsible: op.owner?.name ?? null, deadline: f.period?.periodEnd ?? null, actionableNow: f.run.permissions.canAct, requiresApproval: false, blockedBy: op.blockers.filter((b) => b.blocking).map((b) => b.label), tone: "red", action: runCommands(f).find((c) => c.command === "run.resume") ?? primary(openRun(f, "Resolve it")) });
     else if (op.needsFromYou)
       items.push({ id: "run-needs", title: op.needsFromYou, why: op.attentionReason ?? op.currentWork.detail, responsible: op.owner?.name ?? null, deadline: op.nextFollowUpAt, actionableNow: true, requiresApproval: false, blockedBy: op.blockers.filter((b) => b.blocking).map((b) => b.label), tone: "gold", action: primary(openRun(f)) });
   }
   const next = f.opportunity?.next;
-  if (next && next.holder !== "outside_party" && !f.placement)
+  if (next && next.holder !== "outside_party" && !f.placement && !items.some((x) => x.id.startsWith("run-")))
     items.push({ id: "quote-next", title: next.what, why: next.why, responsible: next.holder === "brokerage" ? "Your brokerage" : null, deadline: next.checkAt ?? null, actionableNow: next.holder === "brokerage", requiresApproval: /\bapprov(e|al)\b/i.test(next.what), blockedBy: next.missing, tone: next.missing.length ? "gold" : "green", action: primary(openQuote(f)) });
   if (f.placement && f.issuance?.stage !== "applied") {
     const p = f.placement;
@@ -99,12 +100,23 @@ function issuanceWords(stage: string): string {
   } as Record<string, string>)[stage] ?? "Continue the issuance";
 }
 
+/** The quotation records this party's answer (quoted or declined). */
+export function answered(f: RenewalLivingFacts, party: string): boolean {
+  return (f.opportunity?.insurers ?? []).some((i) => i.insurerName === party && (i.stage === "quoted" || i.stage === "declined"));
+}
+const allAnswered = (f: RenewalLivingFacts) => {
+  const live = (f.opportunity?.insurers ?? []).filter((i) => !i.removedAt && i.stage !== "removed");
+  return live.length > 0 && live.every((i) => i.stage === "quoted" || i.stage === "declined");
+};
+
 /** Who holds the next step, since when — outside parties named, colleagues named, ASAP's runs said. */
 export function obligations(f: RenewalLivingFacts) {
   const out: { party: string; what: string; since: string | null; due: string | null; kind: "outside" | "brokerage" | "asap" }[] = [];
   const op = f.run?.operational;
   // Once a client has instructed, the placement holds the work: the run's earlier waiting is history.
-  if (op?.waitingFor && !f.placement) out.push({ party: op.waitingFor.party, what: op.currentWork.title, since: op.waitingFor.since, due: op.nextFollowUpAt, kind: "outside" });
+  // And an insurer whose answer is on the quotation no longer holds anything, whatever the run's
+  // last reading says — the quotation is the record of insurer answers (the run catches up on its sweep).
+  if (op?.waitingFor && !f.placement && !answered(f, op.waitingFor.party)) out.push({ party: op.waitingFor.party, what: op.currentWork.title, since: op.waitingFor.since, due: op.nextFollowUpAt, kind: "outside" });
   for (const i of f.opportunity?.insurers ?? [])
     if (i.stage === "with_insurer" && !out.some((o) => o.party === i.insurerName))
       out.push({ party: i.insurerName, what: "Terms for the renewal", since: i.request?.approvedAt ?? i.addedAt, due: null, kind: "outside" });
@@ -225,6 +237,10 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
   if (opps.length)
     blocks.push(block("next", "ProgressOpportunity", "main", "What moves this forward", { items: opps.map(({ action: _a, ...rest }) => rest) }, { actions: opps.map((o) => o.action) }));
 
+  // What waits for approval is shown in full, here, with the governed commands (D-157).
+  for (const a of pendingApprovals(f))
+    blocks.push(block(`approval-${a.key}`, "ApprovalBundle", "main", "For your approval", { title: a.title, why: a.why, items: a.items, approverNote: a.approverNote }, { actions: a.commands }));
+
   // The working column changes with the stage.
   const quoteBlock = () =>
     f.opportunity && f.opportunity.insurers.length
@@ -239,7 +255,7 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
             declineReason: i.response?.declineReason ?? null,
           })),
           note: "Named facts from each insurer's own answer. ASAP does not pick a winner; the client decides.",
-        }, { evidence: [...evidenceOf(f).filter((e) => /answer| — /.test(e.label)), { label: "Quotation", reference: `Insurer answers as recorded on the quotation “${f.opportunity.opportunity.title}”`, documentId: null, recordedAt: null }], actions: [openQuote(f)] })
+        }, { evidence: [...evidenceOf(f).filter((e) => /answer| — /.test(e.label)), { label: "Quotation", reference: `Insurer answers as recorded on the quotation “${f.opportunity.opportunity.title}”`, documentId: null, recordedAt: null }], actions: [...quotationCommands(f).slice(0, 3), openQuote(f)] })
       : null;
 
   const chg = changes(f);
@@ -263,14 +279,16 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
       ],
       coverLine: (iss?.cover.line ?? p.cover.line).slice(0, 500),
       blockers: p.blockers.slice(0, 6),
-    }, { actions: [primary(openQuote(f))] }));
+    }, { actions: [...submissionCommands(f), openQuote(f)] }));
   }
 
   const cons = consequences(f, opts.now);
   if (cons.length) blocks.push(block("consequences", "ConsequencePanel", "side", "What this means", { items: cons }));
 
   const obs = obligations(f);
-  if (obs.length) blocks.push(block("obligations", "ObligationTracker", "side", "Who holds the next step", { items: obs }));
+  // Following up an insurer who has already answered would chase nobody.
+  const controls = runCommands(f).filter((c) => c.command !== "run.resume" && !(c.command === "run.follow_up_now" && allAnswered(f)));
+  if (obs.length || controls.length) blocks.push(block("obligations", "ObligationTracker", "side", "Who holds the next step", { items: obs }, { actions: controls.slice(0, 4) }));
 
   blocks.push(block("cover", "CoverageEffectiveState", "side", "Cover", {
     expiring: f.period ? { periodStart: f.period.periodStart, periodEnd: f.period.periodEnd, insurerName: f.period.insurerName, policyNumber: f.period.policyNumber } : null,

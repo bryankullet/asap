@@ -106,7 +106,7 @@ Living surface (`living/living.css`).
 | M2 Contracts & renderer | **built** | Surface spec, registry, validator, registered React renderers, loading/error states, compatibility with existing Spaces |
 | M3 Context & progress intelligence | **built** for renewals | Viewer-authorized facts, progress opportunities, obligations, evidence. A general semantic graph over every entity is **not built** |
 | M4 Intelligent Home | **partial** | Home (D-155) already shows attention, ASAP's running work, waiting parties and Recent; renewal attention and running renewals now open the Living workspace. A "relevant changes since you were last here" section is **not built** |
-| M5 Living Renewal Journey | **built** to the limits of existing capabilities | One workspace from attention through quotation, comparison, revision, decision, placement, issuance and verified cover. Actions open the governed Spaces where the work is done. Stage 9 (continuing relationship) is **not built** |
+| M5 Living Renewal Journey | **built** to the limits of existing capabilities | One workspace from attention through quotation, comparison, revision, decision, placement, issuance and verified cover. Since D-157 the governed actions run **in place** (§7). Stage 9 (continuing relationship) is **not built** |
 | M6 Ask ASAP directing the interface | **partial** | "Ask about this" opens the existing drawer scoped to the renewal's work item. Intent-to-surface refinement (group, filter, compose) is **not built** |
 | M7 Reactive composition & continuity | **built** | 20 s polling and refresh on focus; unchanged fingerprint → no re-render; blocks keyed by stable id and reconciled in place; Updated/New marks; per-person pin and collapse; deep links, refresh, Back/Forward |
 | M8 Insurance-native intelligence | **partial** | Time & cover, obligation, change/contradiction (revisions, including after instruction) are built for renewals. Communication-to-execution, handoff, portfolio consequence and decision memory are **not built** |
@@ -120,12 +120,12 @@ Living surface (`living/living.css`).
 | Scenario | Status | Where it is tested |
 |---|---|---|
 | A Find meaningful work | **built** | `shell.e2e.mjs` living-renewal-from-work: a Work row opens the Living workspace |
-| B Restore interrupted work | **partial** | Collapsed blocks survive a refresh (`living-collapse-persists`, `LivingSurface.test.tsx`). Restoring a selection inside the comparison is not built |
-| C Insurer response arrives | **partial** | Reconciles in place without remount (`LivingSurface.test.tsx`); not driven by a real inbound response in e2e |
+| B Restore interrupted work | **partial** | Collapsed blocks survive a refresh, now from the server (0080). Restoring a selection inside the comparison is not built yet |
+| C Insurer response arrives | **built** | `living-actions.e2e.mjs`: an answer recorded through the quotation workflow while the broker types; the surface reconciles in place (no remount), marks changes and keeps the unsent text |
 | D Quotation revision | **built** | Earlier/revised side by side and flagged after instruction (`living-surface.test.ts`, UI Lab "comparing" and "placing") |
 | E Missing evidence | **built** for renewals | Missing period, missing premium and missing renewed cover are stated, not filled (`living-renewal` e2e) |
 | F Natural-language refinement | **not built** | |
-| G Approval requirement | **built** (by delegation) | The surface marks what needs approval and opens the governed Space; it has no write path. An already-approved request is not marked as an approval |
+| G Approval requirement | **built** | The bundle is shown in full and approved in place through the existing endpoint with its frozen hash; a role that cannot approve is offered nothing and refused if it posts (connected) |
 | H Cross-tenant isolation | **built** | Connected test (404 for the other brokerage) and `living-never-leaks` in the browser |
 | I Role-specific view | **built** | Blocks needing a permission are removed before sending (unit); audit history only with `audit:view` (connected) |
 | J AI outage | **built** | Composition needs no model; the surface renders with `ai.available: false` |
@@ -134,6 +134,41 @@ Living surface (`living/living.css`).
 | M Mobile | **built** | 390 px e2e and UI Lab; the surface scrolls and never runs past the screen |
 | N Returning from history | **built** | The address is the surface (D-155); `/s/living?workItemId=` reloads to the same surface |
 | O Event burst | **partial** | An unchanged fingerprint is ignored and blocks never remount; not load-tested |
+
+## 7. Governed actions in the workspace (D-157)
+
+A block may carry a `command` action from a closed set. The browser maps each command to the
+endpoint that already owns it (`apps/web/src/asap/living/commands.ts`); the surface can name a
+command and its target, never a path. Each endpoint re-checks permission, frozen payloads and
+state, and audits — nothing new decides an outcome.
+
+| Command | Existing endpoint | Offered when |
+|---|---|---|
+| `workflow_approval.decide` (approve / return with reason) | `POST /workflow-approvals/:id/decide` with the frozen `bundleSha256` | the run waits for approval and the viewer may approve; the bundle is shown in full (`ApprovalBundle`, 0081) |
+| `quotation.record_delivery` | `POST /opportunities/:id/actions` `record_delivery` | an insurer request is approved and not delivered, and the viewer may edit the quotation |
+| `quotation.record_response` | `POST /opportunities/:id/actions` `record_response` | the request was delivered and no answer is on file; the source is required |
+| `run.follow_up_now`, `run.move_follow_up`, `run.escalate`, `run.pause`, `run.resume` | `POST /workflows/runs/:id/…` | the run's own intervention list says available, and the viewer holds `policy:edit` |
+| `placement.approve_request`, `placement.record_submission` | `POST /placements/:id/actions` | the placement's own permissions allow it; the request text is shown in full before approval |
+| `issuance.approve_request`, `issuance.record_submission` | `POST /placements/:id/issuance/actions` | the issuance's own permissions allow it |
+
+The validator rejects any command whose fixed payload or inputs differ from that command's (a
+tampered `action`, an extra field). Inputs are never pre-filled with chosen values. Submissions
+carry an idempotency key per intent. A result is the endpoint's own answer — done, already done, or
+refused with its reason — and a receipt at the top of the surface outlives a block that leaves.
+
+Tested: unit (composer and validator), web (command form: required inputs, owning path, refusal
+shown, no false success), connected on real Postgres (approve through the surface's command; a
+reader is offered nothing and refused if they post anyway; idempotent re-approval), and in a real
+browser (`living-actions.e2e.mjs`: approve, record delivery and escalate in place).
+
+## 8. Personal arrangement and unreadable sources (D-157)
+
+- Pinned and collapsed blocks, selections and "last seen" live in `surface_preferences` (0080),
+  scoped by RLS to brokerage, person and surface — never browser storage. Demo mode and the UI Lab
+  keep them for the visit only.
+- Every source read by `living/facts.ts` records a gap (`restricted` or `failed`) instead of
+  becoming null. The composer never presents a gap as an absent period, placement or cover, and
+  the surface names the gaps in a notice.
 
 ## 6. Known limitations
 

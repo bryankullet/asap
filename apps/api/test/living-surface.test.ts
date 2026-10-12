@@ -108,6 +108,64 @@ describe("sources that could not be read (D-157)", () => {
   });
 });
 
+describe("governed commands (D-157)", () => {
+  const approving = () => facts({ step: "approval", runState: "waiting_approval", opportunity: null });
+  it("shows what waits for approval in full, with approve and return commands carrying the frozen hash", () => {
+    const s = composeRenewalSurface(approving(), { now: NOW, aiAvailable: false });
+    const b = s.blocks.find((x) => x.component === "ApprovalBundle")!;
+    expect((b.props as { items: unknown[] }).items).toHaveLength(2);
+    const cmds = b.actions.filter((a) => a.kind === "command");
+    expect(cmds.map((c) => c.kind === "command" && c.payload["decision"])).toEqual(["approve", "reject"]);
+    expect(cmds.every((c) => c.kind === "command" && c.payload["bundleSha256"] === "a".repeat(64))).toBe(true);
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(true);
+  });
+  it("offers no approval command to a role that cannot approve, and says who can", () => {
+    const f = approving();
+    (f.run as unknown as { permissions: { canApprove: boolean } }).permissions.canApprove = false;
+    const b = composeRenewalSurface(f, { now: NOW, aiAvailable: false }).blocks.find((x) => x.component === "ApprovalBundle")!;
+    expect(b.actions).toEqual([]);
+    expect((b.props as { approverNote: string }).approverNote).toMatch(/cannot approve/);
+  });
+  it("offers run controls only where the run says they are available, and only to a role that may use them", () => {
+    const s = composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
+    const ob = s.blocks.find((x) => x.id === "obligations")!;
+    expect(ob.actions.map((a) => a.kind === "command" && a.command)).toEqual(["run.follow_up_now", "run.move_follow_up", "run.escalate", "run.pause"]);
+    const none = composeRenewalSurface(facts({ viewer: { canControlRun: false } }), { now: NOW, aiAvailable: false });
+    expect(none.blocks.find((x) => x.id === "obligations")!.actions).toEqual([]);
+  });
+  it("lets a person record how an approved placement request was sent, with evidence inputs", () => {
+    const s = composeRenewalSurface(facts({ opportunity: quotedOpp(), placement: placement("requested") }), { now: NOW, aiAvailable: false });
+    const pl = s.blocks.find((x) => x.id === "placement")!;
+    const rec = pl.actions.find((a) => a.kind === "command" && a.command === "placement.record_submission");
+    expect(rec && rec.kind === "command" && rec.inputs.map((i) => i.name)).toEqual(["method", "recipient", "sentAt", "evidenceNote"]);
+  });
+  it("lets a person record each insurer's answer on the comparison, once the request is delivered", () => {
+    const s = composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
+    const q = s.blocks.find((x) => x.component === "QuoteComparison")!;
+    const rec = q.actions.filter((a) => a.kind === "command");
+    expect(rec.map((a) => a.kind === "command" && a.label)).toEqual(["Record CIC's answer", "Record Jubilee's answer"]);
+    expect(rec.every((a) => a.kind === "command" && a.inputs.some((i) => i.name === "sourceNote" && i.required))).toBe(true);
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(true);
+  });
+  it("trusts the quotation over a run that has not caught up: no waiting on, or chasing, an insurer who answered", () => {
+    const f = facts({ step: "await_terms", opportunity: quotedOpp() });
+    expect(obligations(f).some((o) => o.party === "CIC" && o.kind === "outside")).toBe(false);
+    const ob = composeRenewalSurface(f, { now: NOW, aiAvailable: false }).blocks.find((x) => x.id === "obligations")!;
+    expect(ob.actions.some((a) => a.kind === "command" && a.command === "run.follow_up_now")).toBe(false);
+  });
+  it("rejects a surface whose command carries a field the command does not take, or a different action", () => {
+    const s = composeRenewalSurface(approving(), { now: NOW, aiAvailable: false });
+    const b = s.blocks.find((x) => x.component === "ApprovalBundle")!;
+    const c = b.actions[0]!;
+    if (c.kind === "command") c.payload["premiumAmount"] = "1";
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(false);
+    const t = composeRenewalSurface(facts({ opportunity: quotedOpp(), placement: placement("requested") }), { now: NOW, aiAvailable: false });
+    const rec = t.blocks.find((x) => x.id === "placement")!.actions.find((a) => a.kind === "command")!;
+    if (rec.kind === "command") rec.payload["action"] = "record_insurer_response";
+    expect(validateSurface({ surface: t, definitions, permissions: new Set() }).ok).toBe(false);
+  });
+});
+
 describe("validation", () => {
   const good = () => composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
   it("rejects an unregistered component", () => {

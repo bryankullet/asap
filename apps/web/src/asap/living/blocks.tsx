@@ -1,4 +1,5 @@
 import type {
+  approvalBundleProps,
   LivingAction,
   LivingBlock,
   LivingComponent,
@@ -15,9 +16,10 @@ import type {
   renewalJourneyProps,
   timelineProps,
 } from "@asap/schema";
-import type { ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import type { z } from "zod";
 import type { Ref } from "../shell/routes.js";
+import { missingInputs, runCommand, type CommandAction } from "./commands.js";
 
 /**
  * The browser half of the Living registry (D-156). One React component per registered block, typed
@@ -28,7 +30,8 @@ import type { Ref } from "../shell/routes.js";
  * components format; they do not decide. Status colours keep their fixed meanings.
  */
 
-export type BlockEnv = { open: (ref: Ref) => void; ask: (text: string) => void };
+/** `refresh` re-reads the surface; a receipt is said at the top, so it outlives a block that leaves. */
+export type BlockEnv = { open: (ref: Ref) => void; ask: (text: string) => void; refresh: (receipt?: string) => void };
 type P<S extends z.ZodTypeAny> = { props: z.infer<S>; block: LivingBlock; env: BlockEnv };
 
 const day = (iso: string | null | undefined) => {
@@ -258,6 +261,25 @@ function Timeline({ props }: P<typeof timelineProps>) {
   );
 }
 
+function ApprovalBundle({ props }: P<typeof approvalBundleProps>) {
+  return (
+    <div className="lv-approval">
+      <div className="lv-approval-head"><strong>{props.title}</strong><span className="lv-chip lv-gold">Waiting for approval</span></div>
+      <p className="lv-why">{props.why}</p>
+      <ol className="lv-approval-items">
+        {props.items.map((it, i) => (
+          <li key={i} className="lv-approval-item">
+            <div className="lv-approval-meta"><b>{it.heading}</b>{it.to ? <span>To {it.to}</span> : null}</div>
+            <div className="lv-approval-subject">{it.subject}</div>
+            <pre className="lv-approval-body" tabIndex={0} aria-label={`${it.heading}: full text`}>{it.body}</pre>
+          </li>
+        ))}
+      </ol>
+      {props.approverNote ? <p className="lv-note">{props.approverNote}</p> : null}
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -272,17 +294,82 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   PlacementProgress,
   EvidenceInspector,
   Timeline,
+  ApprovalBundle,
 };
 
 export function BlockActions({ actions, env }: { actions: LivingAction[]; env: BlockEnv }) {
+  const [openCommand, setOpenCommand] = useState<number | null>(null);
   if (!actions.length) return null;
+  const active = openCommand !== null ? actions[openCommand] : null;
   return (
-    <div className="lv-actions">
-      {actions.map((a, i) => (
-        <button key={i} type="button" className={a.kind === "open" && a.primary ? "lv-btn lv-btn-primary" : "lv-btn"} onClick={() => (a.kind === "open" ? env.open(a.ref as Ref) : env.ask(a.text))}>
-          {a.label}
-        </button>
+    <>
+      <div className="lv-actions">
+        {actions.map((a, i) =>
+          a.kind === "command" ? (
+            <button key={i} type="button" className={a.tone === "primary" ? "lv-btn lv-btn-primary" : a.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn"} aria-expanded={openCommand === i} onClick={() => setOpenCommand(openCommand === i ? null : i)}>
+              {a.label}
+            </button>
+          ) : (
+            <button key={i} type="button" className={a.kind === "open" && a.primary ? "lv-btn lv-btn-primary" : "lv-btn"} onClick={() => (a.kind === "open" ? env.open(a.ref as Ref) : env.ask(a.text))}>
+              {a.label}
+            </button>
+          ),
+        )}
+      </div>
+      {active && active.kind === "command" ? <CommandForm key={openCommand} action={active} env={env} onClose={() => setOpenCommand(null)} /> : null}
+    </>
+  );
+}
+
+/**
+ * One governed command, in place: what it needs, what it will do, then the owning endpoint's own
+ * answer — done, already done, or refused with its reason. Nothing is shown as done before the
+ * server says so.
+ */
+function CommandForm({ action, env, onClose }: { action: CommandAction; env: BlockEnv; onClose: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [missing, setMissing] = useState<string[]>([]);
+  // One intent, one key: a double submit or a retry after a dropped connection records once.
+  const key = useRef(typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k-${Date.now()}-${Math.random()}`);
+  const id = useId();
+  const submit = async () => {
+    const m = missingInputs(action, values);
+    setMissing(m);
+    if (m.length) return;
+    setBusy(true);
+    const r = await runCommand(action, values, key.current);
+    setBusy(false);
+    setResult(r);
+    if (r.ok) env.refresh(`${action.label} — ${r.message === "Done." ? "done" : r.message}`);
+  };
+  return (
+    <div className="lv-command" role="group" aria-labelledby={`${id}-t`}>
+      <strong id={`${id}-t`}>{action.confirm?.title ?? action.label}</strong>
+      {action.confirm ? <p className="lv-why">{action.confirm.body}</p> : null}
+      {action.inputs.map((i) => (
+        <label key={i.name} className="lv-field">
+          <span>{i.label}</span>
+          {i.kind === "select" ? (
+            <select value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required}>
+              <option value="">Choose…</option>
+              {i.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : i.kind === "textarea" ? (
+            <textarea rows={3} value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required} />
+          ) : (
+            <input type={i.kind === "datetime" ? "datetime-local" : i.kind === "date" ? "date" : "text"} value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required} />
+          )}
+          {i.hint ? <small>{i.hint}</small> : null}
+        </label>
       ))}
+      {missing.length ? <p className="lv-command-error" role="alert">Still needed: {missing.join(", ")}.</p> : null}
+      {result ? <p className={result.ok ? "lv-command-ok" : "lv-command-error"} role="status">{result.message}</p> : null}
+      <div className="lv-actions">
+        {!result?.ok ? <button type="button" className={action.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn lv-btn-primary"} onClick={() => void submit()} disabled={busy}>{busy ? "Working…" : action.label}</button> : null}
+        <button type="button" className="lv-btn" onClick={onClose}>{result?.ok ? "Close" : "Cancel"}</button>
+      </div>
     </div>
   );
 }

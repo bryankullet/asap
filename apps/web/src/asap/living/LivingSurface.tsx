@@ -37,6 +37,7 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
   const [error, setError] = useState<{ status: number; code: string } | null>(null);
   const [marks, setMarks] = useState<Marks>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
   const [surfaceKey, setSurfaceKey] = useState<string | null>(null);
   const { prefs, update } = useSurfacePrefs(prefsStore, surfaceKey);
   const last = useRef<Surface | null>(null);
@@ -126,7 +127,7 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
     );
   }
 
-  const env: BlockEnv = { open: onOpen, ask: onAsk };
+  const env: BlockEnv = { open: onOpen, ask: onAsk, refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); } };
   const toggle = (key: PrefList, id: string) =>
     update((p) => {
       const set = new Set(p[key]);
@@ -150,6 +151,12 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
           {steps ? <button type="button" className="lv-btn lv-btn-quiet" onClick={steps}>Renewal steps</button> : null}
         </span>
       </div>
+      {receipt ? (
+        <div className="lv-receipt" role="status">
+          <span aria-hidden>✓</span><span>{receipt}</span>
+          <button type="button" className="lv-btn lv-btn-quiet" onClick={() => setReceipt(null)}>Dismiss</button>
+        </div>
+      ) : null}
       {surface.unavailable.length ? (
         <div className="lv-unavailable" role="note">
           <strong>Part of this renewal could not be read for you.</strong>

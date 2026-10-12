@@ -28,10 +28,57 @@ export const livingRefSchema = z
   .refine((r) => typeof r["ws"] === "string", "A reference names its workspace.");
 export type LivingRef = z.infer<typeof livingRefSchema>;
 
-/** What a block may offer. Opening the governed place is how an action happens; nothing here writes. */
+/**
+ * A governed command a block may offer (D-157): one of a closed set, each executed by the existing
+ * endpoint that already owns it — the workflow approval, the run controls, the placement and the
+ * issuance actions — under that endpoint's own permission checks, frozen payloads and audit. The
+ * surface names the command and its target; the browser maps the name to the endpoint from a fixed
+ * table. Nothing here can name an endpoint, widen a payload or skip a confirmation.
+ */
+export const LivingCommand = z.enum([
+  "workflow_approval.decide",
+  "run.follow_up_now",
+  "run.move_follow_up",
+  "run.pause",
+  "run.resume",
+  "run.escalate",
+  "quotation.record_delivery",
+  "quotation.record_response",
+  "placement.approve_request",
+  "placement.record_submission",
+  "issuance.approve_request",
+  "issuance.record_submission",
+]);
+export type LivingCommand = z.infer<typeof LivingCommand>;
+/** What a person fills in before a command runs. Never pre-filled with a value the model chose. */
+export const livingCommandInputSchema = z.strictObject({
+  name: z.string().regex(/^[a-zA-Z]{1,40}$/),
+  label,
+  kind: z.enum(["text", "textarea", "date", "datetime", "select"]),
+  required: z.boolean(),
+  options: z.array(z.strictObject({ value: z.string().max(80), label })).max(12).default([]),
+  hint: z.string().max(300).nullable().default(null),
+});
+export type LivingCommandInput = z.infer<typeof livingCommandInputSchema>;
+const commandScalar = z.union([z.string().max(300), z.boolean(), z.null()]);
+
+/** What a block may offer: open a governed place, ask a question, or run a governed command. */
 export const livingActionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("open"), label, ref: livingRefSchema, primary: z.boolean().default(false) }),
   z.strictObject({ kind: z.literal("ask"), label, text: line }),
+  z.strictObject({
+    kind: z.literal("command"),
+    label,
+    command: LivingCommand,
+    /** The record the endpoint acts on: an approval, a run or a placement. */
+    target: uuidSchema,
+    /** Fixed fields the server already knows (a frozen bundle's hash, a request id). */
+    payload: z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9]{0,39}$/), commandScalar).default({}),
+    inputs: z.array(livingCommandInputSchema).max(6).default([]),
+    /** Said before it runs, when the command is consequential. */
+    confirm: z.strictObject({ title: label, body: line }).nullable().default(null),
+    tone: z.enum(["primary", "default", "danger"]).default("default"),
+  }),
 ]);
 export type LivingAction = z.infer<typeof livingActionSchema>;
 
@@ -176,6 +223,19 @@ export const evidenceInspectorProps = z.strictObject({
   items: z.array(livingEvidenceSchema).max(20),
 });
 
+/** Exactly what will leave the brokerage, shown in full before anyone approves it (frozen payload). */
+export const approvalBundleProps = z.strictObject({
+  title: label,
+  /** Whose approval it is and why it is needed, from the record. */
+  why: line,
+  items: z
+    .array(z.strictObject({ heading: label, to: z.string().max(300).nullable(), subject: z.string().max(300), body: z.string().max(20000) }))
+    .min(1)
+    .max(10),
+  /** When the viewer may not approve: who can. */
+  approverNote: z.string().max(300).nullable(),
+});
+
 export const timelineProps = z.strictObject({
   events: z.array(z.strictObject({ at: z.string(), text: line, actor: z.string().max(200).nullable() })).max(15),
 });
@@ -193,6 +253,7 @@ export const LIVING_BLOCK_PROPS = {
   PlacementProgress: placementProgressProps,
   EvidenceInspector: evidenceInspectorProps,
   Timeline: timelineProps,
+  ApprovalBundle: approvalBundleProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
 export const LivingComponentId = z.enum(Object.keys(LIVING_BLOCK_PROPS) as [LivingComponent, ...LivingComponent[]]);
@@ -251,6 +312,7 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   PlacementProgress: { version: 1, name: "Placement progress", purpose: "Instruction, request, insurer confirmation and issuance, each from its record.", requiresEvidence: false },
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
+  ApprovalBundle: { version: 1, name: "Approval bundle", purpose: "Exactly what will leave the brokerage, in full, with the governed approve and return commands.", requiresEvidence: false },
 };
 
 /* ---------------------------------------------------------------------------------------------- */

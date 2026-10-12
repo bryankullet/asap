@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "dccca086029cca4f",
+   "fingerprint": "49e7d6a4ba491990",
    "blocks": [
     {
      "id": "header",
@@ -139,7 +139,7 @@
       "items": [
        {
         "id": "run-approval",
-        "title": "Approve the renewal bundle",
+        "title": "Renewal pack and letters for Acme Logistics",
         "why": "Nothing leaves the brokerage until a person approves its exact content.",
         "responsible": "Wanjiru",
         "deadline": "2026-10-31",
@@ -151,18 +151,76 @@
       ]
      },
      "evidence": [],
+     "actions": [],
+     "hash": "17e7bb41b10d4701"
+    },
+    {
+     "id": "approval-run",
+     "component": "ApprovalBundle",
+     "version": 1,
+     "role": "main",
+     "title": "For your approval",
+     "props": {
+      "title": "Renewal pack and letters for Acme Logistics",
+      "why": "Nothing leaves the brokerage until a person approves this exact content. Approving sends it; returning sends nothing.",
+      "items": [
+       {
+        "heading": "Letter to Acme Logistics",
+        "to": "wanjiru@acme.test",
+        "subject": "Your motor fleet renewal",
+        "body": "Dear Wanjiru,\n\nYour motor fleet cover with CIC ends on 31 October 2026. We are asking insurers for renewal terms and will come back to you with them.\n\nKind regards"
+       },
+       {
+        "heading": "Terms request to Jubilee",
+        "to": "underwriting@jubilee.test",
+        "subject": "Renewal terms — Acme Logistics motor fleet",
+        "body": "Please provide renewal terms for the attached schedule, effective 1 November 2026."
+       }
+      ],
+      "approverNote": null
+     },
+     "evidence": [],
      "actions": [
       {
-       "kind": "open",
-       "label": "Review the bundle",
-       "ref": {
-        "ws": "renewal",
-        "runId": "44444444-4444-4444-8444-444444444444"
+       "kind": "command",
+       "label": "Approve and send",
+       "command": "workflow_approval.decide",
+       "target": "88888888-8888-4888-8888-888888888888",
+       "payload": {
+        "decision": "approve",
+        "bundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
        },
-       "primary": true
+       "inputs": [],
+       "confirm": {
+        "title": "Approve and send?",
+        "body": "2 messages will leave the brokerage exactly as shown."
+       },
+       "tone": "primary"
+      },
+      {
+       "kind": "command",
+       "label": "Return with a reason",
+       "command": "workflow_approval.decide",
+       "target": "88888888-8888-4888-8888-888888888888",
+       "payload": {
+        "decision": "reject",
+        "bundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "inputs": [
+        {
+         "name": "note",
+         "label": "What needs to change",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
       }
      ],
-     "hash": "a32861ac0e278bd8"
+     "hash": "19c788e4f6b52f67"
     },
     {
      "id": "consequences",
@@ -200,8 +258,66 @@
       ]
      },
      "evidence": [],
-     "actions": [],
-     "hash": "81973b4060fc2a9c"
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "9a0ce8ca9b9bc660"
     },
     {
      "id": "cover",
@@ -248,7 +364,7 @@
     "label": "Insurer terms"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "35f64debfde0de75",
+   "fingerprint": "9162a37cb6f06404",
    "blocks": [
     {
      "id": "header",
@@ -404,6 +520,158 @@
      ],
      "actions": [
       {
+       "kind": "command",
+       "label": "Record CIC's answer",
+       "command": "quotation.record_response",
+       "target": "55555555-5555-4555-8555-555555555555",
+       "payload": {
+        "action": "record_response",
+        "opportunityInsurerId": "00000003-0000-4000-8000-000000000003"
+       },
+       "inputs": [
+        {
+         "name": "outcome",
+         "label": "Their answer",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "quoted",
+           "label": "Quoted"
+          },
+          {
+           "value": "declined",
+           "label": "Declined"
+          },
+          {
+           "value": "no_response",
+           "label": "Will not respond"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "premiumAmount",
+         "label": "Premium (if quoted)",
+         "kind": "text",
+         "required": false,
+         "options": [],
+         "hint": "As written by the insurer, e.g. 2510000.00"
+        },
+        {
+         "name": "premiumCurrency",
+         "label": "Currency",
+         "kind": "select",
+         "required": false,
+         "options": [
+          {
+           "value": "KES",
+           "label": "KES"
+          },
+          {
+           "value": "USD",
+           "label": "USD"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "validUntil",
+         "label": "Valid until",
+         "kind": "date",
+         "required": false,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "sourceNote",
+         "label": "Where the answer came from",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "e.g. Jubilee's email of 12 Oct from underwriting."
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
+       "kind": "command",
+       "label": "Record Jubilee's answer",
+       "command": "quotation.record_response",
+       "target": "55555555-5555-4555-8555-555555555555",
+       "payload": {
+        "action": "record_response",
+        "opportunityInsurerId": "00000007-0000-4000-8000-000000000007"
+       },
+       "inputs": [
+        {
+         "name": "outcome",
+         "label": "Their answer",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "quoted",
+           "label": "Quoted"
+          },
+          {
+           "value": "declined",
+           "label": "Declined"
+          },
+          {
+           "value": "no_response",
+           "label": "Will not respond"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "premiumAmount",
+         "label": "Premium (if quoted)",
+         "kind": "text",
+         "required": false,
+         "options": [],
+         "hint": "As written by the insurer, e.g. 2510000.00"
+        },
+        {
+         "name": "premiumCurrency",
+         "label": "Currency",
+         "kind": "select",
+         "required": false,
+         "options": [
+          {
+           "value": "KES",
+           "label": "KES"
+          },
+          {
+           "value": "USD",
+           "label": "USD"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "validUntil",
+         "label": "Valid until",
+         "kind": "date",
+         "required": false,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "sourceNote",
+         "label": "Where the answer came from",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "e.g. Jubilee's email of 12 Oct from underwriting."
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
        "kind": "open",
        "label": "Open the quotation",
        "ref": {
@@ -413,7 +681,7 @@
        "primary": false
       }
      ],
-     "hash": "e74d32362949dce2"
+     "hash": "4d3b15030b1a9264"
     },
     {
      "id": "consequences",
@@ -451,15 +719,86 @@
        {
         "party": "Jubilee",
         "what": "Terms for the renewal",
-        "since": "2026-09-20T08:00:00Z",
+        "since": "2026-09-25T08:00:00Z",
         "due": null,
         "kind": "outside"
        }
       ]
      },
      "evidence": [],
-     "actions": [],
-     "hash": "b65f9ec842420092"
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Follow up now",
+       "command": "run.follow_up_now",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [],
+       "confirm": {
+        "title": "Follow up now?",
+        "body": "ASAP raises the follow-up to the insurer today, as the approved request allows."
+       },
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "1729b470db164185"
     },
     {
      "id": "cover",
@@ -506,7 +845,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "f82c0cb4d5530b90",
+   "fingerprint": "3a93bb496da3e2f6",
    "blocks": [
     {
      "id": "header",
@@ -772,13 +1111,6 @@
      "props": {
       "items": [
        {
-        "party": "CIC",
-        "what": "Awaiting insurer terms",
-        "since": "2026-10-01",
-        "due": "2026-10-14",
-        "kind": "outside"
-       },
-       {
         "party": "ASAP",
         "what": "Awaiting insurer terms",
         "since": null,
@@ -788,8 +1120,66 @@
       ]
      },
      "evidence": [],
-     "actions": [],
-     "hash": "6e130ffd3932a7e9"
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "2808815d575373b1"
     },
     {
      "id": "cover",
@@ -874,7 +1264,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "4773d60212a2a664",
+   "fingerprint": "890afeb8732e26fc",
    "blocks": [
     {
      "id": "header",
@@ -1100,16 +1490,79 @@
      "evidence": [],
      "actions": [
       {
+       "kind": "command",
+       "label": "Record how the request was sent",
+       "command": "placement.record_submission",
+       "target": "66666666-6666-4666-8666-666666666666",
+       "payload": {
+        "action": "record_submission",
+        "placementRequestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+       },
+       "inputs": [
+        {
+         "name": "method",
+         "label": "How it was sent",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "recorded_manual_email",
+           "label": "Sent by email from our own mailbox"
+          },
+          {
+           "value": "recorded_portal",
+           "label": "Submitted on the insurer's portal"
+          },
+          {
+           "value": "recorded_post",
+           "label": "Sent by post or courier"
+          },
+          {
+           "value": "recorded_in_person",
+           "label": "Handed over in person"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "recipient",
+         "label": "Who at Jubilee received it",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "An address, portal reference or name — what proves where it went."
+        },
+        {
+         "name": "sentAt",
+         "label": "When it was sent",
+         "kind": "datetime",
+         "required": true,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "evidenceNote",
+         "label": "Note (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
        "kind": "open",
        "label": "Open the quotation",
        "ref": {
         "ws": "quote",
         "opportunityId": "55555555-5555-4555-8555-555555555555"
        },
-       "primary": true
+       "primary": false
       }
      ],
-     "hash": "b835a35fd72c8ba8"
+     "hash": "a1aefcd08c7d9501"
     },
     {
      "id": "consequences",
@@ -1213,6 +1666,364 @@
   }
  },
  {
+  "key": "placement_approval",
+  "label": "Placement request for approval",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "placing",
+    "label": "Placement"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "d0703b39b7202ef0",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "ASAP",
+        "value": "Waiting on insurers"
+       }
+      ],
+      "status": {
+       "label": "Placement",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "09f20907f613089d"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "now"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       }
+      ],
+      "summary": "Send the approved request. Requested from Jubilee — not confirmed."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "46e6bcf2d8e0ea10"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "placement-next",
+        "title": "Send the approved request",
+        "why": "Requested from Jubilee — not confirmed.",
+        "responsible": null,
+        "deadline": "2026-11-01",
+        "actionableNow": true,
+        "requiresApproval": false,
+        "blockedBy": [],
+        "tone": "green"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": true
+      }
+     ],
+     "hash": "69de29a15909212c"
+    },
+    {
+     "id": "approval-placement",
+     "component": "ApprovalBundle",
+     "version": 1,
+     "role": "main",
+     "title": "For your approval",
+     "props": {
+      "title": "Placement request to Jubilee",
+      "why": "The request to bind cover leaves only once a person approves this exact version.",
+      "items": [
+       {
+        "heading": "Placement request · version 1",
+        "to": null,
+        "subject": "Placement instruction — Acme Logistics motor fleet",
+        "body": "Please bind cover on the terms of your quotation revision 2, effective 1 November 2026."
+       }
+      ],
+      "approverNote": null
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Approve the request",
+       "command": "placement.approve_request",
+       "target": "66666666-6666-4666-8666-666666666666",
+       "payload": {
+        "action": "approve_request",
+        "placementRequestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+       },
+       "inputs": [],
+       "confirm": {
+        "title": "Approve the placement request?",
+        "body": "This version may then be sent to Jubilee. Approving does not send it and does not create cover."
+       },
+       "tone": "primary"
+      }
+     ],
+     "hash": "393154e49f1f274a"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "now",
+        "note": null
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "next",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "next",
+        "note": null
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "next",
+        "note": null
+       }
+      ],
+      "coverLine": "Requested from Jubilee — not confirmed.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "b3331b8a546219c8"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       },
+       {
+        "certainty": "confirmed",
+        "text": "Placement is requested, not confirmed: cover counts only from the insurer's written confirmation."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "5de5bb886fa3bab9"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "requested",
+       "line": "Requested from Jubilee — not confirmed."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "dc9a540b2955da94"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c34ab9e1f58d9ff0"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
   "key": "issuing",
   "label": "Issuance, differences to resolve",
   "surface": {
@@ -1229,7 +2040,7 @@
     "label": "Issuance"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "b9a58fa6e605e8be",
+   "fingerprint": "2d74837f1e830a9b",
    "blocks": [
     {
      "id": "header",
@@ -1428,10 +2239,10 @@
         "ws": "quote",
         "opportunityId": "55555555-5555-4555-8555-555555555555"
        },
-       "primary": true
+       "primary": false
       }
      ],
-     "hash": "a9bcb5d3cb9d6767"
+     "hash": "661841dc3c14dfb5"
     },
     {
      "id": "consequences",
@@ -1570,7 +2381,7 @@
     "label": "Verified"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "f4f07d22f4547870",
+   "fingerprint": "ea32c1039954e2f0",
    "blocks": [
     {
      "id": "header",
@@ -1734,10 +2545,10 @@
         "ws": "quote",
         "opportunityId": "55555555-5555-4555-8555-555555555555"
        },
-       "primary": true
+       "primary": false
       }
      ],
-     "hash": "17ef6eabc0a04f86"
+     "hash": "509fcb868c8124e6"
     },
     {
      "id": "obligations",
@@ -1858,7 +2669,7 @@
     "label": "Stopped"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "9c7d6b44db7ec84d",
+   "fingerprint": "ddc8fd75d4bd907f",
    "blocks": [
     {
      "id": "header",
@@ -2042,8 +2853,79 @@
       ]
      },
      "evidence": [],
-     "actions": [],
-     "hash": "81973b4060fc2a9c"
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Follow up now",
+       "command": "run.follow_up_now",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [],
+       "confirm": {
+        "title": "Follow up now?",
+        "body": "ASAP raises the follow-up to the insurer today, as the approved request allows."
+       },
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "44dd694e124b9a34"
     },
     {
      "id": "cover",

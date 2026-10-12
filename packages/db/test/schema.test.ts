@@ -183,6 +183,7 @@ describe("Drizzle schema conventions", () => {
       "run_events",
       "runs",
       "space_pins",
+      "surface_preferences",
       "teams",
       "user_onboarding",
       "user_team_memberships",

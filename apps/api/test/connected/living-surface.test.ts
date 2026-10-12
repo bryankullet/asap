@@ -114,3 +114,44 @@ describe("surface preferences (0080, D-157)", () => {
   });
 });
 
+describe("governed commands from the surface (D-157)", () => {
+  type Cmd = { kind: "command"; command: string; target: string; payload: Record<string, unknown>; label: string };
+  const commandsOf = (surface: { blocks: { component: string; actions: { kind: string }[] }[] }, component: string) =>
+    (surface.blocks.find((b) => b.component === component)?.actions ?? []).filter((a): a is Cmd => a.kind === "command");
+
+  it("shows the waiting bundle in full, with approve and return commands, to a person who may approve", async () => {
+    const s = livingSurfaceSchema.parse((await call(AMINA, "GET", `/living/${workItemId}`)).body);
+    const bundle = s.blocks.find((b) => b.component === "ApprovalBundle");
+    expect(bundle, "the renewal waiting for approval shows its bundle").toBeTruthy();
+    expect((bundle!.props as { items: { body: string }[] }).items.every((i) => i.body.length > 0)).toBe(true);
+    expect(commandsOf(s, "ApprovalBundle").map((c) => c.payload["decision"])).toEqual(["approve", "reject"]);
+  });
+
+  it("offers a reader no command, and the endpoint refuses one sent anyway", async () => {
+    const amina = livingSurfaceSchema.parse((await call(AMINA, "GET", `/living/${workItemId}`)).body);
+    const approve = commandsOf(amina, "ApprovalBundle")[0]!;
+    const reader = livingSurfaceSchema.parse((await call(READER, "GET", `/living/${workItemId}`)).body);
+    expect(commandsOf(reader, "ApprovalBundle")).toEqual([]);
+    const forced = await call(READER, "POST", `/workflow-approvals/${approve.target}/decide`, approve.payload);
+    expect(forced.status).toBe(403);
+    const [run] = await sql<{ state: string }[]>`select state from workflow_runs where work_item_id = ${workItemId}`;
+    expect(run!.state).toBe("waiting_approval");
+  });
+
+  it("approving through the surface's command uses the existing endpoint, and the surface moves on", async () => {
+    const before = livingSurfaceSchema.parse((await call(AMINA, "GET", `/living/${workItemId}`)).body);
+    const approve = commandsOf(before, "ApprovalBundle")[0]!;
+    const r = await call(AMINA, "POST", `/workflow-approvals/${approve.target}/decide`, approve.payload);
+    expect(r.status).toBe(200);
+    expect(r.body.outcome).toBe("done");
+    const [a] = await sql<{ state: string }[]>`select state from workflow_approvals where id = ${approve.target}`;
+    expect(a!.state).toBe("approved");
+    const after = livingSurfaceSchema.parse((await call(AMINA, "GET", `/living/${workItemId}`)).body);
+    expect(after.blocks.some((b) => b.component === "ApprovalBundle")).toBe(false);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+    // The same command again changes nothing: the frozen approval is already decided.
+    const again = await call(AMINA, "POST", `/workflow-approvals/${approve.target}/decide`, approve.payload);
+    expect(["already", "blocked"]).toContain(again.body.outcome);
+  });
+});
+

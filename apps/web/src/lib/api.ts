@@ -252,6 +252,13 @@ export const api = {
   /** One person's arrangement of one surface in the active brokerage (0080, D-157). */
   surfacePreferences: (surfaceKey: string) => request("GET", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema),
   saveSurfacePreferences: (surfaceKey: string, prefs: SurfacePreferences) => request("PUT", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema, prefs),
+  /**
+   * Runs one governed command from a Living surface against the endpoint that owns it (D-157). The
+   * path comes from the fixed table in asap/living/commands.ts, never from the surface. A refusal
+   * the endpoint explains (403/409/422 with an outcome) is returned, not thrown.
+   */
+  livingCommand: (path: string, body: unknown) =>
+    request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked"]), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
   livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),

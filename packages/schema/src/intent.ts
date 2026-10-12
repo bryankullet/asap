@@ -113,6 +113,7 @@ const LIVING = [
   "CoverageEffectiveState",
   "PlacementProgress",
   "EvidenceInspector",
+  "ApprovalBundle",
 ] as const;
 /** Screen Map v3 surfaces: X08, K01–K03, G01–G02, T01–T02, N01–N04. */
 const V3_SURFACES = [

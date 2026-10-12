@@ -34,6 +34,8 @@ export type RenewalLivingFacts = {
   issuance: IssuanceResponse | null;
   recent: AuditEvent[];
   unavailable: Unavailable[];
+  /** What the viewer's role allows on the run's controls (the endpoints check again). */
+  viewer: { canControlRun: boolean };
 };
 
 /** Reads one part; a failure is recorded as a gap instead of becoming an absent fact. */
@@ -139,5 +141,6 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     issuance,
     recent,
     unavailable: gaps,
+    viewer: { canControlRun: hasPermission(env.ctx, "policy", "edit") },
   };
 }

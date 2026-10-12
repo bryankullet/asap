@@ -1,5 +1,5 @@
 /**
- * Migration 0079 registers the Living blocks (D-156). Like 0031's suite, this reads what shipped
+ * Migrations 0079 and 0081 register the Living blocks (D-156). Like 0031's suite, this reads what shipped
  * and asserts it equals the Zod source in packages/schema/src/living.ts, so the two copies of one
  * contract cannot drift without a test failing.
  */
@@ -8,9 +8,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const sql = readFileSync(fileURLToPath(new URL("../../../supabase/migrations/20261022100000_0079_living_blocks.sql", import.meta.url)), "utf8");
+import { readdirSync } from "node:fs";
+const DIR = fileURLToPath(new URL("../../../supabase/migrations/", import.meta.url));
+// Every migration that registers Living blocks (0079, 0081, …), read as shipped.
+const sql = readdirSync(DIR).filter((f) => /_living_/.test(f)).sort().map((f) => readFileSync(DIR + f, "utf8")).join("\n");
 const re = /\('([A-Za-z]+)', (\d+), '((?:[^']|'')*)', '((?:[^']|'')*)',\s*array\[([^\]]*)\]::text\[\],\s*array\[([^\]]*)\]::text\[\],\s*(true|false), (true|false),\s*'((?:[^']|'')*)'::jsonb\)/g;
-const rows = [...sql.slice(sql.indexOf("values\n")).matchAll(re)].map((m) => ({
+const rows = [...sql.matchAll(re)].map((m) => ({
   id: m[1]! as LivingComponent,
   version: Number(m[2]),
   name: m[3]!.replace(/''/g, "'"),
