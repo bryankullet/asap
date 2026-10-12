@@ -199,12 +199,12 @@ How commands behave:
 - **Home (D-159):** semantic events since the start of this visit, from colleagues, insurers and ASAP. The viewer's own actions are left out and no figures are shown.
 - **Exploration (D-160):** up to three alternatives, from records, labelled hypothetical, kept in the address. It disappears once the client has instructed.
 
-## 9. Verification (full gate on the final acceptance code, D-169)
+## 9. Verification (full gate on the final stabilization code, D-170)
 
 | Check | Result |
 |---|---|
 | Typecheck, lint, secret scan | clean |
-| Unit | api 937 (3 skipped: live-model runs) · web 191 · schema 118 · workers 25 (10 skipped) · db 3 |
+| Unit | api 937 (3 skipped: live-model runs) · web 194 · schema 118 · workers 25 (10 skipped) · db 3 |
 | Build | 6/6 packages; only `VITE_PUBLIC_*` reaches the browser |
 | Evaluations, offline | 47 passed (3 skipped: live-model runs). Rules read 100% of their set; every model-path case is proved to bypass the rules |
 | Evaluations, live model | **not run** — no provider key in the development environment |
