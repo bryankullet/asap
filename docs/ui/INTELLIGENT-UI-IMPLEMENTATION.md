@@ -2,14 +2,34 @@
 
 Tracks the "Intelligent UI Engine & Living Brokerage Interface" brief (12 Oct 2026) against the
 code. Each item is marked **built**, **partial** or **not built**. Nothing is marked built unless
-it is in the code and covered by a test that was run. Decisions: D-156 to D-163.
+it is in the code and covered by a test that was run. Decisions: D-156 to D-169.
 
 Branch: `claude/living-interface`. Base: `main` at the adaptive shell (D-155, PR #17). Not merged,
-not deployed. Hosted migrations 0079–0084 are not applied.
+not deployed. **The hosted database is at 0078; migrations 0079–0091 are not applied** (release
+audit and plan: `docs/release/RELEASE-0079-0091.md`).
 
-**Overall status: the Intelligent UI is not complete.** The renewal journey, the portfolio, claims
-and policy changes run on the Living architecture with governed actions, plain-language refinement,
-exploration, continuity and hardening. Section 4 lists what remains.
+## Status at final acceptance (D-169)
+
+**Verified** (by tests that were run; section 9 has the numbers):
+- Every milestone in section 4 is built, except reconciliation workspaces (no records to compose from).
+- Migrations 0079–0091 apply in order onto a populated 0078 database without changing any existing
+  row; RLS, isolation, registry versions and the 0085 authorization hold on the upgraded data; the
+  0078-era API runs on the 0091 schema; the rollback is rehearsed and restores schema and data exactly.
+- The authenticated shell and every Living surface pass axe-core (no serious or critical findings),
+  keyboard focus and reduced-motion checks at 1440 and 390 px.
+- The model-path evaluation set exists and its routing is proved offline (every model case bypasses
+  the rules).
+
+**Not verified — needs a configured AI gateway:** the model-assisted reading itself. No provider key
+is available in the development environment, so `pnpm eval:workspace:live` has **not** been run and
+the model path has **not** passed. The deterministic rules (100% on their evaluation set) work
+without it; with no gateway, unmatched requests are told the workspace cannot bring that forward.
+
+**Known limitations:** section 6.
+
+**Deployment requires:** owner approval; the sequence in `docs/release/RELEASE-0079-0091.md` §3
+(database first, then API, then web); for model-assisted reading, `AI_DEFAULT_PROVIDER`, `AI_MODEL`
+and the provider key on the API, and a live evaluation run before enabling it.
 
 ---
 
@@ -146,6 +166,7 @@ every control, and reduced motion is honoured.
 - Commission and premium reconciliation workspaces are not built: ASAP records no commission statements, receipts or payments to compose from (D-167).
 - The model-assisted workspace reading is evaluated offline by its rules; its live evaluation (`WORKSPACE_EVAL_LIVE=1`) needs a configured gateway and has not been run here.
 - Interface "learning" is limited to outcomes measured from records (response patterns) and each person's own arrangement; nothing re-orders itself from behaviour.
+- Seen in the visual review (D-169), not changed: on a phone the Work view tabs wrap inside a pill-shaped container; a "What moves this forward" status dot can sit alone above a wrapped heading; the nine-stage strip scrolls sideways with no visible cue; the header keeps "Opening…" when a surface is refused; the header's ASAP status lags recorded answers until a worker advances the run.
 - Visual baselines were generated in this environment. A different font rasteriser will need `UPDATE_BASELINES=1` after review.
 
 ## 7. Governed actions in the workspace (D-157, D-161)

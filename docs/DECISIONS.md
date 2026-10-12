@@ -3107,3 +3107,24 @@ absent. **Not built:** behavioural interface learning (re-ordering by what peopl
   (now exact database counts, "at least" where only part was read) and period queries filtered
   through an embedded policy join, seconds slow under RLS (now by policy id — also the renewal's
   "This cover before").
+
+## D-169 — Final acceptance: release audit, model-path evaluation, visual package
+
+- **Release audit of 0079–0091** (`docs/release/RELEASE-0079-0091.md`, `scripts/release/`). The hosted
+  history (0001–0078) matches the repository. On an isolated server, a 0078 database filled by the
+  0078-era application was upgraded one migration per transaction: every existing table unchanged
+  (fingerprinted), `component_definitions` gained 26 rows with the original 9 identical. pgTAP 1,261/1,261
+  on an upgraded seed database; zero cross-tenant rows across 103 tables for every fixture person on
+  the populated one; the 0078-era API passes 188/188 on the 0091 schema, so the database deploys first.
+  The rollback script restores the 0078 schema and data exactly (rehearsed), and the release's own
+  rows can be backed up and restored. Not applied to hosted.
+- **Model-path evaluation** (`docs/evaluation/workspace-model-fallback.json`, `pnpm eval:workspace:live`):
+  natural, indirect and ambiguous requests, injection, model-only refusals and missing evidence; the
+  offline run proves each model case bypasses the rules; the live run measures intent and target
+  accuracy, safe abstention, latency and failures on real calls and writes its own report. It has
+  **not** been run: there is no provider key in the development environment.
+- **Timing budgets run isolated** (`pnpm test:connected:perf`): inside the parallel connected suite
+  the renewal p95 reached 2.1 s from database contention; alone it is about 0.2 s (portfolio 0.1 s).
+  The 1.5 s budgets are unchanged.
+- **Visual acceptance package** (`apps/web/e2e/visual-acceptance.e2e.mjs`): 78 screenshots of every
+  major experience and state at 1440 and 390 px, captured over the real API; reviewed, nothing restyled.

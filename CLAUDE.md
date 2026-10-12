@@ -123,6 +123,11 @@ supabase start                     # local stack
 supabase db reset                  # re-apply all migrations + seed
 supabase migration new <name>      # create a migration file
 pnpm test:rls                      # pgTAP isolation suite (must pass before any PR)
+pnpm test:connected                # API + PostgREST + RLS against a disposable database (scripts/db-verify-local.sh)
+pnpm test:connected:perf           # composition-time budgets, run alone (they measure contention in the parallel suite)
+pnpm test:e2e                      # real browser over the real API (E2E_SCRIPT picks the suite)
+pnpm eval:ask                      # Ask and workspace-request evaluations, offline (§45 rule 11)
+pnpm eval:workspace:live           # the same, plus the model path, through the configured AI gateway
 ```
 
 If a command above does not exist yet, create it in the root `package.json` rather than inventing a different one.
@@ -277,11 +282,19 @@ cover is active only where the server's cover check verified it. **Demo mode** (
 the approved fictional records in the browser only, signed-in and labelled — the one place fictional
 records live, at the owner's instruction (D-115 departs from D-069 here).
 
-**Living surfaces** (D-156). A renewal opens a Living surface (`/s/living?workItemId=`): composed on
-the server, deterministically, from records the viewer may read (`apps/api/src/living/`), validated
-against `component_definitions` (`allowed_spaces = {living}`, 0079) and the Zod source in
-`packages/schema/src/living.ts`, and rendered by `apps/web/src/asap/living/`. Its blocks only open
-governed places or ask; they never write. Implementation map: `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`.
+**Living surfaces** (D-156 to D-168). Renewals, claims and policy changes open a Living workspace
+(`/s/living?workItemId=`); a client opens an investigation (`/s/investigation?clientId=`); renewals
+across the brokerage open the portfolio (`/s/portfolio`). Each is composed on the server,
+deterministically, from records the viewer may read (`apps/api/src/living/`), validated against
+`component_definitions` (`allowed_spaces = {living}`, 0079–0091) and the Zod source in
+`packages/schema/src/living.ts`, and rendered by `apps/web/src/asap/living/`. A block may open a
+governed place, ask, or offer a **governed command** from a closed set — each runs through the
+endpoint that already owns it, under that endpoint's permissions, frozen payloads and audit
+(D-157). Asking inside a workspace recomposes it around a typed focus (rules first; the model through
+the gateway only when no rule matches, D-165). Implementation map:
+`docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`; release audit and plan for 0079–0091:
+`docs/release/RELEASE-0079-0091.md`. **Hosted database: through 0078; 0079–0091 are on the feature
+branch and not applied** until the owner approves.
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 
