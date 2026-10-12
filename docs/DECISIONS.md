@@ -3147,3 +3147,11 @@ No new design; the approved identity is unchanged. From the D-169 screenshot rev
 - **Found while testing:** the intermittent web test was a real race in `useSurfacePrefs` — the first
   surface key reset an arrangement made in the moment before it arrived. Only a change between
   surfaces resets now; a deterministic test (`prefs.test.tsx`) fails on the old code and passes now.
+- **Release rehearsal on the hosted Postgres build.** The D-169 rehearsal ran on Postgres 16 with the
+  repository shim. It was repeated on `supabase/postgres:17.6.1.166`, the hosted build, applying as the
+  non-superuser `postgres` (`scripts/release/rehearse-supabase17.sh`): all checks pass (pgTAP 1,261/1,261,
+  connected 251 + 1 skipped, 0078-era 188/188, 0 leaks, rollback identical). The image needed two hosted
+  dashboard settings that no migration creates — `postgres`'s default privileges in `public` and the
+  `ensure_rls` event trigger — read from the hosted catalogue and recorded in
+  `scripts/release/supabase17-services.sql`. The release still recommends a Supabase branch before
+  production (`docs/release/RELEASE-0079-0091.md` §2a, §3).

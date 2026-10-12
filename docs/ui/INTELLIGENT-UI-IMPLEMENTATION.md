@@ -15,6 +15,7 @@ audit and plan: `docs/release/RELEASE-0079-0091.md`).
 - Migrations 0079–0091 apply in order onto a populated 0078 database without changing any existing
   row; RLS, isolation, registry versions and the 0085 authorization hold on the upgraded data; the
   0078-era API runs on the 0091 schema; the rollback is rehearsed and restores schema and data exactly.
+  Rehearsed on Postgres 16 with the shim and again on the hosted build, Supabase Postgres 17.6 (D-170).
 - The authenticated shell and every Living surface pass axe-core (no serious or critical findings),
   keyboard focus and reduced-motion checks at 1440 and 390 px.
 - The model-path evaluation set exists and its routing is proved offline (every model case bypasses
@@ -166,7 +167,7 @@ every control, and reduced motion is honoured.
 - Commission and premium reconciliation workspaces are not built: ASAP records no commission statements, receipts or payments to compose from (D-167).
 - The model-assisted workspace reading is evaluated offline by its rules; its live evaluation (`WORKSPACE_EVAL_LIVE=1`) needs a configured gateway and has not been run here.
 - Interface "learning" is limited to outcomes measured from records (response patterns) and each person's own arrangement; nothing re-orders itself from behaviour.
-- Seen in the visual review (D-169), not changed: on a phone the Work view tabs wrap inside a pill-shaped container; a "What moves this forward" status dot can sit alone above a wrapped heading; the nine-stage strip scrolls sideways with no visible cue; the header keeps "Opening…" when a surface is refused; the header's ASAP status lags recorded answers until a worker advances the run.
+- From the visual review (D-169): the Work tabs, the "Opening…" header, the orphaned status dot, the recorded-status/next-step wording and the UI Lab fixtures were corrected in D-170. Left as approved: the nine-stage strip scrolls sideways on a phone with no visible cue; the recorded workflow status still changes only when a worker advances the run (the header now says when answers have been recorded since).
 - Visual baselines were generated in this environment. A different font rasteriser will need `UPDATE_BASELINES=1` after review.
 
 ## 7. Governed actions in the workspace (D-157, D-161)
@@ -210,6 +211,6 @@ How commands behave:
 | Connected (real Postgres, PostgREST, RLS) | 251 passed, 1 skipped (the timing test, which runs in the next row) |
 | Connected timing, isolated | 24 passed — renewal composition p95 about 0.2 s, portfolio about 0.1 s, a 150-policy client under 1.5 s |
 | pgTAP RLS | 1,261 passed |
-| Migration release rehearsal | see `docs/release/RELEASE-0079-0091.md` §2 |
+| Migration release rehearsal | Postgres 16 and Supabase Postgres 17.6: see `docs/release/RELEASE-0079-0091.md` §2, §2a |
 | Browser | shell 36/36 · shell-a11y 36/36 · journey 32/32 · supervision 28/28 · onboarding 14/14 · acceptance 8/8 · staging-findings 7/7 · living-lab 36/36 · living-actions 11/11 · living-portfolio 10/10 · living-servicing 10/10 · living-quality 18/18 · first-document 23/23 · quote-comparison 19/19 |
 | Visual acceptance | 78 screenshots, 1440 and 390 px (`apps/web/e2e/visual-acceptance.e2e.mjs`) |
