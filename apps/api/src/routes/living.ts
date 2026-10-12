@@ -1,4 +1,4 @@
-import { homeChangesResponseSchema, livingSurfaceSchema, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
+import { homeChangesResponseSchema, livingSurfaceSchema, workspaceFocusSchema, workspaceInterpretationSchema, workspaceInterpretRequestSchema, type AiProvider, type WorkspaceFocus, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Logger } from "pino";
@@ -7,6 +7,8 @@ import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { loadRenewalLivingFacts } from "../living/facts.js";
 import { homeChanges } from "../living/home.js";
+import { interpretWorkspace } from "../living/ask-workspace.js";
+import { applyFocus, renewalAnswer, renewalVocabulary, servicingAnswer, servicingVocabulary } from "../living/focus.js";
 import { defaultQuery, interpret } from "../living/interpret.js";
 import { composePortfolio, loadPortfolio, loadVocabulary } from "../living/portfolio.js";
 import { composeClaimSurface, composeEndorsementSurface, loadServicingFacts, loadWorkItem } from "../living/servicing.js";
@@ -26,43 +28,66 @@ import { loadDefinitions } from "../spaces/validate.js";
  * own validator rejects is a defect, logged with its reasons; the browser receives a 422 and shows
  * a state, never a half-validated surface.
  */
-export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean }) {
+export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean; provider: AiProvider | null }) {
   const app = new Hono();
 
-  app.get("/living/:workItemId", async (c: Context) => {
+  const envOf = async (c: Context): Promise<Env> => {
     const { db, user } = c.get("auth");
     const ctx = await resolveContext(db, user.id);
     const org = requireActiveOrganization(ctx);
-    const env: Env = {
-      db,
-      ctx,
-      organizationId: org.id,
-      userId: user.id,
-      audit: (entry) => recordAudit(db, deps.logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }),
-    };
-    const workItemId = c.req.param("workItemId") ?? "";
-    if (!/^[0-9a-f-]{36}$/i.test(workItemId)) throw new HttpError(404, "not_found", "That work is not available.");
+    return { db, ctx, organizationId: org.id, userId: user.id, audit: (entry) => recordAudit(db, deps.logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }) };
+  };
 
-    // One route, one contract: the work's own kind decides which composition it gets (D-161).
+  /** One route, one contract: the work's own kind decides which composition it gets (D-161). */
+  async function composeFor(env: Env, workItemId: string, opts: { explore: string[]; focus: WorkspaceFocus | null; question: string | null; source: "rules" | "model" }) {
+    if (!/^[0-9a-f-]{36}$/i.test(workItemId)) throw new HttpError(404, "not_found", "That work is not available.");
     const item = await loadWorkItem(env, workItemId);
     const now = new Date();
-    let surface;
     if (item.kind === "renewal") {
       const facts = await loadRenewalLivingFacts(env, workItemId);
-      // Alternatives being explored travel in the address (D-160); only ids, never values.
-      const explore = (c.req.query("explore") ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 3);
-      surface = composeRenewalSurface(facts, { now, aiAvailable: deps.aiAvailable, explore });
-    } else if (item.kind === "claim" || item.kind === "endorsement") {
+      let surface = composeRenewalSurface(facts, { now, aiAvailable: deps.aiAvailable, explore: opts.explore });
+      if (opts.focus && opts.focus.intent !== "reset" && opts.focus.intent !== "explore") surface = applyFocus(surface, opts.question ?? opts.focus.intent, renewalAnswer(facts, opts.focus, now), opts.source);
+      return { surface, kind: "renewal" as const, vocab: renewalVocabulary(facts) };
+    }
+    if (item.kind === "claim" || item.kind === "endorsement") {
       const facts = await loadServicingFacts(env, item);
-      surface = item.kind === "claim" ? composeClaimSurface(facts, { now, aiAvailable: deps.aiAvailable }) : composeEndorsementSurface(facts, { now, aiAvailable: deps.aiAvailable });
-    } else throw new HttpError(404, "not_found", "A living workspace is not composed for this kind of work yet.");
-    const definitions = await loadDefinitions(db, surface.blocks.map((b) => ({ component: b.component, version: b.version })));
-    const result = validateSurface({ surface, definitions, permissions: ctx.permissions });
+      let surface = item.kind === "claim" ? composeClaimSurface(facts, { now, aiAvailable: deps.aiAvailable }) : composeEndorsementSurface(facts, { now, aiAvailable: deps.aiAvailable });
+      if (opts.focus && opts.focus.intent !== "reset") surface = applyFocus(surface, opts.question ?? opts.focus.intent, servicingAnswer(facts, opts.focus), opts.source);
+      return { surface, kind: item.kind, vocab: servicingVocabulary(facts) };
+    }
+    throw new HttpError(404, "not_found", "A living workspace is not composed for this kind of work yet.");
+  }
+
+  app.get("/living/:workItemId", async (c: Context) => {
+    const env = await envOf(c);
+    // Alternatives being explored (D-160) and a focus asked for (D-165) travel in the address:
+    // ids and names only, never values. Refresh and Back reproduce the same composition.
+    const explore = (c.req.query("explore") ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 3);
+    const parsedFocus = workspaceFocusSchema.safeParse({ intent: c.req.query("focus"), target: c.req.query("target") ?? null });
+    const question = (c.req.query("fq") ?? "").slice(0, 500) || null;
+    const source = c.req.query("fsrc") === "model" ? "model" : "rules";
+    const { surface } = await composeFor(env, c.req.param("workItemId") ?? "", { explore, focus: parsedFocus.success ? parsedFocus.data : null, question, source });
+    const definitions = await loadDefinitions(env.db, surface.blocks.map((b) => ({ component: b.component, version: b.version })));
+    const result = validateSurface({ surface, definitions, permissions: env.ctx.permissions });
     if (!result.ok) {
-      deps.logger.error({ workItemId, failures: result.failures }, "living surface rejected by the validator");
+      deps.logger.error({ workItemId: c.req.param("workItemId"), failures: result.failures }, "living surface rejected by the validator");
       throw new HttpError(422, "surface_invalid", "This workspace could not be composed");
     }
     return c.json(livingSurfaceSchema.parse(result.surface));
+  });
+
+  /**
+   * `POST /living/:workItemId/interpret` — Ask ASAP inside a workspace (D-165). The request becomes
+   * a typed focus from the record's own names: rules first, the model through the gateway only when
+   * the rules find nothing. It writes nothing; the browser moves to the focused address.
+   */
+  app.post("/living/:workItemId/interpret", async (c: Context) => {
+    const env = await envOf(c);
+    const body = workspaceInterpretRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new HttpError(400, "invalid_request", "Say what you want to see.");
+    const { kind, vocab } = await composeFor(env, c.req.param("workItemId") ?? "", { explore: [], focus: null, question: null, source: "rules" });
+    const interpretation = await interpretWorkspace(body.data.text, kind, vocab, deps.provider, deps.logger);
+    return c.json(workspaceInterpretationSchema.parse(interpretation));
   });
 
   /*

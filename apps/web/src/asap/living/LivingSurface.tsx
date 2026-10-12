@@ -24,7 +24,7 @@ type Marks = Record<string, { kind: "new" | "updated"; until: number }>;
 type PrefList = "pinned" | "collapsed";
 export type LivingLoader = () => Promise<Surface>;
 /** A surface a person can change by asking (D-158): the portfolio's refine box, chips and choices. */
-export type Refiner = { onRefine: (text: string) => void; onRemove: (field: string) => void; busy: boolean; placeholder: string };
+export type Refiner = { onRefine: (text: string) => void; onRemove: (field: string) => void; busy: boolean; placeholder: string; message?: string | null };
 
 /**
  * `identity` is what the surface is about: while it stays the same, a new `load` (a refined query)
@@ -168,6 +168,9 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
     return [...list.filter((b) => prefs.pinned.includes(b.id)), ...list.filter((b) => !prefs.pinned.includes(b.id))];
   };
   const generated = new Date(surface.generatedAt);
+  // The blocks a focus answer concerns are marked (D-165).
+  const focusBlock = surface.blocks.find((b) => b.component === "FocusPanel");
+  const emphasis = new Set(((focusBlock?.props as { emphasis?: string[] } | undefined)?.emphasis) ?? []);
 
   return (
     <div className="lv-scroll"><div className="lv-root" data-stage={surface.stage?.key ?? surface.purpose}>
@@ -195,26 +198,29 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
       {ordered("lead").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} lead />)}
       <div className={ordered("side").length ? "lv-grid" : "lv-grid lv-grid-single"}>
         <div className="lv-col lv-col-main">
-          {ordered("main").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} pinned={prefs.pinned.includes(b.id)} collapsed={prefs.collapsed.includes(b.id)} onPin={() => toggle("pinned", b.id)} onCollapse={() => toggle("collapsed", b.id)} />)}
+          {ordered("main").map((b) => <BlockView key={b.id} block={b} env={env} emphasised={emphasis.has(b.id)} mark={marks[b.id]?.kind ?? null} pinned={prefs.pinned.includes(b.id)} collapsed={prefs.collapsed.includes(b.id)} onPin={() => toggle("pinned", b.id)} onCollapse={() => toggle("collapsed", b.id)} />)}
           {ordered("main").length === 0 ? <div className="lv-block"><p className="lv-empty">Nothing is in progress on this renewal yet. ASAP shows the work here as soon as a record exists for it.</p></div> : null}
         </div>
         <aside className="lv-col lv-col-side" aria-label="Context">
-          {ordered("side").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} pinned={prefs.pinned.includes(b.id)} collapsed={prefs.collapsed.includes(b.id)} onPin={() => toggle("pinned", b.id)} onCollapse={() => toggle("collapsed", b.id)} />)}
+          {ordered("side").map((b) => <BlockView key={b.id} block={b} env={env} emphasised={emphasis.has(b.id)} mark={marks[b.id]?.kind ?? null} pinned={prefs.pinned.includes(b.id)} collapsed={prefs.collapsed.includes(b.id)} onPin={() => toggle("pinned", b.id)} onCollapse={() => toggle("collapsed", b.id)} />)}
         </aside>
       </div>
     </div></div>
   );
 }
 
-function BlockView({ block, env, mark, lead, pinned, collapsed, onPin, onCollapse }: {
-  block: LivingBlock; env: BlockEnv; mark: "new" | "updated" | null; lead?: boolean; pinned?: boolean; collapsed?: boolean; onPin?: () => void; onCollapse?: () => void;
+function BlockView({ block, env, mark, lead, emphasised, pinned, collapsed, onPin, onCollapse }: {
+  block: LivingBlock; env: BlockEnv; mark: "new" | "updated" | null; lead?: boolean; emphasised?: boolean; pinned?: boolean; collapsed?: boolean; onPin?: () => void; onCollapse?: () => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  // An answer arriving is brought into view; nothing else scrolls the person (visual inertia).
+  useEffect(() => { if (block.component === "FocusPanel") ref.current?.scrollIntoView?.({ block: "nearest", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth" }); }, [block.component, block.hash]);
   const Render = LIVING_RENDERERS[block.component];
   if (!Render) return null;
   const showSources = block.evidence.length > 0 && block.component !== "EvidenceInspector";
   const bodyId = `lv-body-${block.id}`;
   return (
-    <section className={`lv-block${lead ? " lv-lead" : ""}${mark ? ` lv-marked lv-${mark}` : ""}`} data-block={block.id} data-component={block.component} aria-labelledby={block.title ? `lv-h-${block.id}` : undefined}>
+    <section ref={ref} className={`lv-block${lead ? " lv-lead" : ""}${emphasised ? " lv-emphasis" : ""}${block.component === "FocusPanel" ? " lv-focus-block" : ""}${mark ? ` lv-marked lv-${mark}` : ""}`} data-block={block.id} data-component={block.component} aria-labelledby={block.title ? `lv-h-${block.id}` : undefined}>
       {block.title || mark ? (
         <div className="lv-block-head">
           {block.title ? <h2 id={`lv-h-${block.id}`}>{block.title}</h2> : <span />}
@@ -258,6 +264,7 @@ function RefineBox({ refine }: { refine: Refiner }) {
       <label className="lv-sr" htmlFor="lv-refine-input">Ask ASAP to change this view</label>
       <input id="lv-refine-input" value={text} onChange={(e) => setText(e.target.value)} placeholder={refine.placeholder} autoComplete="off" />
       <button type="submit" className="lv-btn lv-btn-primary" disabled={refine.busy || !text.trim()}>{refine.busy ? "Changing…" : "Change view"}</button>
+      {refine.message ? <p className="lv-refine-message" role="status">{refine.message}</p> : null}
     </form>
   );
 }

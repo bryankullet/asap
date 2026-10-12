@@ -42,7 +42,8 @@ authorized records (viewer's session, RLS)
         registry row at that version · stored JSON Schema · Zod source · allowed spaces ·
         closed command set with exact payloads · required evidence · banned derived keys ·
         blocks the viewer may not see removed before sending
-  └─ GET /living/:workItemId[?explore=]   renewal | claim | endorsement
+  └─ GET /living/:workItemId[?explore=&focus=&target=&fq=&fsrc=]   renewal | claim | endorsement
+     POST /living/:workItemId/interpret {text}   a request in words → a typed focus (D-165)
      POST /living/portfolio {query, text}  the renewal portfolio, refined in words
      GET /home/changes                     what changed since you last looked
      GET|PUT /surface-preferences/:key     personal arrangement (0080)
@@ -55,7 +56,7 @@ authorized records (viewer's session, RLS)
   - `open` a governed place, or `ask`.
   - `command`, from a closed set that the browser maps to the endpoint that already owns it (D-157, §7). The surface can never name a path.
 
-### Registered Living components (0079, 0081–0084)
+### Registered Living components (0079, 0081–0084, 0086)
 
 | Component | Purpose |
 |---|---|
@@ -75,6 +76,7 @@ authorized records (viewer's session, RLS)
 | QueryInterpretation | The portfolio view in words, each part removable |
 | PortfolioGroups | Renewals selected by the query, grouped and totalled |
 | EvidenceInspector | The sources behind the surface |
+| FocusPanel | The answer to a request asked inside the workspace, from records, with abstention (0086, D-165) |
 | Timeline | Recent changes, notes, this cover in earlier years |
 
 ---
@@ -98,7 +100,7 @@ every control, and reduced motion is honoured.
 | M3 Context and progress | **built** for renewals, claims and policy changes | A general semantic graph over every entity is **not built** |
 | M4 Intelligent Home | **built** | Attention, ASAP's running work, waiting parties, Recent; *What changed since you last looked* from semantic events (D-159); portfolio requests open the portfolio |
 | M5 Living Renewal Journey | **built** to the limits of existing capabilities | Attention → terms → comparison and revision → exploration → decision → placement → issuance → verified cover, with governed actions in place. Stage 9 (continuing relationship) is **not built** |
-| M6 Ask ASAP directing the interface | **partial** | The renewal portfolio is refined in words (window, grouping, filters, comparison) with removable chips, unclear words stated, ambiguous names asked about (D-158). The interpreter is deterministic only. A model-assisted reading needs an evaluation run first and is **not built**. Refining the renewal, claim and policy-change workspaces in words is **not built** |
+| M6 Ask ASAP directing the interface | **built** | The renewal portfolio is refined in words (D-158). Renewal, claim and policy-change workspaces recompose around a request asked inside them — revisions, quotes, blockers, evidence, obligations, consequences, messages, history, next steps, exploration (D-165). Rules first; the model through the gateway only when no rule matches, schema-checked and bounded to the record's names; evaluated (`workspace-requests.json`). The portfolio interpreter remains deterministic only |
 | M7 Reactive composition and continuity | **built** | Polling and refresh on focus; in-place reconciliation by stable id; Updated and New marks; pin, collapse and selections kept on the server; open forms keep their command and typed text; deep links, refresh, Back and Forward |
 | M8 Insurance-native intelligence | **partial** | Built: time and cover, obligation, change and contradiction, communication (D-162), decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159). **Not built:** inbound email turned into proposed actions inside the workspace, structured handoff notes, learned patterns |
 | M9 Exploration and multi-context | **partial** | Client decisions explored before they are made, from records, kept in the address (D-160); portfolio rows open their workspace. Saved, versioned proposals beyond the address are **not built** |
@@ -115,7 +117,7 @@ every control, and reduced motion is honoured.
 | C Insurer response arrives | **built** | `living-actions`: a colleague records the answer while the broker types; the surface reconciles in place and keeps the text |
 | D Quotation revision | **built** | Earlier and revised shown side by side, and flagged when after the instruction (unit, `living-actions`) |
 | E Missing evidence | **built** | Missing period, premium and cover are stated; unreadable sources are named, never shown as missing (D-157) |
-| F Natural-language refinement | **built** for the portfolio | `living-portfolio.e2e.mjs` |
+| F Natural-language refinement | **built** | portfolio: `living-portfolio.e2e.mjs`; inside a workspace: `living-servicing.e2e.mjs` (ask, refusal, refresh, whole workspace again), connected `living-focus.test.ts` |
 | G Approval requirement | **built** | The bundle is shown in full and approved in place with its frozen hash; a role that may not approve is offered nothing and refused (connected) |
 | H Cross-tenant isolation | **built** | Connected tests for workspace, portfolio, Home changes, preferences and claims; browser `living-never-leaks` |
 | I Role-specific view | **built** | Blocks removed before sending; audit history only with `audit:view`; commands only for roles that may use them |
@@ -129,8 +131,8 @@ every control, and reduced motion is honoured.
 ## 6. Known limitations
 
 - Polling, not push: every 20 s for workspaces, every 60 s for Home, and on focus.
-- Only the portfolio understands plain-language refinement, and only deterministically.
-- **Existing behaviour, not changed:** the claim and endorsement RPCs check brokerage membership only. The workspace offers their commands only to roles that can act, but a read-only member could call those endpoints directly (D-161).
+- The portfolio's plain-language refinement is deterministic only; the workspace focus may use the model, but only when no rule matches.
+- Claim and endorsement mutations now require `claim:edit` / `policy:edit` in the database and the API (0085, D-164); the earlier membership-only gap is closed.
 - Demo mode has no server-composed surfaces.
 - Visual baselines were generated in this environment. A different font rasteriser will need `UPDATE_BASELINES=1` after review.
 

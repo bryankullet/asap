@@ -1,5 +1,6 @@
 import type {
   approvalBundleProps,
+  focusPanelProps,
   workChecklistProps,
   workJourneyProps,
   explorationPanelProps,
@@ -470,6 +471,33 @@ function WorkChecklist({ props }: P<typeof workChecklistProps>) {
   );
 }
 
+function FocusPanel({ props, env }: P<typeof focusPanelProps>) {
+  return (
+    <div className="lv-focus">
+      <p className="lv-focus-q">“{props.question}”</p>
+      <p className="lv-focus-understood">
+        <strong>{props.understood}</strong>
+        {props.source === "model" ? <span className="lv-chip lv-grey" title="Read by the model through the AI gateway, checked against the workspace's own names">read by the model</span> : null}
+      </p>
+      {props.items.length ? (
+        <ul className="lv-focus-items">
+          {props.items.map((i, n) => (
+            <li key={n} className={`lv-focus-item lv-tone-${i.tone}`}>
+              <span className={`lv-dot lv-${i.tone}`} aria-hidden />
+              <div>
+                {i.ref ? <button type="button" className="lv-rowlink" onClick={() => env.open(i.ref as Ref)}>{i.label}</button> : <strong>{i.label}</strong>}
+                {i.detail ? <p>{i.detail}</p> : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {props.empty && !props.items.length ? <p className="lv-missing">{props.empty}</p> : null}
+      {env.removeChip ? <div className="lv-actions"><button type="button" className="lv-btn lv-btn-quiet" onClick={() => env.removeChip!("focus")}>Show the whole workspace</button></div> : null}
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -490,6 +518,7 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   ExplorationPanel,
   WorkJourney,
   WorkChecklist,
+  FocusPanel,
 };
 
 /**

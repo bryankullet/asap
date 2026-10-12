@@ -130,6 +130,7 @@ import {
   type UpdateContactRequest,
   spacePlanResponseSchema,
   livingSurfaceSchema,
+  workspaceInterpretationSchema,
   homeChangesResponseSchema,
   portfolioResponseSchema,
   type PortfolioQuery,
@@ -266,8 +267,17 @@ export const api = {
   portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
   /** What changed since this person last looked, from the brokerage's semantic events (D-159). */
   homeChanges: () => request("GET", "/home/changes", homeChangesResponseSchema),
-  livingSurface: (workItemId: string, explore: string[] = []) =>
-    request("GET", `/living/${workItemId}${explore.length ? `?explore=${explore.join(",")}` : ""}`, livingSurfaceSchema),
+  livingSurface: (workItemId: string, view: { explore?: string[]; focus?: string | null; target?: string | null; fq?: string | null; fsrc?: string | null } = {}) => {
+    const q = new URLSearchParams();
+    if (view.explore?.length) q.set("explore", view.explore.join(","));
+    if (view.focus) q.set("focus", view.focus);
+    if (view.target) q.set("target", view.target);
+    if (view.fq) q.set("fq", view.fq);
+    if (view.fsrc) q.set("fsrc", view.fsrc);
+    return request("GET", `/living/${workItemId}${q.toString() ? `?${q}` : ""}`, livingSurfaceSchema);
+  },
+  /** Ask ASAP inside a workspace (D-165): words → a typed focus. Writes nothing. */
+  interpretWorkspace: (workItemId: string, text: string) => request("POST", `/living/${workItemId}/interpret`, workspaceInterpretationSchema, { text }),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /**

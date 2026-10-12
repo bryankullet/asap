@@ -280,6 +280,51 @@ export const workChecklistProps = z.strictObject({
   note: z.string().max(500).nullable(),
 });
 
+/* ---------------------------------------------------------------------------------------------- */
+/* Ask ASAP inside a workspace (D-165): a request becomes a typed focus; the workspace recomposes. */
+
+export const WorkspaceIntent = z.enum([
+  "compare_revisions",
+  "compare_quotes",
+  "blockers",
+  "evidence",
+  "obligations",
+  "consequences",
+  "messages",
+  "history",
+  "next_steps",
+  "explore",
+  "reset",
+]);
+export type WorkspaceIntent = z.infer<typeof WorkspaceIntent>;
+/** What to bring forward. `target` is a name from the record itself (an insurer, a term, a document), never a value. */
+export const workspaceFocusSchema = z.strictObject({ intent: WorkspaceIntent, target: z.string().max(120).nullable() });
+export type WorkspaceFocus = z.infer<typeof workspaceFocusSchema>;
+export const workspaceInterpretationSchema = z.strictObject({
+  focus: workspaceFocusSchema.nullable(),
+  /** Insurers to explore, when the request is "what if the client chose …" (D-160). */
+  explore: z.array(uuidSchema).max(3).nullable(),
+  understood: z.string().max(300).nullable(),
+  unclear: z.string().max(300).nullable(),
+  /** Rules read it, or the model through the gateway, schema-checked (§45 rules 8, 11). */
+  source: z.enum(["rules", "model", "none"]),
+});
+export type WorkspaceInterpretation = z.infer<typeof workspaceInterpretationSchema>;
+export const workspaceInterpretRequestSchema = z.strictObject({ text: z.string().min(1).max(500) });
+
+/** The answer to a request inside a workspace, from records; the blocks it concerns come forward. */
+export const focusPanelProps = z.strictObject({
+  /** The person's own words, said back. */
+  question: line,
+  understood: line,
+  items: z.array(z.strictObject({ label, detail: z.string().max(500).nullable(), tone, ref: livingRefSchema.nullable() })).max(12),
+  /** Said when the records hold nothing for the request — abstention, never a blank. */
+  empty: line.nullable(),
+  /** The blocks this answer concerns, brought forward and marked. */
+  emphasis: z.array(z.string().max(80)).max(6),
+  source: z.enum(["rules", "model"]),
+});
+
 /** Exactly what will leave the brokerage, shown in full before anyone approves it (frozen payload). */
 export const approvalBundleProps = z.strictObject({
   title: label,
@@ -411,6 +456,7 @@ export const LIVING_BLOCK_PROPS = {
   QueryInterpretation: queryInterpretationProps,
   ExplorationPanel: explorationPanelProps,
   WorkJourney: workJourneyProps,
+  FocusPanel: focusPanelProps,
   WorkChecklist: workChecklistProps,
   PortfolioGroups: portfolioGroupsProps,
 } as const;
@@ -476,6 +522,7 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   PlacementProgress: { version: 1, name: "Placement progress", purpose: "Instruction, request, insurer confirmation and issuance, each from its record.", requiresEvidence: false },
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
+  FocusPanel: { version: 1, name: "Focus", purpose: "The answer to a request asked inside a workspace, from records, with the blocks it concerns brought forward.", requiresEvidence: false },
   WorkJourney: { version: 1, name: "Work journey", purpose: "Any workflow's own steps in order, done, now, waiting or next, as its run records them.", requiresEvidence: false },
   WorkChecklist: { version: 1, name: "Work checklist", purpose: "Things each done or outstanding, with who holds them: documents, decisions, separately recorded facts.", requiresEvidence: false },
   ExplorationPanel: { version: 1, name: "Exploration", purpose: "A client decision explored before it is made: each alternative's premium, insurer change, validity, term differences and next steps, from records. Nothing is recorded or recommended.", requiresEvidence: false },

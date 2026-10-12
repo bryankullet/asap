@@ -1,22 +1,56 @@
-import type { LivingSurface as Surface, PortfolioQuery, PortfolioResponse } from "@asap/schema";
+import type { LivingSurface as Surface, PortfolioQuery, PortfolioResponse, WorkspaceInterpretation } from "@asap/schema";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Ref } from "../shell/routes.js";
-import type { PrefsStore } from "../shell/types.js";
+import type { LivingView, PrefsStore } from "../shell/types.js";
 import { LivingSurface } from "./LivingSurface.js";
 
-/** The renewal workspace for one Work item (D-156/157). */
-export function LivingRenewalPane({ workItemId, runId, explore, living, prefsStore, onOpen, onAsk, onTitle }: {
-  workItemId: string; runId: string | null; explore: string; living: (id: string, explore?: string[]) => Promise<Surface>; prefsStore?: PrefsStore | undefined;
+/** A Living workspace for one Work item — renewal, claim or policy change (D-156…D-165). */
+export function LivingRenewalPane({ workItemId, runId, viewRef, living, interpret, prefsStore, onOpen, onAsk, onTitle }: {
+  workItemId: string; runId: string | null; viewRef: Ref;
+  living: (id: string, view?: LivingView) => Promise<Surface>;
+  interpret?: ((id: string, text: string) => Promise<WorkspaceInterpretation>) | undefined;
+  prefsStore?: PrefsStore | undefined;
   onOpen: (ref: Ref) => void; onAsk: (text: string) => void; onTitle: (t: string, purpose?: string) => void;
 }) {
-  // Alternatives being explored live in the address (D-160): Back undoes an exploration, a link shares it.
+  // What to compose lives in the address (D-160, D-165): alternatives explored and a focus asked for.
+  // Back undoes either; a link reproduces it.
+  const str = (k: string) => (typeof viewRef[k] === "string" ? (viewRef[k] as string) : "");
+  const explore = str("explore");
+  const focus = str("focus");
+  const target = str("target");
+  const fq = str("fq");
+  const fsrc = str("fsrc");
   const ids = useMemo(() => explore.split(",").filter(Boolean), [explore]);
-  const load = useCallback(() => living(workItemId, ids), [living, workItemId, ids]);
+  const load = useCallback(() => living(workItemId, { explore: ids, focus: focus || null, target: target || null, fq: fq || null, fsrc: fsrc || null }), [living, workItemId, ids, focus, target, fq, fsrc]);
+  const base = useMemo(() => ({ ws: "living", workItemId, ...(runId ? { runId } : {}) }), [workItemId, runId]);
   const exploring = useMemo(() => ({
     ids,
-    set: (next: string[]) => onOpen(next.length ? { ws: "living", workItemId, ...(runId ? { runId } : {}), explore: next.join(",") } : { ws: "living", workItemId, ...(runId ? { runId } : {}) }),
-  }), [ids, onOpen, workItemId, runId]);
-  return <LivingSurface identity={`work:${workItemId}`} noun="work" runId={runId} load={load} prefsStore={prefsStore} explore={exploring} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
+    set: (next: string[]) => onOpen(next.length ? { ...base, explore: next.join(",") } : base),
+  }), [ids, onOpen, base]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const refine = useMemo(() => (interpret ? {
+    busy,
+    message,
+    placeholder: "Ask about this — “compare the revised terms”, “what is blocking this?”",
+    onRemove: () => onOpen(base),
+    onRefine: async (text: string) => {
+      setBusy(true);
+      setMessage(null);
+      try {
+        const r = await interpret(workItemId, text);
+        if (r.explore?.length) onOpen({ ...base, explore: r.explore.join(",") });
+        else if (r.focus?.intent === "reset") onOpen(base);
+        else if (r.focus) onOpen({ ...base, ...(explore ? { explore } : {}), focus: r.focus.intent, ...(r.focus.target ? { target: r.focus.target } : {}), fq: text.slice(0, 300), fsrc: r.source === "model" ? "model" : "rules" });
+        else setMessage(r.unclear ?? "That could not be read. Nothing was changed.");
+      } catch {
+        setMessage("That could not be read just now. Nothing was changed.");
+      } finally {
+        setBusy(false);
+      }
+    },
+  } : undefined), [interpret, busy, message, workItemId, base, explore, onOpen]);
+  return <LivingSurface identity={`work:${workItemId}`} noun="work" runId={runId} load={load} prefsStore={prefsStore} explore={exploring} {...(refine ? { refine } : {})} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
 }
 
 export type PortfolioApi = (body: { query: PortfolioQuery | null; text: string | null }) => Promise<PortfolioResponse>;

@@ -95,6 +95,38 @@ await step(page, "claim-workspace", async () => {
   const a11y = await axeSerious(page);
   must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
 });
+await step(page, "claim-ask-what-is-blocking", async () => {
+  // Ask inside the workspace (D-165): the request becomes a focus in the address and the same
+  // workspace recomposes around it — no chat transcript appears.
+  const box = page.locator(".lv-refine");
+  await box.locator("input").fill("Show what is blocking this claim");
+  await box.getByRole("button", { name: "Change view" }).click();
+  const focus = page.locator('[data-component="FocusPanel"]');
+  await focus.waitFor({ timeout: 15000 });
+  must(/focus=blockers/.test(page.url()), `the focus is not in the address: ${page.url()}`);
+  must(await focus.getByText(`Police abstract ${TAG} — not received`).count(), "the outstanding document is not named as blocking");
+  must(await page.locator('[data-block="documents"].lv-emphasis').count(), "the documents are not marked as concerned");
+  must((await page.locator(".sh-transcript, .cv-transcript").count()) === 0, "a chat transcript opened");
+  await page.reload();
+  await focus.waitFor({ timeout: 15000 });
+  must(await focus.getByText("Show what is blocking this claim").count(), "refresh did not reproduce the focus");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
+});
+await step(page, "claim-ask-refused", async () => {
+  const box = page.locator(".lv-refine");
+  const before = page.url();
+  await box.locator("input").fill("approve the claim");
+  await box.getByRole("button", { name: "Change view" }).click();
+  await box.locator(".lv-refine-message").waitFor({ timeout: 10000 });
+  must(/Asking does not act/.test(await box.locator(".lv-refine-message").innerText()), "the refusal does not say why");
+  must(page.url() === before, "a refused request changed the workspace");
+});
+await step(page, "claim-whole-workspace-again", async () => {
+  await page.getByRole("button", { name: "Show the whole workspace" }).click();
+  await page.waitForFunction(() => !/focus=/.test(location.href), null, { timeout: 10000 });
+  await page.locator('[data-component="FocusPanel"]').waitFor({ state: "detached", timeout: 15000 });
+});
 await step(page, "claim-document-received-in-place", async () => {
   const docs = page.locator('[data-block="documents"]');
   await docs.getByRole("button", { name: new RegExp(`Police abstract ${TAG}`) }).click();

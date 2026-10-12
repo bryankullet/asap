@@ -291,7 +291,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", ruleRoutes({ logger }));
   app.route("/", quotationReadingRoutes({ logger }));
   app.route("/", placementRoutes({ logger }));
-  app.route("/", livingRoutes({ logger, aiAvailable: !!deps.aiProvider }));
+  app.route("/", livingRoutes({ logger, aiAvailable: !!deps.aiProvider, provider: deps.aiProvider ?? null }));
   app.route("/", policyRoutes({ logger }));
   app.route(
     "/",

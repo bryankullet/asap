@@ -3005,3 +3005,27 @@ instructed — the decision is then a record, not an exploration.
 - **Found while testing:** a connected test that started its renewal with the global workflow sweep
   advanced other test files' runs and made `mailbox-delivery` count extra sends; it now starts its
   renewal for its own period only.
+
+## D-165 — Ask ASAP inside a Living workspace recomposes it (0086)
+
+- **What it does.** Renewal, claim and policy-change workspaces have an "Ask about this" box. A
+  request ("Compare the revised terms", "Show what is blocking this claim", "Bring up the document
+  behind this exclusion") becomes a typed *focus* — one of eleven intents and, where the request
+  names one, a target taken from the record's own names (insurers, terms, documents). The browser
+  moves to that address (`focus`, `target`, `fq`, `fsrc`), and the server recomposes the same
+  workspace: a registered `FocusPanel` answer after the header, the blocks it concerns brought
+  forward and marked. It is not a chat reply and nothing is written.
+- **Answers come from records** (`living/focus.ts`): revisions, quotes, blockers, documents,
+  obligations, messages, notes, consequences. When nothing is on file the panel says so and shows
+  nothing in its place; "nothing on file" is never said beside a list.
+- **Rules first, model second** (`living/ask-workspace.ts`, `POST /living/:id/interpret`). The
+  model is consulted through the AI gateway only when no rule matches. It is given the intent list
+  and the record's names, never the records; its reply must match a schema, its target must be one
+  of the names, and anything else is no answer. Refusals never reach the model.
+- **Refused, with the reason:** requests to act (acting happens through the workspace's governed
+  controls), to decide cover or liability (§45 rule 12), and to choose an insurer for the client.
+- **Explore** ("what if they chose CIC") opens the existing exploration (D-160) rather than a focus.
+- **Evaluated** (§45 rule 11): `docs/evaluation/workspace-requests.json`, 35 readable and 7 refusal
+  cases; rules offline at 100% (threshold 95%), the model with `WORKSPACE_EVAL_LIVE=1`.
+- **Permissions:** asking is reading, so read-only members may ask; another brokerage's work is 404.
+  Item links in the panel are limited to the places a surface may open.

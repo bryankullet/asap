@@ -117,6 +117,7 @@ const LIVING = [
   "QueryInterpretation",
   "ExplorationPanel",
   "WorkJourney",
+  "FocusPanel",
   "WorkChecklist",
   "PortfolioGroups",
 ] as const;

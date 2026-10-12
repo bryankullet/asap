@@ -87,6 +87,10 @@ export function validateSurface(input: { surface: unknown; definitions: Componen
         for (const i of a.inputs) if (!spec.inputs.includes(i.name)) failures.push({ rule: "actions", detail: `${at}: ${a.command} has no input "${i.name}"` });
       }
     }
+    // A focus answer's links open only the places an action may open.
+    if (b.component === "FocusPanel")
+      for (const it of (b.props as { items?: { ref: Record<string, unknown> | null }[] }).items ?? [])
+        if (it.ref && !LIVING_OPENABLE.has(String(it.ref["ws"]))) failures.push({ rule: "actions", detail: `${at}: an answer cannot open "${String(it.ref["ws"])}"` });
     if (def.requires_evidence && b.evidence.length === 0) failures.push({ rule: "evidence", detail: `${at}: ${b.component} requires a source` });
     for (const k of bannedKeys(b.props)) failures.push({ rule: "derived", detail: `${at}: ${k} may not travel in a surface` });
     if (def.required_permissions.some((p) => !input.permissions.has(p))) removed.push(b.id);

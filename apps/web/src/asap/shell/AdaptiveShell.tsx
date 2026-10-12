@@ -293,8 +293,9 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
       key={spaceRef["workItemId"] as string}
       workItemId={spaceRef["workItemId"] as string}
       runId={typeof spaceRef["runId"] === "string" ? spaceRef["runId"] : null}
-      explore={typeof spaceRef["explore"] === "string" ? spaceRef["explore"] : ""}
+      viewRef={spaceRef}
       living={A!.living!}
+      interpret={A?.interpretWorkspace}
       prefsStore={A!.surfacePrefs}
       onOpen={(ref) => controller.open(ref)}
       onAsk={(text) => {
