@@ -32,7 +32,7 @@ const DAY = 86_400_000;
 const gap = (f: RenewalLivingFacts, part: RenewalLivingFacts["unavailable"][number]["part"]) => f.unavailable.some((g) => g.part === part);
 export const PART_WORDS: Record<RenewalLivingFacts["unavailable"][number]["part"], string> = {
   client: "The client", owner: "Who owns this work", run: "The renewal run", quotation: "The quotation", period: "The policy period",
-  revisions: "Revised insurer answers", placement: "The placement", issuance: "The policy issuance", history: "Recent history",
+  revisions: "Revised insurer answers", placement: "The placement", issuance: "The policy issuance", history: "Recent history", memory: "Earlier years of this cover",
 };
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 const fmtDate = (iso: string | null | undefined) =>
@@ -308,6 +308,36 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
       ? "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
       : "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does.",
   }));
+
+  // Every message prepared for this renewal and where it stands — never "sent" unless it was (D-162).
+  const msgs = (f.run?.communications ?? []).filter((c) => c.state !== "superseded");
+  if (msgs.length)
+    blocks.push(block("messages", "WorkChecklist", "main", "Messages for this renewal", {
+      items: msgs.slice(0, 12).map((c) => ({
+        key: c.id,
+        label: (c.audience === "client" ? `Letter to ${c.partyName}` : `Terms request to ${c.partyName}`).slice(0, 200),
+        detail: `${c.subject}${c.deliveryReference ? ` · ${c.deliveryReference}` : ""}`.slice(0, 500),
+        state: c.state === "delivered" || c.state === "sent" ? "done" : c.state === "approved" ? "outstanding" : "pending",
+        party: c.state === "approved" ? "Approved — not sent yet" : c.state === "prepared" ? "Prepared — waiting for approval" : c.toAddress,
+        since: c.deliveredAt,
+      })),
+      note: "Approved is not sent: a message counts as sent only with its delivery on record.",
+    }));
+
+  // What was decided before: the client's cover of this class, year by year, from records (D-162).
+  if (f.memory.length) {
+    const ordered = [...f.memory].sort((a, b) => b.periodEnd.localeCompare(a.periodEnd));
+    blocks.push(block("memory", "Timeline", "side", "This cover before", {
+      events: ordered.slice(0, 5).map((p, i) => {
+        const prev = ordered[i + 1];
+        const amt = p.premiumAmount && p.premiumCurrency ? money(p.premiumAmount, p.premiumCurrency) : "premium not recorded";
+        const change = prev?.premiumAmount && p.premiumAmount && prev.premiumCurrency === p.premiumCurrency && Number(prev.premiumAmount) > 0
+          ? ` (${Number(p.premiumAmount) >= Number(prev.premiumAmount) ? "+" : "−"}${Math.abs(((Number(p.premiumAmount) - Number(prev.premiumAmount)) / Number(prev.premiumAmount)) * 100).toFixed(1)}% on the year before)`
+          : "";
+        return { at: p.periodEnd, text: `${fmtDate(p.periodStart)} – ${fmtDate(p.periodEnd)} · ${p.insurer} · ${amt}${change}`.slice(0, 500), actor: p.policyNumber };
+      }),
+    }));
+  }
 
   const ev = evidenceOf(f);
   if (ev.length) blocks.push(block("evidence", "EvidenceInspector", "side", "Evidence", { items: ev }));

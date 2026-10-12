@@ -447,7 +447,7 @@ export const livingSurfaceSchema = z.strictObject({
   generatedAt: z.string(),
   /** The whole surface's hash: unchanged means nothing to reconcile. */
   fingerprint: z.string().max(64),
-  blocks: z.array(livingBlockSchema).max(14),
+  blocks: z.array(livingBlockSchema).max(20),
   /** Composition needs no model: an unavailable model only switches off what needs one. */
   ai: z.strictObject({ available: z.boolean() }),
   /**

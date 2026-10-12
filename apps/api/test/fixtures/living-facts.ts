@@ -47,7 +47,7 @@ export function facts(over: Partial<RenewalLivingFacts> & { step?: string; runSt
       insurers: [insurer("CIC", "with_insurer", null), insurer("Jubilee", "with_insurer", null)],
       next: null,
     } as unknown as RenewalLivingFacts["opportunity"],
-    revisions: [], placement: null, issuance: null, recent: [], unavailable: [], viewer: { canControlRun: true },
+    revisions: [], placement: null, issuance: null, recent: [], memory: [], unavailable: [], viewer: { canControlRun: true },
     ...rest,
   };
 }

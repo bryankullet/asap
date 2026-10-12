@@ -2952,3 +2952,13 @@ instructed — the decision is then a record, not an exploration.
 - A command the person just completed leaves without a "no longer offered" notice.
 - Commission reconciliation and investigations are **not built**: no reconciliation records exist
   to compose from, and inventing tables for it would be building a later phase early.
+
+## D-162 — Communication and decision memory in the renewal workspace
+
+- *Messages for this renewal*: every message prepared by the run, with its state — prepared and
+  waiting for approval, approved but not sent, or sent/delivered with its proof. Approved is never
+  shown as sent.
+- *This cover before*: the client's earlier periods of the same class, newest first, with insurer,
+  premium and the change on the year before — read from policy periods under the viewer's session,
+  recorded as a gap when unreadable. Memory, not a prediction: no trend is extrapolated.
+- A surface may carry up to 20 blocks (was 14), since the busiest renewal reaches the old limit.

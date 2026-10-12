@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "49e7d6a4ba491990",
+   "fingerprint": "7c477ab73c5675f4",
    "blocks": [
     {
      "id": "header",
@@ -339,6 +339,37 @@
      "evidence": [],
      "actions": [],
      "hash": "d4ed4f7c58445a77"
+    },
+    {
+     "id": "messages",
+     "component": "WorkChecklist",
+     "version": 1,
+     "role": "main",
+     "title": "Messages for this renewal",
+     "props": {
+      "items": [
+       {
+        "key": "99999999-9999-4999-8999-999999999991",
+        "label": "Letter to Acme Logistics",
+        "detail": "Your motor fleet renewal",
+        "state": "pending",
+        "party": "Prepared — waiting for approval",
+        "since": null
+       },
+       {
+        "key": "99999999-9999-4999-8999-999999999992",
+        "label": "Terms request to Jubilee",
+        "detail": "Renewal terms — Acme Logistics motor fleet",
+        "state": "pending",
+        "party": "Prepared — waiting for approval",
+        "since": null
+       }
+      ],
+      "note": "Approved is not sent: a message counts as sent only with its delivery on record."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "6472bfe75e790ec8"
     }
    ],
    "ai": {

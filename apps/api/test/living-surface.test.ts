@@ -195,6 +195,45 @@ describe("exploring a choice before the client decides (D-160)", () => {
   });
 });
 
+describe("communication and decision memory (D-162)", () => {
+  it("lists each prepared message and never calls an approved one sent", () => {
+    const f = facts({ step: "approval", runState: "waiting_approval", opportunity: null });
+    const s = composeRenewalSurface(f, { now: NOW, aiAvailable: false });
+    const m = s.blocks.find((b) => b.id === "messages")!.props as { items: { state: string; party: string | null }[]; note: string };
+    expect(m.items.map((i) => i.state)).toEqual(["pending", "pending"]);
+    expect(m.note).toMatch(/Approved is not sent/);
+  });
+  it("shows the client's earlier years of this cover with the year-on-year change from records", () => {
+    const f = facts({ memory: [
+      { periodStart: "2024-11-01", periodEnd: "2025-10-31", insurer: "CIC", policyNumber: "P-4471", premiumAmount: "170000.00", premiumCurrency: "KES" },
+      { periodStart: "2023-11-01", periodEnd: "2024-10-31", insurer: "Jubilee", policyNumber: "J-9", premiumAmount: "150000.00", premiumCurrency: "KES" },
+    ] });
+    const s = composeRenewalSurface(f, { now: NOW, aiAvailable: false });
+    const t = s.blocks.find((b) => b.id === "memory")!.props as { events: { text: string }[] };
+    expect(t.events[0]!.text).toBe("1 Nov 2024 – 31 Oct 2025 · CIC · KES 170,000.00 (+13.3% on the year before)");
+    expect(t.events[1]!.text).toBe("1 Nov 2023 – 31 Oct 2024 · Jubilee · KES 150,000.00");
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(true);
+  });
+});
+
+describe("the busiest renewal still validates", () => {
+  it("with approval, quotes, revisions, exploration, messages, memory and history all present", () => {
+    const f = facts({ step: "approval", runState: "waiting_approval", opportunity: quotedOpp(),
+      revisions: [
+        { insurerName: "Jubilee", revision: 1, premiumAmount: "175500", premiumCurrency: "KES", validUntil: "2026-11-01", outcome: "quoted", receivedAt: "2026-10-01T10:00:00Z", documentId: null },
+        { insurerName: "Jubilee", revision: 2, premiumAmount: "189000", premiumCurrency: "KES", validUntil: "2026-11-01", outcome: "quoted", receivedAt: "2026-10-07T10:00:00Z", documentId: null },
+      ],
+      memory: [{ periodStart: "2024-11-01", periodEnd: "2025-10-31", insurer: "CIC", policyNumber: "P-4471", premiumAmount: "170000.00", premiumCurrency: "KES" }],
+      recent: [{ at: "2026-10-10T10:00:00Z", action: "work_item.assigned", actor: "Amina" }],
+    });
+    const ids = (quotedOpp() as unknown as { insurers: { id: string }[] }).insurers.map((i) => i.id);
+    const s = composeRenewalSurface(f, { now: NOW, aiAvailable: false, explore: ids });
+    expect(s.blocks.length).toBeGreaterThanOrEqual(14);
+    const r = validateSurface({ surface: s, definitions, permissions: new Set() });
+    expect(r.ok ? [] : r.failures).toEqual([]);
+  });
+});
+
 describe("validation", () => {
   const good = () => composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
   it("rejects an unregistered component", () => {

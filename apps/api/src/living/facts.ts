@@ -19,7 +19,9 @@ export type AuditEvent = { at: string; action: string; actor: string | null };
  * "failed": the read itself failed. Either way the composer must not present the gap as an absent
  * insurance fact — "no placement on file" and "the placement could not be read" are different.
  */
-export type SourcePart = "client" | "owner" | "run" | "quotation" | "period" | "revisions" | "placement" | "issuance" | "history";
+export type SourcePart = "client" | "owner" | "run" | "quotation" | "period" | "revisions" | "placement" | "issuance" | "history" | "memory";
+/** One earlier period of this client's cover of the same class — what was decided before (D-162). */
+export type PastPeriod = { periodStart: string; periodEnd: string; insurer: string; policyNumber: string | null; premiumAmount: string | null; premiumCurrency: string | null };
 export type Unavailable = { part: SourcePart; reason: "restricted" | "failed" };
 
 export type RenewalLivingFacts = {
@@ -33,6 +35,8 @@ export type RenewalLivingFacts = {
   placement: PlacementResponse | null;
   issuance: IssuanceResponse | null;
   recent: AuditEvent[];
+  /** This client's earlier periods of the same class, newest first (decision memory, D-162). */
+  memory: PastPeriod[];
   unavailable: Unavailable[];
   /** What the viewer's role allows on the run's controls (the endpoints check again). */
   viewer: { canControlRun: boolean };
@@ -128,6 +132,16 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
       .map((x) => ({ at: x.occurred_at, action: x.action, actor: x.actor_type === "user" ? (x.users?.display_name ?? x.users?.full_name ?? "A colleague") : "ASAP" }));
   }
 
+  // What was decided before: earlier periods of this client's cover of the same class, under RLS.
+  let memory: PastPeriod[] = [];
+  if (item.client_id && period) {
+    const m = await rows<{ period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null; policies: { policy_number: string | null; class_of_business: string; client_id: string; insurers: { name: string } | null } }[]>(gaps, "memory",
+      db.from("policy_periods").select("period_start, period_end, premium_amount, premium_currency, policies!inner(policy_number, class_of_business, client_id, deleted_at, insurers(name))")
+        .eq("organization_id", org).eq("policies.client_id", item.client_id).eq("policies.class_of_business", period.classOfBusiness).is("policies.deleted_at", null)
+        .lt("period_end", period.periodEnd).order("period_end", { ascending: false }).limit(5));
+    memory = (m ?? []).map((r) => ({ periodStart: r.period_start, periodEnd: r.period_end, insurer: r.policies.insurers?.name ?? "An insurer", policyNumber: r.policies.policy_number, premiumAmount: r.premium_amount != null ? String(r.premium_amount) : null, premiumCurrency: r.premium_currency }));
+  }
+
   const owner = ownerRow;
   return {
     item,
@@ -140,6 +154,7 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     placement,
     issuance,
     recent,
+    memory,
     unavailable: gaps,
     viewer: { canControlRun: hasPermission(env.ctx, "policy", "edit") },
   };
