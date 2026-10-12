@@ -3089,3 +3089,21 @@ absent. **Not built:** behavioural interface learning (re-ordering by what peopl
 - **Found while testing:** the shell header kept the previous record's title while a new composed
   surface loaded, which could also have recorded the new address in Recent under the old name; the
   title now resets whenever the open record changes.
+
+## D-168 — Final hardening of the Intelligent UI
+
+- **Accessibility across the whole authenticated shell** (`apps/web/e2e/shell-a11y.e2e.mjs`):
+  Home, the five Work views, Automations, Activity, Settings, Connections, a client Space, an
+  investigation, the portfolio, a conversation, Search, New and (on phones) More, at 1440 and
+  390 px — axe-core WCAG 2.1 A/AA with no serious or critical violation; keyboard focus visibly
+  drawn (on the control or its box: compared focused and unfocused, so a permanent shadow does not
+  count); no animation running under reduced motion. Fixed on the way: greys below 4.5:1 in the
+  shell and the Space renderers (now tokens), an `aria-label` on a role-less element, an unlabelled
+  file input, composer fields with no drawn focus.
+- **Bursts and volume** (`living-volume.test.ts`): ten concurrent proposal saves number 1–10 once
+  each; two simultaneous handovers — one applies, one is refused as stale; forty filed emails show
+  as eight; fifty concurrent reads compose identically; a client with 150 policies and 250 open
+  items composes within limits and under 1.5 s. Found: investigation counts taken from loaded rows
+  (now exact database counts, "at least" where only part was read) and period queries filtered
+  through an embedded policy join, seconds slow under RLS (now by policy id — also the renewal's
+  "This cover before").

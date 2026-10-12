@@ -130,6 +130,11 @@ export async function loadCollaboration(env: Env, gaps: Gap[], o: {
   const subjects = o.subjectIds.filter(Boolean);
   const runFilter = subjects.length ? `work_item_id.eq.${item.id},subject_id.in.(${subjects.join(",")})` : `work_item_id.eq.${item.id}`;
 
+  // Independent reads start together (D-168: a renewal's composition stays within its time budget).
+  const canManage = hasPermission(env.ctx, "job", "edit");
+  const membersP = canManage && item.task_status !== "done" ? loadMembers(env, gaps) : Promise.resolve([]);
+  const patternsP = o.waitingOn.length ? loadPatterns(env, gaps, o.waitingOn) : Promise.resolve([]);
+  const trailP = o.trailFor ? loadTrail(env, gaps, o.trailFor) : Promise.resolve(null);
   const [runs, handovers, related] = await Promise.all([
     read<{ id: string; workflow: string; current_step: string | null; facts: Record<string, unknown> }[]>(gaps, "Email filed to this work",
       db.from("workflow_runs").select("id, workflow, current_step, facts").eq("organization_id", org).or(runFilter).not("state", "in", "(done,cancelled)")),
@@ -141,7 +146,7 @@ export async function loadCollaboration(env: Env, gaps: Gap[], o: {
       : Promise.resolve([]),
   ]);
 
-  const arrivals = await arrivalsFrom(env, gaps, runs ?? []);
+  const arrivalsP = arrivalsFrom(env, gaps, runs ?? []);
 
   // Related work: same client; same policy is known from the claim, the change or the renewal's period.
   let relatedOut: Related[] = [];
@@ -162,22 +167,22 @@ export async function loadCollaboration(env: Env, gaps: Gap[], o: {
     })).sort((a, b) => Number(b.samePolicy) - Number(a.samePolicy)).slice(0, 8);
   }
 
-  // Handover candidates: active members whose role can hold work, other than the viewer.
-  const canManage = hasPermission(env.ctx, "job", "edit");
-  let members: { id: string; name: string }[] = [];
-  if (canManage && item.task_status !== "done") {
-    const [ms, rp] = await Promise.all([
-      read<{ user_id: string; role_id: string; users: { display_name: string | null; full_name: string | null } | null }[]>(gaps, "Colleagues", db.from("organization_memberships").select("user_id, role_id, users!organization_memberships_user_id_fkey(display_name, full_name)").eq("organization_id", org).eq("status", "active")),
-      read<{ role_id: string }[]>(gaps, "Colleagues", db.from("role_permissions").select("role_id, permissions!inner(object_type, verb)").eq("permissions.object_type", "job").eq("permissions.verb", "edit")),
-    ]);
-    const roles = new Set((rp ?? []).map((r) => r.role_id));
-    members = (ms ?? []).filter((m) => roles.has(m.role_id) && m.user_id !== env.userId).map((m) => ({ id: m.user_id, name: nameOf(m.users) })).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 40);
-  }
-
   const h = (handovers ?? [])[0];
   const handover: Handover | null = h ? { id: h.id, fromName: nameOf(h.from_user), toName: nameOf(h.to_user), toUserId: h.to_user_id, at: h.created_at, done: h.done_text, open: h.open_text, watch: h.watch_text, acknowledgedAt: h.acknowledged_at, earlier: (handovers ?? []).length - 1 } : null;
 
-  return { arrivals, handover, members, related: relatedOut, patterns: o.waitingOn.length ? await loadPatterns(env, gaps, o.waitingOn) : [], viewerId: env.userId, canManage, canRecordResponse: o.canRecordResponse, trail: o.trailFor ? await loadTrail(env, gaps, o.trailFor) : null, unavailable: gaps };
+  const [arrivals, members, patterns, trail] = await Promise.all([arrivalsP, membersP, patternsP, trailP]);
+  return { arrivals, handover, members, related: relatedOut, patterns, viewerId: env.userId, canManage, canRecordResponse: o.canRecordResponse, trail, unavailable: gaps };
+}
+
+/** Handover candidates: active members whose role can hold work, other than the viewer. */
+async function loadMembers(env: Env, gaps: Gap[]): Promise<{ id: string; name: string }[]> {
+  const { db, organizationId: org } = env;
+  const [ms, rp] = await Promise.all([
+    read<{ user_id: string; role_id: string; users: { display_name: string | null; full_name: string | null } | null }[]>(gaps, "Colleagues", db.from("organization_memberships").select("user_id, role_id, users!organization_memberships_user_id_fkey(display_name, full_name)").eq("organization_id", org).eq("status", "active")),
+    read<{ role_id: string }[]>(gaps, "Colleagues", db.from("role_permissions").select("role_id, permissions!inner(object_type, verb)").eq("permissions.object_type", "job").eq("permissions.verb", "edit")),
+  ]);
+  const roles = new Set((rp ?? []).map((r) => r.role_id));
+  return (ms ?? []).filter((m) => roles.has(m.role_id) && m.user_id !== env.userId).map((m) => ({ id: m.user_id, name: nameOf(m.users) })).sort((a, b) => a.name.localeCompare(b.name)).slice(0, 40);
 }
 
 /** Email filed on the step each run is on and not yet dealt with (D-144's own rule), with any reading (D-152). */

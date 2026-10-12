@@ -113,7 +113,7 @@ every control, and reduced motion is honoured.
 | M7 Reactive composition and continuity | **built** | Polling and refresh on focus; in-place reconciliation by stable id; Updated and New marks; pin, collapse and selections kept on the server; open forms keep their command and typed text; deep links, refresh, Back and Forward |
 | M8 Insurance-native intelligence | **built** | Time and cover, obligation, change and contradiction, communication and decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159); arrived email with proposed governed steps, structured handovers with acknowledgement, related work across a client's records, measured response patterns, and the last round's decisions with evidence (D-166). Behavioural interface learning is **not built** by design: patterns come only from recorded outcomes |
 | M9 Exploration and multi-context | **built** | Client decisions explored before they are made, from records, kept in the address (D-160); saved, versioned, hypothetical proposals (D-167); client investigations across every record on file (D-167); portfolio rows open their workspace |
-| M10 Hardening | **built** for Living surfaces | axe-core with zero serious or critical violations; keyboard focus rings; visual regression baselines at 1440 and 390 px; render and composition timing; security tests (tenant, role, tampered commands, markup as text). Shell screens outside Living surfaces are **not** axe-audited |
+| M10 Hardening | **built** | axe-core with zero serious or critical violations on every Living surface and across the whole authenticated shell, keyboard focus visibly drawn, reduced motion honoured (D-168); visual regression baselines at 1440 and 390 px; render and composition timing; burst and volume tests (D-168); security tests (tenant, role, tampered commands, direct database calls, unguarded routes, markup as text) |
 | Secondary workspaces | **built** except reconciliation | Claims and policy changes (D-161), the renewal portfolio (D-158) and client investigations (D-167). **Commission reconciliation is not built**: ASAP records no commission statements, receipts or premium payments to compose from, and the surface will not be built on fabricated records |
 | UI Lab | **built** (development only) | `apps/web/e2e/lab.html`, the composer's own output at every stage; never bundled |
 
@@ -135,7 +135,7 @@ every control, and reduced motion is honoured.
 | L Coverage verification | **built** | A request is never cover; no sentence decides cover on a claim (tested) |
 | M Mobile | **built** | 390 px in every Living browser suite, with no overflow and reachable scroll regions |
 | N Returning from history | **built** | Workspace, exploration and portfolio views are all in the address |
-| O Event burst | **partial** | Successive inbound answers reconcile without remount or lost text; not load-tested at volume |
+| O Event burst | **built** | Successive inbound answers reconcile without remount or lost text (browser); concurrent saves and handovers stay consistent, email bursts stay within block limits, concurrent reads compose identically, a 150-policy / 250-item client composes under 1.5 s (connected, D-168) |
 
 ## 6. Known limitations
 
@@ -143,6 +143,9 @@ every control, and reduced motion is honoured.
 - The portfolio's plain-language refinement is deterministic only; the workspace focus may use the model, but only when no rule matches.
 - Claim and endorsement mutations now require `claim:edit` / `policy:edit` in the database and the API (0085, D-164); the earlier membership-only gap is closed.
 - Demo mode has no server-composed surfaces.
+- Commission and premium reconciliation workspaces are not built: ASAP records no commission statements, receipts or payments to compose from (D-167).
+- The model-assisted workspace reading is evaluated offline by its rules; its live evaluation (`WORKSPACE_EVAL_LIVE=1`) needs a configured gateway and has not been run here.
+- Interface "learning" is limited to outcomes measured from records (response patterns) and each person's own arrangement; nothing re-orders itself from behaviour.
 - Visual baselines were generated in this environment. A different font rasteriser will need `UPDATE_BASELINES=1` after review.
 
 ## 7. Governed actions in the workspace (D-157, D-161)
@@ -174,18 +177,20 @@ How commands behave:
 - **Home (D-159):** semantic events since the start of this visit, from colleagues, insurers and ASAP. The viewer's own actions are left out and no figures are shown.
 - **Exploration (D-160):** up to three alternatives, from records, labelled hypothetical, kept in the address. It disappears once the client has instructed.
 
-## 9. Verification (latest full gate, on `cf8c85f` plus test fixes)
+## 9. Verification (full gate on the final commit of this round)
 
 | Check | Result |
 |---|---|
-| Typecheck, lint | clean |
-| Unit | api 910 (1 skipped) · web 182 · schema 118 · workers 25 (10 skipped) · db 3 |
+| Typecheck, lint, secret scan | clean |
+| Unit | api 934 (2 skipped) · web 191 · schema 118 · workers 25 (10 skipped) · db 3 |
 | Build | 6/6 packages; only `VITE_PUBLIC_*` reaches the browser; the UI Lab is not bundled |
-| Ask evaluation | 41 passed (1 skipped) |
-| Connected (real Postgres, PostgREST, RLS) | 211 passed |
-| pgTAP RLS | 1217 passed |
-| Browser | shell 36/36 · journey 32/32 · supervision 28/28 · onboarding 14/14 · acceptance 8/8 · quote-comparison 19/19 · staging-findings 7/7 · first-document 23/23 · living-lab 32/32 · living-actions 10/10 · living-portfolio 10/10 · living-servicing 4/4 · living-quality 16/16 |
+| Ask and workspace-request evaluations | 44 passed (2 skipped: live model runs, which need a configured gateway) |
+| Connected (real Postgres, PostgREST, RLS) | 252 passed, three consecutive runs |
+| pgTAP RLS | 1261 passed |
+| Browser | shell 36/36 · shell-a11y 36/36 · journey 32/32 · supervision 28/28 · onboarding 14/14 · acceptance 8/8 · staging-findings 7/7 · living-lab 36/36 · living-actions 11/11 · living-portfolio 10/10 · living-servicing 10/10 · living-quality 18/18 · first-document 23/23 · quote-comparison 19/19 |
 
-The first gate run failed four checks, all fixed: two connected expectations predating claims and
-the memory timeline, one shell step on changed wording, and quote-comparison run without the
-document extractor environment it requires (it passes with it).
+The first gate run of this round failed two connected checks, both fixed and re-run: renewal
+composition at p95 2.1 s under the full concurrent suite once the D-166 parts were added (their
+reads now run concurrently, back within 1.5 s), and a refresh-stability test that compared Related
+work, which other test files change concurrently. The earlier intermittent web unit test and the
+earlier intermittent `mailbox-delivery` count have not recurred in this round's runs.

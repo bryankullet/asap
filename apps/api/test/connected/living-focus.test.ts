@@ -132,6 +132,8 @@ describe("GET /living/:id with a focus", () => {
     const q = { focus: "obligations", fq: "who has it" };
     const a = await focused(AMINA, claimId, q);
     const b = await focused(AMINA, claimId, q);
-    expect(b.blocks.map((x) => [x.id, x.hash])).toEqual(a.blocks.map((x) => [x.id, x.hash]));
+    // Related work reads other work for the client, which other test files change concurrently.
+    const own = (x: typeof a) => x.blocks.filter((y) => y.id !== "related" && y.id !== "patterns").map((y) => [y.id, y.hash]);
+    expect(own(b)).toEqual(own(a));
   });
 });

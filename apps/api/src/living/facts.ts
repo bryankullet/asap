@@ -136,19 +136,20 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     }
   }
 
-  // What changed recently on this work, where the viewer may read the audit history.
-  let recent: AuditEvent[] = [];
-  if (hasPermission(env.ctx, "audit", "view")) {
+  // The remaining parts are independent of each other and read together (D-168).
+  const recentP = (async (): Promise<AuditEvent[]> => {
+    // What changed recently on this work, where the viewer may read the audit history.
+    if (!hasPermission(env.ctx, "audit", "view")) return [];
     const ids = [item.id, opportunityId, placement?.placement.id].filter((x): x is string => !!x);
     const a = await rows<unknown[]>(gaps, "history", db.from("audit_log").select("occurred_at, action, actor_type, actor_user_id, users(display_name, full_name)").eq("organization_id", org).in("object_id", ids).order("occurred_at", { ascending: false }).limit(12));
-    recent = ((a ?? []) as unknown as { occurred_at: string; action: string; actor_type: string; users: { display_name: string | null; full_name: string | null } | null }[])
+    return ((a ?? []) as unknown as { occurred_at: string; action: string; actor_type: string; users: { display_name: string | null; full_name: string | null } | null }[])
       .filter((x) => !/^(conversation|work_item\.step_by_run)/.test(x.action))
       .map((x) => ({ at: x.occurred_at, action: x.action, actor: x.actor_type === "user" ? (x.users?.display_name ?? x.users?.full_name ?? "A colleague") : "ASAP" }));
-  }
+  })();
 
-  // What was decided before: earlier periods of this client's cover of the same class, under RLS.
-  let memory: PastPeriod[] = [];
-  if (item.client_id && period) {
+  const memoryP = (async (): Promise<PastPeriod[]> => {
+    // What was decided before: earlier periods of this client's cover of the same class, under RLS.
+    if (!item.client_id || !period) return [];
     // The client's policies of this class first, then their periods by id: an embedded-join filter
     // is evaluated row by row under RLS across the whole brokerage (D-168).
     const pols = await rows<{ id: string; policy_number: string | null; insurers: { name: string } | null }[]>(gaps, "memory",
@@ -158,29 +159,37 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
       ? await rows<{ policy_id: string; period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null }[]>(gaps, "memory",
           db.from("policy_periods").select("policy_id, period_start, period_end, premium_amount, premium_currency").eq("organization_id", org).in("policy_id", ids).lt("period_end", period.periodEnd).order("period_end", { ascending: false }).limit(5))
       : [];
-    const m = (raw ?? []).map((r) => { const p = pols!.find((x) => x.id === r.policy_id)!; return { ...r, policies: { policy_number: p.policy_number, insurers: p.insurers } }; });
-    memory = (m ?? []).map((r) => ({ periodStart: r.period_start, periodEnd: r.period_end, insurer: r.policies.insurers?.name ?? "An insurer", policyNumber: r.policies.policy_number, premiumAmount: r.premium_amount != null ? String(r.premium_amount) : null, premiumCurrency: r.premium_currency }));
-  }
+    return (raw ?? []).map((r) => {
+      const p = pols!.find((x) => x.id === r.policy_id)!;
+      return { periodStart: r.period_start, periodEnd: r.period_end, insurer: p.insurers?.name ?? "An insurer", policyNumber: p.policy_number, premiumAmount: r.premium_amount != null ? String(r.premium_amount) : null, premiumCurrency: r.premium_currency };
+    });
+  })();
 
   const waitingOn = (opportunity?.insurers ?? []).filter((i) => !i.removedAt && i.request && (i.request.sentAt || i.request.delivery) && !i.response).map((i) => i.insurerName);
-  const collab = await loadCollaboration(env, [], { item, subjectIds: [opportunityId ?? "", placement?.placement.id ?? ""], policyId, waitingOn, canRecordResponse: Boolean(opportunity?.permissions.canRecordResponse),
+  const collabP = loadCollaboration(env, [], { item, subjectIds: [opportunityId ?? "", placement?.placement.id ?? ""], policyId, waitingOn, canRecordResponse: Boolean(opportunity?.permissions.canRecordResponse),
     trailFor: item.client_id && period ? { clientId: item.client_id, classOfBusiness: period.classOfBusiness, excludeOpportunityId: opportunityId } : null });
 
-  // Stage nine: the following period on the same policy, and when its renewal would open.
-  let renewed: RenewalLivingFacts["renewed"] = null;
-  if (policyId && period) {
-    const r = await rows<{ period_start: string; period_end: string; policies: { insurers: { name: string } | null } | null }[]>(gaps, "period",
-      db.from("policy_periods").select("period_start, period_end, policies(insurers(name))").eq("organization_id", org).eq("policy_id", policyId).gt("period_start", period.periodStart).order("period_start").limit(1));
+  type Renewed = { periodStart: string; periodEnd: string; insurerName: string };
+  const renewedP = (async (): Promise<{ renewed: Renewed | null; win: { leadDays: number; basis: string } | null }> => {
+    // Stage nine: the following period on the same policy, and when its renewal would open.
+    if (!policyId || !period) return { renewed: null, win: null };
+    const [r, w] = await Promise.all([
+      rows<{ period_start: string; period_end: string; policies: { insurers: { name: string } | null } | null }[]>(gaps, "period",
+        db.from("policy_periods").select("period_start, period_end, policies(insurers(name))").eq("organization_id", org).eq("policy_id", policyId).gt("period_start", period.periodStart).order("period_start").limit(1)),
+      renewalWindow(db, org).catch(() => null),
+    ]);
     const n = r?.[0];
-    if (n) renewed = { periodStart: n.period_start, periodEnd: n.period_end, insurerName: n.policies?.insurers?.name ?? period.insurerName };
-  }
-  const win = renewed ? await renewalWindow(db, org).catch(() => null) : null;
+    return { renewed: n ? { periodStart: n.period_start, periodEnd: n.period_end, insurerName: n.policies?.insurers?.name ?? period.insurerName } : null, win: n && w ? { leadDays: w.leadDays, basis: w.basis } : null };
+  })();
 
-  const proposalRows = opportunityId
-    ? await rows<{ version: number; created_at: string; note: string | null; opportunity_insurer_ids: string[]; revisions: Record<string, number | null>; users: { display_name: string | null; full_name: string | null } | null }[]>(gaps, "proposals",
-        db.from("renewal_proposals").select("version, created_at, note, opportunity_insurer_ids, revisions, users!renewal_proposals_created_by_fkey(display_name, full_name)").eq("organization_id", org).eq("work_item_id", item.id).order("version", { ascending: false }).limit(12))
-    : [];
-  const proposals = (proposalRows ?? []).map((p) => ({ version: p.version, savedAt: p.created_at, by: p.users?.display_name ?? p.users?.full_name ?? null, note: p.note, opportunityInsurerIds: p.opportunity_insurer_ids, revisions: p.revisions }));
+  const proposalsP = (async () => {
+    if (!opportunityId) return [];
+    const rowsP = await rows<{ version: number; created_at: string; note: string | null; opportunity_insurer_ids: string[]; revisions: Record<string, number | null>; users: { display_name: string | null; full_name: string | null } | null }[]>(gaps, "proposals",
+      db.from("renewal_proposals").select("version, created_at, note, opportunity_insurer_ids, revisions, users!renewal_proposals_created_by_fkey(display_name, full_name)").eq("organization_id", org).eq("work_item_id", item.id).order("version", { ascending: false }).limit(12));
+    return (rowsP ?? []).map((p) => ({ version: p.version, savedAt: p.created_at, by: p.users?.display_name ?? p.users?.full_name ?? null, note: p.note, opportunityInsurerIds: p.opportunity_insurer_ids, revisions: p.revisions }));
+  })();
+
+  const [recent, memory, collab, { renewed, win }, proposals] = await Promise.all([recentP, memoryP, collabP, renewedP, proposalsP]);
 
   const owner = ownerRow;
   return {
@@ -201,6 +210,6 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     renewed,
     proposals,
     canPropose: hasPermission(env.ctx, "job", "edit"),
-    window: win ? { leadDays: win.leadDays, basis: win.basis } : null,
+    window: win,
   };
 }
