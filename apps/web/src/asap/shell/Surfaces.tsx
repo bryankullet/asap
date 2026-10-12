@@ -1,4 +1,5 @@
-import { useRef, useState, type DragEvent } from "react";
+import type { HomeChangesResponse } from "@asap/schema";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { activityLog, automationsBoard, homeSurface, workInbox } from "../surfaces.js";
 import type { Ref } from "./routes.js";
 import { KIND_ICON, type Logic, type RecentItem, type ShellAdapters } from "./types.js";
@@ -144,6 +145,7 @@ export function HomeSurface({ logic, A, recent, onOpenRecent, onOpen, onAsk, onF
             )}
             {data.more ? <button type="button" className="sh-link" onClick={() => onOpen({ ws: "work" })}>{data.more} more in Work →</button> : null}
           </section>
+          {A?.homeChanges ? <HomeChanges load={A.homeChanges} onOpen={onOpen} /> : null}
           <section className="sh-card" aria-labelledby="h-handling">
             <h2 id="h-handling">ASAP is handling</h2>
             {data.handling.length === 0 ? (
@@ -307,5 +309,55 @@ export function ActivitySurface({ logic, filter, onFilter, onOpen }: { logic: Lo
         </ol>
       )}
     </div>
+  );
+}
+
+const CHANGE_POLL_MS = 60_000;
+/**
+ * What changed since you last looked (D-159): insurer answers, instructions, cover, issuance, claims
+ * and stopped work, from the brokerage's semantic events. Each line says what happened and opens
+ * the work; no figure is shown here. Re-read every minute and when the window regains focus, so
+ * Home follows the brokerage without a reload. A person's own actions are not listed.
+ */
+function HomeChanges({ load, onOpen }: { load: () => Promise<HomeChangesResponse>; onOpen: Open }) {
+  const [data, setData] = useState<HomeChangesResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    let live = true;
+    const read = () => loadRef.current().then((d) => { if (live) { setData(d); setFailed(false); } }, () => live && setFailed(true));
+    void read();
+    const t = setInterval(() => { if (document.visibilityState === "visible") void read(); }, CHANGE_POLL_MS);
+    const onFocus = () => void read();
+    window.addEventListener("focus", onFocus);
+    return () => { live = false; clearInterval(t); window.removeEventListener("focus", onFocus); };
+  }, []);
+  const since = data ? new Date(data.since) : null;
+  return (
+    <section className="sh-card sh-changes" aria-labelledby="h-changes">
+      <div className="sh-card-head">
+        <h2 id="h-changes">What changed</h2>
+        {since ? <small>since {since.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small> : null}
+      </div>
+      {failed && !data ? <p className="sh-empty">What changed could not be read just now. It will be tried again.</p>
+        : !data ? <p className="sh-empty" aria-busy="true">Reading what changed…</p>
+        : data.changes.length === 0 ? <p className="sh-empty">Nothing new from colleagues, insurers or ASAP since you last looked.</p>
+        : (
+          <ul className="sh-list">
+            {data.changes.map((c) => (
+              <li key={c.key} className="sh-row sh-row-compact">
+                <span className={`sh-dot sh-${c.tone}`} aria-hidden />
+                <div className="sh-row-main">
+                  <strong>{c.text}{c.count > 1 ? ` · ${c.count} times` : ""}</strong>
+                  <p>{[c.subject, c.actor, new Date(c.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })].filter(Boolean).join(" · ")}</p>
+                </div>
+                {c.ref ? <button type="button" onClick={() => onOpen(c.ref as Ref)}>Open</button> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      {data?.more ? <p className="sh-empty">{data.more} more changes are not listed.</p> : null}
+    </section>
   );
 }

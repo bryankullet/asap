@@ -230,3 +230,11 @@
 .lv-compare-card dl div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
 .lv-compare-card dt { color: var(--color-ink-muted); } .lv-compare-card dd { margin: 0; font-weight: 600; text-align: right; }
 @media (max-width: 700px) { .lv-refine { border-radius: var(--radius-panel); flex-wrap: wrap; padding: 10px 12px; } .lv-refine input { flex-basis: 100%; } .lv-group-totals { margin-left: 0; flex-basis: 100%; } }
+
+/* selection continuity (D-157) */
+.lv-focus-btn { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit; cursor: pointer; border-bottom: 1px dashed var(--color-line-strong); }
+.lv-focus-btn[aria-pressed="true"] { color: var(--color-accent-green); border-bottom-color: currentColor; }
+.lv-focus-btn:focus-visible { outline: 2px solid var(--color-accent-green); outline-offset: 2px; border-radius: 4px; }
+.lv-table th.lv-focus, .lv-table td.lv-focus { background: var(--color-accent-green-tint); }
+.lv-table thead th.lv-focus { box-shadow: inset 0 3px 0 var(--color-accent-green); }
+.sh-changes small { color: var(--color-ink-muted); font-size: 12px; }

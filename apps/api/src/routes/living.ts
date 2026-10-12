@@ -1,4 +1,4 @@
-import { livingSurfaceSchema, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
+import { homeChangesResponseSchema, livingSurfaceSchema, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Logger } from "pino";
@@ -6,6 +6,7 @@ import { recordAudit } from "../audit.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { loadRenewalLivingFacts } from "../living/facts.js";
+import { homeChanges } from "../living/home.js";
 import { defaultQuery, interpret } from "../living/interpret.js";
 import { composePortfolio, loadPortfolio, loadVocabulary } from "../living/portfolio.js";
 import { composeRenewalSurface } from "../living/renewal.js";
@@ -79,6 +80,15 @@ export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean }) {
       throw new HttpError(422, "surface_invalid", "This view could not be composed");
     }
     return c.json(portfolioResponseSchema.parse({ surface: result.surface, interpretation }));
+  });
+
+  /** `GET /home/changes` — what changed since this person last looked (D-159). */
+  app.get("/home/changes", async (c) => {
+    const { db, user } = c.get("auth");
+    const ctx = await resolveContext(db, user.id);
+    const org = requireActiveOrganization(ctx);
+    const env: Env = { db, ctx, organizationId: org.id, userId: user.id, audit: (entry) => recordAudit(db, deps.logger, c, { ...entry, organizationId: org.id, actorUserId: user.id }) };
+    return c.json(homeChangesResponseSchema.parse(await homeChanges(env, new Date())));
   });
 
   /*

@@ -207,6 +207,7 @@ export function createApp(deps: AppDeps) {
     "/spaces/*",
     "/living/*",
     "/surface-preferences/*",
+    "/home/changes",
     "/work",
     "/work-items",
     "/work-items/*",

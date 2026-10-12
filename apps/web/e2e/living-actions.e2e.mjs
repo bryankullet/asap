@@ -26,6 +26,7 @@ const jwt = (c) => {
   return `${h}.${b}.${createHmac("sha256", process.env.CONNECTED_JWT_SECRET).update(`${h}.${b}`).digest("base64url")}`;
 };
 const AMINA = jwt({ sub: "a0000000-0000-4000-8000-000000000001", email: "amina@connected.test", role: "authenticated", aud: "authenticated" });
+const KAMAU = jwt({ sub: "a0000000-0000-4000-8000-000000000002", email: "kamau@connected.test", role: "authenticated", aud: "authenticated" });
 const ORG_A = "10000000-0000-4000-8000-00000000000a";
 const ACME = "70000000-0000-4000-8000-00000000000a";
 const JUBILEE = "60000000-0000-4000-8000-00000000000a";
@@ -33,8 +34,8 @@ const TAG = Date.now().toString(36).slice(-5).toUpperCase();
 const DAY = 86_400_000;
 const iso = (d) => d.toISOString().slice(0, 10);
 const sql = (q) => execFileSync("psql", [DB, "-X", "-q", "-t", "-A", "-v", "ON_ERROR_STOP=1", "-c", q], { encoding: "utf8" }).trim();
-const api = async (method, path, body) => {
-  const res = await fetch(API + path, { method, headers: { Authorization: `Bearer ${AMINA}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+const api = async (method, path, body, token = AMINA) => {
+  const res = await fetch(API + path, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const json = await res.json().catch(() => ({}));
   if (res.status >= 400) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(json).slice(0, 300)}`);
   return json;
@@ -127,7 +128,7 @@ await step(page, "run-controls-in-place", async () => {
 });
 
 await step(page, "inbound-response-reconciles-in-place", async () => {
-  await api("POST", `/opportunities/${out.opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jubilee.id, outcome: "quoted", premiumAmount: "2510000", premiumCurrency: "KES", validUntil: iso(new Date(Date.now() + 30 * DAY)), sourceNote: `Jubilee email ${TAG}` });
+  await api("POST", `/opportunities/${out.opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jubilee.id, outcome: "quoted", premiumAmount: "2510000", premiumCurrency: "KES", validUntil: iso(new Date(Date.now() + 30 * DAY)), sourceNote: `Jubilee email ${TAG}` }, KAMAU);
   await focusRefresh(page);
   const quotes = page.locator('[data-component="QuoteComparison"]');
   await quotes.waitFor({ timeout: 10000 });
@@ -135,22 +136,48 @@ await step(page, "inbound-response-reconciles-in-place", async () => {
   must(await page.locator('[data-component="ContextHeader"][data-e2e-mark="kept"]').count(), "the workspace remounted instead of reconciling");
   must((await page.locator('[data-block="obligations"] textarea').inputValue()).includes(`Client wants terms this week ${TAG}`), "the unsent escalation text was lost");
   must((await page.locator(".lv-marked").count()) > 0, "nothing was marked as changed");
+  // The broker keeps Jubilee in focus and opens the sources behind the comparison.
+  await quotes.locator(".lv-focus-btn", { hasText: "Jubilee" }).click();
+  await quotes.locator(".lv-sources summary").click();
+  await page.waitForTimeout(500);
 });
 
 await step(page, "revision-shown-beside-earlier", async () => {
-  await api("POST", `/opportunities/${out.opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jubilee.id, outcome: "quoted", premiumAmount: "2650000", premiumCurrency: "KES", validUntil: iso(new Date(Date.now() + 30 * DAY)), sourceNote: `Jubilee revised email ${TAG}` });
+  await api("POST", `/opportunities/${out.opportunityId}/actions`, { action: "record_response", opportunityInsurerId: jubilee.id, outcome: "quoted", premiumAmount: "2650000", premiumCurrency: "KES", validUntil: iso(new Date(Date.now() + 30 * DAY)), sourceNote: `Jubilee revised email ${TAG}` }, KAMAU);
   await focusRefresh(page);
   const change = page.locator('[data-component="ChangeComparison"]');
   await change.waitFor({ timeout: 10000 });
   const t = await change.innerText();
   must(t.includes("2,510,000.00") && t.includes("2,650,000.00"), `earlier and revised premiums are not side by side: ${t.slice(0, 200)}`);
   must((await page.locator('[data-block="obligations"] textarea').inputValue()).includes(TAG), "the unsent text was lost on the second update");
+  must(await page.locator('[data-block="obligations"] .lv-command').getByText("Why it is escalated").count(), "the open form is no longer the escalation it was opened for");
+  must(await page.locator('[data-component="QuoteComparison"] .lv-focus-btn[aria-pressed="true"]', { hasText: "Jubilee" }).count(), "the focused insurer was lost on the update");
+  must(await page.locator('[data-component="QuoteComparison"] .lv-sources[open]').count(), "the open sources closed on the update");
 });
 
 await step(page, "escalate-through-surface", async () => {
   await page.locator('[data-block="obligations"] .lv-command').getByRole("button", { name: "Escalate" }).click();
   await page.locator('[data-block="obligations"]').getByText("Done.").waitFor({ timeout: 10000 });
   must(sql(`select coalesce(facts->'escalated'->>'reason', '') from workflow_runs where id = '${run.id}'`).includes(TAG), "the escalation was not recorded on the run");
+});
+await step(page, "home-says-what-a-colleague-did", async () => {
+  await page.goto(BASE + "#/");
+  const changes = page.locator(".sh-changes");
+  await changes.waitFor({ timeout: 15000 });
+  await changes.getByText("An insurer's answer was recorded").first().waitFor({ timeout: 15000 });
+  const t = await changes.innerText();
+  must(!/2,510,000|2,650,000/.test(t), "Home showed a figure instead of opening the record");
+  await changes.locator(".sh-row", { hasText: "An insurer's answer was recorded" }).first().getByRole("button", { name: "Open" }).click();
+  await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 15000 });
+  must(new URL(page.url()).hash.includes(workItemId), "the change did not open its renewal");
+});
+await step(page, "selection-restored-on-return", async () => {
+  await page.locator('[data-component="QuoteComparison"]').waitFor({ timeout: 15000 });
+  await page.waitForTimeout(800);
+  must(await page.locator('[data-component="QuoteComparison"] .lv-focus-btn[aria-pressed="true"]', { hasText: "Jubilee" }).count(), "the focused insurer was not restored after leaving and returning");
+  must(await page.locator('[data-component="QuoteComparison"] .lv-sources[open]').count(), "the open sources were not restored");
+  await page.reload();
+  await page.locator('[data-component="QuoteComparison"] .lv-focus-btn[aria-pressed="true"]').waitFor({ timeout: 15000 });
 });
 await page.context().close();
 

@@ -845,7 +845,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "3a93bb496da3e2f6",
+   "fingerprint": "9a3c5b98cbbaffd1",
    "blocks": [
     {
      "id": "header",
@@ -956,11 +956,11 @@
         "state": "next"
        }
       ],
-      "summary": "Awaiting insurer terms. Pack sent"
+      "summary": "CIC has answered. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "3c2555a85bda9c63"
+     "hash": "6c09242dd8b143d3"
     },
     {
      "id": "changes",

@@ -152,6 +152,8 @@ describe("governed commands (D-157)", () => {
     expect(obligations(f).some((o) => o.party === "CIC" && o.kind === "outside")).toBe(false);
     const ob = composeRenewalSurface(f, { now: NOW, aiAvailable: false }).blocks.find((x) => x.id === "obligations")!;
     expect(ob.actions.some((a) => a.kind === "command" && a.command === "run.follow_up_now")).toBe(false);
+    const journey = composeRenewalSurface(f, { now: NOW, aiAvailable: false }).blocks.find((x) => x.id === "journey")!.props as { summary: string };
+    expect(journey.summary).not.toMatch(/^Awaiting insurer terms/);
   });
   it("rejects a surface whose command carries a field the command does not take, or a different action", () => {
     const s = composeRenewalSurface(approving(), { now: NOW, aiAvailable: false });

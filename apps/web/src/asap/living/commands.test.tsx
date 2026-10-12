@@ -65,4 +65,22 @@ describe("governed commands", () => {
     expect(screen.queryByText("Done.")).toBeNull();
     expect(refresh).not.toHaveBeenCalled();
   });
+  it("keeps an open form on its own command when commands are reordered, and closes it if the command leaves", async () => {
+    const { BlockActions } = await import("./blocks.js");
+    const env = { open: () => {}, ask: () => {}, refresh: () => {} };
+    const follow: LivingBlock["actions"][number] = { kind: "command", label: "Follow up now", command: "run.follow_up_now", target: ID, tone: "default", payload: {}, inputs: [], confirm: null };
+    const escalate: LivingBlock["actions"][number] = { kind: "command", label: "Escalate", command: "run.escalate", target: ID, tone: "default", payload: {}, inputs: [{ name: "reason", label: "Why it is escalated", kind: "textarea", required: true, options: [], hint: null }], confirm: null };
+    const pause: LivingBlock["actions"][number] = { kind: "command", label: "Pause ASAP", command: "run.pause", target: ID, tone: "default", payload: {}, inputs: [{ name: "reason", label: "Why (optional)", kind: "textarea", required: false, options: [], hint: null }], confirm: null };
+    const view = render(<BlockActions actions={[follow, escalate, pause]} env={env} />);
+    fireEvent.click(screen.getByRole("button", { name: "Escalate" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Client wants terms this week" } });
+    // The run moved on: "Follow up now" is no longer offered, so the other commands move up.
+    view.rerender(<BlockActions actions={[escalate, pause]} env={env} />);
+    expect(screen.getByText("Why it is escalated")).toBeTruthy();
+    expect(screen.queryByText("Why (optional)")).toBeNull();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Client wants terms this week");
+    view.rerender(<BlockActions actions={[pause]} env={env} />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByText(/“Escalate” is no longer offered here/)).toBeTruthy();
+  });
 });

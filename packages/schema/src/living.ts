@@ -438,7 +438,27 @@ export const surfacePreferencesSchema = z.strictObject({
   selection: z.record(blockId, z.string().max(200)).default({}),
   /** When this person last looked at the surface, so Home can say what changed since. */
   lastSeenAt: z.string().max(40).nullable().default(null),
+  /** The start of "since you last looked" for the current visit, kept stable while it lasts. */
+  previousSeenAt: z.string().max(40).nullable().default(null),
 });
 export type SurfacePreferences = z.infer<typeof surfacePreferencesSchema>;
 export const surfacePreferencesResponseSchema = z.strictObject({ surfaceKey: surfaceKeySchema, prefs: surfacePreferencesSchema, updatedAt: z.string().nullable() });
 export type SurfacePreferencesResponse = z.infer<typeof surfacePreferencesResponseSchema>;
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Home: what changed since this person last looked (D-159). From semantic events, never a value. */
+export const homeChangeSchema = z.strictObject({
+  key: z.string().max(200),
+  at: z.string(),
+  /** green: progress · gold: something to look at · red: ASAP stopped or a check is overdue */
+  tone,
+  text: line,
+  /** The work it happened to, as titled on its record. */
+  subject: z.string().max(200).nullable(),
+  actor: z.string().max(200).nullable(),
+  /** Repeated events on the same work are one line. */
+  count: z.number().int().min(1),
+  ref: livingRefSchema.nullable(),
+});
+export const homeChangesResponseSchema = z.strictObject({ since: z.string(), changes: z.array(homeChangeSchema).max(20), more: z.number().int().min(0) });
+export type HomeChangesResponse = z.infer<typeof homeChangesResponseSchema>;

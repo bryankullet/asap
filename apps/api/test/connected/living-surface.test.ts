@@ -3,7 +3,7 @@
  * and the registry rows migration 0079 seeded. A renewal is detected by the real sweep; the surface
  * is then read by people in each brokerage and role.
  */
-import { livingSurfaceSchema, portfolioResponseSchema } from "@asap/schema";
+import { homeChangesResponseSchema, livingSurfaceSchema, portfolioResponseSchema } from "@asap/schema";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -187,6 +187,32 @@ describe("the renewal portfolio (D-158)", () => {
   });
   it("refuses a malformed query rather than guessing one", async () => {
     expect((await call(AMINA, "POST", "/living/portfolio", { query: { subject: "claims" }, text: null })).status).toBe(400);
+  });
+});
+
+describe("Home: what changed since you last looked (D-159)", () => {
+  it("tells a person what a colleague did on their work, links it, and keeps the visit's starting point", async () => {
+    const first = homeChangesResponseSchema.parse((await call(AMINA, "GET", "/home/changes")).body);
+    // A colleague delivers the approved insurer request and records it, through the quotation workflow.
+    const [q] = await sql<{ id: string; opportunity_id: string }[]>`select qr.id, oi.opportunity_id from quote_requests qr
+      join opportunity_insurers oi on oi.id = qr.opportunity_insurer_id join opportunities o on o.id = oi.opportunity_id
+      where o.work_item_id = ${workItemId} and qr.approved_at is not null limit 1`;
+    expect(q, "the approved renewal has an approved insurer request").toBeTruthy();
+    const r = await call(KAMAU, "POST", `/opportunities/${q!.opportunity_id}/actions`, { action: "record_delivery", quoteRequestId: q!.id, method: "portal", reference: `Portal ref ${TAG}` });
+    expect(r.status).toBe(200);
+    const after = homeChangesResponseSchema.parse((await call(AMINA, "GET", "/home/changes")).body);
+    expect(after.since).toBe(first.since);
+    const line = after.changes.find((c) => c.text === "A request was delivered to an insurer" && c.ref?.["workItemId"] === workItemId);
+    expect(line, JSON.stringify(after.changes)).toBeTruthy();
+    expect(line!.ref).toEqual({ ws: "living", workItemId });
+    expect(line!.actor).toBeTruthy();
+    expect(JSON.stringify(line)).not.toMatch(/Portal ref/);
+  });
+  it("does not tell a person about their own action, and never another brokerage's", async () => {
+    const mine = homeChangesResponseSchema.parse((await call(KAMAU, "GET", "/home/changes")).body);
+    expect(mine.changes.some((c) => c.text === "A request was delivered to an insurer" && c.ref?.["workItemId"] === workItemId)).toBe(false);
+    const other = homeChangesResponseSchema.parse((await call(BETA, "GET", "/home/changes")).body);
+    expect(other.changes.some((c) => c.ref?.["workItemId"] === workItemId)).toBe(false);
   });
 });
 

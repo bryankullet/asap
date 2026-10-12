@@ -40,6 +40,9 @@ export type BlockEnv = {
   /** On a surface a person can refine (D-158): a request in words, or removing one part of the view. */
   refine?: (text: string) => void;
   removeChip?: (field: string) => void;
+  /** The person's choices inside blocks, kept with their arrangement (D-157): they survive updates. */
+  selection?: Record<string, string>;
+  select?: (key: string, value: string | null) => void;
 };
 type P<S extends z.ZodTypeAny> = { props: z.infer<S>; block: LivingBlock; env: BlockEnv };
 
@@ -193,21 +196,33 @@ function CoverageEffectiveState({ props }: P<typeof coverageEffectiveStateProps>
   );
 }
 
-function QuoteComparison({ props }: P<typeof quoteComparisonProps>) {
+function QuoteComparison({ props, block, env }: P<typeof quoteComparisonProps>) {
   const labels = [...new Set(props.insurers.flatMap((i) => i.terms.map((t) => t.label)))].slice(0, 12);
+  // The insurer a person is looking at stays in focus through updates and visits — a reading aid,
+  // never a recommendation: ASAP does not pick a quote.
+  const focus = env.selection?.[block.id] ?? null;
+  const cls = (name: string) => (focus === name ? "lv-focus" : undefined);
   return (
     <div className="lv-quotes">
       <div className="lv-table-wrap">
         <table className="lv-table">
           <thead>
-            <tr><th scope="col"><span className="lv-sr">Term</span></th>{props.insurers.map((i) => <th key={i.name} scope="col">{i.name}<small>{i.stage}</small></th>)}</tr>
+            <tr>
+              <th scope="col"><span className="lv-sr">Term</span></th>
+              {props.insurers.map((i) => (
+                <th key={i.name} scope="col" className={cls(i.name)}>
+                  {env.select ? <button type="button" className="lv-focus-btn" aria-pressed={focus === i.name} onClick={() => env.select!(block.id, focus === i.name ? null : i.name)} title={focus === i.name ? "Stop focusing this insurer" : "Keep this insurer in focus"}>{i.name}</button> : i.name}
+                  <small>{i.stage}</small>
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
-            <tr><th scope="row">Premium</th>{props.insurers.map((i) => <td key={i.name} className="lv-num">{i.premium ?? (i.declineReason ? <span className="lv-missing">Declined</span> : <span className="lv-missing">Awaited</span>)}</td>)}</tr>
-            <tr><th scope="row">Valid until</th>{props.insurers.map((i) => <td key={i.name}>{day(i.validUntil) ?? "—"}</td>)}</tr>
-            <tr><th scope="row">Revision</th>{props.insurers.map((i) => <td key={i.name}>{i.revision && i.revision > 1 ? <span className="lv-chip lv-gold">Revised · {i.revision}</span> : i.revision ? "Original" : "—"}</td>)}</tr>
+            <tr><th scope="row">Premium</th>{props.insurers.map((i) => <td key={i.name} className={`lv-num ${cls(i.name) ?? ""}`}>{i.premium ?? (i.declineReason ? <span className="lv-missing">Declined</span> : <span className="lv-missing">Awaited</span>)}</td>)}</tr>
+            <tr><th scope="row">Valid until</th>{props.insurers.map((i) => <td key={i.name} className={cls(i.name)}>{day(i.validUntil) ?? "—"}</td>)}</tr>
+            <tr><th scope="row">Revision</th>{props.insurers.map((i) => <td key={i.name} className={cls(i.name)}>{i.revision && i.revision > 1 ? <span className="lv-chip lv-gold">Revised · {i.revision}</span> : i.revision ? "Original" : "—"}</td>)}</tr>
             {labels.map((l) => (
-              <tr key={l}><th scope="row">{l}</th>{props.insurers.map((i) => { const t = i.terms.find((x) => x.label === l); return <td key={i.name}>{t ? <>{t.value ?? "—"}{t.unclear ? <span className="lv-chip lv-gold" title="ASAP could not read this clearly">Check</span> : null}</> : <span className="lv-missing">Not stated</span>}</td>; })}</tr>
+              <tr key={l}><th scope="row">{l}</th>{props.insurers.map((i) => { const t = i.terms.find((x) => x.label === l); return <td key={i.name} className={cls(i.name)}>{t ? <>{t.value ?? "—"}{t.unclear ? <span className="lv-chip lv-gold" title="ASAP could not read this clearly">Check</span> : null}</> : <span className="lv-missing">Not stated</span>}</td>; })}</tr>
             ))}
             {props.insurers.some((i) => i.declineReason) ? <tr><th scope="row">Declined because</th>{props.insurers.map((i) => <td key={i.name}>{i.declineReason ?? ""}</td>)}</tr> : null}
           </tbody>
@@ -386,16 +401,33 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   PortfolioGroups,
 };
 
+/**
+ * An open command form is tied to the command it was opened for — its name, target and fixed
+ * fields — never to a position. When an update reorders or removes commands, the form stays with
+ * its own command, or closes saying so; it can never quietly become a different command holding
+ * what the person typed for the first.
+ */
+const commandKey = (a: CommandAction) => `${a.command}:${a.target}:${JSON.stringify(a.payload)}`;
+
 export function BlockActions({ actions, env }: { actions: LivingAction[]; env: BlockEnv }) {
-  const [openCommand, setOpenCommand] = useState<number | null>(null);
-  if (!actions.length) return null;
-  const active = openCommand !== null ? actions[openCommand] : null;
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [gone, setGone] = useState<string | null>(null);
+  const active = openKey ? actions.find((a): a is CommandAction => a.kind === "command" && commandKey(a) === openKey) ?? null : null;
+  const lastLabel = useRef<string | null>(null);
+  if (active) lastLabel.current = active.label;
+  if (openKey && !active) {
+    // The command left the surface (the record moved on): close, and say what happened.
+    setOpenKey(null);
+    setGone(lastLabel.current);
+  }
+  if (!actions.length && !gone) return null;
   return (
     <>
+      {gone ? <p className="lv-command-error" role="status">“{gone}” is no longer offered here — the record moved on. Nothing was done.</p> : null}
       <div className="lv-actions">
         {actions.map((a, i) =>
           a.kind === "command" ? (
-            <button key={i} type="button" className={a.tone === "primary" ? "lv-btn lv-btn-primary" : a.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn"} aria-expanded={openCommand === i} onClick={() => setOpenCommand(openCommand === i ? null : i)}>
+            <button key={commandKey(a)} type="button" className={a.tone === "primary" ? "lv-btn lv-btn-primary" : a.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn"} aria-expanded={openKey === commandKey(a)} onClick={() => { setGone(null); setOpenKey(openKey === commandKey(a) ? null : commandKey(a)); }}>
               {a.label}
             </button>
           ) : (
@@ -405,7 +437,7 @@ export function BlockActions({ actions, env }: { actions: LivingAction[]; env: B
           ),
         )}
       </div>
-      {active && active.kind === "command" ? <CommandForm key={openCommand} action={active} env={env} onClose={() => setOpenCommand(null)} /> : null}
+      {active ? <CommandForm key={openKey} action={active} env={env} onClose={() => setOpenKey(null)} /> : null}
     </>
   );
 }

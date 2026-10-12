@@ -2903,3 +2903,19 @@ fake values and without a parallel system.
 - The renewal premium is read one stated way: confirmed on a placement, else the expiring insurer's
   latest quote, else none. Changes compare amounts in the same currency only. ASAP never picks a quote.
 - Blocks `QueryInterpretation` and `PortfolioGroups` are registered in 0082.
+
+## D-159 — Home follows the brokerage; selections and open forms survive updates
+
+- *What changed* on Home is read from the brokerage's semantic events (§29) under the viewer's
+  session: insurer answers, deliveries, instructions, cover, issuance, claims, policy changes,
+  documents, and work ASAP stopped on. Each line says what happened, by whom, on which work, and
+  opens it; no figure appears on Home. A person's own actions are left out. "Since you last looked"
+  is the start of the current visit (kept stable for 30 minutes) and lives in `surface_preferences`
+  under the key `home`. Home re-reads every minute and on focus.
+- *Selections* inside blocks (the insurer in focus on the quote comparison, which sources are open)
+  are part of the person's arrangement (D-157) and survive updates, leaving and returning, and refresh.
+- *An open command form belongs to its command* (name, target, fixed fields), never to its position.
+  An update that reorders commands leaves the form and its typed text on the same command; one that
+  removes the command closes the form and says so. Found in the browser: by position, a half-typed
+  escalation became a "Pause" form when an earlier command dropped out.
+- *The quotation record wins over a lagging run* also in the journey summary and the obligations.

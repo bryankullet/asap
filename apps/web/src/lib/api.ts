@@ -130,6 +130,7 @@ import {
   type UpdateContactRequest,
   spacePlanResponseSchema,
   livingSurfaceSchema,
+  homeChangesResponseSchema,
   portfolioResponseSchema,
   type PortfolioQuery,
   surfacePreferencesResponseSchema,
@@ -263,6 +264,8 @@ export const api = {
     request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked"]), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
   /** The renewal portfolio: the current view as a typed query, refined by a request in words (D-158). */
   portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
+  /** What changed since this person last looked, from the brokerage's semantic events (D-159). */
+  homeChanges: () => request("GET", "/home/changes", homeChangesResponseSchema),
   livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),

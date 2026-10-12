@@ -124,6 +124,9 @@ export function obligations(f: RenewalLivingFacts) {
     out.push({ party: f.placement.workItem.taskParty, what: f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction, since: f.placement.workItem.taskSince, due: null, kind: "outside" });
   if (f.run && f.run.state === "running" && !f.placement) out.push({ party: "ASAP", what: op?.currentWork.title ?? "Working on the renewal", since: null, due: op?.nextFollowUpAt ?? null, kind: "asap" });
   if (f.item.task_status === "needs_you" && f.ownerName) out.push({ party: f.ownerName, what: f.item.required_action ?? "The next step on this renewal", since: f.item.task_since ?? null, due: f.item.due_on ?? null, kind: "brokerage" });
+  // Nobody outside holds it and the quotation says the brokerage does: say so, rather than nothing.
+  const next = f.opportunity?.next;
+  if (!out.length && next && next.holder === "brokerage" && !f.placement) out.push({ party: f.ownerName ?? "Your brokerage", what: next.what, since: null, due: next.checkAt ?? null, kind: "brokerage" });
   return out.slice(0, 8);
 }
 
@@ -226,7 +229,8 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     summary: (f.placement
       ? `${f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction}. ${f.issuance?.cover.line ?? f.placement.cover.line}`
       : op
-        ? `${op.currentWork.title}. ${op.completed}`
+        ? // A run still "waiting" on an insurer whose answer is on the quotation has not caught up.
+          `${op.waitingFor && answered(f, op.waitingFor.party) ? f.opportunity?.next?.what ?? `${op.waitingFor.party} has answered` : op.currentWork.title}. ${op.completed}`
         : gap(f, "run")
           ? "The renewal run could not be read, so its progress is not shown."
           : f.item.required_action ?? "No renewal run is attached to this work yet."

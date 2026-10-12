@@ -105,10 +105,10 @@ Living surface (`living/living.css`).
 | M1 Visual foundation | **built** | Tokens, radius and elevation scales, Figtree, shell + Spaces + Living restyled |
 | M2 Contracts & renderer | **built** | Surface spec, registry, validator, registered React renderers, loading/error states, compatibility with existing Spaces |
 | M3 Context & progress intelligence | **built** for renewals | Viewer-authorized facts, progress opportunities, obligations, evidence. A general semantic graph over every entity is **not built** |
-| M4 Intelligent Home | **partial** | Home (D-155) already shows attention, ASAP's running work, waiting parties and Recent; renewal attention and running renewals now open the Living workspace. A "relevant changes since you were last here" section is **not built** |
+| M4 Intelligent Home | **built** | Attention, ASAP's running work, waiting parties and Recent (D-155); **What changed since you last looked** from semantic events, linked to the work, refreshed every minute and on focus (D-159); portfolio requests open the portfolio (D-158) |
 | M5 Living Renewal Journey | **built** to the limits of existing capabilities | One workspace from attention through quotation, comparison, revision, decision, placement, issuance and verified cover. Since D-157 the governed actions run **in place** (§7). Stage 9 (continuing relationship) is **not built** |
 | M6 Ask ASAP directing the interface | **built** for the renewal portfolio (D-158) | A request in words refines a typed query — window, grouping, filters, insurer comparison — said back as removable chips; unclear words are said, ambiguous insurers ask; Home opens the portfolio for portfolio requests. Deterministic interpreter only; a model-assisted reading is **not built** (needs an evaluation run). Refinement of other surfaces is **not built** |
-| M7 Reactive composition & continuity | **built** | 20 s polling and refresh on focus; unchanged fingerprint → no re-render; blocks keyed by stable id and reconciled in place; Updated/New marks; per-person pin and collapse; deep links, refresh, Back/Forward |
+| M7 Reactive composition & continuity | **built** | 20 s polling and refresh on focus; unchanged fingerprint → no re-render; blocks keyed by stable id and reconciled in place; Updated/New marks; pin, collapse and selections on the server (D-157/159); open forms keep their command and typed text through updates; deep links, refresh, Back/Forward |
 | M8 Insurance-native intelligence | **partial** | Time & cover, obligation, change/contradiction (revisions, including after instruction) are built for renewals. Communication-to-execution, handoff, portfolio consequence and decision memory are **not built** |
 | M9 Exploration & multi-context | **not built** | |
 | M10 Hardening | **partial** | e2e in a real browser at 1440/1360/900/390, tenant isolation, permission filtering. Visual regression baselines, an accessibility audit and performance measurement are **not built** |
@@ -120,7 +120,7 @@ Living surface (`living/living.css`).
 | Scenario | Status | Where it is tested |
 |---|---|---|
 | A Find meaningful work | **built** | `shell.e2e.mjs` living-renewal-from-work: a Work row opens the Living workspace |
-| B Restore interrupted work | **partial** | Collapsed blocks survive a refresh, now from the server (0080). Restoring a selection inside the comparison is not built yet |
+| B Restore interrupted work | **built** | `living-actions.e2e.mjs`: the insurer in focus and the open sources survive an update, leaving for Home and returning, and a refresh |
 | C Insurer response arrives | **built** | `living-actions.e2e.mjs`: an answer recorded through the quotation workflow while the broker types; the surface reconciles in place (no remount), marks changes and keeps the unsent text |
 | D Quotation revision | **built** | Earlier/revised side by side and flagged after instruction (`living-surface.test.ts`, UI Lab "comparing" and "placing") |
 | E Missing evidence | **built** for renewals | Missing period, missing premium and missing renewed cover are stated, not filled (`living-renewal` e2e) |
@@ -133,7 +133,7 @@ Living surface (`living/living.css`).
 | L Coverage verification | **built** | A request is never cover (`living-surface.test.ts`; e2e "Not confirmed") |
 | M Mobile | **built** | 390 px e2e and UI Lab; the surface scrolls and never runs past the screen |
 | N Returning from history | **built** | The address is the surface (D-155); `/s/living?workItemId=` reloads to the same surface |
-| O Event burst | **partial** | An unchanged fingerprint is ignored and blocks never remount; not load-tested |
+| O Event burst | **partial** | Two inbound revisions in a row reconcile without remount or losing typed text, and an open form never changes command (browser + unit). Not load-tested at volume |
 
 ## 7. Governed actions in the workspace (D-157)
 

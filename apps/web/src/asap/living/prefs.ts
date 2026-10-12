@@ -8,7 +8,7 @@ import type { PrefsStore } from "../shell/types.js";
  * shell's adapters. Without a store (demo mode, the UI Lab) it lives for this visit only: nothing
  * goes into browser storage, so a shared computer never hands one person's arrangement to another.
  */
-export const EMPTY_PREFS: SurfacePreferences = { pinned: [], collapsed: [], selection: {}, lastSeenAt: null };
+export const EMPTY_PREFS: SurfacePreferences = { pinned: [], collapsed: [], selection: {}, lastSeenAt: null, previousSeenAt: null };
 
 export function useSurfacePrefs(store: PrefsStore | undefined, surfaceKey: string | null) {
   const [prefs, setPrefs] = useState<SurfacePreferences>(EMPTY_PREFS);

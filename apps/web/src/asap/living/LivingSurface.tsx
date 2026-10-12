@@ -139,7 +139,19 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
     );
   }
 
-  const env: BlockEnv = { open: onOpen, ask: onAsk, refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); }, ...(refine ? { refine: refine.onRefine, removeChip: refine.onRemove } : {}) };
+  const env: BlockEnv = {
+    open: onOpen,
+    ask: onAsk,
+    refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); },
+    ...(refine ? { refine: refine.onRefine, removeChip: refine.onRemove } : {}),
+    selection: prefs.selection,
+    select: (key, value) => update((p) => {
+      const selection = { ...p.selection };
+      if (value === null) delete selection[key];
+      else selection[key] = value;
+      return { ...p, selection };
+    }),
+  };
   const toggle = (key: PrefList, id: string) =>
     update((p) => {
       const set = new Set(p[key]);
@@ -215,7 +227,7 @@ function BlockView({ block, env, mark, lead, pinned, collapsed, onPin, onCollaps
         <div id={bodyId}>
           <Render props={block.props} block={block} env={env} />
           {showSources ? (
-            <details className="lv-sources">
+            <details className="lv-sources" open={env.selection?.[`${block.id}.sources`] === "open"} onToggle={(e) => { const open = (e.currentTarget as HTMLDetailsElement).open; if (open !== (env.selection?.[`${block.id}.sources`] === "open")) env.select?.(`${block.id}.sources`, open ? "open" : null); }}>
               <summary>Sources ({block.evidence.length})</summary>
               <EvidenceList items={block.evidence} env={env} />
             </details>
