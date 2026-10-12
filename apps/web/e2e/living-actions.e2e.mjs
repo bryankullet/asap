@@ -155,6 +155,27 @@ await step(page, "revision-shown-beside-earlier", async () => {
   must(await page.locator('[data-component="QuoteComparison"] .lv-sources[open]').count(), "the open sources closed on the update");
 });
 
+await step(page, "explore-a-choice-without-recording", async () => {
+  const before = sql(`select count(*) from client_instructions where opportunity_id = '${out.opportunityId}'`);
+  const panel = page.locator('[data-component="ExplorationPanel"]');
+  await panel.waitFor({ timeout: 10000 });
+  await panel.getByRole("button", { name: /^Jubilee/ }).click();
+  await settle(page, 1500);
+  must(decodeURIComponent(new URL(page.url()).hash).includes(`explore=${jubilee.id}`), "the exploration is not in the address");
+  const card = page.locator(".lv-explore-card", { hasText: "Jubilee" });
+  await card.waitFor({ timeout: 10000 });
+  const t = await card.innerText();
+  must(t.includes("KES 2,650,000.00") && t.includes("+KES 250,000.00 against the expiring KES 2,400,000.00 (+10.4%)"), `the explored figures are not the recorded ones: ${t.slice(0, 200)}`);
+  must(t.includes("Renews with the current insurer"), "the insurer change is not said");
+  must(await panel.getByText(/nothing is recorded/i).count(), "the exploration does not say nothing is recorded");
+  must(sql(`select count(*) from client_instructions where opportunity_id = '${out.opportunityId}'`) === before, "exploring recorded something");
+  // The unsent escalation is still being typed.
+  must((await page.locator('[data-block="obligations"] textarea').inputValue()).includes(TAG), "exploring lost the unsent text");
+  await page.goBack();
+  await settle(page, 1500);
+  must((await page.locator(".lv-explore-card").count()) === 0, "Back did not undo the exploration");
+});
+
 await step(page, "escalate-through-surface", async () => {
   await page.locator('[data-block="obligations"] .lv-command').getByRole("button", { name: "Escalate" }).click();
   await page.locator('[data-block="obligations"]').getByText("Done.").waitFor({ timeout: 10000 });

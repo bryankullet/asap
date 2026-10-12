@@ -223,6 +223,37 @@ export const evidenceInspectorProps = z.strictObject({
   items: z.array(livingEvidenceSchema).max(20),
 });
 
+/**
+ * Exploring a client decision that has not been made (D-160): "if the client chose this insurer".
+ * Every figure is read from records; nothing is recorded, nothing is recommended, and the panel
+ * says so. The alternatives live in the address, so an exploration can be shared, restored or undone.
+ */
+export const explorationPanelProps = z.strictObject({
+  /** Insurers with an answer on the quotation, each one a choice that can be explored. */
+  choices: z.array(z.strictObject({ id: uuidSchema, insurer: label, exploring: z.boolean(), answered: z.boolean() })).max(8),
+  alternatives: z
+    .array(
+      z.strictObject({
+        id: uuidSchema,
+        insurer: label,
+        /** Whether this answer could be chosen at all, and if not, why — from the record. */
+        available: z.boolean(),
+        unavailableReason: z.string().max(300).nullable(),
+        premium: z.string().max(80).nullable(),
+        versusExpiring: z.string().max(120).nullable(),
+        direction: z.enum(["increase", "decrease", "same", "unknown"]),
+        insurerChange: z.boolean(),
+        validity: z.strictObject({ until: isoDate.nullable(), note: line, tone }),
+        termDifferences: z.array(z.strictObject({ label, current: z.string().max(300).nullable(), alternative: z.string().max(300).nullable(), unclear: z.boolean() })).max(8),
+        /** What choosing it would set in motion, in order — the governed steps, not a promise. */
+        nextSteps: z.array(line).max(5),
+      }),
+    )
+    .max(3),
+  /** Always said: this is not a decision and nothing was recorded. */
+  notice: line,
+});
+
 /** Exactly what will leave the brokerage, shown in full before anyone approves it (frozen payload). */
 export const approvalBundleProps = z.strictObject({
   title: label,
@@ -352,6 +383,7 @@ export const LIVING_BLOCK_PROPS = {
   Timeline: timelineProps,
   ApprovalBundle: approvalBundleProps,
   QueryInterpretation: queryInterpretationProps,
+  ExplorationPanel: explorationPanelProps,
   PortfolioGroups: portfolioGroupsProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
@@ -416,6 +448,7 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   PlacementProgress: { version: 1, name: "Placement progress", purpose: "Instruction, request, insurer confirmation and issuance, each from its record.", requiresEvidence: false },
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
+  ExplorationPanel: { version: 1, name: "Exploration", purpose: "A client decision explored before it is made: each alternative's premium, insurer change, validity, term differences and next steps, from records. Nothing is recorded or recommended.", requiresEvidence: false },
   QueryInterpretation: { version: 1, name: "Query interpretation", purpose: "The active view in plain words — window, grouping, filters, comparison — each removable, and what was not understood.", requiresEvidence: false },
   PortfolioGroups: { version: 1, name: "Portfolio groups", purpose: "Renewals selected by the query, grouped, with totals and premium changes computed from records.", requiresEvidence: false },
   ApprovalBundle: { version: 1, name: "Approval bundle", purpose: "Exactly what will leave the brokerage, in full, with the governed approve and return commands.", requiresEvidence: false },

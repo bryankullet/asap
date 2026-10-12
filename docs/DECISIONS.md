@@ -2919,3 +2919,15 @@ fake values and without a parallel system.
   removes the command closes the form and says so. Found in the browser: by position, a half-typed
   escalation became a "Pause" form when an earlier command dropped out.
 - *The quotation record wins over a lagging run* also in the journey summary and the obligations.
+
+## D-160 — Exploring a client decision before it is made
+
+Before a client decides, the renewal workspace offers "if the client chose …" for any insurer with
+an answer on the quotation, up to three side by side (`ExplorationPanel`, 0083). Each alternative
+shows, from records only: the premium against the expiring premium (same currency only), whether it
+changes insurer, the answer's validity against the cover end, term differences against the current
+insurer's quote, and the governed steps choosing it would set in motion. Declined or unpriced
+answers say why they cannot be chosen. It is drawn dashed and labelled hypothetical; nothing is
+recorded, nothing is recommended. The alternatives live in the address (`explore=`), so an
+exploration can be shared and restored, and Back undoes it. It disappears once the client has
+instructed — the decision is then a record, not an exploration.

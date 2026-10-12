@@ -10,6 +10,7 @@ import {
   type RenewalStage,
 } from "@asap/schema";
 import { pendingApprovals, quotationCommands, runCommands, submissionCommands } from "./commands.js";
+import { explorationPanel } from "./explore.js";
 import type { RenewalLivingFacts } from "./facts.js";
 
 /**
@@ -202,7 +203,7 @@ function block(id: string, component: LivingComponent, role: LivingBlock["role"]
 }
 
 /** The surface for one renewal, composed for its stage. */
-export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; aiAvailable: boolean }): LivingSurface {
+export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; aiAvailable: boolean; explore?: string[] }): LivingSurface {
   const stage = renewalStage(f);
   const stageIndex = RENEWAL_STAGES.findIndex((s) => s.key === stage);
   const stageLabel = stage === "stopped" ? "Stopped" : RENEWAL_STAGES[stageIndex]!.label;
@@ -268,6 +269,9 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
   if (stage === "awaiting_terms" || stage === "comparing" || stage === "deciding") {
     const q = quoteBlock();
     if (q) blocks.push(q);
+    // Before the client decides, a choice can be explored without recording anything (D-160).
+    const ex = explorationPanel(f, opts.explore ?? [], opts.now);
+    if (ex) blocks.push(block("explore", "ExplorationPanel", "main", opts.explore?.length ? "Exploring a choice" : "Explore a choice", ex));
   }
   if (stage === "placing" || stage === "issuing" || stage === "verified") {
     const p = f.placement!;

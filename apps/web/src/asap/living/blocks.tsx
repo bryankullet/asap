@@ -1,5 +1,6 @@
 import type {
   approvalBundleProps,
+  explorationPanelProps,
   portfolioGroupsProps,
   queryInterpretationProps,
   LivingAction,
@@ -43,6 +44,8 @@ export type BlockEnv = {
   /** The person's choices inside blocks, kept with their arrangement (D-157): they survive updates. */
   selection?: Record<string, string>;
   select?: (key: string, value: string | null) => void;
+  /** Exploring client choices without recording anything (D-160). */
+  explore?: { ids: string[]; set: (ids: string[]) => void };
 };
 type P<S extends z.ZodTypeAny> = { props: z.infer<S>; block: LivingBlock; env: BlockEnv };
 
@@ -382,6 +385,48 @@ function PortfolioGroups({ props, env }: P<typeof portfolioGroupsProps>) {
   );
 }
 
+function ExplorationPanel({ props, env }: P<typeof explorationPanelProps>) {
+  const ids = env.explore?.ids ?? props.alternatives.map((a) => a.id);
+  const toggle = (id: string) => env.explore?.set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id].slice(-3));
+  return (
+    <div className="lv-explore">
+      <p className="lv-explore-notice" role="note"><span aria-hidden>◇</span> {props.notice}</p>
+      <div className="lv-explore-choices" role="group" aria-label="Explore if the client chose">
+        <span>If the client chose</span>
+        {props.choices.map((c) => (
+          <button key={c.id} type="button" className={c.exploring ? "lv-qchip lv-qchip-compare lv-explore-on" : "lv-qchip"} aria-pressed={c.exploring} disabled={!c.answered || !env.explore} onClick={() => toggle(c.id)} title={c.answered ? undefined : "No answer on file yet"}>
+            {c.insurer}{c.exploring ? " ×" : ""}
+          </button>
+        ))}
+        {ids.length ? <button type="button" className="lv-btn lv-btn-quiet" onClick={() => env.explore?.set([])}>Stop exploring</button> : null}
+      </div>
+      {props.alternatives.length ? (
+        <div className="lv-explore-grid">
+          {props.alternatives.map((a) => (
+            <article key={a.id} className={`lv-explore-card${a.available ? "" : " lv-explore-unavailable"}`} aria-label={`If the client chose ${a.insurer}`}>
+              <header><small>If the client chose</small><strong>{a.insurer}</strong></header>
+              {a.available ? (
+                <>
+                  <div className="lv-explore-premium"><b>{a.premium}</b><span className={`lv-dir-${a.direction}`}>{a.versusExpiring}</span></div>
+                  <p className={`lv-explore-validity lv-text-${a.validity.tone}`}>{a.validity.note}</p>
+                  <p className="lv-explore-change">{a.insurerChange ? "Changes insurer." : "Renews with the current insurer."}</p>
+                  {a.termDifferences.length ? (
+                    <table className="lv-table lv-explore-terms">
+                      <thead><tr><th scope="col">Term</th><th scope="col">Today's insurer quoted</th><th scope="col">{a.insurer}</th></tr></thead>
+                      <tbody>{a.termDifferences.map((d) => <tr key={d.label}><th scope="row">{d.label}</th><td>{d.current ?? <span className="lv-missing">Not stated</span>}</td><td>{d.alternative ?? <span className="lv-missing">Not stated</span>}{d.unclear ? <span className="lv-chip lv-gold">Check</span> : null}</td></tr>)}</tbody>
+                    </table>
+                  ) : null}
+                  <ol className="lv-explore-steps">{a.nextSteps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+                </>
+              ) : <p className="lv-missing">{a.unavailableReason}</p>}
+            </article>
+          ))}
+        </div>
+      ) : <p className="lv-note">Choose an insurer above to see what that choice would mean — premium, validity, terms and what happens next. Nothing is recorded.</p>}
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -399,6 +444,7 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   ApprovalBundle,
   QueryInterpretation,
   PortfolioGroups,
+  ExplorationPanel,
 };
 
 /**

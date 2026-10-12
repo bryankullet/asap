@@ -24,7 +24,7 @@ import type { ComponentDefinition, ValidationFailure } from "../spaces/validate.
  */
 
 /** The places a Living action may open — the shell's own workspace references. */
-export const LIVING_OPENABLE = new Set(["renewal", "quote", "document", "workitem", "client", "policy"]);
+export const LIVING_OPENABLE = new Set(["renewal", "quote", "document", "workitem", "client", "policy", "living", "portfolio"]);
 /** Per command: the fixed payload keys (with any value they must equal) and the inputs a person fills. */
 const COMMANDS: Record<LivingCommand, { payload: Record<string, string | null>; inputs: string[] }> = {
   "workflow_approval.decide": { payload: { decision: null, bundleSha256: null }, inputs: ["note"] },

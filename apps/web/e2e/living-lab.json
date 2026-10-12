@@ -845,7 +845,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "9a3c5b98cbbaffd1",
+   "fingerprint": "745c62588c5355ab",
    "blocks": [
     {
      "id": "header",
@@ -1079,6 +1079,34 @@
       }
      ],
      "hash": "2599c6ac4a627582"
+    },
+    {
+     "id": "explore",
+     "component": "ExplorationPanel",
+     "version": 1,
+     "role": "main",
+     "title": "Explore a choice",
+     "props": {
+      "choices": [
+       {
+        "id": "00000003-0000-4000-8000-000000000003",
+        "insurer": "CIC",
+        "exploring": false,
+        "answered": true
+       },
+       {
+        "id": "00000007-0000-4000-8000-000000000007",
+        "insurer": "Jubilee",
+        "exploring": false,
+        "answered": true
+       }
+      ],
+      "alternatives": [],
+      "notice": "Exploring only: nothing is recorded, nothing is sent, and ASAP does not recommend a choice. The client decides; recording their instruction is a separate, evidenced step."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "76cf90435c07dc75"
     },
     {
      "id": "consequences",

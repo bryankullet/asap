@@ -43,7 +43,9 @@ export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean }) {
     if (!/^[0-9a-f-]{36}$/i.test(workItemId)) throw new HttpError(404, "not_found", "That work is not available.");
 
     const facts = await loadRenewalLivingFacts(env, workItemId);
-    const surface = composeRenewalSurface(facts, { now: new Date(), aiAvailable: deps.aiAvailable });
+    // Alternatives being explored travel in the address (D-160); only ids, never values.
+    const explore = (c.req.query("explore") ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 3);
+    const surface = composeRenewalSurface(facts, { now: new Date(), aiAvailable: deps.aiAvailable, explore });
     const definitions = await loadDefinitions(db, surface.blocks.map((b) => ({ component: b.component, version: b.version })));
     const result = validateSurface({ surface, definitions, permissions: ctx.permissions });
     if (!result.ok) {

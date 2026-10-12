@@ -36,7 +36,7 @@ export type ShellAdapters = {
   supervision?: () => unknown;
   waitingDocuments?: () => string[];
   /** Live mode only: the Living surface for a renewal. Demo mode has none and opens the steps. */
-  living?: (workItemId: string) => Promise<LivingSurface>;
+  living?: (workItemId: string, explore?: string[]) => Promise<LivingSurface>;
   /** Live mode only: personal surface arrangement, on the server (D-157). */
   surfacePrefs?: PrefsStore;
   /** Live mode only: the renewal portfolio, refined in plain language (D-158). */

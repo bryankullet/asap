@@ -10,7 +10,7 @@ export const insurer = (name: string, stage: string, premium: string | null) => 
   id: `0000000${name.length}-0000-4000-8000-00000000000${name.length}`, insurerName: name, stage, stageLabel: stage, addedAt: "2026-09-20T08:00:00Z", removedAt: null,
   request: { id: `1000000${name.length}-0000-4000-8000-00000000000${name.length}`, approvedAt: "2026-09-25T08:00:00Z", sentAt: null, delivery: stage === "with_insurer" || stage === "quoted" ? { method: "own_email", reference: "Sent", deliveredAt: "2026-09-26T08:00:00Z" } : null },
   response: premium === null && stage !== "quoted" ? null : {
-    premiumAmount: premium, premiumCurrency: "KES", validUntil: "2026-11-01", receivedAt: "2026-10-01T10:00:00Z", declineReason: null,
+    outcome: "quoted", premiumAmount: premium, premiumCurrency: "KES", validUntil: "2026-11-01", receivedAt: "2026-10-01T10:00:00Z", declineReason: null,
     source: { kind: "document", id: "22222222-2222-4222-8222-222222222222", label: `${name} quote.pdf` },
     terms: [{ label: "Excess", extractedValue: "10%", correctedValue: null, unclear: false, amount: null, currency: null, evidence: { kind: "document", id: "22222222-2222-4222-8222-222222222222", label: "page 2" } }],
   },
@@ -21,7 +21,7 @@ export function facts(over: Partial<RenewalLivingFacts> & { step?: string; runSt
   return {
     item: { id: ID, title: "Renew Acme motor fleet", kind: "renewal", task_status: "with_party", task_party: "CIC", task_since: "2026-10-01", due_on: null, required_action: null, steps: [] } as unknown as RenewalLivingFacts["item"],
     client: { id: "33333333-3333-4333-8333-333333333333", name: "Acme Logistics" },
-    period: { periodStart: "2025-11-01", periodEnd: "2026-10-31", insurerName: "CIC", policyNumber: "P-4471", classOfBusiness: "Motor fleet" },
+    period: { periodStart: "2025-11-01", periodEnd: "2026-10-31", insurerName: "CIC", insurerId: null, policyNumber: "P-4471", classOfBusiness: "Motor fleet", premiumAmount: "170000.00", premiumCurrency: "KES" },
     ownerName: "Wanjiru",
     run: {
       id: "44444444-4444-4444-8444-444444444444", state: runState, currentStep: step, exception: null,

@@ -168,6 +168,33 @@ describe("governed commands (D-157)", () => {
   });
 });
 
+describe("exploring a choice before the client decides (D-160)", () => {
+  const ids = () => (quotedOpp() as unknown as { insurers: { id: string; insurerName: string }[] }).insurers;
+  it("offers each answered insurer as a choice, and explores none until asked", () => {
+    const s = composeRenewalSurface(facts({ step: "compare", opportunity: quotedOpp() }), { now: NOW, aiAvailable: false });
+    const p = s.blocks.find((b) => b.component === "ExplorationPanel")!.props as { choices: { insurer: string; exploring: boolean }[]; alternatives: unknown[]; notice: string };
+    expect(p.choices.map((c) => c.insurer)).toEqual(["CIC", "Jubilee"]);
+    expect(p.alternatives).toEqual([]);
+    expect(p.notice).toMatch(/nothing is recorded/i);
+  });
+  it("shows a choice's impact from records: premium against the expiring one, insurer change, next steps", () => {
+    const jub = ids().find((i) => i.insurerName === "Jubilee")!.id;
+    const s = composeRenewalSurface(facts({ step: "compare", opportunity: quotedOpp() }), { now: NOW, aiAvailable: false, explore: [jub] });
+    const a = (s.blocks.find((b) => b.component === "ExplorationPanel")!.props as { alternatives: { premium: string; versusExpiring: string; direction: string; insurerChange: boolean; nextSteps: string[]; validity: { tone: string } }[] }).alternatives[0]!;
+    expect(a.premium).toBe("KES 189,000.00");
+    expect(a.versusExpiring).toBe("+KES 19,000.00 against the expiring KES 170,000.00 (+11.2%)");
+    expect(a.direction).toBe("increase");
+    expect(a.insurerChange).toBe(true);
+    expect(a.nextSteps.join(" ")).toMatch(/CIC's policy is not renewed/);
+    expect(a.validity.tone).toBe("green");
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(true);
+  });
+  it("writes nothing and is gone once the client has instructed", () => {
+    const s = composeRenewalSurface(facts({ opportunity: quotedOpp(), placement: placement("requested") }), { now: NOW, aiAvailable: false, explore: [ids()[0]!.id] });
+    expect(s.blocks.some((b) => b.component === "ExplorationPanel")).toBe(false);
+  });
+});
+
 describe("validation", () => {
   const good = () => composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
   it("rejects an unregistered component", () => {

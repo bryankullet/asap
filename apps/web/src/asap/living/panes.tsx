@@ -5,12 +5,18 @@ import type { PrefsStore } from "../shell/types.js";
 import { LivingSurface } from "./LivingSurface.js";
 
 /** The renewal workspace for one Work item (D-156/157). */
-export function LivingRenewalPane({ workItemId, runId, living, prefsStore, onOpen, onAsk, onTitle }: {
-  workItemId: string; runId: string | null; living: (id: string) => Promise<Surface>; prefsStore?: PrefsStore | undefined;
+export function LivingRenewalPane({ workItemId, runId, explore, living, prefsStore, onOpen, onAsk, onTitle }: {
+  workItemId: string; runId: string | null; explore: string; living: (id: string, explore?: string[]) => Promise<Surface>; prefsStore?: PrefsStore | undefined;
   onOpen: (ref: Ref) => void; onAsk: (text: string) => void; onTitle: (t: string) => void;
 }) {
-  const load = useCallback(() => living(workItemId), [living, workItemId]);
-  return <LivingSurface identity={`renewal:${workItemId}`} runId={runId} load={load} prefsStore={prefsStore} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
+  // Alternatives being explored live in the address (D-160): Back undoes an exploration, a link shares it.
+  const ids = useMemo(() => explore.split(",").filter(Boolean), [explore]);
+  const load = useCallback(() => living(workItemId, ids), [living, workItemId, ids]);
+  const exploring = useMemo(() => ({
+    ids,
+    set: (next: string[]) => onOpen(next.length ? { ws: "living", workItemId, ...(runId ? { runId } : {}), explore: next.join(",") } : { ws: "living", workItemId, ...(runId ? { runId } : {}) }),
+  }), [ids, onOpen, workItemId, runId]);
+  return <LivingSurface identity={`renewal:${workItemId}`} runId={runId} load={load} prefsStore={prefsStore} explore={exploring} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
 }
 
 export type PortfolioApi = (body: { query: PortfolioQuery | null; text: string | null }) => Promise<PortfolioResponse>;

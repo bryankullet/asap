@@ -266,7 +266,8 @@ export const api = {
   portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
   /** What changed since this person last looked, from the brokerage's semantic events (D-159). */
   homeChanges: () => request("GET", "/home/changes", homeChangesResponseSchema),
-  livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
+  livingSurface: (workItemId: string, explore: string[] = []) =>
+    request("GET", `/living/${workItemId}${explore.length ? `?explore=${explore.join(",")}` : ""}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /**

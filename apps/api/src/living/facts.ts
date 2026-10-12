@@ -25,7 +25,7 @@ export type Unavailable = { part: SourcePart; reason: "restricted" | "failed" };
 export type RenewalLivingFacts = {
   item: WorkItemRow;
   client: { id: string; name: string } | null;
-  period: { periodStart: string; periodEnd: string; insurerName: string; policyNumber: string | null; classOfBusiness: string } | null;
+  period: { periodStart: string; periodEnd: string; insurerName: string; insurerId: string | null; policyNumber: string | null; classOfBusiness: string; premiumAmount: string | null; premiumCurrency: string | null } | null;
   ownerName: string | null;
   run: WorkflowDetail | null;
   opportunity: OpportunityResponse | null;
@@ -80,9 +80,9 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
 
   let period: RenewalLivingFacts["period"] = null;
   if (item.policy_period_id) {
-    const row = await rows<{ period_start: string; period_end: string; policies: { policy_number: string | null; class_of_business: string; insurers: { name: string } | null } | null } | null>(gaps, "period",
-      db.from("policy_periods").select("period_start, period_end, policies(policy_number, class_of_business, insurers(name))").eq("organization_id", org).eq("id", item.policy_period_id).maybeSingle());
-    if (row) period = { periodStart: row.period_start, periodEnd: row.period_end, insurerName: row.policies?.insurers?.name ?? "the insurer", policyNumber: row.policies?.policy_number ?? null, classOfBusiness: row.policies?.class_of_business ?? "Renewal" };
+    const row = await rows<{ period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null; policies: { policy_number: string | null; class_of_business: string; insurer_id: string | null; insurers: { name: string } | null } | null } | null>(gaps, "period",
+      db.from("policy_periods").select("period_start, period_end, premium_amount, premium_currency, policies(policy_number, class_of_business, insurer_id, insurers(name))").eq("organization_id", org).eq("id", item.policy_period_id).maybeSingle());
+    if (row) period = { periodStart: row.period_start, periodEnd: row.period_end, insurerName: row.policies?.insurers?.name ?? "the insurer", insurerId: row.policies?.insurer_id ?? null, policyNumber: row.policies?.policy_number ?? null, classOfBusiness: row.policies?.class_of_business ?? "Renewal", premiumAmount: row.premium_amount != null ? String(row.premium_amount) : null, premiumCurrency: row.premium_currency ?? null };
     else if (!gaps.some((g) => g.part === "period")) gaps.push({ part: "period", reason: "restricted" });
   }
 

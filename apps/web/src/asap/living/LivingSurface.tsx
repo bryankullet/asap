@@ -30,13 +30,15 @@ export type Refiner = { onRefine: (text: string) => void; onRemove: (field: stri
  * `identity` is what the surface is about: while it stays the same, a new `load` (a refined query)
  * re-reads and reconciles in place; a new identity starts afresh.
  */
-export function LivingSurface({ identity, noun = "renewal", runId = null, load, prefsStore, refine, onOpen, onAsk, onTitle }: {
+export function LivingSurface({ identity, noun = "renewal", runId = null, load, prefsStore, refine, explore, onOpen, onAsk, onTitle }: {
   identity: string;
   noun?: string;
   runId?: string | null;
   load: LivingLoader;
   prefsStore?: PrefsStore | undefined;
   refine?: Refiner;
+  /** Alternatives being explored, and how to change them (D-160). */
+  explore?: { ids: string[]; set: (ids: string[]) => void };
   onOpen: (ref: Ref) => void;
   onAsk: (text: string) => void;
   onTitle?: (title: string) => void;
@@ -145,6 +147,7 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
     refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); },
     ...(refine ? { refine: refine.onRefine, removeChip: refine.onRemove } : {}),
     selection: prefs.selection,
+    ...(explore ? { explore } : {}),
     select: (key, value) => update((p) => {
       const selection = { ...p.selection };
       if (value === null) delete selection[key];
