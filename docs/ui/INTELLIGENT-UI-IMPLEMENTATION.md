@@ -198,20 +198,18 @@ How commands behave:
 - **Home (D-159):** semantic events since the start of this visit, from colleagues, insurers and ASAP. The viewer's own actions are left out and no figures are shown.
 - **Exploration (D-160):** up to three alternatives, from records, labelled hypothetical, kept in the address. It disappears once the client has instructed.
 
-## 9. Verification (full gate on the final commit of this round)
+## 9. Verification (full gate on the final acceptance code, D-169)
 
 | Check | Result |
 |---|---|
 | Typecheck, lint, secret scan | clean |
-| Unit | api 934 (2 skipped) · web 191 · schema 118 · workers 25 (10 skipped) · db 3 |
-| Build | 6/6 packages; only `VITE_PUBLIC_*` reaches the browser; the UI Lab is not bundled |
-| Ask and workspace-request evaluations | 44 passed (2 skipped: live model runs, which need a configured gateway) |
-| Connected (real Postgres, PostgREST, RLS) | 252 passed, three consecutive runs |
-| pgTAP RLS | 1261 passed |
+| Unit | api 937 (3 skipped: live-model runs) · web 191 · schema 118 · workers 25 (10 skipped) · db 3 |
+| Build | 6/6 packages; only `VITE_PUBLIC_*` reaches the browser |
+| Evaluations, offline | 47 passed (3 skipped: live-model runs). Rules read 100% of their set; every model-path case is proved to bypass the rules |
+| Evaluations, live model | **not run** — no provider key in the development environment |
+| Connected (real Postgres, PostgREST, RLS) | 251 passed, 1 skipped (the timing test, which runs in the next row) |
+| Connected timing, isolated | 24 passed — renewal composition p95 about 0.2 s, portfolio about 0.1 s, a 150-policy client under 1.5 s |
+| pgTAP RLS | 1,261 passed |
+| Migration release rehearsal | see `docs/release/RELEASE-0079-0091.md` §2 |
 | Browser | shell 36/36 · shell-a11y 36/36 · journey 32/32 · supervision 28/28 · onboarding 14/14 · acceptance 8/8 · staging-findings 7/7 · living-lab 36/36 · living-actions 11/11 · living-portfolio 10/10 · living-servicing 10/10 · living-quality 18/18 · first-document 23/23 · quote-comparison 19/19 |
-
-The first gate run of this round failed two connected checks, both fixed and re-run: renewal
-composition at p95 2.1 s under the full concurrent suite once the D-166 parts were added (their
-reads now run concurrently, back within 1.5 s), and a refresh-stability test that compared Related
-work, which other test files change concurrently. The earlier intermittent web unit test and the
-earlier intermittent `mailbox-delivery` count have not recurred in this round's runs.
+| Visual acceptance | 78 screenshots, 1440 and 390 px (`apps/web/e2e/visual-acceptance.e2e.mjs`) |
