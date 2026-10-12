@@ -18,6 +18,7 @@ import type { Env } from "../placement/service.js";
 import { loadWorkflowDetail } from "../routes/workflows.js";
 import { loadClaimDetail, loadEndorsementDetail } from "../servicing.js";
 import type { Unavailable } from "./facts.js";
+import { loadCollaboration, mergeUnavailable, placeCollaboration, type Collaboration } from "./intelligence.js";
 
 /**
  * Living workspaces for claims and policy changes (D-161), on the same contract, registry,
@@ -48,6 +49,8 @@ export type ServicingFacts = {
   premium: { direction: string; amount: string | null; currency: string | null; reference: string | null } | null;
   canAct: boolean;
   unavailable: Unavailable[];
+  /** Arrived email, handover and related work (D-166). Absent in pure fixtures. */
+  collab?: Collaboration | null;
 };
 
 export async function loadServicingFacts(env: Env, item: WorkItemRow): Promise<ServicingFacts> {
@@ -83,7 +86,8 @@ export async function loadServicingFacts(env: Env, item: WorkItemRow): Promise<S
   }
   // Offered exactly where the database will allow it (0085, D-164): claim:edit for claims, policy:edit for policy changes.
   const canAct = item.kind === "claim" ? hasPermission(env.ctx, "claim", "edit") : hasPermission(env.ctx, "policy", "edit");
-  return { item, client: (client.data as { id: string; name: string } | null) ?? null, run, policy, claim, endorsement, premium, canAct, unavailable: gaps };
+  const collab = await loadCollaboration(env, [], { item, subjectIds: [claim?.claim.id ?? "", endorsement?.endorsement.id ?? ""], policyId, waitingOn: [], canRecordResponse: false });
+  return { item, client: (client.data as { id: string; name: string } | null) ?? null, run, policy, claim, endorsement, premium, canAct, unavailable: gaps, collab };
 }
 
 export async function loadWorkItem(env: Env, workItemId: string): Promise<WorkItemRow> {
@@ -117,11 +121,12 @@ function obligationsFromRun(f: ServicingFacts) {
 }
 const openSteps = (f: ServicingFacts): LivingAction | null => (f.run ? { kind: "open", label: "Open the steps", ref: { ws: "workitem", workItemId: f.item.id }, primary: false } : null);
 
-function surface(f: ServicingFacts, purpose: "claim" | "endorsement", blocks: LivingBlock[], now: Date, aiAvailable: boolean): LivingSurface {
+function surface(f: ServicingFacts, purpose: "claim" | "endorsement", composed: LivingBlock[], now: Date, aiAvailable: boolean): LivingSurface {
+  const blocks = placeCollaboration(composed, f.collab, f.item, purpose);
   return {
     version: 1, surfaceId: `${purpose}:${f.item.id}`, purpose, subject: { kind: "work_item", id: f.item.id, title: f.item.title.slice(0, 200) }, stage: null,
-    generatedAt: now.toISOString(), fingerprint: hash([blocks.map((b) => [b.id, b.hash]), f.unavailable]), blocks, ai: { available: aiAvailable },
-    unavailable: f.unavailable.map((g) => ({ part: g.part === "quotation" ? (purpose === "claim" ? "The claim" : "The policy change") : g.part === "period" ? "The policy" : g.part === "run" ? "The workflow" : g.part === "placement" ? "The premium adjustment" : "The client", reason: g.reason })),
+    generatedAt: now.toISOString(), fingerprint: hash([blocks.map((b) => [b.id, b.hash]), f.unavailable, f.collab?.unavailable ?? []]), blocks, ai: { available: aiAvailable },
+    unavailable: mergeUnavailable(f.unavailable.map((g) => ({ part: g.part === "quotation" ? (purpose === "claim" ? "The claim" : "The policy change") : g.part === "period" ? "The policy" : g.part === "run" ? "The workflow" : g.part === "placement" ? "The premium adjustment" : "The client", reason: g.reason })), f.collab),
   };
 }
 

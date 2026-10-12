@@ -138,6 +138,25 @@ await step(page, "claim-document-received-in-place", async () => {
   must((await docs.getByText(/no longer offered/).count()) === 0, "a completed command was called 'no longer offered'");
   must(sql(`select count(*) from claim_documents where claim_id = '${claimId}' and reference = 'Emailed by the client ${TAG}'`) === "1", "the receipt was not recorded on the claim");
 });
+await step(page, "claim-hand-over-in-place", async () => {
+  // A structured handover (D-166): to a colleague, with what is done and open; the owner changes.
+  const h = page.locator('[data-block="handover"]');
+  await h.getByRole("button", { name: "Hand over to a colleague" }).click();
+  const form = h.locator(".lv-command");
+  await form.locator("select").selectOption({ label: "Brian Kamau" });
+  const boxes = form.locator("textarea");
+  await boxes.nth(0).fill(`Police abstract received ${TAG}`);
+  await boxes.nth(1).fill("Notify Jubilee before the deadline");
+  await form.getByRole("button", { name: "Hand over to a colleague" }).click();
+  await page.locator(".lv-receipt").waitFor({ timeout: 15000 });
+  await page.waitForTimeout(1200);
+  must(await h.getByText(`Police abstract received ${TAG}`).count(), "the handover note is not shown");
+  must(/handed this to/.test(await h.innerText()), "who it was handed to is not said");
+  must(sql(`select count(*) from work_handovers where work_item_id = '${claimWork}'`) === "1", "the handover was not recorded");
+  must(sql(`select owner_id from work_items where id = '${claimWork}'`) !== "a0000000-0000-4000-8000-000000000001", "the owner did not change");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
+});
 await page.goto(BASE + `#/s/living?workItemId=${endWork}`);
 await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 20000 });
 await page.waitForTimeout(800);

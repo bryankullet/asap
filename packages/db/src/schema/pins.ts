@@ -94,3 +94,27 @@ export const surfacePreferences = pgTable(
     index("surface_preferences_user_id_idx").on(t.userId),
   ],
 );
+
+/** Responsibility for a Work item moving between colleagues (0087, D-166). Written only by its functions. */
+export const workHandovers = pgTable(
+  "work_handovers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+    workItemId: uuid("work_item_id").notNull().references(() => workItems.id),
+    fromUserId: uuid("from_user_id").notNull().references(() => users.id),
+    toUserId: uuid("to_user_id").notNull().references(() => users.id),
+    doneText: text("done_text").notNull(),
+    openText: text("open_text").notNull(),
+    watchText: text("watch_text"),
+    createdAt: createdAt(),
+    acknowledgedAt: timestamptz("acknowledged_at"),
+  },
+  (t) => [
+    index("work_handovers_work_item_idx").on(t.workItemId, t.createdAt.desc()),
+    index("work_handovers_organization_id_idx").on(t.organizationId),
+    index("work_handovers_from_user_id_idx").on(t.fromUserId),
+    index("work_handovers_to_user_id_idx").on(t.toUserId),
+    check("work_handovers_check", sql`from_user_id <> to_user_id`),
+  ],
+);

@@ -188,6 +188,26 @@ export const manageWorkResponseSchema = z.discriminatedUnion("outcome", [
 ]);
 export type ManageWorkResponse = z.infer<typeof manageWorkResponseSchema>;
 
+/**
+ * `POST /work-items/:id/hand-over` — responsibility moves to a colleague with what is done, what is
+ * open and what to watch (D-166). The owner changes in the same transaction. Nothing is sent.
+ */
+export const handOverRequestSchema = z.strictObject({
+  /** A string when it comes from a workspace command's fixed payload. */
+  version: z.coerce.number().int(),
+  toUserId: uuidSchema,
+  done: z.string().trim().min(1).max(2000),
+  open: z.string().trim().min(1).max(2000),
+  watch: z.string().trim().max(2000).optional(),
+});
+export type HandOverRequest = z.infer<typeof handOverRequestSchema>;
+export const handOverResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("applied"), handoverId: uuidSchema, item: WorkItemRow }),
+  z.object({ outcome: z.literal("blocked"), guard: z.string(), reason: z.string() }),
+]);
+export type HandOverResponse = z.infer<typeof handOverResponseSchema>;
+export const acknowledgeHandoverResponseSchema = z.object({ outcome: z.enum(["applied", "already_done"]) });
+
 export const workItemResponseSchema = z.object({
   item: WorkItemRow,
   runs: z.array(RunRow),

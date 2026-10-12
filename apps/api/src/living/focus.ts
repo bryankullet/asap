@@ -140,6 +140,6 @@ export function applyFocus(surface: LivingSurface, question: string, answer: Ans
   const lead = surface.blocks.filter((b) => b.role === "lead");
   const forward = emphasis.map((id) => surface.blocks.find((b) => b.id === id)!).map((b) => ({ ...b, role: "main" as const }));
   const rest = surface.blocks.filter((b) => b.role !== "lead" && !emphasis.includes(b.id));
-  const blocks = [...lead, focusBlock, ...forward, ...rest].slice(0, 20);
+  const blocks = [...lead, focusBlock, ...forward, ...rest].slice(0, 28);
   return { ...surface, blocks, fingerprint: hash([surface.fingerprint, props]) };
 }

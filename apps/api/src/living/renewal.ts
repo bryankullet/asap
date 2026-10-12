@@ -12,6 +12,7 @@ import {
 import { pendingApprovals, quotationCommands, runCommands, submissionCommands } from "./commands.js";
 import { explorationPanel } from "./explore.js";
 import type { RenewalLivingFacts } from "./facts.js";
+import { mergeUnavailable, placeCollaboration } from "./intelligence.js";
 
 /**
  * The Living renewal surface (D-156), composed deterministically from the facts.
@@ -351,6 +352,7 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
       }),
     }));
 
+  const placed = placeCollaboration(blocks, f.collab, f.item, "renewal");
   return {
     version: 1,
     surfaceId: `renewal:${f.item.id}`,
@@ -358,9 +360,9 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     subject: { kind: "work_item", id: f.item.id, title: f.item.title.slice(0, 200) },
     stage: { key: stage, label: stageLabel },
     generatedAt: opts.now.toISOString(),
-    fingerprint: hash([blocks.map((b) => [b.id, b.hash]), f.unavailable]),
-    blocks,
+    fingerprint: hash([placed.map((b) => [b.id, b.hash]), f.unavailable, f.collab?.unavailable ?? []]),
+    blocks: placed,
     ai: { available: opts.aiAvailable },
-    unavailable: f.unavailable.map((g) => ({ part: PART_WORDS[g.part], reason: g.reason })),
+    unavailable: mergeUnavailable(f.unavailable.map((g) => ({ part: PART_WORDS[g.part], reason: g.reason })), f.collab),
   };
 }

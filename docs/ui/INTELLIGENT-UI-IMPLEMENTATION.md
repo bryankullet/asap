@@ -56,7 +56,7 @@ authorized records (viewer's session, RLS)
   - `open` a governed place, or `ask`.
   - `command`, from a closed set that the browser maps to the endpoint that already owns it (D-157, §7). The surface can never name a path.
 
-### Registered Living components (0079, 0081–0084, 0086)
+### Registered Living components (0079, 0081–0084, 0086, 0088)
 
 | Component | Purpose |
 |---|---|
@@ -77,6 +77,11 @@ authorized records (viewer's session, RLS)
 | PortfolioGroups | Renewals selected by the query, grouped and totalled |
 | EvidenceInspector | The sources behind the surface |
 | FocusPanel | The answer to a request asked inside the workspace, from records, with abstention (0086, D-165) |
+| ArrivedMail | Email filed to this work and not dealt with; ASAP's reading labelled; the governed step it proposes (0088, D-166) |
+| HandoverNote | Responsibility moving between colleagues: done, open, watch, acknowledged (0087–0088, D-166) |
+| RelatedWork | Other open work on the same client or policy, and why it bears on this work (D-166) |
+| ResponsePatterns | Insurer response times from the brokerage's own records, an estimate with basis and sample (D-166) |
+| DecisionTrail | The client's last round for the same cover: answers, declines, instruction, with evidence (D-166) |
 | Timeline | Recent changes, notes, this cover in earlier years |
 
 ---
@@ -102,7 +107,7 @@ every control, and reduced motion is honoured.
 | M5 Living Renewal Journey | **built** to the limits of existing capabilities | Attention → terms → comparison and revision → exploration → decision → placement → issuance → verified cover, with governed actions in place. Stage 9 (continuing relationship) is **not built** |
 | M6 Ask ASAP directing the interface | **built** | The renewal portfolio is refined in words (D-158). Renewal, claim and policy-change workspaces recompose around a request asked inside them — revisions, quotes, blockers, evidence, obligations, consequences, messages, history, next steps, exploration (D-165). Rules first; the model through the gateway only when no rule matches, schema-checked and bounded to the record's names; evaluated (`workspace-requests.json`). The portfolio interpreter remains deterministic only |
 | M7 Reactive composition and continuity | **built** | Polling and refresh on focus; in-place reconciliation by stable id; Updated and New marks; pin, collapse and selections kept on the server; open forms keep their command and typed text; deep links, refresh, Back and Forward |
-| M8 Insurance-native intelligence | **partial** | Built: time and cover, obligation, change and contradiction, communication (D-162), decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159). **Not built:** inbound email turned into proposed actions inside the workspace, structured handoff notes, learned patterns |
+| M8 Insurance-native intelligence | **built** | Time and cover, obligation, change and contradiction, communication and decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159); arrived email with proposed governed steps, structured handovers with acknowledgement, related work across a client's records, measured response patterns, and the last round's decisions with evidence (D-166). Behavioural interface learning is **not built** by design: patterns come only from recorded outcomes |
 | M9 Exploration and multi-context | **partial** | Client decisions explored before they are made, from records, kept in the address (D-160); portfolio rows open their workspace. Saved, versioned proposals beyond the address are **not built** |
 | M10 Hardening | **built** for Living surfaces | axe-core with zero serious or critical violations; keyboard focus rings; visual regression baselines at 1440 and 390 px; render and composition timing; security tests (tenant, role, tampered commands, markup as text). Shell screens outside Living surfaces are **not** axe-audited |
 | Secondary workspaces | **partial** | Claims and policy changes (D-161) and the renewal portfolio (D-158) are built. **Commission reconciliation** and **investigations** are **not built**: no reconciliation records exist to compose from |
@@ -147,6 +152,9 @@ every control, and reduced motion is honoured.
 | `issuance.approve_request`, `issuance.record_submission` | `POST /placements/:id/issuance/actions` | the issuance's own permissions allow it |
 | `claim.receive_document` | `POST /claims/:id/actions` | a document is outstanding and the viewer can act |
 | `endorsement.decide_item` | `POST /endorsements/:id/actions` | an item waits for the insurer's written decision and the viewer can act |
+| `quotation.confirm_reading` | `POST /opportunities/:id/actions` (`record_response` with `fromProposalId`) | an arrived email was read into a proposal and the viewer may record answers |
+| `work.hand_over` | `POST /work-items/:id/hand-over` | the viewer holds `job:edit` and the work is not done |
+| `work.acknowledge_handover` | `POST /work-handovers/:id/acknowledge` | the work was handed to the viewer and not yet acknowledged |
 
 How commands behave:
 - **Validation:** the validator holds each command's fixed payload and inputs exactly.

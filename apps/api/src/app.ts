@@ -249,6 +249,8 @@ export function createApp(deps: AppDeps) {
     "/exception-suggestions/*",
     "/chaser-templates",
     "/chaser-templates/*",
+    /* A colleague acknowledging work handed to them (D-166). */
+    "/work-handovers/*",
   ]) {
     app.use(path, guard);
   }

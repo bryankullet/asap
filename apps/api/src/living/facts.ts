@@ -5,6 +5,7 @@ import { loadIssuance } from "../placement/issuance.js";
 import { load as loadPlacement, type Env } from "../placement/service.js";
 import { loadOpportunity } from "../routes/opportunities.js";
 import { loadWorkflowDetail } from "../routes/workflows.js";
+import { loadCollaboration, type Collaboration } from "./intelligence.js";
 
 /**
  * Everything a Living renewal surface is composed from (D-156), read under the viewer's own session
@@ -40,6 +41,8 @@ export type RenewalLivingFacts = {
   unavailable: Unavailable[];
   /** What the viewer's role allows on the run's controls (the endpoints check again). */
   viewer: { canControlRun: boolean };
+  /** Arrived email, handover, related work and response patterns (D-166). Absent in pure fixtures. */
+  collab?: Collaboration | null;
 };
 
 /** Reads one part; a failure is recorded as a gap instead of becoming an absent fact. */
@@ -83,11 +86,13 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
   if (item.client_id && !clientRow && !gaps.some((g) => g.part === "client")) gaps.push({ part: "client", reason: "restricted" });
 
   let period: RenewalLivingFacts["period"] = null;
+  let policyId: string | null = null;
   if (item.policy_period_id) {
-    const row = await rows<{ period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null; policies: { policy_number: string | null; class_of_business: string; insurer_id: string | null; insurers: { name: string } | null } | null } | null>(gaps, "period",
-      db.from("policy_periods").select("period_start, period_end, premium_amount, premium_currency, policies(policy_number, class_of_business, insurer_id, insurers(name))").eq("organization_id", org).eq("id", item.policy_period_id).maybeSingle());
+    const row = await rows<{ policy_id: string; period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null; policies: { policy_number: string | null; class_of_business: string; insurer_id: string | null; insurers: { name: string } | null } | null } | null>(gaps, "period",
+      db.from("policy_periods").select("period_start, period_end, premium_amount, premium_currency, policy_id, policies(policy_number, class_of_business, insurer_id, insurers(name))").eq("organization_id", org).eq("id", item.policy_period_id).maybeSingle());
     if (row) period = { periodStart: row.period_start, periodEnd: row.period_end, insurerName: row.policies?.insurers?.name ?? "the insurer", insurerId: row.policies?.insurer_id ?? null, policyNumber: row.policies?.policy_number ?? null, classOfBusiness: row.policies?.class_of_business ?? "Renewal", premiumAmount: row.premium_amount != null ? String(row.premium_amount) : null, premiumCurrency: row.premium_currency ?? null };
     else if (!gaps.some((g) => g.part === "period")) gaps.push({ part: "period", reason: "restricted" });
+    policyId = row?.policy_id ?? null;
   }
 
   const runId = (runRows ?? [])[0]?.id ?? null;
@@ -142,6 +147,10 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     memory = (m ?? []).map((r) => ({ periodStart: r.period_start, periodEnd: r.period_end, insurer: r.policies.insurers?.name ?? "An insurer", policyNumber: r.policies.policy_number, premiumAmount: r.premium_amount != null ? String(r.premium_amount) : null, premiumCurrency: r.premium_currency }));
   }
 
+  const waitingOn = (opportunity?.insurers ?? []).filter((i) => !i.removedAt && i.request && (i.request.sentAt || i.request.delivery) && !i.response).map((i) => i.insurerName);
+  const collab = await loadCollaboration(env, [], { item, subjectIds: [opportunityId ?? "", placement?.placement.id ?? ""], policyId, waitingOn, canRecordResponse: Boolean(opportunity?.permissions.canRecordResponse),
+    trailFor: item.client_id && period ? { clientId: item.client_id, classOfBusiness: period.classOfBusiness, excludeOpportunityId: opportunityId } : null });
+
   const owner = ownerRow;
   return {
     item,
@@ -157,5 +166,6 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     memory,
     unavailable: gaps,
     viewer: { canControlRun: hasPermission(env.ctx, "policy", "edit") },
+    collab,
   };
 }

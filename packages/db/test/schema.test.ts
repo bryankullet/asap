@@ -188,6 +188,7 @@ describe("Drizzle schema conventions", () => {
       "user_onboarding",
       "user_team_memberships",
       "users",
+      "work_handovers",
       "work_item_pins",
       "work_items",
       "workflow_approvals",

@@ -50,6 +50,9 @@ export const LivingCommand = z.enum([
   "issuance.record_submission",
   "claim.receive_document",
   "endorsement.decide_item",
+  "quotation.confirm_reading",
+  "work.hand_over",
+  "work.acknowledge_handover",
 ]);
 export type LivingCommand = z.infer<typeof LivingCommand>;
 /** What a person fills in before a command runs. Never pre-filled with a value the model chose. */
@@ -58,7 +61,7 @@ export const livingCommandInputSchema = z.strictObject({
   label,
   kind: z.enum(["text", "textarea", "date", "datetime", "select"]),
   required: z.boolean(),
-  options: z.array(z.strictObject({ value: z.string().max(80), label })).max(12).default([]),
+  options: z.array(z.strictObject({ value: z.string().max(80), label })).max(40).default([]),
   hint: z.string().max(300).nullable().default(null),
 });
 export type LivingCommandInput = z.infer<typeof livingCommandInputSchema>;
@@ -439,6 +442,91 @@ export const portfolioGroupsProps = z.strictObject({
   comparing: z.boolean(),
 });
 
+/* Insurance-native intelligence (D-166) ------------------------------------------------------- */
+
+const longText = z.string().min(1).max(2000);
+
+/**
+ * Email the inbound router filed to this work and nobody has dealt with yet (D-144), with ASAP's
+ * reading of it labelled as a reading, and what the workspace proposes doing — through its own
+ * governed commands. Filing an email records nothing; only a person's command does.
+ */
+export const arrivedMailProps = z.strictObject({
+  items: z.array(z.strictObject({
+    id: uuidSchema,
+    from: label,
+    subject: line,
+    at: isoDate,
+    party: z.string().max(200).nullable(),
+    /** ASAP's reading of what the email is, in words — never a fact. */
+    reading: line.nullable(),
+    /** What was read from the email's own words (D-152), when anything was. */
+    proposal: z.strictObject({ summary: line, words: line.nullable() }).nullable(),
+    /** What the workspace proposes doing with it. */
+    proposed: line,
+  })).max(8),
+  note: line,
+});
+
+/** The latest handover of this work between colleagues (D-166): done, open, watch, acknowledged. */
+export const handoverNoteProps = z.strictObject({
+  /** All null when the work has not been handed over yet. */
+  from: label.nullable(),
+  to: label.nullable(),
+  at: isoDate.nullable(),
+  done: longText.nullable(),
+  open: longText.nullable(),
+  watch: longText.nullable(),
+  acknowledgedAt: isoDate.nullable(),
+  /** True when the viewer is the person it was handed to. */
+  forViewer: z.boolean(),
+  /** How many earlier handovers this work has had. */
+  earlier: z.number().int().min(0),
+});
+
+/** Other open work on the same client or policy, and why it bears on this work (D-166). */
+export const relatedWorkProps = z.strictObject({
+  items: z.array(z.strictObject({
+    title: label,
+    kind: label,
+    status: line,
+    why: line,
+    /** potential: it may bear on this work; context: the same client, worth knowing. */
+    certainty: z.enum(["potential", "context"]),
+    ref: livingRefSchema,
+  })).max(8),
+});
+
+/**
+ * What usually happens, measured from this brokerage's own records (D-166): an estimate with its
+ * basis and sample, or a plain statement that there is too little on file to say.
+ */
+export const responsePatternsProps = z.strictObject({
+  items: z.array(z.strictObject({
+    party: label,
+    measure: line,
+    sample: z.number().int().min(0),
+    enough: z.boolean(),
+  })).max(8),
+  basis: line,
+});
+
+/**
+ * What was decided in this client's last round for the same cover, and on what evidence (D-166):
+ * the insurers' answers, declines with their reasons, and the client's recorded instruction.
+ */
+export const decisionTrailProps = z.strictObject({
+  round: line,
+  items: z.array(z.strictObject({
+    at: isoDate.nullable(),
+    text: line,
+    by: z.string().max(200).nullable(),
+    tone,
+    ref: livingRefSchema.nullable(),
+  })).max(10),
+  note: line,
+});
+
 /** Every Living block's schema, by component id. The registry rows hold their JSON Schema. */
 export const LIVING_BLOCK_PROPS = {
   ContextHeader: contextHeaderProps,
@@ -458,6 +546,11 @@ export const LIVING_BLOCK_PROPS = {
   WorkJourney: workJourneyProps,
   FocusPanel: focusPanelProps,
   WorkChecklist: workChecklistProps,
+  ArrivedMail: arrivedMailProps,
+  HandoverNote: handoverNoteProps,
+  RelatedWork: relatedWorkProps,
+  ResponsePatterns: responsePatternsProps,
+  DecisionTrail: decisionTrailProps,
   PortfolioGroups: portfolioGroupsProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
@@ -493,7 +586,7 @@ export const livingSurfaceSchema = z.strictObject({
   generatedAt: z.string(),
   /** The whole surface's hash: unchanged means nothing to reconcile. */
   fingerprint: z.string().max(64),
-  blocks: z.array(livingBlockSchema).max(20),
+  blocks: z.array(livingBlockSchema).max(28),
   /** Composition needs no model: an unavailable model only switches off what needs one. */
   ai: z.strictObject({ available: z.boolean() }),
   /**
@@ -523,6 +616,11 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
   FocusPanel: { version: 1, name: "Focus", purpose: "The answer to a request asked inside a workspace, from records, with the blocks it concerns brought forward.", requiresEvidence: false },
+  ArrivedMail: { version: 1, name: "Arrived email", purpose: "Email filed to this work and not yet dealt with, ASAP's reading labelled as a reading, and the governed step it proposes.", requiresEvidence: false },
+  HandoverNote: { version: 1, name: "Handover", purpose: "Responsibility moving between colleagues: what is done, open and to watch, and whether the receiver has it.", requiresEvidence: false },
+  RelatedWork: { version: 1, name: "Related work", purpose: "Other open work on the same client or policy, and why it bears on this work.", requiresEvidence: false },
+  DecisionTrail: { version: 1, name: "Decided last time", purpose: "What was decided in the client's last round for the same cover, each decision with its evidence.", requiresEvidence: false },
+  ResponsePatterns: { version: 1, name: "What usually happens", purpose: "Response times measured from this brokerage's own records, as an estimate with its basis and sample.", requiresEvidence: false },
   WorkJourney: { version: 1, name: "Work journey", purpose: "Any workflow's own steps in order, done, now, waiting or next, as its run records them.", requiresEvidence: false },
   WorkChecklist: { version: 1, name: "Work checklist", purpose: "Things each done or outstanding, with who holds them: documents, decisions, separately recorded facts.", requiresEvidence: false },
   ExplorationPanel: { version: 1, name: "Exploration", purpose: "A client decision explored before it is made: each alternative's premium, insurer change, validity, term differences and next steps, from records. Nothing is recorded or recommended.", requiresEvidence: false },

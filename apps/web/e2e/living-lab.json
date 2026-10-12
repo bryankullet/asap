@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "7c477ab73c5675f4",
+   "fingerprint": "122c01614f4a27bf",
    "blocks": [
     {
      "id": "header",
@@ -395,7 +395,7 @@
     "label": "Insurer terms"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "9162a37cb6f06404",
+   "fingerprint": "c9984043e2a45dca",
    "blocks": [
     {
      "id": "header",
@@ -876,7 +876,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "745c62588c5355ab",
+   "fingerprint": "a38bdb72772a6438",
    "blocks": [
     {
      "id": "header",
@@ -1323,7 +1323,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "890afeb8732e26fc",
+   "fingerprint": "58f2d5023f4afe92",
    "blocks": [
     {
      "id": "header",
@@ -1741,7 +1741,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "d0703b39b7202ef0",
+   "fingerprint": "7f0aaafcd95b8354",
    "blocks": [
     {
      "id": "header",
@@ -2099,7 +2099,7 @@
     "label": "Issuance"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "2d74837f1e830a9b",
+   "fingerprint": "6d6492f8178e2745",
    "blocks": [
     {
      "id": "header",
@@ -2440,7 +2440,7 @@
     "label": "Verified"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "ea32c1039954e2f0",
+   "fingerprint": "9c89a8309440868f",
    "blocks": [
     {
      "id": "header",
@@ -2728,7 +2728,7 @@
     "label": "Stopped"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "ddc8fd75d4bd907f",
+   "fingerprint": "82b2ece2444198da",
    "blocks": [
     {
      "id": "header",

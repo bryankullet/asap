@@ -1,6 +1,11 @@
 import type {
   approvalBundleProps,
+  arrivedMailProps,
+  decisionTrailProps,
   focusPanelProps,
+  handoverNoteProps,
+  relatedWorkProps,
+  responsePatternsProps,
   workChecklistProps,
   workJourneyProps,
   explorationPanelProps,
@@ -498,6 +503,106 @@ function FocusPanel({ props, env }: P<typeof focusPanelProps>) {
   );
 }
 
+function ArrivedMail({ props }: P<typeof arrivedMailProps>) {
+  return (
+    <div className="lv-arrived">
+      <ul>
+        {props.items.map((m) => (
+          <li key={m.id} className="lv-arrived-item">
+            <div className="lv-arrived-head">
+              <strong>{m.party ?? m.from}</strong>
+              <small>{m.party ? `${m.from} · ` : ""}{day(m.at)}</small>
+            </div>
+            <p className="lv-arrived-subject">{m.subject}</p>
+            {m.reading ? <p className="lv-arrived-reading"><span className="lv-chip lv-grey">Not a fact</span> {m.reading}</p> : null}
+            {m.proposal ? (
+              <p className="lv-arrived-proposal">
+                Read from the email: <strong>{m.proposal.summary}</strong>
+                {m.proposal.words ? <q>{m.proposal.words}</q> : null}
+              </p>
+            ) : null}
+            <p className="lv-arrived-next">{m.proposed}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
+function HandoverNote({ props }: P<typeof handoverNoteProps>) {
+  if (!props.from || !props.done)
+    return <p className="lv-note">Not handed over. If a colleague takes this on, hand it over with what is done and what is still open — they will see it first.</p>;
+  return (
+    <div className={`lv-handover${props.forViewer && !props.acknowledgedAt ? " lv-handover-new" : ""}`}>
+      <p className="lv-handover-who">
+        <strong>{props.from}</strong> handed this to <strong>{props.forViewer ? "you" : props.to}</strong>{props.at ? ` on ${day(props.at)}` : ""}
+        {props.acknowledgedAt ? <span className="lv-chip lv-green">Acknowledged {day(props.acknowledgedAt)}</span> : <span className="lv-chip lv-gold">Not acknowledged yet</span>}
+      </p>
+      <dl className="lv-handover-notes">
+        <dt>Done</dt><dd>{props.done}</dd>
+        <dt>Still open</dt><dd>{props.open}</dd>
+        {props.watch ? <><dt>Watch</dt><dd>{props.watch}</dd></> : null}
+      </dl>
+      {props.earlier ? <small>{props.earlier} earlier handover{props.earlier === 1 ? "" : "s"} on this work.</small> : null}
+    </div>
+  );
+}
+
+function RelatedWork({ props, env }: P<typeof relatedWorkProps>) {
+  return (
+    <ul className="lv-related">
+      {props.items.map((r, i) => (
+        <li key={i}>
+          <div className="lv-related-head">
+            <span className="lv-chip lv-grey">{r.kind}</span>
+            <button type="button" className="lv-rowlink" onClick={() => env.open(r.ref as Ref)}>{r.title}</button>
+          </div>
+          <small>{r.status}</small>
+          <p>{r.certainty === "potential" ? <span className={`lv-chip lv-${CERTAINTY.potential[1]}`}>{CERTAINTY.potential[0]}</span> : <span className="lv-chip lv-grey">Same client</span>} {r.why}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ResponsePatterns({ props }: P<typeof responsePatternsProps>) {
+  return (
+    <div className="lv-patterns">
+      <ul>
+        {props.items.map((p) => (
+          <li key={p.party}>
+            <strong>{p.party}</strong>
+            <p className={p.enough ? undefined : "lv-missing"}>{p.measure}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.basis}</p>
+    </div>
+  );
+}
+
+function DecisionTrail({ props, env }: P<typeof decisionTrailProps>) {
+  return (
+    <div className="lv-trail">
+      <p className="lv-trail-round">{props.round}</p>
+      <ol className="lv-timeline">
+        {props.items.map((i, n) => (
+          <li key={n}>
+            <span className={`lv-dot lv-${i.tone}`} aria-hidden />
+            <div>
+              <p>{i.text}</p>
+              <small>{[i.at ? day(i.at) : null, i.by].filter(Boolean).join(" · ")}</small>
+              {i.ref ? <button type="button" className="lv-rowlink lv-trail-link" onClick={() => env.open(i.ref as Ref)}>Open the evidence</button> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -519,6 +624,11 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   WorkJourney,
   WorkChecklist,
   FocusPanel,
+  ArrivedMail,
+  HandoverNote,
+  RelatedWork,
+  ResponsePatterns,
+  DecisionTrail,
 };
 
 /**

@@ -126,3 +126,7 @@ export async function browser(who: Person | "anon", method: string, path: string
 /** The engine's connection, for driving a workflow at a chosen moment in tests. Local PostgREST only. */
 export const serviceClient = () =>
   createSupabaseFactory({ url: SUPABASE, anonKey: jwt({ role: "anon" }), serviceRoleKey: jwt({ role: "service_role" }), apiInternalKey: "unused", fetch: transport }).service();
+
+/** A person's own supabase-js client, as the API builds it for their request: RLS applies. */
+export const userDb = (who: Person) =>
+  createSupabaseFactory({ url: SUPABASE, anonKey: jwt({ role: "anon" }), serviceRoleKey: jwt({ role: "service_role" }), apiInternalKey: "unused", jwtSecret: SECRET, fetch: transport }).forUser(token(who));

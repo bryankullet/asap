@@ -262,7 +262,7 @@ export const api = {
    * the endpoint explains (403/409/422 with an outcome) is returned, not thrown.
    */
   livingCommand: (path: string, body: unknown) =>
-    request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked"]).optional(), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
+    request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked", "applied", "already_done"]).optional(), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
   /** The renewal portfolio: the current view as a typed query, refined by a request in words (D-158). */
   portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
   /** What changed since this person last looked, from the brokerage's semantic events (D-159). */

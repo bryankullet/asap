@@ -41,6 +41,10 @@ const COMMANDS: Record<LivingCommand, { payload: Record<string, string | null>; 
   "issuance.record_submission": { payload: { action: "record_issuance_submission", issuanceRequestId: null }, inputs: ["method", "recipient", "sentAt", "evidenceNote"] },
   "claim.receive_document": { payload: { action: "receive_document", documentId: null }, inputs: ["reference"] },
   "endorsement.decide_item": { payload: { action: "decide_item", itemId: null }, inputs: ["decision", "responseReference", "note"] },
+  // Accepting ASAP's reading of an insurer's email as read (D-152, D-166); the confirmation shows it in full.
+  "quotation.confirm_reading": { payload: { action: "record_response", opportunityInsurerId: null, fromProposalId: null, outcome: null }, inputs: [] },
+  "work.hand_over": { payload: { version: null }, inputs: ["toUserId", "done", "open", "watch"] },
+  "work.acknowledge_handover": { payload: {}, inputs: [] },
 };
 
 const BANNED_KEYS = ["percent", "percentage", "confidence", "completion", "score", "ranking"];

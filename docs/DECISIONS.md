@@ -3029,3 +3029,34 @@ instructed — the decision is then a record, not an exploration.
   cases; rules offline at 100% (threshold 95%), the model with `WORKSPACE_EVAL_LIVE=1`.
 - **Permissions:** asking is reading, so read-only members may ask; another brokerage's work is 404.
   Item links in the panel are limited to the places a surface may open.
+
+## D-166 — Insurance-native intelligence in every Living workspace (0087, 0088)
+
+Five blocks, each from records the viewer may read, none a status, none written by a model:
+
+- **Arrived email** (`ArrivedMail`). Email the inbound router filed to this work's runs (D-144) on
+  the step the run is on and nobody has dealt with. ASAP's reading is labelled "Not a fact". When
+  the email's own words were read into a proposal (D-152), the workspace offers
+  `quotation.confirm_reading`: the existing `record_response` action with `fromProposalId`, its
+  confirmation showing the values and the words. Otherwise it says which governed step the email
+  belongs to (record a claim document, an insurer's decision, an answer). Filing records nothing.
+- **Handover** (`HandoverNote`, table `work_handovers`, 0087). Responsibility moves to a colleague
+  with what is done, what is still open and what to watch; the owner changes in the same
+  transaction under `job:edit`, to an active member, at the version seen, never on done work. The
+  receiver sees it first and acknowledges it ("I have it"); only they can. Everyone who can see the
+  work can read how it changed hands. `POST /work-items/:id/hand-over`,
+  `POST /work-handovers/:id/acknowledge` (the latter added to the session guard after the connected
+  test found it reachable without one).
+- **Related work** (`RelatedWork`). Other open work for the same client; on the same policy it says
+  why it may bear on this work (an open claim on a policy being renewed, an open change on a
+  claimed policy), marked *potential*; other policies are marked *same client*. No cover wording.
+- **What usually happens** (`ResponsePatterns`). For insurers a renewal waits on: delivered requests
+  and recorded answers over 12 months, the typical first-answer time, stated only with 5 or more
+  requests and always as an estimate with its basis. The minimum is a display rule, said on screen.
+- **Decided last time** (`DecisionTrail`). The client's previous quotation round for the same class:
+  answers, declines with their reasons, and the client's instruction with its evidence — "a starting
+  point, not this year's decision".
+
+Unreadable parts are named on the surface (e.g. "Colleagues could not be read"), never shown as
+absent. **Not built:** behavioural interface learning (re-ordering by what people click); the only
+"learning" is outcomes measured from records, and personal arrangement (0080).

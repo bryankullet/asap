@@ -287,3 +287,27 @@
 .lv-focus-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-nested); background: var(--color-wash); border: 1px solid var(--color-line-soft); }
 .lv-focus-item .lv-dot { margin-top: 6px; }
 .lv-focus-item p { margin: 2px 0 0; font-size: 13px; color: var(--color-ink-secondary); }
+
+/* Insurance-native intelligence (D-166) */
+.lv-arrived ul, .lv-related, .lv-patterns ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.lv-arrived-item { padding: 12px 14px; border-radius: var(--radius-nested); background: var(--color-wash); border: 1px solid var(--color-line-soft); }
+.lv-arrived-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.lv-arrived-head small, .lv-related small { color: var(--color-ink-muted); font-size: 12px; }
+.lv-arrived-subject { margin: 4px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.lv-arrived-reading, .lv-arrived-proposal, .lv-arrived-next { margin: 6px 0 0; font-size: 13px; color: var(--color-ink-secondary); }
+.lv-arrived-proposal q { display: block; margin-top: 4px; font-style: italic; color: var(--color-ink-muted); overflow-wrap: anywhere; }
+.lv-arrived-next { color: var(--color-ink); font-weight: 500; }
+.lv-handover-who { margin: 0 0 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 14px; }
+.lv-handover-new { padding: 12px 14px; border-radius: var(--radius-nested); background: var(--color-accent-gold-soft); }
+.lv-handover-notes { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13px; }
+.lv-handover-notes dt { color: var(--color-ink-muted); font-weight: 600; }
+.lv-handover-notes dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lv-related li { display: flex; flex-direction: column; gap: 4px; }
+.lv-related-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lv-related p, .lv-patterns p { margin: 0; font-size: 13px; color: var(--color-ink-secondary); }
+@media (max-width: 520px) { .lv-handover-notes { grid-template-columns: 1fr; } }
+.lv-trail-round { margin: 0 0 8px; font-size: 13px; color: var(--color-ink-muted); }
+.lv-trail .lv-timeline li { display: flex; gap: 10px; align-items: flex-start; }
+.lv-trail .lv-timeline .lv-dot { margin-top: 6px; flex: none; }
+.lv-trail .lv-timeline p { margin: 0; font-size: 13px; }
+.lv-trail-link { display: block; margin-top: 2px; font-size: 12px; }

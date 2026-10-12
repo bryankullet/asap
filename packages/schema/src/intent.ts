@@ -118,6 +118,11 @@ const LIVING = [
   "ExplorationPanel",
   "WorkJourney",
   "FocusPanel",
+  "ArrivedMail",
+  "HandoverNote",
+  "RelatedWork",
+  "ResponsePatterns",
+  "DecisionTrail",
   "WorkChecklist",
   "PortfolioGroups",
 ] as const;
