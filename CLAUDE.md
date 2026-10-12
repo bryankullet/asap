@@ -277,6 +277,12 @@ cover is active only where the server's cover check verified it. **Demo mode** (
 the approved fictional records in the browser only, signed-in and labelled — the one place fictional
 records live, at the owner's instruction (D-115 departs from D-069 here).
 
+**Living surfaces** (D-156). A renewal opens a Living surface (`/s/living?workItemId=`): composed on
+the server, deterministically, from records the viewer may read (`apps/api/src/living/`), validated
+against `component_definitions` (`allowed_spaces = {living}`, 0079) and the Zod source in
+`packages/schema/src/living.ts`, and rendered by `apps/web/src/asap/living/`. Its blocks only open
+governed places or ask; they never write. Implementation map: `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`.
+
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 
 ### Generative UI — the hard boundary
@@ -325,9 +331,10 @@ Lines       #dfe6ea strong · #edf1f3 soft
 Accent      #0f7b5a green, #e7f5ef soft  — success, active, "ASAP is working"
             #d9a62e gold,  #fbf4dc soft  — waiting, attention
             #b94a48 red,   #fff0ef soft  — needs review, error
-Radius      18px cards · 12px controls · 99px pills
-Shadow      0 14px 44px rgba(16,42,67,.09) — for things that float only. A card at rest is a
-            hairline border and an 18px radius, never a drop shadow.
+Radius      D-156 scale: 28 surface · 24 panel · 22 card · 18 nested · 15 control · 14 input ·
+            12 compact · 10 chip · 8 tight · 999 pill
+Shadow      D-156 elevation: --shadow-1 for cards at rest, --shadow-2 raised, --shadow-3, --shadow-4
+            for things that float (palette, sheets). Supersedes "a card at rest is never shadowed".
 Sidebar     224px, collapses to a bottom bar under 900px
 ```
 

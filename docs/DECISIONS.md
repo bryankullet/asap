@@ -2824,3 +2824,41 @@ keeps D-115's substance (the approved interface's logic, Spaces and sheets) and 
   in N minutes" figure for Renewal Autopilot (the worker's schedule is not exposed to the browser,
   and the card does not invent one); pausing a whole workflow engine from its card (it is governed by
   the autonomy rule, opened from its Space).
+
+## D-156 — The Living Interface: server-composed, registered, calm surfaces; a softer visual system
+
+**Context.** The Intelligent UI brief (12 Oct 2026) asks for a premium, rounded visual language and
+for workspaces that compose themselves from what is happening, without giving a model authority
+over values, status, approvals or cover.
+
+**Decision.**
+- *Visual system.* `packages/ui/src/styles.css` stays the single source. Figtree body, Outfit
+  headings; radius scale surface 28 · panel 24 · card 22 · nested 18 · control 15 · input 14 ·
+  compact 12 · chip 10 · tight 8 · pill 999; elevation `--shadow-1`…`--shadow-4`, with
+  `--shadow-1` on cards at rest. This **supersedes** CLAUDE.md's "a card at rest is a hairline
+  border and an 18px radius, never a drop shadow" and the 18/12/99 radius set. Status colours and
+  their meanings do not change.
+- *Living surface.* A `LivingSurface` (`packages/schema/src/living.ts`) is composed on the server,
+  deterministically, from records the viewer may read (`apps/api/src/living/`). It is validated
+  against `component_definitions` (11 blocks, migration 0079, `allowed_spaces = {living}`), the
+  stored JSON Schema and the Zod source. Blocks needing a permission the viewer lacks are removed
+  before sending. The same contract as the Space plan (D-059) applies: no unregistered component,
+  no value from model text, no authored status.
+- *Actions never write.* A block can only open a governed place or ask a question. Approval,
+  sending, recording and applying stay where they are, under their guards.
+- *Consequences are typed by certainty.* Confirmed from records, potential from a relationship,
+  unknown when a fact is missing. A request, quote or draft is never shown as cover.
+- *Calm updates.* Polling every 20 s and on focus; an unchanged fingerprint is ignored; blocks keep
+  their ids and reconcile in place; changed blocks are marked Updated and new ones New for a few
+  seconds. Pinned and collapsed blocks are a per-person convenience in browser storage (CLAUDE.md
+  allows it for conveniences only).
+- *Renewals first.* Renewal runs and renewal Work items open `/s/living?workItemId=`. The renewal
+  steps stay one click away and remain where actions happen. Demo mode has no server and opens the
+  steps instead.
+- *UI Lab.* `apps/web/e2e/lab.html`, development only and never bundled, renders the composer's own
+  output for one fictional renewal at every stage. `apps/api/test/living-lab.test.ts` keeps the
+  snapshot equal to the composer. Fictional records stay confined to tests and demo mode (D-115).
+
+**Simplest choices where the brief is silent.** Polling instead of a second realtime channel. One
+composition purpose (`renewal`), as an enum so others are additive. The implementation map and
+milestone status are in `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`.
