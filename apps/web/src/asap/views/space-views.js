@@ -91,7 +91,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "font-size:12px;letter-spacing:0.04em;font-weight:400;color:#6e776f;margin-bottom:9px;font-family:var(--font-body)",
+                                    "font-size:12px;letter-spacing:0.04em;font-weight:400;color:var(--color-ink-muted);margin-bottom:9px;font-family:var(--font-body)",
                                   ),
                                 },
                                 r(v, "b.label"),
@@ -122,7 +122,7 @@ export function renderSpace(v) {
                                           "small",
                                           {
                                             style: st(
-                                              "display:block;font-size:12px;letter-spacing:0.04em;color:#6e776f;font-weight:400;font-family:var(--font-body)",
+                                              "display:block;font-size:12px;letter-spacing:0.04em;color:var(--color-ink-muted);font-weight:400;font-family:var(--font-body)",
                                             ),
                                           },
                                           r(v, "f.k"),
@@ -160,7 +160,7 @@ export function renderSpace(v) {
                                             h("strong", { style: st("display:block;font-size:13px") }, r(v, "r.title")),
                                             h(
                                               "small",
-                                              { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px;line-height:1.45") },
+                                              { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px;line-height:1.45") },
                                               r(v, "r.note"),
                                             ),
                                             r(v, "r.whyOpen")
@@ -332,7 +332,7 @@ export function renderSpace(v) {
                                     style: st(
                                       "display:grid;grid-template-columns:" +
                                         s(r(v, "b.grid")) +
-                                        ";background:#f5f7f4;font-size:12px;letter-spacing:0.04em;font-weight:400;color:#6e776f;font-family:var(--font-body)",
+                                        ";background:#f5f7f4;font-size:12px;letter-spacing:0.04em;font-weight:400;color:var(--color-ink-muted);font-family:var(--font-body)",
                                     ),
                                   },
                                   h("div", { style: st("padding:9px 11px") }, "TERM"),
@@ -352,7 +352,7 @@ export function renderSpace(v) {
                                         {
                                           style: st("display:grid;grid-template-columns:" + s(r(v, "r.grid")) + ";border-top:1px solid #eef1ee;font-size:13px"),
                                         },
-                                        h("div", { style: st("padding:10px 11px;color:#6e776f") }, r(v, "r.label")),
+                                        h("div", { style: st("padding:10px 11px;color:var(--color-ink-muted)") }, r(v, "r.label")),
                                         (r(v, "r.cells") || []).map((it, ix) => {
                                           const v2 = sc(v, "cell", it);
                                           return h(
@@ -391,7 +391,7 @@ export function renderSpace(v) {
                                     style: st(
                                       "display:grid;grid-template-columns:" +
                                         s(r(v, "b.grid")) +
-                                        ";background:#f5f7f4;font-size:12px;letter-spacing:0.04em;font-weight:400;color:#6e776f;font-family:var(--font-body)",
+                                        ";background:#f5f7f4;font-size:12px;letter-spacing:0.04em;font-weight:400;color:var(--color-ink-muted);font-family:var(--font-body)",
                                     ),
                                   },
                                   (r(v, "b.cols") || []).map((it, ix) => {
@@ -471,7 +471,7 @@ export function renderSpace(v) {
                                     "div",
                                     {},
                                     h("strong", { style: st("display:block;font-size:13px") }, r(v, "b.name")),
-                                    h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") }, r(v, "b.kind")),
+                                    h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") }, r(v, "b.kind")),
                                   ),
                                   h(
                                     "span",
@@ -519,7 +519,7 @@ export function renderSpace(v) {
                                     );
                                   }),
                                 ),
-                                h("p", { style: st("margin:11px 0 0;font-size:13px;color:#6e776f;line-height:1.6") }, r(v, "b.note")),
+                                h("p", { style: st("margin:11px 0 0;font-size:13px;color:var(--color-ink-muted);line-height:1.6") }, r(v, "b.note")),
                               ),
                             )
                           : null,
@@ -548,12 +548,12 @@ export function renderSpace(v) {
                                     },
                                     r(v, "b.headLabel"),
                                   ),
-                                  h("span", { style: st("font-size:11px;color:#6e776f") }, r(v, "b.headMeta")),
+                                  h("span", { style: st("font-size:11px;color:var(--color-ink-muted)") }, r(v, "b.headMeta")),
                                 ),
                                 h(
                                   "div",
                                   { style: st("padding:12px") },
-                                  h("div", { style: st("font-size:12px;color:#6e776f") }, "To · " + s(r(v, "b.to"))),
+                                  h("div", { style: st("font-size:12px;color:var(--color-ink-muted)") }, "To · " + s(r(v, "b.to"))),
                                   h("strong", { style: st("display:block;font-size:13px;margin-top:6px") }, r(v, "b.subject")),
                                   h("p", { style: st("margin:9px 0 0;font-size:13px;line-height:1.6;color:#4c564e;white-space:pre-line") }, r(v, "b.body")),
                                   h(
@@ -621,11 +621,12 @@ export function renderSpace(v) {
                                 h("strong", { style: st("display:block;font-size:13px") }, r(v, "b.label2")),
                                 h(
                                   "small",
-                                  { style: st("display:block;font-size:12px;color:#6e776f;margin-top:4px") },
+                                  { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:4px") },
                                   "Real files are read from your device. Nothing is saved until you confirm.",
                                 ),
                                 h("input", {
                                   type: "file",
+                                  "aria-label": "Choose files from your device",
                                   multiple: !!r(v, "b.multiple"),
                                   onChange: r(v, "b.onPick"),
                                   style: st("margin-top:11px;font-size:13px"),
@@ -732,7 +733,7 @@ export function renderSpace(v) {
                                   },
                                   "Save assignment",
                                 ),
-                                h("small", { style: st("display:block;width:100%;font-size:12px;color:#6e776f") }, r(v, "b.permNote")),
+                                h("small", { style: st("display:block;width:100%;font-size:12px;color:var(--color-ink-muted)") }, r(v, "b.permNote")),
                               ),
                             )
                           : null,
@@ -831,7 +832,7 @@ export function renderSpace(v) {
                                     },
                                     r(v, "b.saveLabel"),
                                   ),
-                                  h("small", { style: st("font-size:12px;color:#6e776f;align-self:center") }, r(v, "b.saveNote")),
+                                  h("small", { style: st("font-size:12px;color:var(--color-ink-muted);align-self:center") }, r(v, "b.saveNote")),
                                 ),
                               ),
                             )
@@ -844,7 +845,7 @@ export function renderSpace(v) {
                                 "div",
                                 { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);padding:13px;background:#fff;box-shadow:var(--shadow-1)") },
                                 h("strong", { style: st("display:block;font-size:13px") }, r(v, "b.gateHeading")),
-                                h("p", { style: st("margin:6px 0 11px;font-size:12px;line-height:1.55;color:#6e776f") }, r(v, "b.detail")),
+                                h("p", { style: st("margin:6px 0 11px;font-size:12px;line-height:1.55;color:var(--color-ink-muted)") }, r(v, "b.detail")),
                                 h(
                                   "div",
                                   { style: st("display:flex;gap:8px;flex-wrap:wrap;align-items:center") },
@@ -912,7 +913,7 @@ export function renderSpace(v) {
                                             "small",
                                             {
                                               style: st(
-                                                "display:block;font-size:12px;letter-spacing:0.04em;font-weight:400;color:#6e776f;font-family:var(--font-body)",
+                                                "display:block;font-size:12px;letter-spacing:0.04em;font-weight:400;color:var(--color-ink-muted);font-family:var(--font-body)",
                                               ),
                                             },
                                             r(v, "e.when"),
@@ -1087,7 +1088,7 @@ export function renderConversation(v) {
                                                                 "small",
                                                                 {
                                                                   style: st(
-                                                                    "display:block;font-size:12px;letter-spacing:0.04em;color:#6e776f;font-family:var(--font-body);font-weight:400",
+                                                                    "display:block;font-size:12px;letter-spacing:0.04em;color:var(--color-ink-muted);font-family:var(--font-body);font-weight:400",
                                                                   ),
                                                                 },
                                                                 r(v, "sec.label"),
@@ -1217,7 +1218,7 @@ export function renderConversation(v) {
                             null,
                             h(
                               "div",
-                              { style: st("display:flex;gap:10px;align-items:center;color:#6e776f;font-size:13px") },
+                              { style: st("display:flex;gap:10px;align-items:center;color:var(--color-ink-muted);font-size:13px") },
                               h(
                                 "span",
                                 {
@@ -1378,7 +1379,7 @@ export function renderConversation(v) {
                                 {
                                   onClick: r(v, "sug.go"),
                                   style: st(
-                                    "border:1px dashed #d7ded8;background:transparent;border-radius:var(--radius-pill);padding:5px 10px;font-size:12px;color:#6e776f",
+                                    "border:1px dashed #d7ded8;background:transparent;border-radius:var(--radius-pill);padding:5px 10px;font-size:12px;color:var(--color-ink-muted)",
                                   ),
                                   className: ["dch8"].join(" "),
                                 },
@@ -1390,7 +1391,7 @@ export function renderConversation(v) {
                       ),
                       h(
                         "small",
-                        { style: st("display:block;margin-top:8px;font-size:11px;color:#8b938d") },
+                        { style: st("display:block;margin-top:8px;font-size:11px;color:var(--color-ink-muted)") },
                         "ASAP prepares. A human approves anything that leaves this brokerage or moves money.",
                       ),
                     ),
@@ -1474,7 +1475,7 @@ export function renderSheet(v) {
                   "div",
                   { style: st("flex:1;min-height:0;overflow-y:auto;padding:18px 22px") },
                   r(v, "sheet.hasCopy")
-                    ? h(F, null, h("p", { style: st("margin:0 0 15px;font-size:13px;color:#6e776f;line-height:1.6") }, r(v, "sheet.copy")))
+                    ? h(F, null, h("p", { style: st("margin:0 0 15px;font-size:13px;color:var(--color-ink-muted);line-height:1.6") }, r(v, "sheet.copy")))
                     : null,
                   r(v, "sheet.isEmail")
                     ? h(
@@ -1564,7 +1565,7 @@ export function renderSheet(v) {
                               );
                             }),
                           ),
-                          h("small", { style: st("display:block;margin-top:12px;font-size:12px;color:#6e776f;line-height:1.5") }, r(v, "sheet.editNote")),
+                          h("small", { style: st("display:block;margin-top:12px;font-size:12px;color:var(--color-ink-muted);line-height:1.5") }, r(v, "sheet.editNote")),
                         ),
                       )
                     : null,
@@ -1599,7 +1600,7 @@ export function renderSheet(v) {
                                     "span",
                                     { style: st("min-width:0;flex:1") },
                                     h("strong", { style: st("display:block;font-size:13px") }, r(v, "o.title")),
-                                    h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px;line-height:1.5") }, r(v, "o.note")),
+                                    h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px;line-height:1.5") }, r(v, "o.note")),
                                   ),
                                   h("b", { style: st("color:#7b867d") }, "→"),
                                 ),
@@ -1623,7 +1624,7 @@ export function renderSheet(v) {
                             placeholder: "Client, policy number, registration, claim reference or a phrase from an email",
                             style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-control);padding:12px;outline:0;font-size:14px;margin-bottom:12px"),
                           }),
-                          h("div", { style: st("font-size:11px;color:#6e776f;margin-bottom:10px") }, r(v, "sheet.resultCount")),
+                          h("div", { style: st("font-size:11px;color:var(--color-ink-muted);margin-bottom:10px") }, r(v, "sheet.resultCount")),
                           h(
                             "div",
                             { style: st("display:flex;flex-direction:column;gap:7px") },
@@ -1646,7 +1647,7 @@ export function renderSheet(v) {
                                       "span",
                                       { style: st("min-width:0") },
                                       h("strong", { style: st("display:block;font-size:13px") }, r(v, "r.title")),
-                                      h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") }, r(v, "r.note")),
+                                      h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") }, r(v, "r.note")),
                                     ),
                                     h(
                                       "span",
@@ -1711,7 +1712,7 @@ export function renderSheet(v) {
                                     "span",
                                     {},
                                     h("strong", { style: st("display:block;font-size:13px") }, r(v, "r.label")),
-                                    h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") }, r(v, "r.note")),
+                                    h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") }, r(v, "r.note")),
                                   ),
                                   h("b", { style: st("color:#7b867d") }, r(v, "r.mark")),
                                 ),
@@ -1747,7 +1748,7 @@ export function renderSheet(v) {
                                     "span",
                                     { style: st("min-width:0") },
                                     h("strong", { style: st("display:block;font-size:13px") }, r(v, "s.label")),
-                                    h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:2px") }, r(v, "s.note")),
+                                    h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:2px") }, r(v, "s.note")),
                                   ),
                                   h(
                                     "span",
@@ -1808,7 +1809,7 @@ export function renderSheet(v) {
                                     className: ["dch10"].join(" "),
                                   },
                                   h("strong", { style: st("display:block;font-size:13px") }, r(v, "h.title")),
-                                  h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") }, r(v, "h.note")),
+                                  h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") }, r(v, "h.note")),
                                 ),
                               ])(v2),
                             );
@@ -1841,7 +1842,7 @@ export function renderSheet(v) {
                               h("strong", { style: st("display:block;font-size:14px") }, r(v, "me.name")),
                               h(
                                 "small",
-                                { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") },
+                                { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") },
                                 s(r(v, "me.roleLabel")) + " · " + s(r(v, "brokerageName")),
                               ),
                             ),
@@ -1868,7 +1869,7 @@ export function renderSheet(v) {
                                       "span",
                                       {},
                                       h("strong", { style: st("display:block;font-size:13px") }, r(v, "l.title")),
-                                      h("small", { style: st("display:block;font-size:12px;color:#6e776f;margin-top:3px") }, r(v, "l.note")),
+                                      h("small", { style: st("display:block;font-size:12px;color:var(--color-ink-muted);margin-top:3px") }, r(v, "l.note")),
                                     ),
                                     h("b", { style: st("color:#7b867d") }, "→"),
                                   ),

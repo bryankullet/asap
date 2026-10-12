@@ -213,7 +213,7 @@ export function WorkSurface({ logic, A, view, onView, onOpen }: { logic: Logic; 
         <ul className="sh-work" aria-label={current.label}>
           {current.rows.map((r) => (
             <li key={r.id} className="sh-work-row">
-              <span className={`sh-urgency sh-u-${r.urgency}`} aria-label={`Urgency ${r.urgency}`} />
+              <span className={`sh-urgency sh-u-${r.urgency}`} role="img" aria-label={`Urgency ${r.urgency}`} />
               <div className="sh-row-main">
                 <strong>{r.title}</strong>
                 <p>{[r.client?.name, r.statusText, r.owner, r.when].filter(Boolean).join(" · ")}</p>
