@@ -9,6 +9,7 @@ import { loadRenewalLivingFacts } from "../living/facts.js";
 import { homeChanges } from "../living/home.js";
 import { defaultQuery, interpret } from "../living/interpret.js";
 import { composePortfolio, loadPortfolio, loadVocabulary } from "../living/portfolio.js";
+import { composeClaimSurface, composeEndorsementSurface, loadServicingFacts, loadWorkItem } from "../living/servicing.js";
 import { composeRenewalSurface } from "../living/renewal.js";
 import { validateSurface } from "../living/validate.js";
 import type { Env } from "../placement/service.js";
@@ -42,10 +43,19 @@ export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean }) {
     const workItemId = c.req.param("workItemId") ?? "";
     if (!/^[0-9a-f-]{36}$/i.test(workItemId)) throw new HttpError(404, "not_found", "That work is not available.");
 
-    const facts = await loadRenewalLivingFacts(env, workItemId);
-    // Alternatives being explored travel in the address (D-160); only ids, never values.
-    const explore = (c.req.query("explore") ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 3);
-    const surface = composeRenewalSurface(facts, { now: new Date(), aiAvailable: deps.aiAvailable, explore });
+    // One route, one contract: the work's own kind decides which composition it gets (D-161).
+    const item = await loadWorkItem(env, workItemId);
+    const now = new Date();
+    let surface;
+    if (item.kind === "renewal") {
+      const facts = await loadRenewalLivingFacts(env, workItemId);
+      // Alternatives being explored travel in the address (D-160); only ids, never values.
+      const explore = (c.req.query("explore") ?? "").split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 3);
+      surface = composeRenewalSurface(facts, { now, aiAvailable: deps.aiAvailable, explore });
+    } else if (item.kind === "claim" || item.kind === "endorsement") {
+      const facts = await loadServicingFacts(env, item);
+      surface = item.kind === "claim" ? composeClaimSurface(facts, { now, aiAvailable: deps.aiAvailable }) : composeEndorsementSurface(facts, { now, aiAvailable: deps.aiAvailable });
+    } else throw new HttpError(404, "not_found", "A living workspace is not composed for this kind of work yet.");
     const definitions = await loadDefinitions(db, surface.blocks.map((b) => ({ component: b.component, version: b.version })));
     const result = validateSurface({ surface, definitions, permissions: ctx.permissions });
     if (!result.ok) {

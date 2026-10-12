@@ -2931,3 +2931,24 @@ answers say why they cannot be chosen. It is drawn dashed and labelled hypotheti
 recorded, nothing is recommended. The alternatives live in the address (`explore=`), so an
 exploration can be shared and restored, and Back undoes it. It disappears once the client has
 instructed — the decision is then a record, not an exploration.
+
+## D-161 — Claims and policy changes get Living workspaces on the same contract
+
+- `GET /living/:workItemId` composes by the work's own kind: renewal, claim or endorsement — one
+  route, one surface contract, one registry, one validator, one renderer. Other kinds answer 404
+  and keep their existing pages.
+- Claims are composed from `loadClaimDetail` and the run; policy changes from
+  `loadEndorsementDetail`, the run and `endorsement_premium_adjustments`. New registered blocks:
+  `WorkJourney` (any run's own steps) and `WorkChecklist` (0084). The older `Checklist` (0031) is a
+  different component and is left alone.
+- §45 rule 12 on screen: an unreviewed claim says cover has not been reviewed and that ASAP does
+  not decide it; no sentence decides cover (tested). The claim's offer, acceptance and payment are
+  three separate facts, each done only with its own reference.
+- Commands `claim.receive_document` and `endorsement.decide_item` run through
+  `POST /claims/:id/actions` and `POST /endorsements/:id/actions`. They are offered to roles that
+  can act (`space:create`). **Observed, not changed here:** the underlying RPCs check brokerage
+  membership only, so a read-only member calling the endpoint directly could record a document
+  or a decision; tightening that is a separate change to those RPCs.
+- A command the person just completed leaves without a "no longer offered" notice.
+- Commission reconciliation and investigations are **not built**: no reconciliation records exist
+  to compose from, and inventing tables for it would be building a later phase early.

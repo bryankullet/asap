@@ -48,6 +48,8 @@ export const LivingCommand = z.enum([
   "placement.record_submission",
   "issuance.approve_request",
   "issuance.record_submission",
+  "claim.receive_document",
+  "endorsement.decide_item",
 ]);
 export type LivingCommand = z.infer<typeof LivingCommand>;
 /** What a person fills in before a command runs. Never pre-filled with a value the model chose. */
@@ -254,6 +256,30 @@ export const explorationPanelProps = z.strictObject({
   notice: line,
 });
 
+/** Any workflow's own steps, in order, as its run records them (D-161). Never a percentage. */
+export const workJourneyProps = z.strictObject({
+  steps: z.array(z.strictObject({ key: z.string().max(60), label, state: z.enum(["done", "now", "next", "waiting", "stopped", "skipped"]) })).max(16),
+  summary: line,
+});
+
+/** A list of things, each done or not, with who holds it — documents, decisions, facts (D-161). */
+export const workChecklistProps = z.strictObject({
+  items: z
+    .array(
+      z.strictObject({
+        key: z.string().max(80),
+        label,
+        detail: z.string().max(500).nullable(),
+        state: z.enum(["done", "outstanding", "rejected", "pending"]),
+        party: z.string().max(200).nullable(),
+        since: isoDate.nullable(),
+      }),
+    )
+    .max(40),
+  /** Said under the list, e.g. "An offer is not acceptance; acceptance is not payment." */
+  note: z.string().max(500).nullable(),
+});
+
 /** Exactly what will leave the brokerage, shown in full before anyone approves it (frozen payload). */
 export const approvalBundleProps = z.strictObject({
   title: label,
@@ -384,6 +410,8 @@ export const LIVING_BLOCK_PROPS = {
   ApprovalBundle: approvalBundleProps,
   QueryInterpretation: queryInterpretationProps,
   ExplorationPanel: explorationPanelProps,
+  WorkJourney: workJourneyProps,
+  WorkChecklist: workChecklistProps,
   PortfolioGroups: portfolioGroupsProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
@@ -408,7 +436,7 @@ export type LivingBlock = z.infer<typeof livingBlockSchema>;
 export const livingSurfaceSchema = z.strictObject({
   version: z.literal(1),
   surfaceId: z.string().max(120),
-  purpose: z.enum(["renewal", "portfolio"]),
+  purpose: z.enum(["renewal", "portfolio", "claim", "endorsement"]),
   subject: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("work_item"), id: uuidSchema, title: label }),
     /** A portfolio view is identified by its query's hash. */
@@ -448,6 +476,8 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   PlacementProgress: { version: 1, name: "Placement progress", purpose: "Instruction, request, insurer confirmation and issuance, each from its record.", requiresEvidence: false },
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
+  WorkJourney: { version: 1, name: "Work journey", purpose: "Any workflow's own steps in order, done, now, waiting or next, as its run records them.", requiresEvidence: false },
+  WorkChecklist: { version: 1, name: "Work checklist", purpose: "Things each done or outstanding, with who holds them: documents, decisions, separately recorded facts.", requiresEvidence: false },
   ExplorationPanel: { version: 1, name: "Exploration", purpose: "A client decision explored before it is made: each alternative's premium, insurer change, validity, term differences and next steps, from records. Nothing is recorded or recommended.", requiresEvidence: false },
   QueryInterpretation: { version: 1, name: "Query interpretation", purpose: "The active view in plain words — window, grouping, filters, comparison — each removable, and what was not understood.", requiresEvidence: false },
   PortfolioGroups: { version: 1, name: "Portfolio groups", purpose: "Renewals selected by the query, grouped, with totals and premium changes computed from records.", requiresEvidence: false },

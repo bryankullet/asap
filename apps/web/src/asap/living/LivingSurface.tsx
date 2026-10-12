@@ -41,7 +41,7 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
   explore?: { ids: string[]; set: (ids: string[]) => void };
   onOpen: (ref: Ref) => void;
   onAsk: (text: string) => void;
-  onTitle?: (title: string) => void;
+  onTitle?: (title: string, purpose: string) => void;
 }) {
   const [surface, setSurface] = useState<Surface | null>(null);
   const [error, setError] = useState<{ status: number; code: string } | null>(null);
@@ -108,9 +108,10 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
   const titleTo = useRef(onTitle);
   titleTo.current = onTitle;
   const subjectTitle = surface?.subject.title ?? null;
+  const purpose = surface?.purpose ?? "renewal";
   useEffect(() => {
-    if (subjectTitle && titleTo.current) titleTo.current(subjectTitle);
-  }, [subjectTitle]);
+    if (subjectTitle && titleTo.current) titleTo.current(subjectTitle, purpose);
+  }, [subjectTitle, purpose]);
 
   const steps = runId ? () => onOpen({ ws: "renewal", runId }) : null;
 

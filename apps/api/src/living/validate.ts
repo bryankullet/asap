@@ -39,6 +39,8 @@ const COMMANDS: Record<LivingCommand, { payload: Record<string, string | null>; 
   "placement.record_submission": { payload: { action: "record_submission", placementRequestId: null }, inputs: ["method", "recipient", "sentAt", "evidenceNote"] },
   "issuance.approve_request": { payload: { action: "approve_issuance_request", issuanceRequestId: null }, inputs: [] },
   "issuance.record_submission": { payload: { action: "record_issuance_submission", issuanceRequestId: null }, inputs: ["method", "recipient", "sentAt", "evidenceNote"] },
+  "claim.receive_document": { payload: { action: "receive_document", documentId: null }, inputs: ["reference"] },
+  "endorsement.decide_item": { payload: { action: "decide_item", itemId: null }, inputs: ["decision", "responseReference", "note"] },
 };
 
 const BANNED_KEYS = ["percent", "percentage", "confidence", "completion", "score", "ranking"];

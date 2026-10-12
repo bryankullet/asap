@@ -112,7 +112,7 @@ Living surface (`living/living.css`).
 | M8 Insurance-native intelligence | **partial** | Time & cover, obligation, change/contradiction (revisions, including after instruction) are built for renewals. Communication-to-execution, handoff, portfolio consequence and decision memory are **not built** |
 | M9 Exploration & multi-context | **partial** | Client decisions explored before they are made, up to three side by side, from records, in the address (D-160; `living-actions.e2e.mjs` checks figures, no write, Back). Portfolio rows open their workspace (D-158). Saved, versioned proposals beyond the address are **not built** |
 | M10 Hardening | **partial** | e2e in a real browser at 1440/1360/900/390, tenant isolation, permission filtering. Visual regression baselines, an accessibility audit and performance measurement are **not built** |
-| Secondary workspaces (claims, endorsements, reconciliation, investigations, portfolio) | **not built** | The contract's `purpose` is an enum, so a second purpose is additive |
+| Secondary workspaces | **partial** | **Claims** and **policy changes** built (D-161; connected + `living-servicing.e2e.mjs`); **renewal portfolio** built (D-158). **Commission reconciliation** and **investigations** **not built** — no reconciliation records exist to compose from |
 | UI Lab | **built** (dev only) | `apps/web/e2e/lab.html`: the composer's own output at every stage. Never bundled |
 
 ## 5. Scenarios

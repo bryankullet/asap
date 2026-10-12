@@ -83,4 +83,16 @@ describe("governed commands", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.getByText(/“Escalate” is no longer offered here/)).toBeTruthy();
   });
+  it("does not call a command it just completed 'no longer offered' when it leaves", async () => {
+    answer = { outcome: "done" };
+    const { BlockActions } = await import("./blocks.js");
+    const env = { open: () => {}, ask: () => {}, refresh: () => {} };
+    const follow: LivingBlock["actions"][number] = { kind: "command", label: "Follow up now", command: "run.follow_up_now", target: ID, tone: "default", payload: {}, inputs: [], confirm: { title: "Follow up now?", body: "ASAP follows up today." } };
+    const view = render(<BlockActions actions={[follow]} env={env} />);
+    fireEvent.click(screen.getByRole("button", { name: "Follow up now" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Follow up now" })[1]!);
+    await screen.findByText("Done.");
+    view.rerender(<BlockActions actions={[]} env={env} />);
+    expect(screen.queryByText(/no longer offered/)).toBeNull();
+  });
 });

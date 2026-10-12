@@ -1,5 +1,7 @@
 import type {
   approvalBundleProps,
+  workChecklistProps,
+  workJourneyProps,
   explorationPanelProps,
   portfolioGroupsProps,
   queryInterpretationProps,
@@ -427,6 +429,47 @@ function ExplorationPanel({ props, env }: P<typeof explorationPanelProps>) {
   );
 }
 
+const STEP_MARK = { done: "✓", now: "•", waiting: "…", stopped: "!", skipped: "–", next: "" } as const;
+function WorkJourney({ props }: P<typeof workJourneyProps>) {
+  return (
+    <div className="lv-journey">
+      {props.steps.length ? (
+        <ol className="lv-stages lv-work-stages" aria-label="Steps" style={{ gridTemplateColumns: `repeat(${props.steps.length}, minmax(0, 1fr))` }}>
+          {props.steps.map((s, i) => (
+            <li key={s.key} className={`lv-stage lv-${s.state === "now" || s.state === "waiting" ? "now" : s.state === "done" ? "done" : s.state === "stopped" ? "stopped" : "next"}`} aria-current={s.state === "now" || s.state === "waiting" ? "step" : undefined}>
+              <span className="lv-stage-mark" aria-hidden>{STEP_MARK[s.state] || i + 1}</span>
+              <span className="lv-stage-label">{s.label}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <p className="lv-journey-summary">{props.summary}</p>
+    </div>
+  );
+}
+
+const CHECK_MARK = { done: "✓", outstanding: "○", rejected: "×", pending: "…" } as const;
+const CHECK_WORDS = { done: "Done", outstanding: "Outstanding", rejected: "Rejected", pending: "Waiting" } as const;
+function WorkChecklist({ props }: P<typeof workChecklistProps>) {
+  return (
+    <div className="lv-checklist">
+      <ul>
+        {props.items.map((i) => (
+          <li key={i.key} className={`lv-check lv-check-${i.state}`}>
+            <span className="lv-check-mark" aria-hidden>{CHECK_MARK[i.state]}</span>
+            <div>
+              <strong>{i.label}</strong> <span className="lv-sr">— {CHECK_WORDS[i.state]}</span>
+              {i.detail ? <p>{i.detail}</p> : null}
+              {i.party || i.since ? <small>{[i.party, i.since ? (i.state === "done" ? `on ${day(i.since)}` : `since ${day(i.since)}`) : null].filter(Boolean).join(" · ")}</small> : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {props.note ? <p className="lv-note">{props.note}</p> : null}
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -445,6 +488,8 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   QueryInterpretation,
   PortfolioGroups,
   ExplorationPanel,
+  WorkJourney,
+  WorkChecklist,
 };
 
 /**
@@ -460,11 +505,13 @@ export function BlockActions({ actions, env }: { actions: LivingAction[]; env: B
   const [gone, setGone] = useState<string | null>(null);
   const active = openKey ? actions.find((a): a is CommandAction => a.kind === "command" && commandKey(a) === openKey) ?? null : null;
   const lastLabel = useRef<string | null>(null);
+  // A command the person just completed leaves the surface because it is done — that is not news.
+  const succeeded = useRef<string | null>(null);
   if (active) lastLabel.current = active.label;
   if (openKey && !active) {
-    // The command left the surface (the record moved on): close, and say what happened.
+    // The command left the surface: close; if the person had not completed it, say so.
+    if (succeeded.current !== openKey) setGone(lastLabel.current);
     setOpenKey(null);
-    setGone(lastLabel.current);
   }
   if (!actions.length && !gone) return null;
   return (
@@ -483,7 +530,7 @@ export function BlockActions({ actions, env }: { actions: LivingAction[]; env: B
           ),
         )}
       </div>
-      {active ? <CommandForm key={openKey} action={active} env={env} onClose={() => setOpenKey(null)} /> : null}
+      {active ? <CommandForm key={openKey} action={active} env={env} onDone={() => { succeeded.current = openKey; }} onClose={() => setOpenKey(null)} /> : null}
     </>
   );
 }
@@ -493,7 +540,7 @@ export function BlockActions({ actions, env }: { actions: LivingAction[]; env: B
  * answer — done, already done, or refused with its reason. Nothing is shown as done before the
  * server says so.
  */
-function CommandForm({ action, env, onClose }: { action: CommandAction; env: BlockEnv; onClose: () => void }) {
+function CommandForm({ action, env, onDone, onClose }: { action: CommandAction; env: BlockEnv; onDone: () => void; onClose: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -509,7 +556,10 @@ function CommandForm({ action, env, onClose }: { action: CommandAction; env: Blo
     const r = await runCommand(action, values, key.current);
     setBusy(false);
     setResult(r);
-    if (r.ok) env.refresh(`${action.label} — ${r.message === "Done." ? "done" : r.message}`);
+    if (r.ok) {
+      onDone();
+      env.refresh(`${action.label} — ${r.message === "Done." ? "done" : r.message}`);
+    }
   };
   return (
     <div className="lv-command" role="group" aria-labelledby={`${id}-t`}>

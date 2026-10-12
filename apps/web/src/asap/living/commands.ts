@@ -20,6 +20,8 @@ const ROUTES: Record<LivingCommand, (target: string) => string> = {
   "placement.record_submission": (id) => `/placements/${id}/actions`,
   "issuance.approve_request": (id) => `/placements/${id}/issuance/actions`,
   "issuance.record_submission": (id) => `/placements/${id}/issuance/actions`,
+  "claim.receive_document": (id) => `/claims/${id}/actions`,
+  "endorsement.decide_item": (id) => `/endorsements/${id}/actions`,
 };
 /** Commands that record a fact once: a retried submit carries the same key and records one. */
 const IDEMPOTENT = new Set<LivingCommand>(["placement.record_submission", "issuance.record_submission"]);
@@ -47,6 +49,7 @@ export async function runCommand(a: CommandAction, values: Record<string, string
   try {
     const r = await api.livingCommand(ROUTES[a.command](a.target), commandBody(a, values, idempotencyKey));
     if (r.outcome === "blocked") return { ok: false, message: r.reason ?? "The brokerage's rules did not allow it. Nothing was changed." };
+    // Endpoints that answer with the updated record and no outcome succeeded: their errors are thrown.
     return { ok: true, message: r.outcome === "already" ? "That was already done — nothing changed." : "Done." };
   } catch (e) {
     return { ok: false, message: describeApiError(e) };

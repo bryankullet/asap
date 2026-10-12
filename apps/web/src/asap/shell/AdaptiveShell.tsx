@@ -101,7 +101,8 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     if (!ready) return;
     const ref = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
     // A Living renewal (D-156) is rendered by the shell; without a server (demo mode) it opens the steps.
-    logic.setSurface(ref && ref.ws === "living" && !A?.living ? (typeof ref["runId"] === "string" ? { ws: "renewal", runId: ref["runId"] } : { ws: "renewal" }) : ref);
+    // Without a server (demo mode) a renewal opens its steps and other work its Work item page.
+    logic.setSurface(ref && ref.ws === "living" && !A?.living ? (typeof ref["runId"] === "string" ? { ws: "renewal", runId: ref["runId"] } : typeof ref["workItemId"] === "string" ? { ws: "workitem", workItemId: ref["workItemId"] } : { ws: "renewal" }) : ref);
     const cid = surface.mode === "conversation" ? surface.conversationId : surface.mode === "space" && surface.drawer && surface.drawer !== "new" ? surface.drawer : null;
     const wantsChat = surface.mode === "conversation" || (surface.mode === "space" && surface.drawer);
     if (wantsChat && (cid || null) !== (logic.state.conversationId || null)) void logic.openConversation(cid);
@@ -134,6 +135,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const living = !!(spaceRef && spaceRef.ws === "living" && A?.living && typeof spaceRef["workItemId"] === "string");
   const portfolio = !!(spaceRef && spaceRef.ws === "portfolio");
   const [livingTitle, setLivingTitle] = useState("");
+  const [livingKind, setLivingKind] = useState("Renewal");
   const spaceTitle = living || portfolio ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
@@ -275,7 +277,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     }
   };
 
-  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? "Renewal" : portfolio ? "Portfolio" : ws?.kind });
+  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? livingKind : portfolio ? "Portfolio" : ws?.kind });
   const conversationEl = ready ? renderConversation(v) : null;
   const spaceEl = !ready ? null : portfolio && spaceRef ? (
     <PortfolioPane
@@ -299,7 +301,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
         void logic.ask(text);
       }}
-      onTitle={setLivingTitle}
+      onTitle={(t, purpose) => { setLivingTitle(t); setLivingKind(purpose === "claim" ? "Claim" : purpose === "endorsement" ? "Policy change" : "Renewal"); }}
     />
   ) : renderSpace(v);
 
@@ -331,7 +333,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         <Resizer width={splitWidth} onWidth={setSplitWidth} />
         <div className="sh-split-space">
           <div className="sh-pane-bar">
-            <span className="sh-pane-label">{living ? "Renewal" : ws?.kind || "Space"}</span>
+            <span className="sh-pane-label">{living ? livingKind : ws?.kind || "Space"}</span>
             <span className="sh-pane-actions">
               <button type="button" onClick={() => go({ mode: "space", ref: surface.space!, drawer: surface.conversationId })}>Expand</button>
               <button type="button" onClick={closeSpaceKeepChat} aria-label="Close the Space and centre the conversation">Close Space</button>
