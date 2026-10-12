@@ -224,7 +224,9 @@ describe("Home: what changed since you last looked (D-159)", () => {
   });
 });
 
-describe("composition time (D-163)", () => {
+// Timing is measured on its own (pnpm test:connected:perf, D-169): inside the parallel suite thirty
+// files share one small Postgres, and the number measures that contention, not the composition.
+describe.skipIf(!process.env["CONNECTED_PERF"])("composition time (D-163)", () => {
   it("composes the renewal workspace and the portfolio quickly on a real database", async () => {
     const time = async (f: () => Promise<unknown>) => { const t = performance.now(); await f(); return performance.now() - t; };
     const renewal: number[] = [];
