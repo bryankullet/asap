@@ -1,4 +1,4 @@
-import type { ConversationSummary, LivingSurface, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
+import type { ConversationSummary, LivingSurface, PortfolioQuery, PortfolioResponse, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
 import type { Ref } from "./routes.js";
 
 export type RecentItem = Recent;
@@ -39,6 +39,8 @@ export type ShellAdapters = {
   living?: (workItemId: string) => Promise<LivingSurface>;
   /** Live mode only: personal surface arrangement, on the server (D-157). */
   surfacePrefs?: PrefsStore;
+  /** Live mode only: the renewal portfolio, refined in plain language (D-158). */
+  portfolio?: (body: { query: PortfolioQuery | null; text: string | null }) => Promise<PortfolioResponse>;
   records: { actor(): { id: string; name: string }; act(a: string, p: unknown, id: string): Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string }; sel: Record<string, (...a: never[]) => unknown> };
 };
 

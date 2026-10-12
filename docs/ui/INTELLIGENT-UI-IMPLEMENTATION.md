@@ -107,7 +107,7 @@ Living surface (`living/living.css`).
 | M3 Context & progress intelligence | **built** for renewals | Viewer-authorized facts, progress opportunities, obligations, evidence. A general semantic graph over every entity is **not built** |
 | M4 Intelligent Home | **partial** | Home (D-155) already shows attention, ASAP's running work, waiting parties and Recent; renewal attention and running renewals now open the Living workspace. A "relevant changes since you were last here" section is **not built** |
 | M5 Living Renewal Journey | **built** to the limits of existing capabilities | One workspace from attention through quotation, comparison, revision, decision, placement, issuance and verified cover. Since D-157 the governed actions run **in place** (§7). Stage 9 (continuing relationship) is **not built** |
-| M6 Ask ASAP directing the interface | **partial** | "Ask about this" opens the existing drawer scoped to the renewal's work item. Intent-to-surface refinement (group, filter, compose) is **not built** |
+| M6 Ask ASAP directing the interface | **built** for the renewal portfolio (D-158) | A request in words refines a typed query — window, grouping, filters, insurer comparison — said back as removable chips; unclear words are said, ambiguous insurers ask; Home opens the portfolio for portfolio requests. Deterministic interpreter only; a model-assisted reading is **not built** (needs an evaluation run). Refinement of other surfaces is **not built** |
 | M7 Reactive composition & continuity | **built** | 20 s polling and refresh on focus; unchanged fingerprint → no re-render; blocks keyed by stable id and reconciled in place; Updated/New marks; per-person pin and collapse; deep links, refresh, Back/Forward |
 | M8 Insurance-native intelligence | **partial** | Time & cover, obligation, change/contradiction (revisions, including after instruction) are built for renewals. Communication-to-execution, handoff, portfolio consequence and decision memory are **not built** |
 | M9 Exploration & multi-context | **not built** | |
@@ -124,7 +124,7 @@ Living surface (`living/living.css`).
 | C Insurer response arrives | **built** | `living-actions.e2e.mjs`: an answer recorded through the quotation workflow while the broker types; the surface reconciles in place (no remount), marks changes and keeps the unsent text |
 | D Quotation revision | **built** | Earlier/revised side by side and flagged after instruction (`living-surface.test.ts`, UI Lab "comparing" and "placing") |
 | E Missing evidence | **built** for renewals | Missing period, missing premium and missing renewed cover are stated, not filled (`living-renewal` e2e) |
-| F Natural-language refinement | **not built** | |
+| F Natural-language refinement | **built** | `living-portfolio.e2e.mjs`: Home request → portfolio; "group by insurer", "only premium increases" (recorded figures exactly), Back/Forward undo and redo, an unclear request changes nothing, chip removal, "compare CIC and Jubilee", refresh keeps the view, a row opens its workspace |
 | G Approval requirement | **built** | The bundle is shown in full and approved in place through the existing endpoint with its frozen hash; a role that cannot approve is offered nothing and refused if it posts (connected) |
 | H Cross-tenant isolation | **built** | Connected test (404 for the other brokerage) and `living-never-leaks` in the browser |
 | I Role-specific view | **built** | Blocks needing a permission are removed before sending (unit); audit history only with `audit:view` (connected) |
@@ -169,6 +169,20 @@ browser (`living-actions.e2e.mjs`: approve, record delivery and escalate in plac
 - Every source read by `living/facts.ts` records a gap (`restricted` or `failed`) instead of
   becoming null. The composer never presents a gap as an absent period, placement or cover, and
   the surface names the gaps in a notice.
+
+## 9. The renewal portfolio (D-158)
+
+`POST /living/portfolio` with `{ query, text }`. `living/interpret.ts` turns the text into a new
+query on top of the current one; `living/portfolio.ts` reads renewals for the window under the
+viewer's session (policy periods, renewal Work items, quotations, placements, confirmed premiums),
+filters, groups and totals them, and composes `ContextHeader`, `QueryInterpretation` and
+`PortfolioGroups`. The browser keeps the query in the address and reuses the answer once for the
+arrival at the refined address.
+
+Understood today: windows (a month, next/this month, next N days, this/next quarter, Qn, end of
+year), grouping (insurer, class, owner, client, month, status), premium change (increase, decrease,
+changed, none yet), status (needs me, waiting on others, not started, done), "mine", an insurer or
+class by the brokerage's own names, "compare A and B", "clear filters".
 
 ## 6. Known limitations
 

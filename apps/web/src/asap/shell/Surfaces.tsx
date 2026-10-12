@@ -50,6 +50,7 @@ export function HomeSurface({ logic, A, recent, onOpenRecent, onOpen, onAsk, onF
   const quick: [string, () => void][] = [
     ["Add records", () => onOpen({ ws: "import" })],
     ["Prepare a renewal", () => onOpen({ ws: "renewal" })],
+    ...(A?.portfolio ? ([["Explore renewals", () => onOpen({ ws: "portfolio" })]] as [string, () => void][]) : []),
     ["Start a quotation", () => onOpen({ ws: "quote" })],
     ["Report a claim", () => onOpen({ ws: "claim" })],
     ["Upload documents", () => fileRef.current?.click()],

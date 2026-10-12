@@ -1,6 +1,7 @@
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { LivingSurface } from "../living/LivingSurface.js";
+import { ApiRequestError } from "../../lib/api.js";
+import { LivingRenewalPane, looksLikePortfolio, PortfolioPane } from "../living/panes.js";
 import { renderConversation, renderSheet, renderSpace, renderToast } from "../views/space-views.js";
 import { parse, sameRef, surfaceForRef, toPath, type Ref, type Surface } from "./routes.js";
 import { ActivitySurface, AutomationsSurface, HomeSurface, WorkSurface } from "./Surfaces.js";
@@ -131,13 +132,16 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const ws = v["ws"] as { kind?: string; title?: string; statusLabel?: string } | undefined;
   const spaceRef = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
   const living = !!(spaceRef && spaceRef.ws === "living" && A?.living && typeof spaceRef["workItemId"] === "string");
+  const portfolio = !!(spaceRef && spaceRef.ws === "portfolio");
   const [livingTitle, setLivingTitle] = useState("");
-  const spaceTitle = living ? livingTitle : ws?.title || "";
+  const spaceTitle = living || portfolio ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
     if (!ready || !A?.shell || !spaceRef || !spaceTitle || /^(Loading|Opening)/.test(spaceTitle)) return;
     if (["newclient", "newcontact", "nothing"].includes(spaceRef.ws)) return;
-    const t = setTimeout(() => void A.shell.recordOpen({ ref: spaceRef, title: spaceTitle.slice(0, 160) }).then(refreshLists), 400);
+    // A portfolio view's whole query lives in its address; Recent keeps the portfolio itself.
+    const entry = spaceRef.ws === "portfolio" ? { ref: { ws: "portfolio" }, title: "Renewal portfolio" } : { ref: spaceRef, title: spaceTitle.slice(0, 160) };
+    const t = setTimeout(() => void A.shell.recordOpen(entry).then(refreshLists), 400);
     return () => clearTimeout(t);
     // spaceKey stands for spaceRef: the same record, not the same object, decides.
   }, [ready, A, spaceKey, spaceTitle, refreshLists]);
@@ -222,7 +226,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const [palette, setPalette] = useState<null | "search" | "new" | "more">(null);
   const [splitWidth, setSplitWidth] = useState(460);
 
-  const pinTarget = surface.mode === "conversation" && surface.conversationId && !surface.space ? { conversationId: surface.conversationId } : spaceRef ? { ref: spaceRef, title: spaceTitle || spaceRef.ws } : null;
+  const pinTarget = surface.mode === "conversation" && surface.conversationId && !surface.space ? { conversationId: surface.conversationId } : spaceRef ? (spaceRef.ws === "portfolio" ? { ref: { ws: "portfolio" }, title: "Renewal portfolio" } : { ref: spaceRef, title: spaceTitle || spaceRef.ws }) : null;
   const pinKey = useMemo(() => {
     if (!pinTarget) return null;
     if ("conversationId" in pinTarget) return `conversation:${pinTarget.conversationId}`;
@@ -271,14 +275,23 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     }
   };
 
-  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? "Renewal" : ws?.kind });
+  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? "Renewal" : portfolio ? "Portfolio" : ws?.kind });
   const conversationEl = ready ? renderConversation(v) : null;
-  const spaceEl = !ready ? null : living && spaceRef ? (
-    <LivingSurface
+  const spaceEl = !ready ? null : portfolio && spaceRef ? (
+    <PortfolioPane
+      viewRef={spaceRef}
+      portfolio={A?.portfolio ?? notConnected}
+      prefsStore={A?.surfacePrefs}
+      onOpen={(ref) => controller.open(ref)}
+      onNavigate={(ref, replace) => (surface.mode === "conversation" ? go({ mode: "conversation", conversationId: surface.conversationId, space: ref }, { replace }) : go({ mode: "space", ref, drawer: null }, { replace }))}
+      onTitle={setLivingTitle}
+    />
+  ) : living && spaceRef ? (
+    <LivingRenewalPane
       key={spaceRef["workItemId"] as string}
       workItemId={spaceRef["workItemId"] as string}
       runId={typeof spaceRef["runId"] === "string" ? spaceRef["runId"] : null}
-      load={A!.living!}
+      living={A!.living!}
       prefsStore={A!.surfacePrefs}
       onOpen={(ref) => controller.open(ref)}
       onAsk={(text) => {
@@ -292,7 +305,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   let main: ReactNode;
   if (!ready) main = <div className="sh-loading" role="status">Opening your brokerage…</div>;
   else if (surface.mode === "home")
-    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => void logic.ask(text)} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
+    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => (A?.portfolio && looksLikePortfolio(text) ? go({ mode: "space", ref: { ws: "portfolio", t: text }, drawer: null }) : void logic.ask(text))} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
   else if (surface.mode === "work") main = <WorkSurface logic={logic} A={A} view={surface.view} onView={(view) => go({ mode: "work", view }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "automations") main = <AutomationsSurface logic={logic} A={A} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "activity") main = <ActivitySurface logic={logic} filter={surface.filter} onFilter={(filter) => go({ mode: "activity", filter }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;
@@ -684,6 +697,7 @@ function NewSheet({ onClose, go, onFiles }: { onClose: () => void; go: (s: Surfa
     ["▦", "Import spreadsheet", "Clients and policies from Excel or CSV", space({ ws: "import" })],
     ["◎", "Add client", "A client by name, then their people and policies", space({ ws: "newclient" })],
     ["↻", "Prepare renewal", "Every renewal ASAP is preparing, and starting one", space({ ws: "renewal" })],
+    ["▤", "Explore renewals", "The renewal portfolio — ask to group, filter or compare", space({ ws: "portfolio" })],
     ["▱", "Start quotation", "New business from a client request", space({ ws: "quote" })],
     ["⚑", "Report claim", "A loss against a policy", space({ ws: "claim" })],
     ["⌘", "Create automation", "Teach ASAP what to prepare, and when", space({ ws: "automation", create: "1" })],
@@ -731,3 +745,6 @@ function MoreSheet({ onClose, go, recent, onOpen, onSearch, onNew, onProfile }: 
     </Sheet>
   );
 }
+
+/** Demo mode has no server: the portfolio says so instead of drawing example rows. */
+const notConnected = async (): Promise<never> => { throw new ApiRequestError(0, "api_unreachable"); };

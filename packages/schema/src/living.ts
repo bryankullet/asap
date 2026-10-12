@@ -240,6 +240,103 @@ export const timelineProps = z.strictObject({
   events: z.array(z.strictObject({ at: z.string(), text: line, actor: z.string().max(200).nullable() })).max(15),
 });
 
+/* ---------------------------------------------------------------------------------------------- */
+/* The renewal portfolio (D-158): a typed query, refined in plain language, composed from records. */
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const PortfolioGroupBy = z.enum(["insurer", "class", "owner", "client", "month", "status"]);
+export const PortfolioPremiumChange = z.enum(["increase", "decrease", "changed", "unknown"]);
+export const PortfolioStatus = z.enum(["needs_me", "with_party", "in_progress", "done", "not_started"]);
+/** The whole view, as data: what the person asked to see. Never a value — only what to select. */
+export const portfolioQuerySchema = z.strictObject({
+  subject: z.literal("renewals"),
+  window: z.strictObject({ from: day, to: day, label }),
+  groupBy: PortfolioGroupBy.nullable().default(null),
+  filters: z
+    .strictObject({
+      insurers: z.array(uuidSchema).max(8).default([]),
+      classOfBusiness: z.string().max(100).nullable().default(null),
+      premiumChange: PortfolioPremiumChange.nullable().default(null),
+      mine: z.boolean().default(false),
+      status: PortfolioStatus.nullable().default(null),
+    })
+    .default({ insurers: [], classOfBusiness: null, premiumChange: null, mine: false, status: null }),
+  /** Insurers side by side: the view groups by insurer and keeps only these. */
+  compare: z.array(uuidSchema).max(4).default([]),
+});
+export type PortfolioQuery = z.infer<typeof portfolioQuerySchema>;
+
+/** What the interpreter made of a request: the new query, each refinement in words, and what it did not understand. */
+export const portfolioInterpretationSchema = z.strictObject({
+  query: portfolioQuerySchema,
+  understood: z.array(z.strictObject({ kind: z.enum(["window", "group", "filter", "compare", "reset"]), text: label })).max(12),
+  /** Words it could not turn into a refinement. Said, never guessed. */
+  unclear: z.string().max(300).nullable(),
+  /** When a word names more than one thing (two insurers called "Jubilee …"), the choices. */
+  clarify: z.strictObject({ question: line, options: z.array(z.strictObject({ label, text: line })).min(2).max(6) }).nullable(),
+});
+export type PortfolioInterpretation = z.infer<typeof portfolioInterpretationSchema>;
+export const portfolioRequestSchema = z.strictObject({ query: portfolioQuerySchema.nullable().default(null), text: z.string().max(500).nullable().default(null) });
+
+export const queryInterpretationProps = z.strictObject({
+  /** The active view in words, each removable. */
+  chips: z
+    .array(
+      z.strictObject({
+        kind: z.enum(["window", "group", "filter", "compare"]),
+        /** Which part of the query this chip is, so removing it is an exact edit, not a guess. */
+        field: z.enum(["window", "groupBy", "compare", "insurers", "classOfBusiness", "premiumChange", "status", "mine"]),
+        text: label,
+        removable: z.boolean(),
+      }),
+    )
+    .max(12),
+  unclear: z.string().max(300).nullable(),
+  clarify: z.strictObject({ question: line, options: z.array(z.strictObject({ label, text: line })).max(6) }).nullable(),
+  /** How the renewal premium is read, so a change is never a mystery. */
+  basis: line,
+});
+
+const portfolioRow = z.strictObject({
+  periodId: uuidSchema,
+  workItemId: uuidSchema.nullable(),
+  client: label,
+  policy: z.string().max(200),
+  insurer: label,
+  classOfBusiness: z.string().max(100),
+  ends: day,
+  owner: z.string().max(200).nullable(),
+  status: label,
+  statusTone: tone,
+  expiring: z.string().max(80).nullable(),
+  renewal: z.string().max(80).nullable(),
+  renewalBasis: z.enum(["placed", "expiring_insurer_quote", "none"]),
+  change: z.string().max(120).nullable(),
+  direction: z.enum(["increase", "decrease", "same", "unknown"]),
+});
+export const portfolioGroupsProps = z.strictObject({
+  groups: z
+    .array(
+      z.strictObject({
+        key: z.string().max(200),
+        label,
+        count: z.number().int().min(0),
+        expiringTotals: z.array(z.string().max(80)).max(4),
+        renewalTotals: z.array(z.string().max(80)).max(4),
+        increases: z.number().int().min(0),
+        decreases: z.number().int().min(0),
+        unknown: z.number().int().min(0),
+        rows: z.array(portfolioRow).max(100),
+        more: z.number().int().min(0),
+      }),
+    )
+    .max(40),
+  /** How many renewals the view selects (a count, not money). */
+  selected: z.number().int().min(0),
+  /** True when the view groups insurers side by side. */
+  comparing: z.boolean(),
+});
+
 /** Every Living block's schema, by component id. The registry rows hold their JSON Schema. */
 export const LIVING_BLOCK_PROPS = {
   ContextHeader: contextHeaderProps,
@@ -254,6 +351,8 @@ export const LIVING_BLOCK_PROPS = {
   EvidenceInspector: evidenceInspectorProps,
   Timeline: timelineProps,
   ApprovalBundle: approvalBundleProps,
+  QueryInterpretation: queryInterpretationProps,
+  PortfolioGroups: portfolioGroupsProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
 export const LivingComponentId = z.enum(Object.keys(LIVING_BLOCK_PROPS) as [LivingComponent, ...LivingComponent[]]);
@@ -277,9 +376,14 @@ export type LivingBlock = z.infer<typeof livingBlockSchema>;
 export const livingSurfaceSchema = z.strictObject({
   version: z.literal(1),
   surfaceId: z.string().max(120),
-  purpose: z.enum(["renewal"]),
-  subject: z.strictObject({ kind: z.literal("work_item"), id: uuidSchema, title: label }),
-  stage: z.strictObject({ key: RenewalStage, label }),
+  purpose: z.enum(["renewal", "portfolio"]),
+  subject: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("work_item"), id: uuidSchema, title: label }),
+    /** A portfolio view is identified by its query's hash. */
+    z.strictObject({ kind: z.literal("portfolio"), id: z.string().regex(/^[0-9a-f]{16}$/), title: label }),
+  ]),
+  /** Where a renewal stands; a portfolio has no stage. */
+  stage: z.strictObject({ key: RenewalStage, label }).nullable(),
   generatedAt: z.string(),
   /** The whole surface's hash: unchanged means nothing to reconcile. */
   fingerprint: z.string().max(64),
@@ -312,8 +416,14 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   PlacementProgress: { version: 1, name: "Placement progress", purpose: "Instruction, request, insurer confirmation and issuance, each from its record.", requiresEvidence: false },
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
+  QueryInterpretation: { version: 1, name: "Query interpretation", purpose: "The active view in plain words — window, grouping, filters, comparison — each removable, and what was not understood.", requiresEvidence: false },
+  PortfolioGroups: { version: 1, name: "Portfolio groups", purpose: "Renewals selected by the query, grouped, with totals and premium changes computed from records.", requiresEvidence: false },
   ApprovalBundle: { version: 1, name: "Approval bundle", purpose: "Exactly what will leave the brokerage, in full, with the governed approve and return commands.", requiresEvidence: false },
 };
+
+/** The portfolio answer: the validated surface and what was made of the request. */
+export const portfolioResponseSchema = z.strictObject({ surface: livingSurfaceSchema, interpretation: portfolioInterpretationSchema });
+export type PortfolioResponse = z.infer<typeof portfolioResponseSchema>;
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Personal arrangement of a surface (0080, D-157): interface state only, strict so it cannot become

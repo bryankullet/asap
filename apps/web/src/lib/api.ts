@@ -130,6 +130,8 @@ import {
   type UpdateContactRequest,
   spacePlanResponseSchema,
   livingSurfaceSchema,
+  portfolioResponseSchema,
+  type PortfolioQuery,
   surfacePreferencesResponseSchema,
   type SurfacePreferences,
   workListResponseSchema,
@@ -259,6 +261,8 @@ export const api = {
    */
   livingCommand: (path: string, body: unknown) =>
     request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked"]), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
+  /** The renewal portfolio: the current view as a typed query, refined by a request in words (D-158). */
+  portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
   livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),

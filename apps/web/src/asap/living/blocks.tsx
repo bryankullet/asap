@@ -1,5 +1,7 @@
 import type {
   approvalBundleProps,
+  portfolioGroupsProps,
+  queryInterpretationProps,
   LivingAction,
   LivingBlock,
   LivingComponent,
@@ -31,7 +33,14 @@ import { missingInputs, runCommand, type CommandAction } from "./commands.js";
  */
 
 /** `refresh` re-reads the surface; a receipt is said at the top, so it outlives a block that leaves. */
-export type BlockEnv = { open: (ref: Ref) => void; ask: (text: string) => void; refresh: (receipt?: string) => void };
+export type BlockEnv = {
+  open: (ref: Ref) => void;
+  ask: (text: string) => void;
+  refresh: (receipt?: string) => void;
+  /** On a surface a person can refine (D-158): a request in words, or removing one part of the view. */
+  refine?: (text: string) => void;
+  removeChip?: (field: string) => void;
+};
 type P<S extends z.ZodTypeAny> = { props: z.infer<S>; block: LivingBlock; env: BlockEnv };
 
 const day = (iso: string | null | undefined) => {
@@ -280,6 +289,84 @@ function ApprovalBundle({ props }: P<typeof approvalBundleProps>) {
   );
 }
 
+function QueryInterpretation({ props, env }: P<typeof queryInterpretationProps>) {
+  return (
+    <div className="lv-query">
+      <ul className="lv-chips" aria-label="The view">
+        {props.chips.map((c) => (
+          <li key={`${c.field}-${c.text}`} className={`lv-qchip lv-qchip-${c.kind}`}>
+            <span>{c.text}</span>
+            {c.removable && env.removeChip ? <button type="button" aria-label={`Remove: ${c.text}`} onClick={() => env.removeChip!(c.field)}>×</button> : null}
+          </li>
+        ))}
+      </ul>
+      {props.unclear ? <p className="lv-unclear" role="status">{props.unclear} Nothing was changed for it.</p> : null}
+      {props.clarify ? (
+        <div className="lv-clarify" role="group" aria-label={props.clarify.question}>
+          <strong>{props.clarify.question}</strong>
+          <div className="lv-actions">{props.clarify.options.map((o) => <button key={o.label} type="button" className="lv-btn" onClick={() => env.refine?.(o.text)}>{o.label}</button>)}</div>
+        </div>
+      ) : null}
+      <p className="lv-note">{props.basis}</p>
+    </div>
+  );
+}
+
+const DIR_MARK = { increase: "▲", decrease: "▼", same: "＝", unknown: "" } as const;
+function PortfolioGroups({ props, env }: P<typeof portfolioGroupsProps>) {
+  if (props.selected === 0) return <p className="lv-empty">No renewal matches this view. Remove a part of it above, or ask for a different window.</p>;
+  return (
+    <div className={`lv-groups${props.comparing ? " lv-comparing" : ""}`}>
+      {props.comparing ? (
+        <div className="lv-compare-cards">
+          {props.groups.map((g) => (
+            <div key={g.key} className="lv-compare-card">
+              <strong>{g.label}</strong>
+              <dl>
+                <div><dt>Renewals</dt><dd>{g.count}</dd></div>
+                <div><dt>Expiring premium</dt><dd>{g.expiringTotals.join(" · ") || "—"}</dd></div>
+                <div><dt>Renewal premium</dt><dd>{g.renewalTotals.join(" · ") || "None yet"}</dd></div>
+                <div><dt>Up · down · unknown</dt><dd>{g.increases} · {g.decreases} · {g.unknown}</dd></div>
+              </dl>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {props.groups.map((g) => (
+        <section key={g.key} className="lv-group" aria-label={g.label}>
+          <header className="lv-group-head">
+            <h3>{g.label}</h3>
+            <span className="lv-chip lv-grey">{g.count}</span>
+            <span className="lv-group-totals">{g.expiringTotals.length ? <>Expiring {g.expiringTotals.join(" · ")}</> : null}{g.renewalTotals.length ? <> · Renewal {g.renewalTotals.join(" · ")}</> : null}</span>
+          </header>
+          <div className="lv-table-wrap">
+            <table className="lv-table lv-portfolio-table">
+              <thead><tr><th scope="col">Client · policy</th><th scope="col">Ends</th><th scope="col">Insurer</th><th scope="col">Expiring</th><th scope="col">Renewal</th><th scope="col">Change</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                {g.rows.map((r) => (
+                  <tr key={r.periodId}>
+                    <th scope="row">
+                      {r.workItemId ? <button type="button" className="lv-rowlink" onClick={() => env.open({ ws: "living", workItemId: r.workItemId! })}>{r.client}</button> : <span>{r.client}</span>}
+                      <small>{r.policy} · {r.classOfBusiness}</small>
+                    </th>
+                    <td>{day(r.ends)}</td>
+                    <td>{r.insurer}</td>
+                    <td className="lv-num">{r.expiring ?? <span className="lv-missing">Not recorded</span>}</td>
+                    <td className="lv-num">{r.renewal ?? <span className="lv-missing">None yet</span>}{r.renewalBasis === "placed" ? <small>Confirmed on placement</small> : r.renewalBasis === "expiring_insurer_quote" ? <small>Expiring insurer's quote</small> : null}</td>
+                    <td className={`lv-change-cell lv-dir-${r.direction}`}>{r.change ? <><span aria-hidden>{DIR_MARK[r.direction]}</span> {r.change}</> : <span className="lv-missing">—</span>}</td>
+                    <td><span className={`lv-chip lv-${r.statusTone}`}>{r.status}</span>{r.owner ? <small>{r.owner}</small> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {g.more ? <p className="lv-note">{g.more} more in this group are not listed. Narrow the view to see them.</p> : null}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -295,6 +382,8 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   EvidenceInspector,
   Timeline,
   ApprovalBundle,
+  QueryInterpretation,
+  PortfolioGroups,
 };
 
 export function BlockActions({ actions, env }: { actions: LivingAction[]; env: BlockEnv }) {

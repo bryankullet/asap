@@ -3253,6 +3253,7 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     waitingDocuments,
     /** The Living renewal surface (D-156), composed and validated by the server. Live mode only. */
     living: (workItemId) => api.livingSurface(workItemId),
+    portfolio: (body) => api.portfolio(body),
     /** A person's arrangement of a surface, kept on the server per brokerage and person (D-157). */
     surfacePrefs: {
       get: (key) => api.surfacePreferences(key).then((r) => r.prefs),

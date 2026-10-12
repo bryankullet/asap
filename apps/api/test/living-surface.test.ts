@@ -33,7 +33,7 @@ describe("renewal stage", () => {
 describe("composition", () => {
   it("leads with insurer answers while terms are awaited, and names who holds the work", () => {
     const s = composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
-    expect(s.stage.key).toBe("awaiting_terms");
+    expect(s.stage!.key).toBe("awaiting_terms");
     expect(s.blocks.map((b) => b.component)).toEqual(expect.arrayContaining(["ContextHeader", "RenewalJourney", "QuoteComparison", "ObligationTracker", "CoverageEffectiveState"]));
     expect(s.blocks.some((b) => b.component === "PlacementProgress")).toBe(false);
     const ob = s.blocks.find((b) => b.component === "ObligationTracker")!.props as { items: { party: string; since: string | null }[] };

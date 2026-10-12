@@ -15,10 +15,14 @@ export function useSurfacePrefs(store: PrefsStore | undefined, surfaceKey: strin
   const [loaded, setLoaded] = useState(false);
   const latest = useRef(prefs);
   latest.current = prefs;
+  // Set when the person arranges something before their saved arrangement has arrived: what they
+  // just did wins over the late read, instead of being silently undone by it.
+  const touched = useRef(false);
 
   useEffect(() => {
     setPrefs(EMPTY_PREFS);
     setLoaded(false);
+    touched.current = false;
     if (!surfaceKey) return;
     let live = true;
     const seen = new Date().toISOString();
@@ -26,10 +30,11 @@ export function useSurfacePrefs(store: PrefsStore | undefined, surfaceKey: strin
     store.get(surfaceKey).then(
       (p) => {
         if (!live) return;
-        setPrefs(p);
+        const kept = touched.current ? { ...latest.current, lastSeenAt: seen } : { ...p, lastSeenAt: seen };
+        if (!touched.current) setPrefs(p);
         setLoaded(true);
         // Looking at the surface is what "since you last looked" is measured from.
-        void store.put(surfaceKey, { ...p, lastSeenAt: seen }).catch(() => {});
+        void store.put(surfaceKey, kept).catch(() => {});
       },
       () => live && setLoaded(true),
     );
@@ -38,6 +43,8 @@ export function useSurfacePrefs(store: PrefsStore | undefined, surfaceKey: strin
 
   const update = useCallback((change: (p: SurfacePreferences) => SurfacePreferences) => {
     const next = change(latest.current);
+    touched.current = true;
+    latest.current = next;
     setPrefs(next);
     if (!store || !surfaceKey) return;
     // Saved at once: a person who refreshes straight after a click keeps what they arranged.

@@ -22,13 +22,21 @@ const POLL_MS = 20_000;
 const MARK_MS = 12_000;
 type Marks = Record<string, { kind: "new" | "updated"; until: number }>;
 type PrefList = "pinned" | "collapsed";
-export type LivingLoader = (workItemId: string) => Promise<Surface>;
+export type LivingLoader = () => Promise<Surface>;
+/** A surface a person can change by asking (D-158): the portfolio's refine box, chips and choices. */
+export type Refiner = { onRefine: (text: string) => void; onRemove: (field: string) => void; busy: boolean; placeholder: string };
 
-export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onAsk, onTitle }: {
-  workItemId: string;
-  runId: string | null;
+/**
+ * `identity` is what the surface is about: while it stays the same, a new `load` (a refined query)
+ * re-reads and reconciles in place; a new identity starts afresh.
+ */
+export function LivingSurface({ identity, noun = "renewal", runId = null, load, prefsStore, refine, onOpen, onAsk, onTitle }: {
+  identity: string;
+  noun?: string;
+  runId?: string | null;
   load: LivingLoader;
   prefsStore?: PrefsStore | undefined;
+  refine?: Refiner;
   onOpen: (ref: Ref) => void;
   onAsk: (text: string) => void;
   onTitle?: (title: string) => void;
@@ -45,7 +53,7 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
   const fetchIt = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     try {
-      const next = await load(workItemId);
+      const next = await load();
       setError(null);
       const prev = last.current;
       if (prev && prev.fingerprint === next.fingerprint) return;
@@ -68,13 +76,17 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
     } finally {
       if (manual) setRefreshing(false);
     }
-  }, [load, workItemId]);
+  }, [load]);
 
+  // A different subject starts afresh; a refined view of the same one reconciles in place.
   useEffect(() => {
     last.current = null;
     setSurface(null);
     setError(null);
     setMarks({});
+  }, [identity]);
+
+  useEffect(() => {
     void fetchIt();
     const t = setInterval(() => { if (document.visibilityState === "visible") void fetchIt(); }, POLL_MS);
     const onFocus = () => void fetchIt();
@@ -106,8 +118,8 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
     return (
       <div className="lv-scroll"><div className="lv-root">
         <div className="lv-state" role="status">
-          <h2>{gone ? "This renewal is not available to you" : unreachable ? "Not connected yet" : "This workspace could not be composed"}</h2>
-          <p>{gone ? "It may belong to another brokerage, or it was removed." : unreachable ? "ASAP could not reach the brokerage's service. Nothing is shown rather than an example." : "ASAP refused to show a workspace it could not validate. The renewal itself is unaffected."}</p>
+          <h2>{gone ? `This ${noun} is not available to you` : unreachable ? "Not connected yet" : "This workspace could not be composed"}</h2>
+          <p>{gone ? "It may belong to another brokerage, or it was removed." : unreachable ? "ASAP could not reach the brokerage's service. Nothing is shown rather than an example." : `ASAP refused to show a workspace it could not validate. The ${noun} itself is unaffected.`}</p>
           <div className="lv-actions">
             <button type="button" className="lv-btn" onClick={() => void fetchIt(true)}>Try again</button>
             {steps && !gone ? <button type="button" className="lv-btn lv-btn-primary" onClick={steps}>Open the renewal steps</button> : null}
@@ -122,12 +134,12 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
         <div className="lv-skeleton lv-skeleton-head" />
         <div className="lv-skeleton lv-skeleton-strip" />
         <div className="lv-grid"><div className="lv-col"><div className="lv-skeleton" /><div className="lv-skeleton" /></div><div className="lv-col"><div className="lv-skeleton" /></div></div>
-        <span className="lv-sr" role="status">Composing the renewal workspace…</span>
+        <span className="lv-sr" role="status">Composing the {noun} workspace…</span>
       </div></div>
     );
   }
 
-  const env: BlockEnv = { open: onOpen, ask: onAsk, refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); } };
+  const env: BlockEnv = { open: onOpen, ask: onAsk, refresh: (r) => { if (r) setReceipt(r); void fetchIt(true); }, ...(refine ? { refine: refine.onRefine, removeChip: refine.onRemove } : {}) };
   const toggle = (key: PrefList, id: string) =>
     update((p) => {
       const set = new Set(p[key]);
@@ -142,9 +154,9 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
   const generated = new Date(surface.generatedAt);
 
   return (
-    <div className="lv-scroll"><div className="lv-root" data-stage={surface.stage.key}>
+    <div className="lv-scroll"><div className="lv-root" data-stage={surface.stage?.key ?? surface.purpose}>
       <div className="lv-bar">
-        <span className="lv-bar-stage">{surface.stage.label}</span>
+        {surface.stage ? <span className="lv-bar-stage">{surface.stage.label}</span> : null}
         <span className="lv-bar-time" aria-live="polite">Updated {generated.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</span>
         <span className="lv-bar-actions">
           <button type="button" className="lv-btn lv-btn-quiet" onClick={() => void fetchIt(true)} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</button>
@@ -163,8 +175,9 @@ export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onA
           <span>{surface.unavailable.map((u) => `${u.part} (${u.reason === "restricted" ? "not available to your role" : "could not be loaded"})`).join(" · ")}. What is shown is what could be read; a gap here is not missing insurance information.</span>
         </div>
       ) : null}
+      {refine ? <RefineBox refine={refine} /> : null}
       {ordered("lead").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} lead />)}
-      <div className="lv-grid">
+      <div className={ordered("side").length ? "lv-grid" : "lv-grid lv-grid-single"}>
         <div className="lv-col lv-col-main">
           {ordered("main").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} pinned={prefs.pinned.includes(b.id)} collapsed={prefs.collapsed.includes(b.id)} onPin={() => toggle("pinned", b.id)} onCollapse={() => toggle("collapsed", b.id)} />)}
           {ordered("main").length === 0 ? <div className="lv-block"><p className="lv-empty">Nothing is in progress on this renewal yet. ASAP shows the work here as soon as a record exists for it.</p></div> : null}
@@ -211,5 +224,24 @@ function BlockView({ block, env, mark, lead, pinned, collapsed, onPin, onCollaps
         </div>
       )}
     </section>
+  );
+}
+
+/** "Ask ASAP to change this view": a request in plain words becomes a refinement of the query. */
+function RefineBox({ refine }: { refine: Refiner }) {
+  const [text, setText] = useState("");
+  const submit = () => {
+    const t = text.trim();
+    if (!t || refine.busy) return;
+    refine.onRefine(t);
+    setText("");
+  };
+  return (
+    <form className="lv-refine" role="search" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <span className="lv-refine-mark" aria-hidden>✦</span>
+      <label className="lv-sr" htmlFor="lv-refine-input">Ask ASAP to change this view</label>
+      <input id="lv-refine-input" value={text} onChange={(e) => setText(e.target.value)} placeholder={refine.placeholder} autoComplete="off" />
+      <button type="submit" className="lv-btn lv-btn-primary" disabled={refine.busy || !text.trim()}>{refine.busy ? "Changing…" : "Change view"}</button>
+    </form>
   );
 }

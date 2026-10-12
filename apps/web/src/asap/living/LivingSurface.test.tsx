@@ -29,7 +29,7 @@ const surface = (over: { premium?: string; extra?: boolean; unavailable?: Surfac
 async function mount(load: (id: string) => Promise<Surface>, onOpen = vi.fn()) {
   localStorage.clear();
   const { LivingSurface } = await import("./LivingSurface.js");
-  render(<LivingSurface workItemId={ID} runId="r1" load={load} onOpen={onOpen} onAsk={() => {}} />);
+  render(<LivingSurface identity={ID} runId="r1" load={() => load(ID)} onOpen={onOpen} onAsk={() => {}} />);
   return onOpen;
 }
 
@@ -62,7 +62,7 @@ describe("LivingSurface", () => {
     const store = { get: vi.fn(async (k: string) => (saved.get(k) as never) ?? { pinned: [], collapsed: [], selection: {}, lastSeenAt: null }), put: vi.fn(async (k: string, p: unknown) => { saved.set(k, p); }) };
     const { LivingSurface } = await import("./LivingSurface.js");
     localStorage.clear();
-    const first = render(<LivingSurface workItemId={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
+    const first = render(<LivingSurface identity={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
     await screen.findByText("KES 175,500.00");
     fireEvent.click(screen.getAllByTitle("Collapse")[0]!);
     expect(screen.queryByText("KES 175,500.00")).toBeNull();
@@ -70,9 +70,23 @@ describe("LivingSurface", () => {
     expect(store.get).toHaveBeenCalledWith(`renewal:${ID}`);
     expect(localStorage.length).toBe(0);
     first.unmount();
-    render(<LivingSurface workItemId={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
+    render(<LivingSurface identity={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
     await screen.findByText("Quotes side by side");
     await waitFor(() => expect(screen.queryByText("KES 175,500.00")).toBeNull());
+  });
+
+  it("keeps what the person arranged before their saved arrangement arrived", async () => {
+    let release: (v: unknown) => void = () => {};
+    const saved = new Map<string, unknown>();
+    const store = { get: vi.fn(() => new Promise<never>((r) => { release = r as never; })), put: vi.fn(async (k: string, p: unknown) => { saved.set(k, p); }) };
+    const { LivingSurface } = await import("./LivingSurface.js");
+    render(<LivingSurface identity={ID} load={async () => surface()} prefsStore={store as never} onOpen={() => {}} onAsk={() => {}} />);
+    await screen.findByText("KES 175,500.00");
+    fireEvent.click(screen.getAllByTitle("Collapse")[0]!);
+    release({ pinned: [], collapsed: [], selection: {}, lastSeenAt: null });
+    await waitFor(() => expect(store.put).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("KES 175,500.00")).toBeNull();
+    expect((saved.get(`renewal:${ID}`) as { collapsed: string[] }).collapsed).toEqual(["quotes"]);
   });
 
   it("says which sources could not be read, instead of showing them as missing", async () => {

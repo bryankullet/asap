@@ -3,7 +3,7 @@
  * and the registry rows migration 0079 seeded. A renewal is detected by the real sweep; the surface
  * is then read by people in each brokerage and role.
  */
-import { livingSurfaceSchema } from "@asap/schema";
+import { livingSurfaceSchema, portfolioResponseSchema } from "@asap/schema";
 import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -152,6 +152,41 @@ describe("governed commands from the surface (D-157)", () => {
     // The same command again changes nothing: the frozen approval is already decided.
     const again = await call(AMINA, "POST", `/workflow-approvals/${approve.target}/decide`, approve.payload);
     expect(["already", "blocked"]).toContain(again.body.outcome);
+  });
+});
+
+describe("the renewal portfolio (D-158)", () => {
+  const groupsOf = (body: unknown) => {
+    const r = portfolioResponseSchema.parse(body);
+    const g = r.surface.blocks.find((b) => b.component === "PortfolioGroups")!.props as { groups: { label: string; rows: { policy: string; workItemId: string | null }[] }[]; selected: number };
+    return { r, g, policies: g.groups.flatMap((x) => x.rows.map((y) => y.policy)) };
+  };
+  it("reads the brokerage's renewals for a window refined in words, and links each to its workspace", async () => {
+    const res = await call(AMINA, "POST", "/living/portfolio", { query: null, text: "renewals in the next 60 days by insurer" });
+    expect(res.status).toBe(200);
+    const { r, g, policies } = groupsOf(res.body);
+    expect(r.interpretation.query.groupBy).toBe("insurer");
+    expect(r.interpretation.query.window.label).toBe("in the next 60 days");
+    expect(policies).toContain(`LIV-${TAG}`);
+    const row = g.groups.flatMap((x) => x.rows).find((x) => x.policy === `LIV-${TAG}`)!;
+    expect(row.workItemId).toBe(workItemId);
+  });
+  it("refines the current view: an insurer named in this brokerage filters to it", async () => {
+    const first = portfolioResponseSchema.parse((await call(AMINA, "POST", "/living/portfolio", { query: null, text: "next 60 days" })).body);
+    const res = await call(AMINA, "POST", "/living/portfolio", { query: first.interpretation.query, text: "only jubilee" });
+    const { r, policies } = groupsOf(res.body);
+    expect(r.interpretation.query.window.label).toBe("in the next 60 days");
+    expect(r.interpretation.query.filters.insurers).toEqual([JUBILEE]);
+    expect(policies).toContain(`LIV-${TAG}`);
+  });
+  it("never shows another brokerage's renewals, whatever the request", async () => {
+    const res = await call(BETA, "POST", "/living/portfolio", { query: null, text: "renewals in the next 60 days" });
+    expect(res.status).toBe(200);
+    expect(groupsOf(res.body).policies).not.toContain(`LIV-${TAG}`);
+    expect(JSON.stringify(res.body)).not.toContain(`LIV-${TAG}`);
+  });
+  it("refuses a malformed query rather than guessing one", async () => {
+    expect((await call(AMINA, "POST", "/living/portfolio", { query: { subject: "claims" }, text: null })).status).toBe(400);
   });
 });
 

@@ -21,7 +21,7 @@ const definitions = (Object.keys(LIVING_BLOCK_PROPS) as LivingComponent[]).map((
 describe("the UI Lab snapshot", () => {
   const composed = labScenarios().map((s) => ({ key: s.key, label: s.label, surface: composeRenewalSurface(s.facts, { now: NOW, aiAvailable: false }) }));
   it("covers every stage, each surface valid", () => {
-    expect(composed.map((c) => c.surface.stage.key)).toEqual(["preparing", "awaiting_terms", "comparing", "placing", "placing", "issuing", "verified", "stopped"]);
+    expect(composed.map((c) => c.surface.stage!.key)).toEqual(["preparing", "awaiting_terms", "comparing", "placing", "placing", "issuing", "verified", "stopped"]);
     for (const c of composed) {
       const r = validateSurface({ surface: c.surface, definitions, permissions: new Set() });
       expect(r.ok ? [] : r.failures, c.key).toEqual([]);

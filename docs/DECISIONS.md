@@ -2862,3 +2862,44 @@ over values, status, approvals or cover.
 **Simplest choices where the brief is silent.** Polling instead of a second realtime channel. One
 composition purpose (`renewal`), as an enum so others are additive. The implementation map and
 milestone status are in `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`.
+
+## D-157 — Living surfaces act in place, keep personal arrangement on the server, and say what they could not read
+
+**Context.** D-156's surfaces opened the older workflow screens for every action, kept pinned and
+collapsed blocks in browser storage, and could present a failed read as missing information.
+
+**Decision.**
+- *Governed commands.* A block may carry a `command` from a closed set (approve or return a frozen
+  bundle, record a quotation delivery or an insurer's answer, the run's follow-up, escalate, pause
+  and resume controls, the placement's and the issuance's approve and record-submission steps).
+  The browser maps each to the endpoint that already owns it; the surface can never name a path.
+  The validator holds each command's fixed payload and inputs exactly. Commands are offered only
+  where the owning record already says they are available to this viewer, and every endpoint checks
+  again and audits. Approving shows the frozen payload in full (`ApprovalBundle`, 0081).
+- *The quotation record wins over a lagging run.* An insurer whose answer is on the quotation no
+  longer holds the next step, and is not chased, whatever the run's last reading says.
+- *Personal arrangement* (pinned, collapsed, selections, last seen) is kept in `surface_preferences`
+  (0080), scoped by RLS to brokerage, person and surface. Browser storage is no longer used for it.
+  An arrangement made before the saved one arrives wins over the late read.
+- *Unreadable sources* are recorded by the facts loader as `restricted` or `failed` and named on the
+  surface. The composer never shows such a gap as an absent period, placement or cover.
+
+## D-158 — The renewal portfolio, refined in plain language
+
+**Context.** The brief asks for Ask ASAP to control the interface — filter, group, compare — without
+fake values and without a parallel system.
+
+**Decision.**
+- A portfolio surface is selected by a typed query (`portfolioQuerySchema`: window, grouping,
+  filters, insurer comparison). The address carries the query (`/s/portfolio?q=…`), so refresh
+  reopens the view and Back undoes a refinement. Recent keeps the portfolio itself, not each view.
+- A request in words changes only the query, applied on top of the current view, by a
+  deterministic interpreter over the brokerage's own insurer and class names (`living/interpret.ts`).
+  Each refinement is said back as a removable chip; words it cannot use are said and change nothing;
+  a word naming two insurers asks which. No model runs in this path: a model-assisted reading may
+  be added later behind the same schema and an evaluation run (§45 rule 11).
+- Home sends a request about "renewals" or "portfolio" (with no instruction to act on a record) to
+  the portfolio; everything else still opens a conversation.
+- The renewal premium is read one stated way: confirmed on a placement, else the expiring insurer's
+  latest quote, else none. Changes compare amounts in the same currency only. ASAP never picks a quote.
+- Blocks `QueryInterpretation` and `PortfolioGroups` are registered in 0082.
