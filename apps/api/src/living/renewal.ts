@@ -73,10 +73,10 @@ export function progressOpportunities(f: RenewalLivingFacts) {
   }
   const next = f.opportunity?.next;
   if (next && next.holder !== "outside_party" && !f.placement)
-    items.push({ id: "quote-next", title: next.what, why: next.why, responsible: next.holder === "brokerage" ? "Your brokerage" : null, deadline: next.checkAt ?? null, actionableNow: next.holder === "brokerage", requiresApproval: /approv/i.test(next.what), blockedBy: next.missing, tone: next.missing.length ? "gold" : "green", action: primary(openQuote(f)) });
+    items.push({ id: "quote-next", title: next.what, why: next.why, responsible: next.holder === "brokerage" ? "Your brokerage" : null, deadline: next.checkAt ?? null, actionableNow: next.holder === "brokerage", requiresApproval: /\bapprov(e|al)\b/i.test(next.what), blockedBy: next.missing, tone: next.missing.length ? "gold" : "green", action: primary(openQuote(f)) });
   if (f.placement && f.issuance?.stage !== "applied") {
     const p = f.placement;
-    items.push({ id: "placement-next", title: f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : p.nextAction, why: p.cover.line, responsible: p.workItem.taskParty, deadline: p.placement.requestedEffectiveAt, actionableNow: p.workItem.taskStatus === "needs_you", requiresApproval: /approv/i.test(p.nextAction), blockedBy: [...p.blockers, ...(f.issuance?.readiness.state === "blocked" ? f.issuance.readiness.reasons.map((r) => r.message) : [])].slice(0, 6), tone: p.blockers.length ? "gold" : "green", action: primary(openQuote(f)) });
+    items.push({ id: "placement-next", title: f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : p.nextAction, why: p.cover.line, responsible: p.workItem.taskParty, deadline: p.placement.requestedEffectiveAt, actionableNow: p.workItem.taskStatus === "needs_you", requiresApproval: /\bapprov(e|al)\b/i.test(p.nextAction), blockedBy: [...p.blockers, ...(f.issuance?.readiness.state === "blocked" ? f.issuance.readiness.reasons.map((r) => r.message) : [])].slice(0, 6), tone: p.blockers.length ? "gold" : "green", action: primary(openQuote(f)) });
   }
   return items.slice(0, 4);
 }
@@ -97,13 +97,14 @@ function issuanceWords(stage: string): string {
 export function obligations(f: RenewalLivingFacts) {
   const out: { party: string; what: string; since: string | null; due: string | null; kind: "outside" | "brokerage" | "asap" }[] = [];
   const op = f.run?.operational;
-  if (op?.waitingFor) out.push({ party: op.waitingFor.party, what: op.currentWork.title, since: op.waitingFor.since, due: op.nextFollowUpAt, kind: "outside" });
+  // Once a client has instructed, the placement holds the work: the run's earlier waiting is history.
+  if (op?.waitingFor && !f.placement) out.push({ party: op.waitingFor.party, what: op.currentWork.title, since: op.waitingFor.since, due: op.nextFollowUpAt, kind: "outside" });
   for (const i of f.opportunity?.insurers ?? [])
     if (i.stage === "with_insurer" && !out.some((o) => o.party === i.insurerName))
       out.push({ party: i.insurerName, what: "Terms for the renewal", since: i.request?.approvedAt ?? i.addedAt, due: null, kind: "outside" });
   if (f.placement && f.placement.workItem.taskStatus === "with_party" && f.placement.workItem.taskParty)
-    out.push({ party: f.placement.workItem.taskParty, what: f.placement.nextAction, since: f.placement.workItem.taskSince, due: null, kind: "outside" });
-  if (f.run && f.run.state === "running") out.push({ party: "ASAP", what: op?.currentWork.title ?? "Working on the renewal", since: null, due: op?.nextFollowUpAt ?? null, kind: "asap" });
+    out.push({ party: f.placement.workItem.taskParty, what: f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction, since: f.placement.workItem.taskSince, due: null, kind: "outside" });
+  if (f.run && f.run.state === "running" && !f.placement) out.push({ party: "ASAP", what: op?.currentWork.title ?? "Working on the renewal", since: null, due: op?.nextFollowUpAt ?? null, kind: "asap" });
   if (f.item.task_status === "needs_you" && f.ownerName) out.push({ party: f.ownerName, what: f.item.required_action ?? "The next step on this renewal", since: f.item.task_since ?? null, due: f.item.due_on ?? null, kind: "brokerage" });
   return out.slice(0, 8);
 }
@@ -201,7 +202,12 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
 
   blocks.push(block("journey", "RenewalJourney", "lead", null, {
     stages: RENEWAL_STAGES.map((s, i) => ({ key: s.key, label: s.label, state: stage === "stopped" ? (i < 1 ? "done" : "next") : i < stageIndex ? "done" : i === stageIndex ? "now" : "next" })),
-    summary: op ? `${op.currentWork.title}. ${op.completed}`.slice(0, 500) : f.item.required_action ?? "No renewal run is attached to this work yet.",
+    summary: (f.placement
+      ? `${f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction}. ${f.issuance?.cover.line ?? f.placement.cover.line}`
+      : op
+        ? `${op.currentWork.title}. ${op.completed}`
+        : f.item.required_action ?? "No renewal run is attached to this work yet."
+    ).slice(0, 500),
   }));
 
   const opps = progressOpportunities(f);

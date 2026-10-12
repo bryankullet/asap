@@ -1,5 +1,6 @@
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { LivingSurface } from "../living/LivingSurface.js";
 import { renderConversation, renderSheet, renderSpace, renderToast } from "../views/space-views.js";
 import { parse, sameRef, surfaceForRef, toPath, type Ref, type Surface } from "./routes.js";
 import { ActivitySurface, AutomationsSurface, HomeSurface, WorkSurface } from "./Surfaces.js";
@@ -98,7 +99,8 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   useEffect(() => {
     if (!ready) return;
     const ref = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
-    logic.setSurface(ref);
+    // A Living renewal (D-156) is rendered by the shell; without a server (demo mode) it opens the steps.
+    logic.setSurface(ref && ref.ws === "living" && !A?.living ? (typeof ref["runId"] === "string" ? { ws: "renewal", runId: ref["runId"] } : { ws: "renewal" }) : ref);
     const cid = surface.mode === "conversation" ? surface.conversationId : surface.mode === "space" && surface.drawer && surface.drawer !== "new" ? surface.drawer : null;
     const wantsChat = surface.mode === "conversation" || (surface.mode === "space" && surface.drawer);
     if (wantsChat && (cid || null) !== (logic.state.conversationId || null)) void logic.openConversation(cid);
@@ -123,12 +125,14 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     if (conversation?.id === surface.conversationId && conversation.spaceRef && sameRef(conversation.spaceRef, surface.space)) return;
     const space = surface.space as Ref;
     void A.shell.update(surface.conversationId, { spaceRef: space }).then((c) => setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel, spaceRef: (c.spaceRef as Ref | null) ?? null })).catch(() => {});
-  }, [splitKey, conversation?.id]); // eslint-disable-line
+  }, [splitKey, conversation?.id]);
 
   // A Space opened is a Space in Recent, named as the Space names itself.
   const ws = v["ws"] as { kind?: string; title?: string; statusLabel?: string } | undefined;
   const spaceRef = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
-  const spaceTitle = ws?.title || "";
+  const living = !!(spaceRef && spaceRef.ws === "living" && A?.living && typeof spaceRef["workItemId"] === "string");
+  const [livingTitle, setLivingTitle] = useState("");
+  const spaceTitle = living ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
     if (!ready || !A?.shell || !spaceRef || !spaceTitle || /^(Loading|Opening)/.test(spaceTitle)) return;
@@ -267,9 +271,22 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     }
   };
 
-  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: ws?.kind });
+  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? "Renewal" : ws?.kind });
   const conversationEl = ready ? renderConversation(v) : null;
-  const spaceEl = ready ? renderSpace(v) : null;
+  const spaceEl = !ready ? null : living && spaceRef ? (
+    <LivingSurface
+      key={spaceRef["workItemId"] as string}
+      workItemId={spaceRef["workItemId"] as string}
+      runId={typeof spaceRef["runId"] === "string" ? spaceRef["runId"] : null}
+      load={A!.living!}
+      onOpen={(ref) => controller.open(ref)}
+      onAsk={(text) => {
+        if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
+        void logic.ask(text);
+      }}
+      onTitle={setLivingTitle}
+    />
+  ) : renderSpace(v);
 
   let main: ReactNode;
   if (!ready) main = <div className="sh-loading" role="status">Opening your brokerage…</div>;
@@ -299,7 +316,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         <Resizer width={splitWidth} onWidth={setSplitWidth} />
         <div className="sh-split-space">
           <div className="sh-pane-bar">
-            <span className="sh-pane-label">{ws?.kind || "Space"}</span>
+            <span className="sh-pane-label">{living ? "Renewal" : ws?.kind || "Space"}</span>
             <span className="sh-pane-actions">
               <button type="button" onClick={() => go({ mode: "space", ref: surface.space!, drawer: surface.conversationId })}>Expand</button>
               <button type="button" onClick={closeSpaceKeepChat} aria-label="Close the Space and centre the conversation">Close Space</button>

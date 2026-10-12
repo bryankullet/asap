@@ -332,6 +332,8 @@ async function hydrate(me) {
         id: it.id,
         clientId: it.client_id,
         kind: kindWords(it.kind),
+        // The record's own kind, for routing: a renewal opens its Living workspace (D-156).
+        recordKind: it.kind,
         taskStatus: it.task_status,
         statusLabel: it.task_status === "with_party" ? null : STATUS_LABEL[it.task_status] ?? null,
         // The server's next action (D-120) — the same object Today, Ask and the Space read.
@@ -3249,6 +3251,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   return {
     supervision: () => state.supervision,
     waitingDocuments,
+    /** The Living renewal surface (D-156), composed and validated by the server. Live mode only. */
+    living: (workItemId) => api.livingSurface(workItemId),
     /**
      * The adaptive shell's server-backed state (D-155): named sessions, Recent and Pins. Every call
      * is the API's; nothing here is kept in browser storage.

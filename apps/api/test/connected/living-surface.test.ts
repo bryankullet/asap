@@ -73,9 +73,13 @@ describe("GET /living/:workItemId", () => {
     const r = await call(READER, "GET", `/living/${workItemId}`);
     expect(r.status).toBe(200);
     const s = livingSurfaceSchema.parse(r.body);
-    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from role_permissions rp join organization_members m on m.role_id = rp.role_id
-      join permissions p on p.id = rp.permission_id where m.user_id = ${READER.id} and m.organization_id = ${ORG_A} and p.object_type = 'audit' and p.verb = 'view'`.catch(() => [{ n: -1 }]);
+    const rows = await sql<{ n: number }[]>`select count(*)::int as n from role_permissions rp
+      join organization_memberships m on m.role_id = rp.role_id join permissions p on p.id = rp.permission_id
+      where m.user_id = ${READER.id} and m.organization_id = ${ORG_A} and p.object_type = 'audit' and p.verb = 'view'`;
+    const n = rows[0]!.n;
+    // Whichever way the role is configured, the audit history follows the permission, never the screen.
     if (n === 0) expect(s.blocks.some((b) => b.component === "Timeline")).toBe(false);
+    expect(n === 0 || n === 1).toBe(true);
   });
 
   it("refuses what is not a renewal, an unknown id and a malformed id alike", async () => {

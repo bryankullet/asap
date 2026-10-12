@@ -38,11 +38,13 @@ describe("the surfaces read the brokerage, never invent it", () => {
   it("a run asking for approval is what matters today, with why and one action", () => {
     brokerage();
     const h = homeSurface({ supervision: { items: [run({ state: "waiting_approval", views: ["needs_me"] })] }, meId: ME });
-    expect(h.attention[0]).toMatchObject({ kind: "approval", title: "Acme renewal", action: { label: "Review", ref: { ws: "renewal", runId: "r1" } } });
+    expect(h.attention[0]).toMatchObject({ kind: "approval", title: "Acme renewal", action: { label: "Review", ref: { ws: "living", runId: "r1" } } });
     expect(h.firstUse).toBe(false);
   });
   it("a run opens its own Space: a renewal its board, any other its Work item", () => {
     expect(runRef({ id: "r1", workflow: "renewal" })).toEqual({ ws: "renewal", runId: "r1" });
+    // With its Work item, a renewal opens its Living workspace (D-156); the steps stay inside it.
+    expect(runRef({ id: "r1", workflow: "renewal", workItemId: "w1" })).toEqual({ ws: "living", workItemId: "w1", runId: "r1" });
     expect(runRef({ id: "r2", workflow: "claim", workItemId: "w9" })).toEqual({ ws: "workitem", workItemId: "w9" });
   });
   it("Automations groups ASAP's workflows and says what is next", () => {

@@ -129,6 +129,7 @@ import {
   type CreateContactRequest,
   type UpdateContactRequest,
   spacePlanResponseSchema,
+  livingSurfaceSchema,
   workListResponseSchema,
   type WorkView,
   documentSummarySchema,
@@ -245,6 +246,8 @@ export const api = {
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */
+  /** The Living renewal surface (D-156): composed and validated server-side, rendered as registered blocks. */
+  livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /**
