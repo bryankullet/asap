@@ -2979,3 +2979,29 @@ instructed — the decision is then a record, not an exploration.
   held under 1.5 s for the renewal workspace and the portfolio.
 - *Security:* record text renders as text (markup in a title is not interpreted), in addition to the
   tenant, role, tampered-command and preference-scope tests.
+
+## D-164 — Claim and policy-change mutations require the business permission (0085)
+
+- **Defect corrected.** Every claim and endorsement mutation checked brokerage membership only, so a
+  read-only member could record a claim document, a call note, an insurer reference, a claim fact
+  or amount, the insurer's decision on an endorsement item, a premium adjustment, or apply an
+  endorsement, by calling the API directly. Browsers' own direct calls to the database functions
+  were already refused (`app.require_api_caller`).
+- **Fix, in the database (0085):** `app.claim_for_write` requires `claim:edit`;
+  `app.endorsement_for_write` requires `policy:edit`; `claim_create` requires `claim:create`;
+  `endorsement_create` requires `policy:edit`. All fourteen mutation functions funnel through the
+  two helpers, so one change covers them. Membership is still checked first, so another brokerage
+  is still "not a member". The permissions are the existing matrix (0005/0014): read-only holds
+  only `view`; operational roles, managers and administrators keep the same abilities.
+- **And at the API:** `POST /claims/:id/actions` requires `claim:edit` and
+  `POST /endorsements/:id/actions` requires `policy:edit`, refusing with 403 and a denied audit row
+  before any write. Creation was already checked there.
+- **The workspace** offers claim commands on `claim:edit` and policy-change commands on `policy:edit`.
+- **Unchanged:** the workflow engine's own service-role function (`claim_set_cover_review_by_run`).
+- **Tested:** pgTAP 0353 (read-only refused for nine mutations, other brokerage refused, authorized
+  still allowed); connected (read-only refused through the API for every claim and endorsement
+  action and for opening claim or policy work, refused calling the database functions directly,
+  denied rows audited, nothing recorded; authorized members still succeed).
+- **Found while testing:** a connected test that started its renewal with the global workflow sweep
+  advanced other test files' runs and made `mailbox-delivery` count extra sends; it now starts its
+  renewal for its own period only.

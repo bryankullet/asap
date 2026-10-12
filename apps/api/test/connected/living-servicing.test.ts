@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { createApp } from "../../src/app.js";
-import { ACME, AMINA, BETA, buildApp, caller, JUBILEE, newApiKey, ORG_A, OWNER, READER } from "./_harness.js";
+import { ACME, AMINA, BETA, browser, buildApp, caller, JUBILEE, KAMAU, newApiKey, ORG_A, OWNER, READER } from "./_harness.js";
 
 const API_KEY = newApiKey();
 let app: ReturnType<typeof createApp>;
@@ -93,3 +93,78 @@ describe("the policy change workspace", () => {
     expect(JSON.stringify(after)).not.toMatch(banned);
   });
 });
+
+describe("authorization of claim and policy-change mutations (0085, D-164)", () => {
+  let claimId = "";
+  let docId = "";
+  let endorsementId = "";
+  let claimWork = "";
+  beforeAll(async () => {
+    const r = await call(KAMAU, "POST", "/work-items", { kind: "claim", clientId: ACME, incidentOn: day(-3), incidentSummary: `Authorization test ${TAG}.`, policyId, source: "ask" });
+    // 201 when new; 200 when the same claim work was reopened.
+    expect([200, 201]).toContain(r.status);
+    claimWork = r.body.item.id;
+    claimId = (await sql`select id from claims where work_item_id = ${claimWork}`)[0]!["id"] as string;
+    expect((await call(KAMAU, "POST", `/claims/${claimId}/actions`, { action: "add_document", label: `Logbook ${TAG}`, holder: "client" })).status).toBe(200);
+    docId = (await sql`select id from claim_documents where claim_id = ${claimId} and label = ${"Logbook " + TAG}`)[0]!["id"] as string;
+    const e = await call(KAMAU, "POST", "/work-items", { kind: "endorsement", clientId: ACME, policyId, requestText: `Authorization change ${TAG}`, requestedBy: "policyholder" });
+    expect([200, 201]).toContain(e.status);
+    endorsementId = (await sql`select id from endorsements where work_item_id = ${e.body.item.id}`)[0]!["id"] as string;
+    await call(KAMAU, "POST", `/endorsements/${endorsementId}/actions`, { action: "set_details", effectiveOn: day(3), items: [{ id: "a1", label: "KDZ 1", before: null, after: "Add", sumInsuredMinor: 100 }] });
+  });
+
+  it("refuses a read-only member every claim mutation through the API, audits it, and records nothing", async () => {
+    for (const body of [
+      { action: "receive_document", documentId: docId, reference: "Bypass attempt" },
+      { action: "add_document", label: "Bypass", holder: "client" },
+      { action: "add_call_note", spokeWith: "Client", body: "Bypass" },
+      { action: "set_insurer_reference", reference: "BYPASS-1" },
+      { action: "set_clock", clauseReference: "Condition 3", clausePage: 4, clauseDays: 7, startEvent: "incident", startOn: day(-3), startEvidence: "Bypass" },
+    ]) {
+      const r = await call(READER, "POST", `/claims/${claimId}/actions`, body);
+      expect(r.status, JSON.stringify(body)).toBe(403);
+    }
+    const [doc] = await sql<{ received_at: string | null }[]>`select received_at from claim_documents where id = ${docId}`;
+    expect(doc!.received_at).toBeNull();
+    const [c] = await sql<{ insurer_reference: string | null }[]>`select insurer_reference from claims where id = ${claimId}`;
+    expect(c!.insurer_reference).toBeNull();
+    const denied = await sql<{ n: number }[]>`select count(*)::int as n from audit_log where actor_user_id = ${READER.id} and object_id = ${claimId} and result = 'denied'`;
+    expect(denied[0]!.n).toBeGreaterThanOrEqual(5);
+  });
+
+  it("refuses a read-only member every policy-change mutation and opening new claim or policy work", async () => {
+    for (const body of [
+      { action: "decide_item", itemId: "a1", decision: "accepted", responseReference: "Bypass" },
+      { action: "record_instruction", reference: "Bypass", from: "policyholder" },
+      { action: "set_details", effectiveOn: day(5) },
+    ]) expect((await call(READER, "POST", `/endorsements/${endorsementId}/actions`, body)).status, JSON.stringify(body)).toBe(403);
+    const [e] = await sql<{ items: { decision: string }[] }[]>`select items from endorsements where id = ${endorsementId}`;
+    expect(e!.items[0]!.decision).toBe("pending");
+    expect((await call(READER, "POST", "/work-items", { kind: "claim", clientId: ACME, incidentOn: day(-1), incidentSummary: "Bypass", policyId, source: "ask" })).status).toBe(403);
+    expect((await call(READER, "POST", "/work-items", { kind: "endorsement", clientId: ACME, policyId, requestText: "Bypass", requestedBy: "policyholder" })).status).toBe(403);
+  });
+
+  it("refuses a read-only member who calls the database functions directly, skipping the API", async () => {
+    const direct = await browser(READER, "POST", "rpc/claim_document_receive", { p_document_id: docId, p_reference: "Direct bypass" });
+    expect(direct.status).toBeGreaterThanOrEqual(400);
+    const decide = await browser(READER, "POST", "rpc/endorsement_item_decide", { p_id: endorsementId, p_item_id: "a1", p_decision: "accepted", p_note: null, p_response_reference: "Direct bypass" });
+    expect(decide.status).toBeGreaterThanOrEqual(400);
+    const [doc] = await sql<{ received_at: string | null }[]>`select received_at from claim_documents where id = ${docId}`;
+    expect(doc!.received_at).toBeNull();
+  });
+
+  it("never lets another brokerage change them", async () => {
+    expect((await call(BETA, "POST", `/claims/${claimId}/actions`, { action: "receive_document", documentId: docId, reference: "Other brokerage" })).status).toBeGreaterThanOrEqual(403);
+    const [doc] = await sql<{ received_at: string | null }[]>`select received_at from claim_documents where id = ${docId}`;
+    expect(doc!.received_at).toBeNull();
+  });
+
+  it("still lets members with the permission do the same things", async () => {
+    expect((await call(KAMAU, "POST", `/claims/${claimId}/actions`, { action: "receive_document", documentId: docId, reference: `Emailed ${TAG}` })).status).toBe(200);
+    expect((await call(KAMAU, "POST", `/endorsements/${endorsementId}/actions`, { action: "decide_item", itemId: "a1", decision: "accepted", responseReference: `Jubilee email ${TAG}` })).status).toBe(200);
+    expect((await call(AMINA, "POST", `/claims/${claimId}/actions`, { action: "add_call_note", spokeWith: "Client", body: `Called ${TAG}` })).status).toBe(200);
+    const [doc] = await sql<{ received_at: string | null }[]>`select received_at from claim_documents where id = ${docId}`;
+    expect(doc!.received_at).not.toBeNull();
+  });
+});
+

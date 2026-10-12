@@ -81,7 +81,9 @@ export async function loadServicingFacts(env: Env, item: WorkItemRow): Promise<S
     const row = ((a.data ?? []) as { direction: string; amount: string | null; currency: string | null; reference: string | null }[])[0];
     if (row) premium = { direction: row.direction, amount: row.amount != null ? String(row.amount) : null, currency: row.currency, reference: row.reference };
   }
-  return { item, client: (client.data as { id: string; name: string } | null) ?? null, run, policy, claim, endorsement, premium, canAct: hasPermission(env.ctx, "space", "create"), unavailable: gaps };
+  // Offered exactly where the database will allow it (0085, D-164): claim:edit for claims, policy:edit for policy changes.
+  const canAct = item.kind === "claim" ? hasPermission(env.ctx, "claim", "edit") : hasPermission(env.ctx, "policy", "edit");
+  return { item, client: (client.data as { id: string; name: string } | null) ?? null, run, policy, claim, endorsement, premium, canAct, unavailable: gaps };
 }
 
 export async function loadWorkItem(env: Env, workItemId: string): Promise<WorkItemRow> {

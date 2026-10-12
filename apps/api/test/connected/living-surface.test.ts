@@ -31,7 +31,10 @@ beforeAll(async () => {
     values (${ORG_A}, ${ACME}, ${JUBILEE}, 'Commercial motor', ${"LIV-" + TAG}) returning id`;
   const [per] = await sql<{ id: string }[]>`insert into policy_periods (organization_id, policy_id, period_start, period_end, premium_amount, premium_currency, premium_basis)
     values (${ORG_A}, ${pol!.id}, ${iso(new Date(Date.now() - 340 * DAY))}, ${iso(new Date(Date.now() + 25 * DAY))}, 3200000, 'KES', 'gross') returning id`;
-  await app.request("/internal/workflows/sweep", { method: "POST", headers: { "x-asap-internal-key": API_KEY } });
+  // Started for this one period, not by the global sweep: a sweep advances every brokerage's runs
+  // and would race other files' in-flight work (it made mailbox-delivery count extra sends).
+  const started = await call(AMINA, "POST", "/workflows/renewals", { policyPeriodId: per!.id });
+  expect(started.status).toBe(200);
   const [run] = await sql<{ work_item_id: string }[]>`select work_item_id from workflow_runs where subject_id = ${per!.id}`;
   workItemId = run!.work_item_id;
   // Renewals, claims and policy changes have workspaces (D-161); any other kind does not.
