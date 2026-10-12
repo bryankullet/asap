@@ -1,4 +1,4 @@
-import type { ConversationSummary, LivingSurface, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
+import type { ConversationSummary, LivingSurface, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
 import type { Ref } from "./routes.js";
 
 export type RecentItem = Recent;
@@ -29,12 +29,16 @@ export type ShellApi = {
   unpin(key: string): Promise<unknown>;
 };
 
+export type PrefsStore = { get(key: string): Promise<SurfacePreferences>; put(key: string, prefs: SurfacePreferences): Promise<void> };
+
 export type ShellAdapters = {
   shell: ShellApi;
   supervision?: () => unknown;
   waitingDocuments?: () => string[];
   /** Live mode only: the Living surface for a renewal. Demo mode has none and opens the steps. */
   living?: (workItemId: string) => Promise<LivingSurface>;
+  /** Live mode only: personal surface arrangement, on the server (D-157). */
+  surfacePrefs?: PrefsStore;
   records: { actor(): { id: string; name: string }; act(a: string, p: unknown, id: string): Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string }; sel: Record<string, (...a: never[]) => unknown> };
 };
 

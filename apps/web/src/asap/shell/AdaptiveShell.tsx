@@ -279,6 +279,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
       workItemId={spaceRef["workItemId"] as string}
       runId={typeof spaceRef["runId"] === "string" ? spaceRef["runId"] : null}
       load={A!.living!}
+      prefsStore={A!.surfacePrefs}
       onOpen={(ref) => controller.open(ref)}
       onAsk={(text) => {
         if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });

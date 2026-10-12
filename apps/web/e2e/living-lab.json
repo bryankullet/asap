@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "ce5de05506960891",
+   "fingerprint": "dccca086029cca4f",
    "blocks": [
     {
      "id": "header",
@@ -227,7 +227,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -247,7 +248,7 @@
     "label": "Insurer terms"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "22f25041d2228aee",
+   "fingerprint": "35f64debfde0de75",
    "blocks": [
     {
      "id": "header",
@@ -484,7 +485,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -504,7 +506,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "5d96ea6c6d1179be",
+   "fingerprint": "f82c0cb4d5530b90",
    "blocks": [
     {
      "id": "header",
@@ -851,7 +853,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -871,7 +874,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "136177458e1d2242",
+   "fingerprint": "4773d60212a2a664",
    "blocks": [
     {
      "id": "header",
@@ -1205,7 +1208,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -1225,7 +1229,7 @@
     "label": "Issuance"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "f0a61826b2fc51bf",
+   "fingerprint": "b9a58fa6e605e8be",
    "blocks": [
     {
      "id": "header",
@@ -1545,7 +1549,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -1565,7 +1570,7 @@
     "label": "Verified"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "2fbfb2f1865ebc4a",
+   "fingerprint": "f4f07d22f4547870",
    "blocks": [
     {
      "id": "header",
@@ -1832,7 +1837,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  },
  {
@@ -1852,7 +1858,7 @@
     "label": "Stopped"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "ccc076c31261cbaf",
+   "fingerprint": "9c7d6b44db7ec84d",
    "blocks": [
     {
      "id": "header",
@@ -2063,7 +2069,8 @@
    ],
    "ai": {
     "available": false
-   }
+   },
+   "unavailable": []
   }
  }
 ]

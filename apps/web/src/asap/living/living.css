@@ -166,3 +166,6 @@
   .lv-bar-time { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .lv-block, .lv-btn { transition: none; } .lv-skeleton { animation: none; } }
+
+.lv-unavailable { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--color-accent-gold-line); background: var(--color-accent-gold-wash); color: var(--color-accent-gold-ink); border-radius: var(--radius-nested); padding: 12px 16px; font-size: 13px; }
+.lv-unavailable strong { font-family: var(--font-display); font-weight: 600; }

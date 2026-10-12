@@ -3253,6 +3253,11 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     waitingDocuments,
     /** The Living renewal surface (D-156), composed and validated by the server. Live mode only. */
     living: (workItemId) => api.livingSurface(workItemId),
+    /** A person's arrangement of a surface, kept on the server per brokerage and person (D-157). */
+    surfacePrefs: {
+      get: (key) => api.surfacePreferences(key).then((r) => r.prefs),
+      put: (key, prefs) => api.saveSurfacePreferences(key, prefs).then(() => undefined),
+    },
     /**
      * The adaptive shell's server-backed state (D-155): named sessions, Recent and Pins. Every call
      * is the API's; nothing here is kept in browser storage.

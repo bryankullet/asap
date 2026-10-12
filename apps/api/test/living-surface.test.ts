@@ -84,6 +84,30 @@ describe("composition", () => {
   });
 });
 
+describe("sources that could not be read (D-157)", () => {
+  it("never presents an unreadable period as a missing one", () => {
+    const f = facts({ period: null, unavailable: [{ part: "period", reason: "failed" }] });
+    const texts = consequences(f, NOW).map((c) => c.text).join(" ");
+    expect(texts).not.toMatch(/No policy period is linked/);
+    expect(texts).toMatch(/could not be read/);
+    const s = composeRenewalSurface(f, { now: NOW, aiAvailable: false });
+    expect(s.unavailable).toEqual([{ part: "The policy period", reason: "failed" }]);
+    expect(validateSurface({ surface: s, definitions, permissions: new Set() }).ok).toBe(true);
+  });
+  it("does not say 'no renewed cover' when the placement could not be read", () => {
+    const f = facts({ opportunity: quotedOpp(), unavailable: [{ part: "placement", reason: "restricted" }] });
+    const s = composeRenewalSurface(f, { now: NOW, aiAvailable: false });
+    const cover = s.blocks.find((b) => b.component === "CoverageEffectiveState")!.props as { statement: string; renewed: unknown };
+    expect(cover.statement).toMatch(/not the same as no cover/);
+    expect(consequences(f, NOW).map((c) => c.text).join(" ")).not.toMatch(/Nothing on file yet confirms cover/);
+  });
+  it("changes the fingerprint when a source becomes readable again", () => {
+    const a = composeRenewalSurface(facts({ unavailable: [{ part: "run", reason: "failed" }] }), { now: NOW, aiAvailable: false });
+    const b = composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
+    expect(a.fingerprint).not.toBe(b.fingerprint);
+  });
+});
+
 describe("validation", () => {
   const good = () => composeRenewalSurface(facts(), { now: NOW, aiAvailable: false });
   it("rejects an unregistered component", () => {

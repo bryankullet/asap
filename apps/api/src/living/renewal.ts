@@ -26,6 +26,12 @@ import type { RenewalLivingFacts } from "./facts.js";
  */
 
 const DAY = 86_400_000;
+/** A source that could not be read — never to be presented as an absent fact (D-157). */
+const gap = (f: RenewalLivingFacts, part: RenewalLivingFacts["unavailable"][number]["part"]) => f.unavailable.some((g) => g.part === part);
+export const PART_WORDS: Record<RenewalLivingFacts["unavailable"][number]["part"], string> = {
+  client: "The client", owner: "Who owns this work", run: "The renewal run", quotation: "The quotation", period: "The policy period",
+  revisions: "Revised insurer answers", placement: "The placement", issuance: "The policy issuance", history: "Recent history",
+};
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 const fmtDate = (iso: string | null | undefined) =>
   iso ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Nairobi" }) : null;
@@ -138,9 +144,11 @@ export function consequences(f: RenewalLivingFacts, now: Date) {
   const end = f.period?.periodEnd ?? null;
   const days = end ? Math.ceil((new Date(`${end}T23:59:59Z`).getTime() - now.getTime()) / DAY) : null;
   const coverState = f.placement?.cover.state ?? null;
-  if (end && days !== null && days >= 0 && !["confirmed", "active"].includes(coverState ?? ""))
+  const coverUnknown = gap(f, "placement") || gap(f, "issuance") || gap(f, "quotation");
+  if (coverUnknown) out.push({ certainty: "missing", text: "Renewed cover cannot be stated here: part of the placement record could not be read for you." });
+  if (!coverUnknown && end && days !== null && days >= 0 && !["confirmed", "active"].includes(coverState ?? ""))
     out.push({ certainty: "potential", text: `The current cover ends on ${fmtDate(end)} (${days} day${days === 1 ? "" : "s"}). Nothing on file yet confirms cover from that date.` });
-  if (end && days !== null && days < 0 && !["confirmed", "active"].includes(coverState ?? ""))
+  if (!coverUnknown && end && days !== null && days < 0 && !["confirmed", "active"].includes(coverState ?? ""))
     out.push({ certainty: "confirmed", text: `The previous period ended on ${fmtDate(end)} and no renewed cover is confirmed on file.` });
   for (const c of changes(f).filter((x) => x.field === "Premium"))
     out.push({ certainty: "confirmed", text: `${c.subject} revised its premium from ${c.earlier ?? "nothing recorded"} to ${c.revised ?? "nothing recorded"} (revision ${c.revision}).` });
@@ -153,7 +161,8 @@ export function consequences(f: RenewalLivingFacts, now: Date) {
       out.push({ certainty: "missing", text: `${i.insurerName} quoted without a premium on file — the comparison cannot include its price until one is recorded.` });
   if (f.issuance?.check && f.issuance.check.unresolved > 0)
     out.push({ certainty: "confirmed", text: `The issued policy differs from what was agreed in ${f.issuance.check.unresolved} place${f.issuance.check.unresolved === 1 ? "" : "s"} still to resolve.` });
-  if (!f.period) out.push({ certainty: "missing", text: "No policy period is linked to this renewal, so its expiry cannot be checked." });
+  if (gap(f, "period")) out.push({ certainty: "missing", text: "The policy period could not be read for you, so its expiry is not checked here." });
+  else if (!f.period) out.push({ certainty: "missing", text: "No policy period is linked to this renewal, so its expiry cannot be checked." });
   return out.slice(0, 6);
 }
 
@@ -206,7 +215,9 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
       ? `${f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction}. ${f.issuance?.cover.line ?? f.placement.cover.line}`
       : op
         ? `${op.currentWork.title}. ${op.completed}`
-        : f.item.required_action ?? "No renewal run is attached to this work yet."
+        : gap(f, "run")
+          ? "The renewal run could not be read, so its progress is not shown."
+          : f.item.required_action ?? "No renewal run is attached to this work yet."
     ).slice(0, 500),
   }));
 
@@ -263,9 +274,11 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
 
   blocks.push(block("cover", "CoverageEffectiveState", "side", "Cover", {
     expiring: f.period ? { periodStart: f.period.periodStart, periodEnd: f.period.periodEnd, insurerName: f.period.insurerName, policyNumber: f.period.policyNumber } : null,
-    renewed: f.placement ? { state: (f.issuance?.cover.state ?? f.placement.cover.state) ?? null, line: (f.issuance?.cover.line ?? f.placement.cover.line).slice(0, 500) } : null,
+    renewed: f.placement && !gap(f, "issuance") ? { state: (f.issuance?.cover.state ?? f.placement.cover.state) ?? null, line: (f.issuance?.cover.line ?? f.placement.cover.line).slice(0, 500) } : null,
     daysToExpiry: days,
-    statement: f.placement
+    statement: gap(f, "placement") || gap(f, "issuance") || gap(f, "quotation")
+      ? "Renewed cover is not stated: part of the placement record could not be read for you. That is not the same as no cover."
+      : f.placement
       ? "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
       : "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does.",
   }));
@@ -289,8 +302,9 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     subject: { kind: "work_item", id: f.item.id, title: f.item.title.slice(0, 200) },
     stage: { key: stage, label: stageLabel },
     generatedAt: opts.now.toISOString(),
-    fingerprint: hash(blocks.map((b) => [b.id, b.hash])),
+    fingerprint: hash([blocks.map((b) => [b.id, b.hash]), f.unavailable]),
     blocks,
     ai: { available: opts.aiAvailable },
+    unavailable: f.unavailable.map((g) => ({ part: PART_WORDS[g.part], reason: g.reason })),
   };
 }

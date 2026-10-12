@@ -2,6 +2,8 @@ import type { LivingBlock, LivingSurface as Surface } from "@asap/schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../../lib/api.js";
 import type { Ref } from "../shell/routes.js";
+import type { PrefsStore } from "../shell/types.js";
+import { useSurfacePrefs } from "./prefs.js";
 import { BlockActions, EvidenceList, LIVING_RENDERERS, type BlockEnv } from "./blocks.js";
 import "./living.css";
 
@@ -12,38 +14,21 @@ import "./living.css";
  * Visual inertia: blocks are keyed by their stable id, so a re-composed surface reconciles in place
  * — nothing remounts, scroll and focus stay. A block whose content hash changed is marked
  * "Updated" for a while; a block that appeared is marked "New". An unchanged fingerprint is not
- * even re-rendered. Pinned and collapsed blocks are a per-person convenience kept in this browser
- * only; losing them loses nothing that matters.
+ * even re-rendered. Pinned and collapsed blocks and selections inside blocks are the person's own
+ * arrangement, kept on the server per brokerage, person and surface (D-157).
  */
 
 const POLL_MS = 20_000;
 const MARK_MS = 12_000;
 type Marks = Record<string, { kind: "new" | "updated"; until: number }>;
-type Prefs = { pinned: string[]; collapsed: string[] };
-
-const prefsKey = (id: string) => `asap.living.${id}`;
-function readPrefs(id: string): Prefs {
-  try {
-    const v = JSON.parse(localStorage.getItem(prefsKey(id)) || "null") as Prefs | null;
-    return v && Array.isArray(v.pinned) && Array.isArray(v.collapsed) ? v : { pinned: [], collapsed: [] };
-  } catch {
-    return { pinned: [], collapsed: [] };
-  }
-}
-function writePrefs(id: string, p: Prefs) {
-  try {
-    localStorage.setItem(prefsKey(id), JSON.stringify(p));
-  } catch {
-    /* a convenience only */
-  }
-}
-
+type PrefList = "pinned" | "collapsed";
 export type LivingLoader = (workItemId: string) => Promise<Surface>;
 
-export function LivingSurface({ workItemId, runId, load, onOpen, onAsk, onTitle }: {
+export function LivingSurface({ workItemId, runId, load, prefsStore, onOpen, onAsk, onTitle }: {
   workItemId: string;
   runId: string | null;
   load: LivingLoader;
+  prefsStore?: PrefsStore | undefined;
   onOpen: (ref: Ref) => void;
   onAsk: (text: string) => void;
   onTitle?: (title: string) => void;
@@ -52,7 +37,8 @@ export function LivingSurface({ workItemId, runId, load, onOpen, onAsk, onTitle 
   const [error, setError] = useState<{ status: number; code: string } | null>(null);
   const [marks, setMarks] = useState<Marks>({});
   const [refreshing, setRefreshing] = useState(false);
-  const [prefs, setPrefs] = useState<Prefs>({ pinned: [], collapsed: [] });
+  const [surfaceKey, setSurfaceKey] = useState<string | null>(null);
+  const { prefs, update } = useSurfacePrefs(prefsStore, surfaceKey);
   const last = useRef<Surface | null>(null);
 
   const fetchIt = useCallback(async (manual = false) => {
@@ -73,7 +59,7 @@ export function LivingSurface({ workItemId, runId, load, onOpen, onAsk, onTitle 
           }
           return out;
         });
-      } else setPrefs(readPrefs(next.surfaceId));
+      } else setSurfaceKey(next.surfaceId);
       last.current = next;
       setSurface(next);
     } catch (e) {
@@ -141,14 +127,13 @@ export function LivingSurface({ workItemId, runId, load, onOpen, onAsk, onTitle 
   }
 
   const env: BlockEnv = { open: onOpen, ask: onAsk };
-  const toggle = (key: keyof Prefs, id: string) => {
-    const set = new Set(prefs[key]);
-    if (set.has(id)) set.delete(id);
-    else set.add(id);
-    const next = { ...prefs, [key]: [...set] };
-    setPrefs(next);
-    writePrefs(surface.surfaceId, next);
-  };
+  const toggle = (key: PrefList, id: string) =>
+    update((p) => {
+      const set = new Set(p[key]);
+      if (set.has(id)) set.delete(id);
+      else set.add(id);
+      return { ...p, [key]: [...set] };
+    });
   const ordered = (role: LivingBlock["role"]) => {
     const list = surface.blocks.filter((b) => b.role === role);
     return [...list.filter((b) => prefs.pinned.includes(b.id)), ...list.filter((b) => !prefs.pinned.includes(b.id))];
@@ -165,6 +150,12 @@ export function LivingSurface({ workItemId, runId, load, onOpen, onAsk, onTitle 
           {steps ? <button type="button" className="lv-btn lv-btn-quiet" onClick={steps}>Renewal steps</button> : null}
         </span>
       </div>
+      {surface.unavailable.length ? (
+        <div className="lv-unavailable" role="note">
+          <strong>Part of this renewal could not be read for you.</strong>
+          <span>{surface.unavailable.map((u) => `${u.part} (${u.reason === "restricted" ? "not available to your role" : "could not be loaded"})`).join(" · ")}. What is shown is what could be read; a gap here is not missing insurance information.</span>
+        </div>
+      ) : null}
       {ordered("lead").map((b) => <BlockView key={b.id} block={b} env={env} mark={marks[b.id]?.kind ?? null} lead />)}
       <div className="lv-grid">
         <div className="lv-col lv-col-main">

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, index, jsonb, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
-import { createdAt, timestamptz } from "./_shared.js";
+import { createdAt, timestamptz, updatedAt } from "./_shared.js";
 import { conversations } from "./conversations.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
@@ -76,5 +76,21 @@ export const spacePins = pgTable(
     index("space_pins_person_idx").on(t.organizationId, t.userId, t.createdAt.desc()),
     index("space_pins_user_id_idx").on(t.userId),
     index("space_pins_conversation_id_idx").on(t.conversationId),
+  ],
+);
+
+/** One person's arrangement of one composed surface in one brokerage (0080, D-157). Interface state only. */
+export const surfacePreferences = pgTable(
+  "surface_preferences",
+  {
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    surfaceKey: text("surface_key").notNull(),
+    prefs: jsonb("prefs").notNull().default(sql`'{}'::jsonb`),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.organizationId, t.userId, t.surfaceKey] }),
+    index("surface_preferences_user_id_idx").on(t.userId),
   ],
 );

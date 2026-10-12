@@ -130,6 +130,8 @@ import {
   type UpdateContactRequest,
   spacePlanResponseSchema,
   livingSurfaceSchema,
+  surfacePreferencesResponseSchema,
+  type SurfacePreferences,
   workListResponseSchema,
   type WorkView,
   documentSummarySchema,
@@ -247,6 +249,9 @@ export const api = {
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */
   /** The Living renewal surface (D-156): composed and validated server-side, rendered as registered blocks. */
+  /** One person's arrangement of one surface in the active brokerage (0080, D-157). */
+  surfacePreferences: (surfaceKey: string) => request("GET", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema),
+  saveSurfacePreferences: (surfaceKey: string, prefs: SurfacePreferences) => request("PUT", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema, prefs),
   livingSurface: (workItemId: string) => request("GET", `/living/${workItemId}`, livingSurfaceSchema),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),

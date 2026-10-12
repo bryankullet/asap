@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { createApp } from "../../src/app.js";
-import { ACME, AMINA, BETA, buildApp, caller, JUBILEE, newApiKey, ORG_A, OWNER, READER } from "./_harness.js";
+import { ACME, AMINA, BETA, buildApp, caller, JUBILEE, KAMAU, newApiKey, ORG_A, OWNER, READER } from "./_harness.js";
 
 const API_KEY = newApiKey();
 let app: ReturnType<typeof createApp>;
@@ -93,3 +93,24 @@ describe("GET /living/:workItemId", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("surface preferences (0080, D-157)", () => {
+  const key = () => `renewal:${workItemId}`;
+  it("keeps one person's arrangement for them, in their brokerage", async () => {
+    const put = await call(AMINA, "PUT", `/surface-preferences/${key()}`, { pinned: ["quotes"], collapsed: ["recent"], selection: { quotes: "Jubilee" }, lastSeenAt: null });
+    expect(put.status).toBe(200);
+    const got = await call(AMINA, "GET", `/surface-preferences/${key()}`);
+    expect(got.body.prefs).toMatchObject({ pinned: ["quotes"], collapsed: ["recent"], selection: { quotes: "Jubilee" } });
+    const [row] = await sql<{ organization_id: string; user_id: string }[]>`select organization_id, user_id from surface_preferences where surface_key = ${key()} and user_id = ${AMINA.id}`;
+    expect(row).toEqual({ organization_id: ORG_A, user_id: AMINA.id });
+  });
+  it("is never a colleague's, and never another brokerage's", async () => {
+    expect((await call(KAMAU, "GET", `/surface-preferences/${key()}`)).body.prefs.pinned).toEqual([]);
+    expect((await call(BETA, "GET", `/surface-preferences/${key()}`)).body.prefs.pinned).toEqual([]);
+  });
+  it("refuses business data or free text in place of an arrangement", async () => {
+    expect((await call(AMINA, "PUT", `/surface-preferences/${key()}`, { pinned: [], collapsed: [], selection: {}, lastSeenAt: null, premium: "KES 1" })).status).toBe(400);
+    expect((await call(AMINA, "GET", "/surface-preferences/bad%20key")).status).toBe(400);
+  });
+});
+

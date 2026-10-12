@@ -9,11 +9,11 @@ vi.mock("../../lib/supabase.js", () => ({ supabase: { auth: { getSession: async 
  * them, calm reconciliation when the surface changes, and a designed state for every failure.
  */
 const ID = "11111111-1111-4111-8111-111111111111";
-const surface = (over: { premium?: string; extra?: boolean } = {}): Surface => ({
+const surface = (over: { premium?: string; extra?: boolean; unavailable?: Surface["unavailable"] } = {}): Surface => ({
   version: 1, surfaceId: `renewal:${ID}`, purpose: "renewal",
   subject: { kind: "work_item", id: ID, title: "Renew Acme motor fleet" },
   stage: { key: "comparing", label: "Comparing" }, generatedAt: "2026-10-12T09:00:00Z",
-  fingerprint: `fp-${over.premium ?? "a"}-${over.extra ? 1 : 0}`, ai: { available: false },
+  fingerprint: `fp-${over.premium ?? "a"}-${over.extra ? 1 : 0}`, ai: { available: false }, unavailable: over.unavailable ?? [],
   blocks: [
     { id: "header", component: "ContextHeader", version: 1, role: "lead", title: null, evidence: [], actions: [], hash: "h1",
       props: { eyebrow: "Renewal", title: "Acme Logistics — Motor fleet P-4471", client: null, facts: [{ label: "Cover ends", value: "31 Oct 2026 · 19 days" }], status: { label: "Comparing", tone: "green" }, owner: "Wanjiru" } },
@@ -57,15 +57,28 @@ describe("LivingSurface", () => {
     expect(screen.getByText("New")).toBeTruthy();
   });
 
-  it("keeps a block collapsed for this person across a remount", async () => {
-    await mount(async () => surface());
+  it("keeps a block collapsed for this person across a remount, through the server store", async () => {
+    const saved = new Map<string, unknown>();
+    const store = { get: vi.fn(async (k: string) => (saved.get(k) as never) ?? { pinned: [], collapsed: [], selection: {}, lastSeenAt: null }), put: vi.fn(async (k: string, p: unknown) => { saved.set(k, p); }) };
+    const { LivingSurface } = await import("./LivingSurface.js");
+    localStorage.clear();
+    const first = render(<LivingSurface workItemId={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
     await screen.findByText("KES 175,500.00");
     fireEvent.click(screen.getAllByTitle("Collapse")[0]!);
     expect(screen.queryByText("KES 175,500.00")).toBeNull();
-    const { LivingSurface } = await import("./LivingSurface.js");
-    render(<LivingSurface workItemId={ID} runId={null} load={async () => surface()} onOpen={() => {}} onAsk={() => {}} />);
-    await waitFor(() => expect(screen.getAllByText("Quotes side by side").length).toBe(2));
-    expect(screen.queryByText("KES 175,500.00")).toBeNull();
+    await waitFor(() => expect((saved.get(`renewal:${ID}`) as { collapsed: string[] } | undefined)?.collapsed).toEqual(["quotes"]), { timeout: 2000 });
+    expect(store.get).toHaveBeenCalledWith(`renewal:${ID}`);
+    expect(localStorage.length).toBe(0);
+    first.unmount();
+    render(<LivingSurface workItemId={ID} runId={null} load={async () => surface()} prefsStore={store} onOpen={() => {}} onAsk={() => {}} />);
+    await screen.findByText("Quotes side by side");
+    await waitFor(() => expect(screen.queryByText("KES 175,500.00")).toBeNull());
+  });
+
+  it("says which sources could not be read, instead of showing them as missing", async () => {
+    await mount(async () => surface({ unavailable: [{ part: "The placement", reason: "restricted" }] }));
+    expect(await screen.findByText(/Part of this renewal could not be read for you/)).toBeTruthy();
+    expect(screen.getByText(/The placement \(not available to your role\)/)).toBeTruthy();
   });
 
   it("says when it is not available, and never shows an example instead", async () => {

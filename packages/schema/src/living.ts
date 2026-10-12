@@ -225,6 +225,11 @@ export const livingSurfaceSchema = z.strictObject({
   blocks: z.array(livingBlockSchema).max(14),
   /** Composition needs no model: an unavailable model only switches off what needs one. */
   ai: z.strictObject({ available: z.boolean() }),
+  /**
+   * Sources that could not be read for this viewer (D-157). The surface says so instead of
+   * presenting the gap as missing insurance information.
+   */
+  unavailable: z.array(z.strictObject({ part: label, reason: z.enum(["restricted", "failed"]) })).max(12).default([]),
 });
 export type LivingSurface = z.infer<typeof livingSurfaceSchema>;
 
@@ -247,3 +252,21 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   EvidenceInspector: { version: 1, name: "Evidence", purpose: "The documents and references behind the facts on the surface, each openable.", requiresEvidence: false },
   Timeline: { version: 1, name: "Recent changes", purpose: "What changed recently on this work, in order, with who did it.", requiresEvidence: false },
 };
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Personal arrangement of a surface (0080, D-157): interface state only, strict so it cannot become
+   a side channel for business data. Scoped by the server to (brokerage, person, surface). */
+
+export const surfaceKeySchema = z.string().regex(/^[a-z_]{1,40}(:[A-Za-z0-9_.:-]{1,200})?$/);
+const blockId = z.string().min(1).max(80);
+export const surfacePreferencesSchema = z.strictObject({
+  pinned: z.array(blockId).max(30).default([]),
+  collapsed: z.array(blockId).max(30).default([]),
+  /** What the person had chosen inside blocks, by block id — e.g. the insurer column in focus. */
+  selection: z.record(blockId, z.string().max(200)).default({}),
+  /** When this person last looked at the surface, so Home can say what changed since. */
+  lastSeenAt: z.string().max(40).nullable().default(null),
+});
+export type SurfacePreferences = z.infer<typeof surfacePreferencesSchema>;
+export const surfacePreferencesResponseSchema = z.strictObject({ surfaceKey: surfaceKeySchema, prefs: surfacePreferencesSchema, updatedAt: z.string().nullable() });
+export type SurfacePreferencesResponse = z.infer<typeof surfacePreferencesResponseSchema>;

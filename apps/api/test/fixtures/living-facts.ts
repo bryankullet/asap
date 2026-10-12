@@ -32,7 +32,7 @@ export function facts(over: Partial<RenewalLivingFacts> & { step?: string; runSt
       insurers: [insurer("CIC", "with_insurer", null), insurer("Jubilee", "with_insurer", null)],
       next: null,
     } as unknown as RenewalLivingFacts["opportunity"],
-    revisions: [], placement: null, issuance: null, recent: [],
+    revisions: [], placement: null, issuance: null, recent: [], unavailable: [],
     ...rest,
   };
 }

@@ -1,10 +1,10 @@
-import { livingSurfaceSchema } from "@asap/schema";
+import { livingSurfaceSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
 import { requireActiveOrganization, resolveContext } from "../context.js";
-import { HttpError, sendError } from "../errors.js";
+import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { loadRenewalLivingFacts } from "../living/facts.js";
 import { composeRenewalSurface } from "../living/renewal.js";
 import { validateSurface } from "../living/validate.js";
@@ -48,6 +48,35 @@ export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean }) {
       throw new HttpError(422, "surface_invalid", "This workspace could not be composed");
     }
     return c.json(livingSurfaceSchema.parse(result.surface));
+  });
+
+  /*
+   * One person's arrangement of one surface in their active brokerage (0080, D-157). The brokerage
+   * and the person come from the session, never the request; RLS enforces the same scope again.
+   */
+  app.get("/surface-preferences/:surfaceKey", async (c) => {
+    const { db, user } = c.get("auth");
+    const org = requireActiveOrganization(await resolveContext(db, user.id));
+    const key = surfaceKeySchema.safeParse(c.req.param("surfaceKey"));
+    if (!key.success) throw new HttpError(400, "invalid_request", "That is not a surface.");
+    const r = await db.from("surface_preferences").select("prefs, updated_at").eq("organization_id", org.id).eq("user_id", user.id).eq("surface_key", key.data).maybeSingle();
+    if (r.error) throw mapDatabaseError(r.error);
+    const stored = surfacePreferencesSchema.safeParse(r.data?.prefs ?? {});
+    return c.json(surfacePreferencesResponseSchema.parse({ surfaceKey: key.data, prefs: stored.success ? stored.data : surfacePreferencesSchema.parse({}), updatedAt: r.data?.updated_at ?? null }));
+  });
+
+  app.put("/surface-preferences/:surfaceKey", async (c) => {
+    const { db, user } = c.get("auth");
+    const org = requireActiveOrganization(await resolveContext(db, user.id));
+    const key = surfaceKeySchema.safeParse(c.req.param("surfaceKey"));
+    if (!key.success) throw new HttpError(400, "invalid_request", "That is not a surface.");
+    const body = surfacePreferencesSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new HttpError(400, "invalid_request", "Those preferences are not valid.");
+    const r = await db.from("surface_preferences")
+      .upsert({ organization_id: org.id, user_id: user.id, surface_key: key.data, prefs: body.data, updated_at: new Date().toISOString() }, { onConflict: "organization_id,user_id,surface_key" })
+      .select("prefs, updated_at").single();
+    if (r.error) throw mapDatabaseError(r.error);
+    return c.json(surfacePreferencesResponseSchema.parse({ surfaceKey: key.data, prefs: body.data, updatedAt: r.data.updated_at }));
   });
 
   app.onError((err, c) => {
