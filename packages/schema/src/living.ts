@@ -53,6 +53,7 @@ export const LivingCommand = z.enum([
   "quotation.confirm_reading",
   "work.hand_over",
   "work.acknowledge_handover",
+  "proposal.save",
 ]);
 export type LivingCommand = z.infer<typeof LivingCommand>;
 /** What a person fills in before a command runs. Never pre-filled with a value the model chose. */
@@ -96,7 +97,7 @@ export const livingEvidenceSchema = z.strictObject({
 });
 export type LivingEvidence = z.infer<typeof livingEvidenceSchema>;
 
-export const RenewalStage = z.enum(["attention", "preparing", "awaiting_terms", "comparing", "deciding", "placing", "issuing", "verified", "stopped"]);
+export const RenewalStage = z.enum(["attention", "preparing", "awaiting_terms", "comparing", "deciding", "placing", "issuing", "verified", "continuing", "stopped"]);
 export type RenewalStage = z.infer<typeof RenewalStage>;
 export const RENEWAL_STAGES: { key: RenewalStage; label: string }[] = [
   { key: "attention", label: "Needs attention" },
@@ -107,6 +108,8 @@ export const RENEWAL_STAGES: { key: RenewalStage; label: string }[] = [
   { key: "placing", label: "Placement" },
   { key: "issuing", label: "Issuance" },
   { key: "verified", label: "Verified" },
+  /** Stage nine (D-167): the renewed period has begun; the relationship goes on. */
+  { key: "continuing", label: "Continuing" },
 ];
 
 const tone = z.enum(["green", "gold", "red", "grey"]);
@@ -491,8 +494,8 @@ export const relatedWorkProps = z.strictObject({
     kind: label,
     status: line,
     why: line,
-    /** potential: it may bear on this work; context: the same client, worth knowing. */
-    certainty: z.enum(["potential", "context"]),
+    /** potential: it may bear on this work; context: the same client, worth knowing; none: a plain list (v2). */
+    certainty: z.enum(["potential", "context", "none"]),
     ref: livingRefSchema,
   })).max(8),
 });
@@ -527,6 +530,48 @@ export const decisionTrailProps = z.strictObject({
   note: line,
 });
 
+/**
+ * Saved, versioned proposals (D-167): hypotheticals kept from the exploration, never an instruction
+ * and never sent. Each names the insurers explored and says which have revised their answer since;
+ * opening one re-explores it with today's figures from the quotation.
+ */
+export const proposalVersionsProps = z.strictObject({
+  items: z.array(z.strictObject({
+    version: z.number().int().min(1),
+    savedAt: isoDate,
+    by: z.string().max(200).nullable(),
+    note: z.string().max(1000).nullable(),
+    insurers: z.array(label).max(3),
+    revisedSince: z.array(label).max(3),
+    latest: z.boolean(),
+    ref: livingRefSchema,
+  })).max(12),
+  /** Said once the client has instructed: the proposals are history, not the decision. */
+  committed: line.nullable(),
+  note: line,
+});
+
+/** `POST /living/:workItemId/proposals` — save what is being explored as the next version (D-167). */
+export const proposalSaveRequestSchema = z.strictObject({
+  /** The quotation-insurer ids being explored, comma-separated, as the address carries them. */
+  explore: z.string().min(36).max(120),
+  note: z.string().trim().max(1000).optional(),
+});
+export const proposalSaveResponseSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("applied"), version: z.number().int() }),
+  z.object({ outcome: z.literal("blocked"), reason: z.string() }),
+]);
+
+/** `POST /living/investigate` — which client a request in words is about, from the brokerage's own names. */
+export const investigateRequestSchema = z.strictObject({ text: z.string().min(1).max(500) });
+export const investigateResponseSchema = z.strictObject({
+  clientId: uuidSchema.nullable(),
+  /** Said when no client, or more than one, matches: nothing is guessed. */
+  unclear: z.string().max(300).nullable(),
+  candidates: z.array(z.strictObject({ id: uuidSchema, name: label })).max(5),
+});
+export type InvestigateResponse = z.infer<typeof investigateResponseSchema>;
+
 /** Every Living block's schema, by component id. The registry rows hold their JSON Schema. */
 export const LIVING_BLOCK_PROPS = {
   ContextHeader: contextHeaderProps,
@@ -551,6 +596,7 @@ export const LIVING_BLOCK_PROPS = {
   RelatedWork: relatedWorkProps,
   ResponsePatterns: responsePatternsProps,
   DecisionTrail: decisionTrailProps,
+  ProposalVersions: proposalVersionsProps,
   PortfolioGroups: portfolioGroupsProps,
 } as const;
 export type LivingComponent = keyof typeof LIVING_BLOCK_PROPS;
@@ -575,9 +621,11 @@ export type LivingBlock = z.infer<typeof livingBlockSchema>;
 export const livingSurfaceSchema = z.strictObject({
   version: z.literal(1),
   surfaceId: z.string().max(120),
-  purpose: z.enum(["renewal", "portfolio", "claim", "endorsement"]),
+  purpose: z.enum(["renewal", "portfolio", "claim", "endorsement", "investigation"]),
   subject: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("work_item"), id: uuidSchema, title: label }),
+    /** A client investigation looks across everything on file for one client (D-167). */
+    z.strictObject({ kind: z.literal("client"), id: uuidSchema, title: label }),
     /** A portfolio view is identified by its query's hash. */
     z.strictObject({ kind: z.literal("portfolio"), id: z.string().regex(/^[0-9a-f]{16}$/), title: label }),
   ]),
@@ -605,7 +653,8 @@ export function livingPropsJsonSchema(component: LivingComponent): unknown {
 /** The registry rows for the Living blocks: name, purpose, whether a fact must cite a source. */
 export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: string; purpose: string; requiresEvidence: boolean }> = {
   ContextHeader: { version: 1, name: "Context header", purpose: "What the workspace is about: the record, its client, its status and who holds it.", requiresEvidence: false },
-  RenewalJourney: { version: 1, name: "Renewal journey", purpose: "Where the renewal stands, stage by stage, derived from the records.", requiresEvidence: false },
+  // Version 2 (0089) adds stage nine, "continuing". Version 1 stays registered for anything stored at it.
+  RenewalJourney: { version: 2, name: "Renewal journey", purpose: "Where the renewal stands, stage by stage through the continuing relationship, derived from the records.", requiresEvidence: false },
   ProgressOpportunity: { version: 1, name: "Progress opportunities", purpose: "What could move the work forward now, why, who holds it and what blocks it.", requiresEvidence: false },
   ObligationTracker: { version: 1, name: "Obligations", purpose: "Who holds the next step, since when, and by when.", requiresEvidence: false },
   ChangeComparison: { version: 1, name: "Change comparison", purpose: "An earlier value beside a revised one, and what the revision affects.", requiresEvidence: true },
@@ -618,7 +667,9 @@ export const LIVING_REGISTRY: Record<LivingComponent, { version: number; name: s
   FocusPanel: { version: 1, name: "Focus", purpose: "The answer to a request asked inside a workspace, from records, with the blocks it concerns brought forward.", requiresEvidence: false },
   ArrivedMail: { version: 1, name: "Arrived email", purpose: "Email filed to this work and not yet dealt with, ASAP's reading labelled as a reading, and the governed step it proposes.", requiresEvidence: false },
   HandoverNote: { version: 1, name: "Handover", purpose: "Responsibility moving between colleagues: what is done, open and to watch, and whether the receiver has it.", requiresEvidence: false },
-  RelatedWork: { version: 1, name: "Related work", purpose: "Other open work on the same client or policy, and why it bears on this work.", requiresEvidence: false },
+  // Version 2 (0091) adds "none", for a client investigation's plain list of open work.
+  RelatedWork: { version: 2, name: "Related work", purpose: "Other open work on the same client or policy, and why it bears on this work.", requiresEvidence: false },
+  ProposalVersions: { version: 1, name: "Saved proposals", purpose: "Hypotheticals saved from the exploration, versioned, never an instruction, with what has been revised since.", requiresEvidence: false },
   DecisionTrail: { version: 1, name: "Decided last time", purpose: "What was decided in the client's last round for the same cover, each decision with its evidence.", requiresEvidence: false },
   ResponsePatterns: { version: 1, name: "What usually happens", purpose: "Response times measured from this brokerage's own records, as an estimate with its basis and sample.", requiresEvidence: false },
   WorkJourney: { version: 1, name: "Work journey", purpose: "Any workflow's own steps in order, done, now, waiting or next, as its run records them.", requiresEvidence: false },

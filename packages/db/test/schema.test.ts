@@ -177,6 +177,7 @@ describe("Drizzle schema conventions", () => {
       "quote_term_revisions",
       "quote_terms",
       "recent_items",
+      "renewal_proposals",
       "requirement_templates",
       "role_permissions",
       "roles",

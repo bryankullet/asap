@@ -5,6 +5,7 @@ import { loadIssuance } from "../placement/issuance.js";
 import { load as loadPlacement, type Env } from "../placement/service.js";
 import { loadOpportunity } from "../routes/opportunities.js";
 import { loadWorkflowDetail } from "../routes/workflows.js";
+import { renewalWindow } from "../workflows/renewal.js";
 import { loadCollaboration, type Collaboration } from "./intelligence.js";
 
 /**
@@ -20,7 +21,7 @@ export type AuditEvent = { at: string; action: string; actor: string | null };
  * "failed": the read itself failed. Either way the composer must not present the gap as an absent
  * insurance fact — "no placement on file" and "the placement could not be read" are different.
  */
-export type SourcePart = "client" | "owner" | "run" | "quotation" | "period" | "revisions" | "placement" | "issuance" | "history" | "memory";
+export type SourcePart = "client" | "owner" | "run" | "quotation" | "period" | "revisions" | "placement" | "issuance" | "history" | "memory" | "proposals";
 /** One earlier period of this client's cover of the same class — what was decided before (D-162). */
 export type PastPeriod = { periodStart: string; periodEnd: string; insurer: string; policyNumber: string | null; premiumAmount: string | null; premiumCurrency: string | null };
 export type Unavailable = { part: SourcePart; reason: "restricted" | "failed" };
@@ -41,6 +42,14 @@ export type RenewalLivingFacts = {
   unavailable: Unavailable[];
   /** What the viewer's role allows on the run's controls (the endpoints check again). */
   viewer: { canControlRun: boolean };
+  /** The period that follows this one on the same policy, once it is on file (stage nine, D-167). */
+  renewed?: { periodStart: string; periodEnd: string; insurerName: string } | null;
+  /** When the next renewal opens: the brokerage's renewal rule or ASAP's stated default. */
+  window?: { leadDays: number; basis: string } | null;
+  /** Saved proposals on this renewal, newest first (D-167). */
+  proposals?: { version: number; savedAt: string; by: string | null; note: string | null; opportunityInsurerIds: string[]; revisions: Record<string, number | null> }[];
+  /** Whether the viewer may save a proposal (job:edit, D-167). */
+  canPropose?: boolean;
   /** Arrived email, handover, related work and response patterns (D-166). Absent in pure fixtures. */
   collab?: Collaboration | null;
 };
@@ -140,16 +149,38 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
   // What was decided before: earlier periods of this client's cover of the same class, under RLS.
   let memory: PastPeriod[] = [];
   if (item.client_id && period) {
-    const m = await rows<{ period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null; policies: { policy_number: string | null; class_of_business: string; client_id: string; insurers: { name: string } | null } }[]>(gaps, "memory",
-      db.from("policy_periods").select("period_start, period_end, premium_amount, premium_currency, policies!inner(policy_number, class_of_business, client_id, deleted_at, insurers(name))")
-        .eq("organization_id", org).eq("policies.client_id", item.client_id).eq("policies.class_of_business", period.classOfBusiness).is("policies.deleted_at", null)
-        .lt("period_end", period.periodEnd).order("period_end", { ascending: false }).limit(5));
+    // The client's policies of this class first, then their periods by id: an embedded-join filter
+    // is evaluated row by row under RLS across the whole brokerage (D-168).
+    const pols = await rows<{ id: string; policy_number: string | null; insurers: { name: string } | null }[]>(gaps, "memory",
+      db.from("policies").select("id, policy_number, insurers(name)").eq("organization_id", org).eq("client_id", item.client_id).eq("class_of_business", period.classOfBusiness).is("deleted_at", null).limit(200));
+    const ids = (pols ?? []).map((p) => p.id);
+    const raw = ids.length
+      ? await rows<{ policy_id: string; period_start: string; period_end: string; premium_amount: string | null; premium_currency: string | null }[]>(gaps, "memory",
+          db.from("policy_periods").select("policy_id, period_start, period_end, premium_amount, premium_currency").eq("organization_id", org).in("policy_id", ids).lt("period_end", period.periodEnd).order("period_end", { ascending: false }).limit(5))
+      : [];
+    const m = (raw ?? []).map((r) => { const p = pols!.find((x) => x.id === r.policy_id)!; return { ...r, policies: { policy_number: p.policy_number, insurers: p.insurers } }; });
     memory = (m ?? []).map((r) => ({ periodStart: r.period_start, periodEnd: r.period_end, insurer: r.policies.insurers?.name ?? "An insurer", policyNumber: r.policies.policy_number, premiumAmount: r.premium_amount != null ? String(r.premium_amount) : null, premiumCurrency: r.premium_currency }));
   }
 
   const waitingOn = (opportunity?.insurers ?? []).filter((i) => !i.removedAt && i.request && (i.request.sentAt || i.request.delivery) && !i.response).map((i) => i.insurerName);
   const collab = await loadCollaboration(env, [], { item, subjectIds: [opportunityId ?? "", placement?.placement.id ?? ""], policyId, waitingOn, canRecordResponse: Boolean(opportunity?.permissions.canRecordResponse),
     trailFor: item.client_id && period ? { clientId: item.client_id, classOfBusiness: period.classOfBusiness, excludeOpportunityId: opportunityId } : null });
+
+  // Stage nine: the following period on the same policy, and when its renewal would open.
+  let renewed: RenewalLivingFacts["renewed"] = null;
+  if (policyId && period) {
+    const r = await rows<{ period_start: string; period_end: string; policies: { insurers: { name: string } | null } | null }[]>(gaps, "period",
+      db.from("policy_periods").select("period_start, period_end, policies(insurers(name))").eq("organization_id", org).eq("policy_id", policyId).gt("period_start", period.periodStart).order("period_start").limit(1));
+    const n = r?.[0];
+    if (n) renewed = { periodStart: n.period_start, periodEnd: n.period_end, insurerName: n.policies?.insurers?.name ?? period.insurerName };
+  }
+  const win = renewed ? await renewalWindow(db, org).catch(() => null) : null;
+
+  const proposalRows = opportunityId
+    ? await rows<{ version: number; created_at: string; note: string | null; opportunity_insurer_ids: string[]; revisions: Record<string, number | null>; users: { display_name: string | null; full_name: string | null } | null }[]>(gaps, "proposals",
+        db.from("renewal_proposals").select("version, created_at, note, opportunity_insurer_ids, revisions, users!renewal_proposals_created_by_fkey(display_name, full_name)").eq("organization_id", org).eq("work_item_id", item.id).order("version", { ascending: false }).limit(12))
+    : [];
+  const proposals = (proposalRows ?? []).map((p) => ({ version: p.version, savedAt: p.created_at, by: p.users?.display_name ?? p.users?.full_name ?? null, note: p.note, opportunityInsurerIds: p.opportunity_insurer_ids, revisions: p.revisions }));
 
   const owner = ownerRow;
   return {
@@ -167,5 +198,9 @@ export async function loadRenewalLivingFacts(env: Env, workItemId: string): Prom
     unavailable: gaps,
     viewer: { canControlRun: hasPermission(env.ctx, "policy", "edit") },
     collab,
+    renewed,
+    proposals,
+    canPropose: hasPermission(env.ctx, "job", "edit"),
+    window: win ? { leadDays: win.leadDays, basis: win.basis } : null,
   };
 }

@@ -53,7 +53,7 @@
 .lv-fact dd { margin: 2px 0 0; font-weight: 600; font-size: 14px; }
 
 /* journey */
-.lv-stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.lv-stages { list-style: none; margin: 0; padding: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
 .lv-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: 12px; color: var(--color-ink-faint); }
 .lv-stage::before { content: ""; position: absolute; top: 13px; left: calc(-50% + 16px); right: calc(50% + 16px); height: 2px; background: var(--color-line); border-radius: 2px; }
 .lv-stage:first-child::before { display: none; }
@@ -311,3 +311,13 @@
 .lv-trail .lv-timeline .lv-dot { margin-top: 6px; flex: none; }
 .lv-trail .lv-timeline p { margin: 0; font-size: 13px; }
 .lv-trail-link { display: block; margin-top: 2px; font-size: 12px; }
+
+/* Saved proposals (D-167): hypothetical, drawn like the exploration, never in a status colour */
+.lv-proposals ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.lv-proposal { padding: 10px 12px; border-radius: var(--radius-nested); border: 1px dashed var(--color-accent-purple); display: flex; flex-direction: column; gap: 4px; }
+.lv-proposal-head { display: flex; gap: 6px; flex-wrap: wrap; }
+.lv-proposal p { margin: 0; font-size: 13px; color: var(--color-ink-secondary); }
+.lv-proposal small { color: var(--color-ink-muted); font-size: 12px; }
+.lv-proposals-committed { margin: 0 0 8px; font-size: 13px; color: var(--color-ink); font-weight: 500; }
+.lv-chip.lv-purple { color: var(--color-accent-purple); background: var(--color-accent-purple-soft); }
+.lv-candidates { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }

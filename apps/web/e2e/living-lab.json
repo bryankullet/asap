@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "122c01614f4a27bf",
+   "fingerprint": "f11d48387712bf68",
    "blocks": [
     {
      "id": "header",
@@ -64,6 +64,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -72,12 +81,12 @@
        "primary": false
       }
      ],
-     "hash": "6842eb7ca0cb0e4d"
+     "hash": "85cb4c2460aac9a2"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -121,13 +130,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Awaiting insurer terms. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "2ba244f263d55b5f"
+     "hash": "fa7783967083049d"
     },
     {
      "id": "next",
@@ -395,7 +409,7 @@
     "label": "Insurer terms"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "c9984043e2a45dca",
+   "fingerprint": "75261fb437d9f122",
    "blocks": [
     {
      "id": "header",
@@ -447,6 +461,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -455,12 +478,12 @@
        "primary": false
       }
      ],
-     "hash": "b102b29e394d5143"
+     "hash": "5681f8157b2994a2"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -504,13 +527,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Awaiting insurer terms. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "b6a39b0e675c01c2"
+     "hash": "5d5c7b45f60a092d"
     },
     {
      "id": "quotes",
@@ -876,7 +904,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "a38bdb72772a6438",
+   "fingerprint": "fcd95c7c91341c69",
    "blocks": [
     {
      "id": "header",
@@ -928,6 +956,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -936,12 +973,12 @@
        "primary": false
       }
      ],
-     "hash": "38c8785f38edde77"
+     "hash": "a29d44d707646ac3"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -985,13 +1022,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "CIC has answered. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "6c09242dd8b143d3"
+     "hash": "dc421c6301b0e65a"
     },
     {
      "id": "changes",
@@ -1323,7 +1365,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "58f2d5023f4afe92",
+   "fingerprint": "85fe4ea9751037ee",
    "blocks": [
     {
      "id": "header",
@@ -1375,6 +1417,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -1383,12 +1434,12 @@
        "primary": false
       }
      ],
-     "hash": "09f20907f613089d"
+     "hash": "5db9c1212d54b57d"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -1432,13 +1483,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Send the approved request. Requested from Jubilee — not confirmed."
      },
      "evidence": [],
      "actions": [],
-     "hash": "46e6bcf2d8e0ea10"
+     "hash": "fcc97feb49675483"
     },
     {
      "id": "next",
@@ -1741,7 +1797,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "7f0aaafcd95b8354",
+   "fingerprint": "520212c60feffc14",
    "blocks": [
     {
      "id": "header",
@@ -1793,6 +1849,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -1801,12 +1866,12 @@
        "primary": false
       }
      ],
-     "hash": "09f20907f613089d"
+     "hash": "5db9c1212d54b57d"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -1850,13 +1915,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Send the approved request. Requested from Jubilee — not confirmed."
      },
      "evidence": [],
      "actions": [],
-     "hash": "46e6bcf2d8e0ea10"
+     "hash": "fcc97feb49675483"
     },
     {
      "id": "next",
@@ -2099,7 +2169,7 @@
     "label": "Issuance"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "6d6492f8178e2745",
+   "fingerprint": "6411526e2a460f23",
    "blocks": [
     {
      "id": "header",
@@ -2151,6 +2221,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -2159,12 +2238,12 @@
        "primary": false
       }
      ],
-     "hash": "3013db2dff8f44ae"
+     "hash": "a3f539190539162b"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -2208,13 +2287,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Resolve the differences between the issued policy and what was agreed. Confirmed by Jubilee in writing from 1 Nov 2026."
      },
      "evidence": [],
      "actions": [],
-     "hash": "04aed989cca5772b"
+     "hash": "6a48970794eb842e"
     },
     {
      "id": "next",
@@ -2440,7 +2524,7 @@
     "label": "Verified"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "9c89a8309440868f",
+   "fingerprint": "fb445c1a7735d92e",
    "blocks": [
     {
      "id": "header",
@@ -2492,6 +2576,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -2500,12 +2593,12 @@
        "primary": false
       }
      ],
-     "hash": "77818c11c38e0730"
+     "hash": "aea053b38fc50057"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -2549,13 +2642,359 @@
         "key": "verified",
         "label": "Verified",
         "state": "now"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Continue the issuance. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
      },
      "evidence": [],
      "actions": [],
-     "hash": "38e6360dbf8beace"
+     "hash": "942fb568626710dc"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "done",
+        "note": "6 Oct 2026"
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "done",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "done",
+        "note": "8 Oct 2026"
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "done",
+        "note": "0 unresolved differences"
+       }
+      ],
+      "coverLine": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "509fcb868c8124e6"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": [
+       {
+        "party": "Jubilee",
+        "what": "Continue the issuance",
+        "since": "2026-10-08",
+        "due": null,
+        "kind": "outside"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "568864047ee2ff5c"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "active",
+       "line": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "1f1c850cd78b5647"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       },
+       {
+        "label": "Issued policy document",
+        "reference": "Jubilee policy schedule 2026.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-10T08:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c0b9c16bd055fc45"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "continuing",
+  "label": "Continuing",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "continuing",
+    "label": "Continuing"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "429df64b4212ed76",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "ASAP",
+        "value": "Waiting on insurers"
+       }
+      ],
+      "status": {
+       "label": "Continuing",
+       "tone": "green"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "08bab1c0f4ad8535"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "done"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "done"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "done"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "now"
+       }
+      ],
+      "summary": "Continue the issuance. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "207715a56ef0140b"
+    },
+    {
+     "id": "continuing",
+     "component": "WorkChecklist",
+     "version": 1,
+     "role": "main",
+     "title": "The year ahead",
+     "props": {
+      "items": [
+       {
+        "key": "in_force",
+        "label": "Renewed cover on file with Jubilee",
+        "detail": "1 Nov 2026 – 31 Oct 2027",
+        "state": "done",
+        "party": null,
+        "since": "2026-11-01"
+       },
+       {
+        "key": "next_renewal",
+        "label": "Next renewal work opens",
+        "detail": "Around 1 Sept 2027, 60 days before this cover ends. ASAP's default — 60 days before expiry — because this brokerage has not set a renewal rule.",
+        "state": "pending",
+        "party": null,
+        "since": null
+       },
+       {
+        "key": "memory",
+        "label": "This round's decisions are kept for next year",
+        "detail": "The insurers' answers and the client's instruction are on the quotation; next year's workspace shows them as \"Decided last time\".",
+        "state": "done",
+        "party": null,
+        "since": null
+       }
+      ],
+      "note": "Changes, claims and certificates during the year are their own work, shown under Related work. Nothing here is a status of the cover beyond what is on file."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "3e5a5159f3462d92"
     },
     {
      "id": "placement",
@@ -2728,7 +3167,7 @@
     "label": "Stopped"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "82b2ece2444198da",
+   "fingerprint": "968e87ef9ddb5563",
    "blocks": [
     {
      "id": "header",
@@ -2776,6 +3215,15 @@
       },
       {
        "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
        "label": "Open the renewal steps",
        "ref": {
         "ws": "renewal",
@@ -2784,12 +3232,12 @@
        "primary": false
       }
      ],
-     "hash": "14c8f9da2f6103c8"
+     "hash": "462f5fd167c809ee"
     },
     {
      "id": "journey",
      "component": "RenewalJourney",
-     "version": 1,
+     "version": 2,
      "role": "lead",
      "title": null,
      "props": {
@@ -2833,13 +3281,18 @@
         "key": "verified",
         "label": "Verified",
         "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
        }
       ],
       "summary": "Awaiting insurer terms. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "f2658bdfe1c8ead0"
+     "hash": "2508de48a5fa6678"
     },
     {
      "id": "next",

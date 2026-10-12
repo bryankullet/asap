@@ -3060,3 +3060,32 @@ Five blocks, each from records the viewer may read, none a status, none written 
 Unreadable parts are named on the surface (e.g. "Colleagues could not be read"), never shown as
 absent. **Not built:** behavioural interface learning (re-ordering by what people click); the only
 "learning" is outcomes measured from records, and personal arrangement (0080).
+
+## D-167 — Stage nine, saved proposals and client investigations (0089, 0090, 0091)
+
+- **Stage nine, "Continuing"** (`RenewalJourney` v2, 0089). A renewal reaches it once the renewed
+  cover is verified (issuance applied) and the following period on the same policy is on file and
+  has begun, or the renewal work is done. The workspace then shows the year ahead from records: the
+  cover now in force, when the next renewal opens (the brokerage's `renewal.window` rule, or ASAP's
+  stated default), and that this round's decisions carry into next year's "Decided last time".
+  A later period without verified issuance is not stage nine (tested). Version 1 stays registered.
+- **Saved, versioned proposals** (`renewal_proposals`, `renewal_proposal_save`, `ProposalVersions`,
+  0090). What is being explored (D-160) can be saved as the next numbered proposal through the
+  `proposal.save` command (`POST /living/:id/proposals`). A proposal holds the quotation-insurer ids
+  and each answer's revision at the time, never a figure; opening one re-explores it with today's
+  figures, and an answer revised since is said. It is labelled hypothetical everywhere, is never the
+  client's instruction, is never sent, and once the client instructs, the block says the proposals
+  are history. `job:edit`, open renewals, insurers on that renewal's own quotation only; audited.
+- **Client investigations** (`GET /living/client/:clientId`, purpose `investigation`). One
+  workspace across everything on file for a client: open work (most pressing first, `RelatedWork`
+  v2 with no marker, 0091), cover on file per policy, claims, email waiting across the client's runs,
+  recent changes. It offers no command; each row opens the governed place. Reached from "Everything
+  for this client" on every workspace header and from Home ("everything about Acme Motors"):
+  `POST /living/investigate` matches the brokerage's own client names and picks one only when its
+  name carries every distinctive word asked; otherwise it offers the candidates. Never a guess.
+- **Reconciliation workspaces are not built.** There are no commission statements, receipts or
+  premium payments recorded in ASAP to compose from; building the surface would mean fabricating
+  financial records. It waits for the money slice.
+- **Found while testing:** the shell header kept the previous record's title while a new composed
+  surface loaded, which could also have recorded the new address in Recent under the old name; the
+  title now resets whenever the open record changes.

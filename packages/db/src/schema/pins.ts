@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { check, index, jsonb, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
+import { check, index, integer, jsonb, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
 import { createdAt, timestamptz, updatedAt } from "./_shared.js";
 import { conversations } from "./conversations.js";
 import { organizations } from "./organizations.js";
+import { opportunities } from "./quotations.js";
 import { users } from "./users.js";
 import { workItems } from "./work.js";
 
@@ -116,5 +117,28 @@ export const workHandovers = pgTable(
     index("work_handovers_from_user_id_idx").on(t.fromUserId),
     index("work_handovers_to_user_id_idx").on(t.toUserId),
     check("work_handovers_check", sql`from_user_id <> to_user_id`),
+  ],
+);
+
+/** A hypothetical saved from the exploration: insurers and answer revisions, never figures (0090, D-167). */
+export const renewalProposals = pgTable(
+  "renewal_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+    workItemId: uuid("work_item_id").notNull().references(() => workItems.id),
+    opportunityId: uuid("opportunity_id").notNull().references(() => opportunities.id),
+    version: integer("version").notNull(),
+    opportunityInsurerIds: uuid("opportunity_insurer_ids").array().notNull(),
+    revisions: jsonb("revisions").notNull().default(sql`'{}'::jsonb`),
+    note: text("note"),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("renewal_proposals_work_item_id_version_key").on(t.workItemId, t.version),
+    index("renewal_proposals_organization_id_idx").on(t.organizationId),
+    index("renewal_proposals_opportunity_id_idx").on(t.opportunityId),
+    index("renewal_proposals_created_by_idx").on(t.createdBy),
   ],
 );

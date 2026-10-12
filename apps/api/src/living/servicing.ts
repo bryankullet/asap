@@ -34,6 +34,8 @@ import { loadCollaboration, mergeUnavailable, placeCollaboration, type Collabora
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 const DAY = 86_400_000;
 const fmt = (iso: string | null | undefined) => (iso ? new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Nairobi" }) : null);
+/** Everything on file for this client, in one workspace (D-167). */
+const acrossClient = (f: ServicingFacts): LivingAction | null => (f.client ? { kind: "open", label: "Everything for this client", ref: { ws: "investigation", clientId: f.client.id }, primary: false } : null);
 const block = (id: string, component: LivingBlock["component"], role: LivingBlock["role"], title: string | null, props: Record<string, unknown>, actions: (LivingAction | null)[] = []): LivingBlock => {
   const a = actions.filter((x): x is LivingAction => !!x).slice(0, 4);
   return { id, component, version: LIVING_REGISTRY[component].version, role, title, props, evidence: [], actions: a, hash: hash({ props, a }) };
@@ -146,7 +148,7 @@ export function composeClaimSurface(f: ServicingFacts, opts: { now: Date; aiAvai
       ...(clock?.started ? [{ label: "Notice due", value: `${fmt(clock.dueOn)} · ${daysLeft! >= 0 ? `${daysLeft} days left` : `${-daysLeft!} days late`}` }] : []),
     ].slice(0, 6),
     status, owner: f.run?.operational.owner?.name ?? null,
-  }, [openSteps(f)]));
+  }, [openSteps(f), acrossClient(f)]));
   blocks.push(journey(f, c ? (c.status === "draft" ? "A draft claim. Nothing has been sent to the insurer." : "The claim is with the insurer.") : "The claim could not be read."));
 
   const outstanding = (d?.documents ?? []).filter((x) => !x.received_at);
@@ -207,7 +209,7 @@ export function composeEndorsementSurface(f: ServicingFacts, opts: { now: Date; 
     ].slice(0, 6),
     status: applied ? { label: "Applied to the policy", tone: "green" } : e?.response_reference ? { label: "Insurer has answered", tone: "gold" } : { label: "Not yet decided by the insurer", tone: "gold" },
     owner: f.run?.operational.owner?.name ?? null,
-  }, [openSteps(f)]));
+  }, [openSteps(f), acrossClient(f)]));
   blocks.push(journey(f, e ? "The requested change, item by item, waits for the insurer's written decision." : "The policy change could not be read."));
   const next = [...nextFromRun(f), ...(d?.missing.length ? [{ id: "missing", title: "Complete what the request still needs", why: d.missing.join(" ").slice(0, 500), responsible: null, deadline: null, actionableNow: f.canAct, requiresApproval: false, blockedBy: d.missing.map((m) => m.slice(0, 500)).slice(0, 6), tone: "gold" as const }] : [])].slice(0, 6);
   if (next.length) blocks.push(block("next", "ProgressOpportunity", "main", "What moves this forward", { items: next }));

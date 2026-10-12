@@ -123,6 +123,7 @@ const LIVING = [
   "RelatedWork",
   "ResponsePatterns",
   "DecisionTrail",
+  "ProposalVersions",
   "WorkChecklist",
   "PortfolioGroups",
 ] as const;

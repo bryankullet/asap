@@ -192,6 +192,26 @@ await step(page, "escalate-through-surface", async () => {
   await page.locator('[data-block="obligations"]').getByText("Done.").waitFor({ timeout: 10000 });
   must(sql(`select coalesce(facts->'escalated'->>'reason', '') from workflow_runs where id = '${run.id}'`).includes(TAG), "the escalation was not recorded on the run");
 });
+await step(page, "save-a-proposal-separate-from-the-decision", async () => {
+  // A saved proposal (D-167): numbered, hypothetical, never the client's instruction.
+  const before = sql(`select count(*) from client_instructions where opportunity_id = '${out.opportunityId}'`);
+  await page.goto(BASE + `#/s/living?workItemId=${workItemId}&explore=${jubilee.id}`);
+  const panel = page.locator('[data-component="ExplorationPanel"]');
+  await page.locator(".lv-explore-card", { hasText: "Jubilee" }).waitFor({ timeout: 15000 });
+  await panel.getByRole("button", { name: "Save as proposal v1" }).click();
+  await panel.locator(".lv-command textarea").fill(`Client asked to see Jubilee ${TAG}`);
+  await panel.locator(".lv-command").getByRole("button", { name: "Save as proposal v1" }).click();
+  await page.locator(".lv-receipt").waitFor({ timeout: 15000 });
+  await settle(page, 1500);
+  const saved = page.locator('[data-block="proposals"]');
+  await saved.waitFor({ timeout: 15000 });
+  must(await saved.getByText("Proposal v1 · hypothetical").count(), "the saved proposal is not shown as hypothetical v1");
+  must(await saved.getByText(/not the client's instruction/).count(), "the proposal is not separated from the decision in words");
+  must(sql(`select count(*) from renewal_proposals where work_item_id = '${workItemId}'`) === "1", "the proposal was not saved");
+  must(sql(`select count(*) from client_instructions where opportunity_id = '${out.opportunityId}'`) === before, "saving a proposal recorded an instruction");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
+});
 await step(page, "home-says-what-a-colleague-did", async () => {
   await page.goto(BASE + "#/");
   const changes = page.locator(".sh-changes");

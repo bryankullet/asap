@@ -157,6 +157,30 @@ await step(page, "claim-hand-over-in-place", async () => {
   const a11y = await axeSerious(page);
   must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
 });
+await step(page, "investigate-the-client", async () => {
+  // Everything for this client (D-167): open work, cover on file and claims, from records; no commands.
+  await page.locator('[data-component="ContextHeader"]').getByRole("button", { name: "Everything for this client" }).click();
+  await page.locator('.lv-root [data-component="ContextHeader"]', { hasText: "Client" }).waitFor({ timeout: 15000 });
+  must(/\/s\/investigation\?clientId=/.test(decodeURIComponent(page.url())), `not the client's investigation: ${page.url()}`);
+  must(await page.locator('[data-block="work"]').getByText(/Rear-ended at Mlolongo|claim/i).count(), "the client's open claim is not listed");
+  must(await page.locator('[data-block="cover"]').count(), "cover on file is not shown");
+  must((await page.locator(".lv-root .lv-command, .lv-root [data-command]").count()) === 0, "an investigation offers a command");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
+  await page.goBack();
+  await page.locator('.lv-root [data-component="ContextHeader"]', { hasText: "Claim" }).waitFor({ timeout: 15000 });
+});
+await step(page, "home-asks-to-look-across-a-client", async () => {
+  await page.goto(BASE + "#/");
+  const box = page.locator("textarea, input[type=text]").first();
+  await box.waitFor({ timeout: 15000 });
+  await box.fill("everything about Acme Motors");
+  await box.press("Enter");
+  await page.waitForFunction(() => /investigation\?clientId=/.test(decodeURIComponent(location.href)), null, { timeout: 15000 });
+  await page.locator('.lv-root [data-component="ContextHeader"]', { hasText: "Acme Motors" }).waitFor({ timeout: 15000 });
+  const head = await page.locator(".sh-head, header").first().innerText();
+  must(!/claim/i.test(head.split("\n").slice(0, 3).join(" ")), `the header still names the claim: ${head.slice(0, 120)}`);
+});
 await page.goto(BASE + `#/s/living?workItemId=${endWork}`);
 await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 20000 });
 await page.waitForTimeout(800);

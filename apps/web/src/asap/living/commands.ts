@@ -25,6 +25,7 @@ const ROUTES: Record<LivingCommand, (target: string) => string> = {
   "quotation.confirm_reading": (id) => `/opportunities/${id}/actions`,
   "work.hand_over": (id) => `/work-items/${id}/hand-over`,
   "work.acknowledge_handover": (id) => `/work-handovers/${id}/acknowledge`,
+  "proposal.save": (id) => `/living/${id}/proposals`,
 };
 /** Commands that record a fact once: a retried submit carries the same key and records one. */
 const IDEMPOTENT = new Set<LivingCommand>(["placement.record_submission", "issuance.record_submission"]);

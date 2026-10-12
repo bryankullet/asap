@@ -1,7 +1,7 @@
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiRequestError } from "../../lib/api.js";
-import { LivingRenewalPane, looksLikePortfolio, PortfolioPane } from "../living/panes.js";
+import { InvestigationPane, LivingRenewalPane, looksLikeInvestigation, looksLikePortfolio, PortfolioPane } from "../living/panes.js";
 import { renderConversation, renderSheet, renderSpace, renderToast } from "../views/space-views.js";
 import { parse, sameRef, surfaceForRef, toPath, type Ref, type Surface } from "./routes.js";
 import { ActivitySurface, AutomationsSurface, HomeSurface, WorkSurface } from "./Surfaces.js";
@@ -134,9 +134,14 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const spaceRef = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
   const living = !!(spaceRef && spaceRef.ws === "living" && A?.living && typeof spaceRef["workItemId"] === "string");
   const portfolio = !!(spaceRef && spaceRef.ws === "portfolio");
+  const investigation = !!(spaceRef && spaceRef.ws === "investigation" && A?.investigation);
   const [livingTitle, setLivingTitle] = useState("");
   const [livingKind, setLivingKind] = useState("Renewal");
-  const spaceTitle = living || portfolio ? livingTitle : ws?.title || "";
+  // A composed surface names itself once it loads; until then the previous record's name must not
+  // stand in the header or be recorded in Recent under the new address.
+  const surfaceIdentity = spaceRef ? `${spaceRef.ws}:${String(spaceRef["workItemId"] ?? spaceRef["clientId"] ?? "")}` : "";
+  useEffect(() => setLivingTitle(""), [surfaceIdentity]);
+  const spaceTitle = living || portfolio || investigation ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
     if (!ready || !A?.shell || !spaceRef || !spaceTitle || /^(Loading|Opening)/.test(spaceTitle)) return;
@@ -277,9 +282,23 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     }
   };
 
-  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? livingKind : portfolio ? "Portfolio" : ws?.kind });
+  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? livingKind : portfolio ? "Portfolio" : investigation ? "Client" : ws?.kind });
   const conversationEl = ready ? renderConversation(v) : null;
-  const spaceEl = !ready ? null : portfolio && spaceRef ? (
+  const spaceEl = !ready ? null : investigation && spaceRef ? (
+    <InvestigationPane
+      viewRef={spaceRef}
+      investigation={A!.investigation!}
+      resolveClient={A?.resolveClient}
+      prefsStore={A?.surfacePrefs}
+      onOpen={(ref) => controller.open(ref)}
+      onNavigate={(ref, replace) => go({ mode: "space", ref, drawer: null }, { replace })}
+      onAsk={(text) => {
+        if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
+        void logic.ask(text);
+      }}
+      onTitle={setLivingTitle}
+    />
+  ) : portfolio && spaceRef ? (
     <PortfolioPane
       viewRef={spaceRef}
       portfolio={A?.portfolio ?? notConnected}
@@ -309,7 +328,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   let main: ReactNode;
   if (!ready) main = <div className="sh-loading" role="status">Opening your brokerage…</div>;
   else if (surface.mode === "home")
-    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => (A?.portfolio && looksLikePortfolio(text) ? go({ mode: "space", ref: { ws: "portfolio", t: text }, drawer: null }) : void logic.ask(text))} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
+    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => (A?.portfolio && looksLikePortfolio(text) ? go({ mode: "space", ref: { ws: "portfolio", t: text }, drawer: null }) : A?.investigation && looksLikeInvestigation(text) ? go({ mode: "space", ref: { ws: "investigation", t: text }, drawer: null }) : void logic.ask(text))} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
   else if (surface.mode === "work") main = <WorkSurface logic={logic} A={A} view={surface.view} onView={(view) => go({ mode: "work", view }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "automations") main = <AutomationsSurface logic={logic} A={A} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "activity") main = <ActivitySurface logic={logic} filter={surface.filter} onFilter={(filter) => go({ mode: "activity", filter }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;

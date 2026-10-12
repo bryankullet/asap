@@ -4,6 +4,7 @@ import type {
   decisionTrailProps,
   focusPanelProps,
   handoverNoteProps,
+  proposalVersionsProps,
   relatedWorkProps,
   responsePatternsProps,
   workChecklistProps,
@@ -559,7 +560,7 @@ function RelatedWork({ props, env }: P<typeof relatedWorkProps>) {
             <button type="button" className="lv-rowlink" onClick={() => env.open(r.ref as Ref)}>{r.title}</button>
           </div>
           <small>{r.status}</small>
-          <p>{r.certainty === "potential" ? <span className={`lv-chip lv-${CERTAINTY.potential[1]}`}>{CERTAINTY.potential[0]}</span> : <span className="lv-chip lv-grey">Same client</span>} {r.why}</p>
+          <p>{r.certainty === "potential" ? <span className={`lv-chip lv-${CERTAINTY.potential[1]}`}>{CERTAINTY.potential[0]}</span> : r.certainty === "context" ? <span className="lv-chip lv-grey">Same client</span> : null} {r.why}</p>
         </li>
       ))}
     </ul>
@@ -603,6 +604,29 @@ function DecisionTrail({ props, env }: P<typeof decisionTrailProps>) {
   );
 }
 
+function ProposalVersions({ props, env }: P<typeof proposalVersionsProps>) {
+  return (
+    <div className="lv-proposals">
+      {props.committed ? <p className="lv-proposals-committed">{props.committed}</p> : null}
+      <ul>
+        {props.items.map((p) => (
+          <li key={p.version} className="lv-proposal">
+            <div className="lv-proposal-head">
+              <span className="lv-chip lv-purple">Proposal v{p.version} · hypothetical</span>
+              {p.latest ? <span className="lv-chip lv-grey">Latest</span> : null}
+            </div>
+            <button type="button" className="lv-rowlink" onClick={() => env.open(p.ref as Ref)}>{p.insurers.length ? `If the client chose ${p.insurers.join(" or ")}` : "The insurers in it are no longer on the quotation"}</button>
+            {p.note ? <p>{p.note}</p> : null}
+            {p.revisedSince.length ? <p className="lv-proposal-revised"><span className="lv-chip lv-gold">Revised since</span> {p.revisedSince.join(", ")} revised their answer after this was saved.</p> : null}
+            <small>{[`Saved ${day(p.savedAt)}`, p.by].filter(Boolean).join(" · ")}</small>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
 /** Component id → renderer. The registry's browser half; anything absent does not render. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
 export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
@@ -629,6 +653,7 @@ export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: 
   RelatedWork,
   ResponsePatterns,
   DecisionTrail,
+  ProposalVersions,
 };
 
 /**

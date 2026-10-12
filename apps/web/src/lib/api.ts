@@ -131,6 +131,7 @@ import {
   spacePlanResponseSchema,
   livingSurfaceSchema,
   workspaceInterpretationSchema,
+  investigateResponseSchema,
   homeChangesResponseSchema,
   portfolioResponseSchema,
   type PortfolioQuery,
@@ -278,6 +279,10 @@ export const api = {
   },
   /** Ask ASAP inside a workspace (D-165): words → a typed focus. Writes nothing. */
   interpretWorkspace: (workItemId: string, text: string) => request("POST", `/living/${workItemId}/interpret`, workspaceInterpretationSchema, { text }),
+  /** Everything on file for one client, as a Living workspace (D-167). */
+  investigation: (clientId: string) => request("GET", `/living/client/${clientId}`, livingSurfaceSchema),
+  /** Which client a request names, from the brokerage's own names; never a guess (D-167). */
+  resolveClient: (text: string) => request("POST", "/living/investigate", investigateResponseSchema, { text }),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /**

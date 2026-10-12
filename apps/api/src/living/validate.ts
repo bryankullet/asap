@@ -24,7 +24,7 @@ import type { ComponentDefinition, ValidationFailure } from "../spaces/validate.
  */
 
 /** The places a Living action may open — the shell's own workspace references. */
-export const LIVING_OPENABLE = new Set(["renewal", "quote", "document", "workitem", "client", "policy", "living", "portfolio"]);
+export const LIVING_OPENABLE = new Set(["renewal", "quote", "document", "workitem", "client", "policy", "living", "portfolio", "investigation"]);
 /** Per command: the fixed payload keys (with any value they must equal) and the inputs a person fills. */
 const COMMANDS: Record<LivingCommand, { payload: Record<string, string | null>; inputs: string[] }> = {
   "workflow_approval.decide": { payload: { decision: null, bundleSha256: null }, inputs: ["note"] },
@@ -45,6 +45,7 @@ const COMMANDS: Record<LivingCommand, { payload: Record<string, string | null>; 
   "quotation.confirm_reading": { payload: { action: "record_response", opportunityInsurerId: null, fromProposalId: null, outcome: null }, inputs: [] },
   "work.hand_over": { payload: { version: null }, inputs: ["toUserId", "done", "open", "watch"] },
   "work.acknowledge_handover": { payload: {}, inputs: [] },
+  "proposal.save": { payload: { explore: null }, inputs: ["note"] },
 };
 
 const BANNED_KEYS = ["percent", "percentage", "confidence", "completion", "score", "ranking"];

@@ -22,15 +22,21 @@ const rows = [...sql.matchAll(re)].map((m) => ({
   schema: JSON.parse(m[9]!.replace(/''/g, "'")),
 }));
 
+// A component's current version is its latest row; earlier versions stay registered, never deleted.
+const latest = [...new Set(rows.map((r) => r.id))].map((id) => rows.filter((r) => r.id === id).reduce((a, b) => (b.version > a.version ? b : a)));
+
 describe("the Living block registry", () => {
   it("registers exactly the Living components", () => {
-    expect(rows.map((r) => r.id).sort()).toEqual(Object.keys(LIVING_BLOCK_PROPS).sort());
+    expect(latest.map((r) => r.id).sort()).toEqual(Object.keys(LIVING_BLOCK_PROPS).sort());
+  });
+  it("keeps every earlier version of a component registered, numbered from 1", () => {
+    for (const id of new Set(rows.map((r) => r.id))) expect(rows.filter((r) => r.id === id).map((r) => r.version).sort(), id).toEqual(Array.from({ length: LIVING_REGISTRY[id].version }, (_, i) => i + 1));
   });
   it("stores the same property schema the composer builds with", () => {
-    for (const r of rows) expect(r.schema, r.id).toEqual(livingPropsJsonSchema(r.id));
+    for (const r of latest) expect(r.schema, r.id).toEqual(livingPropsJsonSchema(r.id));
   });
   it("matches the code's registry metadata and allows only Living surfaces", () => {
-    for (const r of rows) {
+    for (const r of latest) {
       expect(r.version, r.id).toBe(LIVING_REGISTRY[r.id].version);
       expect(r.name, r.id).toBe(LIVING_REGISTRY[r.id].name);
       expect(r.requiresEvidence, r.id).toBe(LIVING_REGISTRY[r.id].requiresEvidence);

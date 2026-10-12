@@ -33,7 +33,7 @@ const DAY = 86_400_000;
 const gap = (f: RenewalLivingFacts, part: RenewalLivingFacts["unavailable"][number]["part"]) => f.unavailable.some((g) => g.part === part);
 export const PART_WORDS: Record<RenewalLivingFacts["unavailable"][number]["part"], string> = {
   client: "The client", owner: "Who owns this work", run: "The renewal run", quotation: "The quotation", period: "The policy period",
-  revisions: "Revised insurer answers", placement: "The placement", issuance: "The policy issuance", history: "Recent history", memory: "Earlier years of this cover",
+  revisions: "Revised insurer answers", placement: "The placement", issuance: "The policy issuance", history: "Recent history", memory: "Earlier years of this cover", proposals: "Saved proposals",
 };
 const hash = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0, 16);
 const fmtDate = (iso: string | null | undefined) =>
@@ -46,9 +46,34 @@ const ACTION_WORDS: [RegExp, string][] = [
 ];
 
 /** The stage, from what the records say has happened — never from what a model believes. */
-export function renewalStage(f: RenewalLivingFacts): RenewalStage {
+/** Saved proposals, newest first, each saying which answers have been revised since it was kept (D-167). */
+function proposalVersions(f: RenewalLivingFacts) {
+  const list = f.proposals ?? [];
+  if (!list.length || !f.opportunity) return null;
+  const insurers = f.opportunity.insurers;
+  const latestRevision = (name: string) => Math.max(0, ...f.revisions.filter((r) => r.insurerName === name).map((r) => r.revision));
+  return {
+    items: list.slice(0, 12).map((p, n) => {
+      const named = p.opportunityInsurerIds.map((id) => insurers.find((i) => i.id === id)).filter((i): i is (typeof insurers)[number] => !!i);
+      return {
+        version: p.version,
+        savedAt: p.savedAt,
+        by: p.by,
+        note: p.note,
+        insurers: named.map((i) => i.insurerName.slice(0, 200)).slice(0, 3),
+        revisedSince: named.filter((i) => latestRevision(i.insurerName) > (p.revisions[i.id] ?? 0)).map((i) => i.insurerName.slice(0, 200)).slice(0, 3),
+        latest: n === 0,
+        ref: { ws: "living", workItemId: f.item.id, explore: p.opportunityInsurerIds.join(",") },
+      };
+    }),
+    committed: f.placement ? `The client's instruction was recorded${f.placement.instruction.instructedAt ? ` on ${fmtDate(f.placement.instruction.instructedAt)}` : ""}. These proposals are kept as history; they are not the decision.`.slice(0, 500) : null,
+    note: "Hypothetical. A saved proposal is not the client's instruction and is not sent to anyone; opening one shows today's figures from the quotation.",
+  };
+}
+
+export function renewalStage(f: RenewalLivingFacts, now: Date = new Date()): RenewalStage {
   if (f.run?.state === "exception" || f.run?.state === "cancelled") return f.placement ? stageAfterQuotes(f) : "stopped";
-  if (f.issuance?.stage === "applied") return "verified";
+  if (f.issuance?.stage === "applied") return continuing(f, now) ? "continuing" : "verified";
   if (f.placement) return stageAfterQuotes(f);
   const quoted = (f.opportunity?.insurers ?? []).filter((i) => i.stage === "quoted").length;
   const step = f.run?.currentStep ?? null;
@@ -57,6 +82,10 @@ export function renewalStage(f: RenewalLivingFacts): RenewalStage {
   if (step === "open_terms" || step === "await_terms" || (f.opportunity?.insurers ?? []).some((i) => i.stage === "with_insurer" || i.stage === "approved_to_deliver")) return "awaiting_terms";
   if (step === "pack" || step === "communications" || step === "approval") return "preparing";
   return "attention";
+}
+/** Stage nine (D-167): verified cover, and the renewed period on file has begun or the work is done. */
+function continuing(f: RenewalLivingFacts, now: Date): boolean {
+  return Boolean(f.renewed && (new Date(`${f.renewed.periodStart}T00:00:00Z`).getTime() <= now.getTime() || f.item.task_status === "done"));
 }
 function stageAfterQuotes(f: RenewalLivingFacts): RenewalStage {
   if (f.issuance?.stage === "applied") return "verified";
@@ -205,7 +234,7 @@ function block(id: string, component: LivingComponent, role: LivingBlock["role"]
 
 /** The surface for one renewal, composed for its stage. */
 export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; aiAvailable: boolean; explore?: string[] }): LivingSurface {
-  const stage = renewalStage(f);
+  const stage = renewalStage(f, opts.now);
   const stageIndex = RENEWAL_STAGES.findIndex((s) => s.key === stage);
   const stageLabel = stage === "stopped" ? "Stopped" : RENEWAL_STAGES[stageIndex]!.label;
   const op = f.run?.operational;
@@ -224,7 +253,7 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     ].slice(0, 6),
     status: { label: stageLabel, tone: statusTone },
     owner: f.ownerName,
-  }, { actions: [f.client ? { kind: "open", label: "Open the client", ref: { ws: "client", clientId: f.client.id }, primary: false } : null, openRun(f)] }));
+  }, { actions: [f.client ? { kind: "open", label: "Open the client", ref: { ws: "client", clientId: f.client.id }, primary: false } : null, f.client ? { kind: "open", label: "Everything for this client", ref: { ws: "investigation", clientId: f.client.id }, primary: false } : null, openRun(f)] }));
 
   blocks.push(block("journey", "RenewalJourney", "lead", null, {
     stages: RENEWAL_STAGES.map((s, i) => ({ key: s.key, label: s.label, state: stage === "stopped" ? (i < 1 ? "done" : "next") : i < stageIndex ? "done" : i === stageIndex ? "now" : "next" })),
@@ -272,9 +301,27 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     if (q) blocks.push(q);
     // Before the client decides, a choice can be explored without recording anything (D-160).
     const ex = explorationPanel(f, opts.explore ?? [], opts.now);
-    if (ex) blocks.push(block("explore", "ExplorationPanel", "main", opts.explore?.length ? "Exploring a choice" : "Explore a choice", ex));
+    // What is being explored can be kept as the next numbered proposal: insurers and revisions, never figures (D-167).
+    const exploring = (opts.explore ?? []).filter((id) => f.opportunity?.insurers.some((i) => i.id === id && !i.removedAt));
+    const save: LivingAction | null = ex && exploring.length && f.canPropose && f.item.task_status !== "done"
+      ? { kind: "command", label: `Save as proposal v${(f.proposals?.[0]?.version ?? 0) + 1}`, command: "proposal.save", target: f.item.id, payload: { explore: exploring.join(",") }, tone: "default", confirm: null,
+          inputs: [{ name: "note", label: "Note (optional)", kind: "textarea", required: false, options: [], hint: "Why this proposal, e.g. what the client asked to see." }] }
+      : null;
+    if (ex) blocks.push(block("explore", "ExplorationPanel", "main", opts.explore?.length ? "Exploring a choice" : "Explore a choice", ex, { actions: [save] }));
   }
-  if (stage === "placing" || stage === "issuing" || stage === "verified") {
+  if (stage === "continuing" && f.renewed) {
+    // The relationship goes on: the cover now in force, when its renewal opens, and what carries forward.
+    const opensAt = f.window ? new Date(new Date(`${f.renewed.periodEnd}T00:00:00Z`).getTime() - f.window.leadDays * DAY).toISOString().slice(0, 10) : null;
+    blocks.push(block("continuing", "WorkChecklist", "main", "The year ahead", {
+      items: [
+        { key: "in_force", label: `Renewed cover on file with ${f.renewed.insurerName}`.slice(0, 200), detail: `${fmtDate(f.renewed.periodStart)} – ${fmtDate(f.renewed.periodEnd)}`.slice(0, 500), state: "done", party: null, since: f.renewed.periodStart },
+        ...(opensAt ? [{ key: "next_renewal", label: "Next renewal work opens", detail: `Around ${fmtDate(opensAt)}, ${f.window!.leadDays} days before this cover ends. ${f.window!.basis}`.slice(0, 500), state: "pending" as const, party: null, since: null }] : []),
+        { key: "memory", label: "This round's decisions are kept for next year", detail: "The insurers' answers and the client's instruction are on the quotation; next year's workspace shows them as \"Decided last time\".", state: "done", party: null, since: null },
+      ],
+      note: "Changes, claims and certificates during the year are their own work, shown under Related work. Nothing here is a status of the cover beyond what is on file.",
+    }));
+  }
+  if (stage === "placing" || stage === "issuing" || stage === "verified" || stage === "continuing") {
     const p = f.placement!;
     const iss = f.issuance;
     blocks.push(block("placement", "PlacementProgress", "main", "Placement and issuance", {
@@ -290,6 +337,9 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
       blockers: p.blockers.slice(0, 6),
     }, { actions: [...submissionCommands(f), openQuote(f)] }));
   }
+
+  const pv = proposalVersions(f);
+  if (pv) blocks.push(block("proposals", "ProposalVersions", "side", "Saved proposals", pv));
 
   const cons = consequences(f, opts.now);
   if (cons.length) blocks.push(block("consequences", "ConsequencePanel", "side", "What this means", { items: cons }));

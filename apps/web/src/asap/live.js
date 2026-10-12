@@ -3254,6 +3254,8 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
     /** The Living renewal surface (D-156), composed and validated by the server. Live mode only. */
     living: (workItemId, view) => api.livingSurface(workItemId, view ?? {}),
     interpretWorkspace: (workItemId, text) => api.interpretWorkspace(workItemId, text),
+    investigation: (clientId) => api.investigation(clientId),
+    resolveClient: (text) => api.resolveClient(text),
     portfolio: (body) => api.portfolio(body),
     homeChanges: () => api.homeChanges(),
     /** A person's arrangement of a surface, kept on the server per brokerage and person (D-157). */

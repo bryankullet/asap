@@ -1,5 +1,5 @@
-import type { LivingSurface as Surface, PortfolioQuery, PortfolioResponse, WorkspaceInterpretation } from "@asap/schema";
-import { useCallback, useMemo, useRef, useState } from "react";
+import type { InvestigateResponse, LivingSurface as Surface, PortfolioQuery, PortfolioResponse, WorkspaceInterpretation } from "@asap/schema";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Ref } from "../shell/routes.js";
 import type { LivingView, PrefsStore } from "../shell/types.js";
 import { LivingSurface } from "./LivingSurface.js";
@@ -51,6 +51,58 @@ export function LivingRenewalPane({ workItemId, runId, viewRef, living, interpre
     },
   } : undefined), [interpret, busy, message, workItemId, base, explore, onOpen]);
   return <LivingSurface identity={`work:${workItemId}`} noun="work" runId={runId} load={load} prefsStore={prefsStore} explore={exploring} {...(refine ? { refine } : {})} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
+}
+
+/** A request on Home that asks to look across one client's records (D-167). */
+export function looksLikeInvestigation(text: string): boolean {
+  const t = text.toLowerCase();
+  if (/\b(prepare|start|create|send|approve|draft|email|write|call|remind|renew)\b/.test(t)) return false;
+  return /\b(everything (about|on|for)|investigate|look into|look across|what'?s (going on|happening) with|all (the )?(open )?work (for|on))\b/.test(t);
+}
+
+/** A client investigation (D-167): resolved from words to a client by the server, then composed. */
+export function InvestigationPane({ viewRef, investigation, resolveClient, prefsStore, onOpen, onNavigate, onAsk, onTitle }: {
+  viewRef: Ref;
+  investigation: (clientId: string) => Promise<Surface>;
+  resolveClient?: ((text: string) => Promise<InvestigateResponse>) | undefined;
+  prefsStore?: PrefsStore | undefined;
+  onOpen: (ref: Ref) => void; onNavigate: (ref: Ref, replace: boolean) => void; onAsk: (text: string) => void; onTitle: (t: string) => void;
+}) {
+  const clientId = typeof viewRef["clientId"] === "string" ? (viewRef["clientId"] as string) : "";
+  const text = typeof viewRef["t"] === "string" ? (viewRef["t"] as string) : "";
+  const [answer, setAnswer] = useState<InvestigateResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (clientId || !text || !resolveClient) return;
+    let live = true;
+    resolveClient(text).then((r) => {
+      if (!live) return;
+      if (r.clientId) onNavigate({ ws: "investigation", clientId: r.clientId }, true);
+      else setAnswer(r);
+    }, () => live && setFailed(true));
+    return () => { live = false; };
+  }, [clientId, text, resolveClient, onNavigate]);
+  const load = useCallback(() => investigation(clientId), [investigation, clientId]);
+  if (clientId) return <LivingSurface key={clientId} identity={`client:${clientId}`} noun="client" load={load} prefsStore={prefsStore} onOpen={onOpen} onAsk={onAsk} onTitle={onTitle} />;
+  return (
+    <div className="lv-root">
+      <div className="lv-scroll">
+        <section className="lv-block lv-state" role="status">
+          {failed ? <><h2>That could not be looked up just now</h2><p>Nothing is shown rather than a guess. Try again in a moment.</p></>
+            : !answer ? <p>Finding the client…</p>
+            : <>
+                <h2>{answer.unclear ?? "Which client?"}</h2>
+                <p>“{text}”</p>
+                {answer.candidates.length ? (
+                  <ul className="lv-candidates">
+                    {answer.candidates.map((c) => <li key={c.id}><button type="button" className="lv-btn" onClick={() => onNavigate({ ws: "investigation", clientId: c.id }, false)}>{c.name}</button></li>)}
+                  </ul>
+                ) : null}
+              </>}
+        </section>
+      </div>
+    </div>
+  );
 }
 
 export type PortfolioApi = (body: { query: PortfolioQuery | null; text: string | null }) => Promise<PortfolioResponse>;

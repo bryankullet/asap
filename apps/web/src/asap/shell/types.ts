@@ -1,4 +1,4 @@
-import type { ConversationSummary, HomeChangesResponse, WorkspaceInterpretation, LivingSurface, PortfolioQuery, PortfolioResponse, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
+import type { ConversationSummary, HomeChangesResponse, WorkspaceInterpretation, LivingSurface, PortfolioQuery, PortfolioResponse, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef, InvestigateResponse } from "@asap/schema";
 import type { Ref } from "./routes.js";
 
 export type RecentItem = Recent;
@@ -42,6 +42,9 @@ export type ShellAdapters = {
   living?: (workItemId: string, view?: LivingView) => Promise<LivingSurface>;
   /** Live mode only: a request inside a workspace, read into a typed focus (D-165). */
   interpretWorkspace?: (workItemId: string, text: string) => Promise<WorkspaceInterpretation>;
+  /** Live mode only: everything on file for one client (D-167). */
+  investigation?: (clientId: string) => Promise<LivingSurface>;
+  resolveClient?: (text: string) => Promise<InvestigateResponse>;
   /** Live mode only: personal surface arrangement, on the server (D-157). */
   surfacePrefs?: PrefsStore;
   /** Live mode only: the renewal portfolio, refined in plain language (D-158). */

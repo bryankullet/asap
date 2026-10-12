@@ -44,6 +44,9 @@ authorized records (viewer's session, RLS)
         blocks the viewer may not see removed before sending
   └─ GET /living/:workItemId[?explore=&focus=&target=&fq=&fsrc=]   renewal | claim | endorsement
      POST /living/:workItemId/interpret {text}   a request in words → a typed focus (D-165)
+     POST /living/:workItemId/proposals          save what is explored as proposal vN (D-167)
+     GET  /living/client/:clientId               a client investigation (D-167)
+     POST /living/investigate {text}             which client a request names; never a guess
      POST /living/portfolio {query, text}  the renewal portfolio, refined in words
      GET /home/changes                     what changed since you last looked
      GET|PUT /surface-preferences/:key     personal arrangement (0080)
@@ -56,12 +59,12 @@ authorized records (viewer's session, RLS)
   - `open` a governed place, or `ask`.
   - `command`, from a closed set that the browser maps to the endpoint that already owns it (D-157, §7). The surface can never name a path.
 
-### Registered Living components (0079, 0081–0084, 0086, 0088)
+### Registered Living components (0079, 0081–0084, 0086, 0088–0091)
 
 | Component | Purpose |
 |---|---|
 | ContextHeader | The record, client, status, owner and key facts |
-| RenewalJourney | Eight renewal stages, derived from the records |
+| RenewalJourney | Nine renewal stages through the continuing relationship, derived from the records (v2, 0089) |
 | WorkJourney | Any run's own steps (claims, policy changes) |
 | ProgressOpportunity | What moves the work forward, why, who holds it, what blocks it |
 | ObligationTracker | Who holds the next step and since when |
@@ -82,6 +85,7 @@ authorized records (viewer's session, RLS)
 | RelatedWork | Other open work on the same client or policy, and why it bears on this work (D-166) |
 | ResponsePatterns | Insurer response times from the brokerage's own records, an estimate with basis and sample (D-166) |
 | DecisionTrail | The client's last round for the same cover: answers, declines, instruction, with evidence (D-166) |
+| ProposalVersions | Saved, numbered, hypothetical proposals: insurers, revisions since, never the instruction (0090, D-167) |
 | Timeline | Recent changes, notes, this cover in earlier years |
 
 ---
@@ -104,13 +108,13 @@ every control, and reduced motion is honoured.
 | M2 Contracts and renderer | **built** | Surface spec, registry, validator, registered renderers, loading, error, unavailable and empty states |
 | M3 Context and progress | **built** for renewals, claims and policy changes | A general semantic graph over every entity is **not built** |
 | M4 Intelligent Home | **built** | Attention, ASAP's running work, waiting parties, Recent; *What changed since you last looked* from semantic events (D-159); portfolio requests open the portfolio |
-| M5 Living Renewal Journey | **built** to the limits of existing capabilities | Attention → terms → comparison and revision → exploration → decision → placement → issuance → verified cover, with governed actions in place. Stage 9 (continuing relationship) is **not built** |
+| M5 Living Renewal Journey | **built** | Attention → terms → comparison and revision → exploration → decision → placement → issuance → verified cover → continuing relationship (stage nine, D-167), with governed actions in place |
 | M6 Ask ASAP directing the interface | **built** | The renewal portfolio is refined in words (D-158). Renewal, claim and policy-change workspaces recompose around a request asked inside them — revisions, quotes, blockers, evidence, obligations, consequences, messages, history, next steps, exploration (D-165). Rules first; the model through the gateway only when no rule matches, schema-checked and bounded to the record's names; evaluated (`workspace-requests.json`). The portfolio interpreter remains deterministic only |
 | M7 Reactive composition and continuity | **built** | Polling and refresh on focus; in-place reconciliation by stable id; Updated and New marks; pin, collapse and selections kept on the server; open forms keep their command and typed text; deep links, refresh, Back and Forward |
 | M8 Insurance-native intelligence | **built** | Time and cover, obligation, change and contradiction, communication and decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159); arrived email with proposed governed steps, structured handovers with acknowledgement, related work across a client's records, measured response patterns, and the last round's decisions with evidence (D-166). Behavioural interface learning is **not built** by design: patterns come only from recorded outcomes |
-| M9 Exploration and multi-context | **partial** | Client decisions explored before they are made, from records, kept in the address (D-160); portfolio rows open their workspace. Saved, versioned proposals beyond the address are **not built** |
+| M9 Exploration and multi-context | **built** | Client decisions explored before they are made, from records, kept in the address (D-160); saved, versioned, hypothetical proposals (D-167); client investigations across every record on file (D-167); portfolio rows open their workspace |
 | M10 Hardening | **built** for Living surfaces | axe-core with zero serious or critical violations; keyboard focus rings; visual regression baselines at 1440 and 390 px; render and composition timing; security tests (tenant, role, tampered commands, markup as text). Shell screens outside Living surfaces are **not** axe-audited |
-| Secondary workspaces | **partial** | Claims and policy changes (D-161) and the renewal portfolio (D-158) are built. **Commission reconciliation** and **investigations** are **not built**: no reconciliation records exist to compose from |
+| Secondary workspaces | **built** except reconciliation | Claims and policy changes (D-161), the renewal portfolio (D-158) and client investigations (D-167). **Commission reconciliation is not built**: ASAP records no commission statements, receipts or premium payments to compose from, and the surface will not be built on fabricated records |
 | UI Lab | **built** (development only) | `apps/web/e2e/lab.html`, the composer's own output at every stage; never bundled |
 
 ## 5. Scenarios
@@ -155,6 +159,7 @@ every control, and reduced motion is honoured.
 | `quotation.confirm_reading` | `POST /opportunities/:id/actions` (`record_response` with `fromProposalId`) | an arrived email was read into a proposal and the viewer may record answers |
 | `work.hand_over` | `POST /work-items/:id/hand-over` | the viewer holds `job:edit` and the work is not done |
 | `work.acknowledge_handover` | `POST /work-handovers/:id/acknowledge` | the work was handed to the viewer and not yet acknowledged |
+| `proposal.save` | `POST /living/:id/proposals` | something is being explored on an open renewal and the viewer holds `job:edit` |
 
 How commands behave:
 - **Validation:** the validator holds each command's fixed payload and inputs exactly.

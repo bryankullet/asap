@@ -1,4 +1,4 @@
-import { INBOUND_KIND_LABELS, type InboundKind, type LivingAction, type LivingBlock, type LivingCommandInput, type WorkItemRow } from "@asap/schema";
+import { INBOUND_KIND_LABELS, LIVING_REGISTRY, type InboundKind, type LivingAction, type LivingBlock, type LivingCommandInput, type WorkItemRow } from "@asap/schema";
 import { createHash } from "node:crypto";
 import { hasPermission } from "../context.js";
 import type { Env } from "../placement/service.js";
@@ -141,24 +141,7 @@ export async function loadCollaboration(env: Env, gaps: Gap[], o: {
       : Promise.resolve([]),
   ]);
 
-  // Arrived email: filed on the step the run is on and not yet dealt with (D-144's own rule).
-  const filed: { runId: string; workflow: string; messageId: string; from: string; subject: string; at: string; kind: string | null; party: string | null }[] = [];
-  for (const r of runs ?? [])
-    for (const e of (r.facts["inbound"] as { messageId: string; from: string; subject: string; at: string; kind: string | null; party: string | null; step: string | null; acknowledged: boolean }[] | undefined) ?? [])
-      if (!e.acknowledged && e.step === r.current_step) filed.push({ runId: r.id, workflow: r.workflow, ...e });
-  const ids = [...new Set(filed.map((f) => f.messageId))].slice(0, 8);
-  const proposals = ids.length
-    ? await read<{ id: string; email_message_id: string; opportunity_id: string; opportunity_insurer_id: string; outcome: string; premium_amount: string | null; premium_currency: string | null; valid_until: string | null; decline_reason: string | null; evidence: { words?: string }[] | null }[]>(gaps, "ASAP's readings of email",
-        db.from("insurer_response_proposals").select("id, email_message_id, opportunity_id, opportunity_insurer_id, outcome, premium_amount, premium_currency, valid_until, decline_reason, evidence").eq("organization_id", org).in("email_message_id", ids).eq("state", "proposed"))
-    : [];
-  const arrivals: Arrival[] = ids.map((id) => {
-    const f = filed.find((x) => x.messageId === id)!;
-    const p = (proposals ?? []).find((x) => x.email_message_id === id);
-    return {
-      messageId: id, from: f.from, subject: f.subject, at: f.at, party: f.party, kind: f.kind, workflow: f.workflow,
-      proposal: p ? { id: p.id, opportunityId: p.opportunity_id, opportunityInsurerId: p.opportunity_insurer_id, outcome: p.outcome, premiumAmount: p.premium_amount, premiumCurrency: p.premium_currency, validUntil: p.valid_until, declineReason: p.decline_reason, words: p.evidence?.[0]?.words ?? null } : null,
-    };
-  });
+  const arrivals = await arrivalsFrom(env, gaps, runs ?? []);
 
   // Related work: same client; same policy is known from the claim, the change or the renewal's period.
   let relatedOut: Related[] = [];
@@ -195,6 +178,28 @@ export async function loadCollaboration(env: Env, gaps: Gap[], o: {
   const handover: Handover | null = h ? { id: h.id, fromName: nameOf(h.from_user), toName: nameOf(h.to_user), toUserId: h.to_user_id, at: h.created_at, done: h.done_text, open: h.open_text, watch: h.watch_text, acknowledgedAt: h.acknowledged_at, earlier: (handovers ?? []).length - 1 } : null;
 
   return { arrivals, handover, members, related: relatedOut, patterns: o.waitingOn.length ? await loadPatterns(env, gaps, o.waitingOn) : [], viewerId: env.userId, canManage, canRecordResponse: o.canRecordResponse, trail: o.trailFor ? await loadTrail(env, gaps, o.trailFor) : null, unavailable: gaps };
+}
+
+/** Email filed on the step each run is on and not yet dealt with (D-144's own rule), with any reading (D-152). */
+export async function arrivalsFrom(env: Env, gaps: Gap[], runs: { id: string; workflow: string; current_step: string | null; facts: Record<string, unknown> }[]): Promise<Arrival[]> {
+  const { db, organizationId: org } = env;
+  const filed: { runId: string; workflow: string; messageId: string; from: string; subject: string; at: string; kind: string | null; party: string | null }[] = [];
+  for (const r of runs)
+    for (const e of (r.facts["inbound"] as { messageId: string; from: string; subject: string; at: string; kind: string | null; party: string | null; step: string | null; acknowledged: boolean }[] | undefined) ?? [])
+      if (!e.acknowledged && e.step === r.current_step) filed.push({ runId: r.id, workflow: r.workflow, ...e });
+  const ids = [...new Set(filed.map((f) => f.messageId))].slice(0, 8);
+  const proposals = ids.length
+    ? await read<{ id: string; email_message_id: string; opportunity_id: string; opportunity_insurer_id: string; outcome: string; premium_amount: string | null; premium_currency: string | null; valid_until: string | null; decline_reason: string | null; evidence: { words?: string }[] | null }[]>(gaps, "ASAP's readings of email",
+        db.from("insurer_response_proposals").select("id, email_message_id, opportunity_id, opportunity_insurer_id, outcome, premium_amount, premium_currency, valid_until, decline_reason, evidence").eq("organization_id", org).in("email_message_id", ids).eq("state", "proposed"))
+    : [];
+  return ids.map((id) => {
+    const f = filed.find((x) => x.messageId === id)!;
+    const p = (proposals ?? []).find((x) => x.email_message_id === id);
+    return {
+      messageId: id, from: f.from, subject: f.subject, at: f.at, party: f.party, kind: f.kind, workflow: f.workflow,
+      proposal: p ? { id: p.id, opportunityId: p.opportunity_id, opportunityInsurerId: p.opportunity_insurer_id, outcome: p.outcome, premiumAmount: p.premium_amount, premiumCurrency: p.premium_currency, validUntil: p.valid_until, declineReason: p.decline_reason, words: p.evidence?.[0]?.words ?? null } : null,
+    };
+  });
 }
 
 /** The previous round: its insurers' answers and the client's instruction, each with its evidence. */
@@ -250,7 +255,7 @@ export async function loadPatterns(env: Env, gaps: Gap[], insurers: string[]): P
 /* Blocks ---------------------------------------------------------------------------------------- */
 
 const block = (id: string, component: LivingBlock["component"], role: LivingBlock["role"], title: string, props: Record<string, unknown>, actions: Command[] = []): LivingBlock =>
-  ({ id, component, version: 1, role, title, props, evidence: [], actions: actions.slice(0, 4), hash: hashOf([props, actions]) });
+  ({ id, component, version: LIVING_REGISTRY[component].version, role, title, props, evidence: [], actions: actions.slice(0, 4), hash: hashOf([props, actions]) });
 
 const KIND_STEP: Record<string, string> = {
   quotation: "Record the insurer's answer on the quotes below, from what the email says.",
@@ -261,7 +266,7 @@ const KIND_STEP: Record<string, string> = {
   endorsement: "If it is the insurer's written decision, record it on the item below, with the email as the reference.",
 };
 
-export function arrivedMailBlock(c: Collaboration): LivingBlock | null {
+export function arrivedMailBlock(c: Pick<Collaboration, "arrivals" | "canRecordResponse">): LivingBlock | null {
   if (!c.arrivals.length) return null;
   const actions: Command[] = [];
   const items = c.arrivals.map((a) => {

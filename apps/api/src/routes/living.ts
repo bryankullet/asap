@@ -1,9 +1,9 @@
-import { homeChangesResponseSchema, livingSurfaceSchema, workspaceFocusSchema, workspaceInterpretationSchema, workspaceInterpretRequestSchema, type AiProvider, type WorkspaceFocus, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
+import { homeChangesResponseSchema, investigateRequestSchema, investigateResponseSchema, livingSurfaceSchema, proposalSaveRequestSchema, proposalSaveResponseSchema, workspaceFocusSchema, workspaceInterpretationSchema, workspaceInterpretRequestSchema, type AiProvider, type WorkspaceFocus, portfolioRequestSchema, portfolioResponseSchema, surfaceKeySchema, surfacePreferencesResponseSchema, surfacePreferencesSchema } from "@asap/schema";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit.js";
-import { requireActiveOrganization, resolveContext } from "../context.js";
+import { hasPermission, requireActiveOrganization, resolveContext } from "../context.js";
 import { HttpError, mapDatabaseError, sendError } from "../errors.js";
 import { loadRenewalLivingFacts } from "../living/facts.js";
 import { homeChanges } from "../living/home.js";
@@ -13,6 +13,7 @@ import { defaultQuery, interpret } from "../living/interpret.js";
 import { composePortfolio, loadPortfolio, loadVocabulary } from "../living/portfolio.js";
 import { composeClaimSurface, composeEndorsementSurface, loadServicingFacts, loadWorkItem } from "../living/servicing.js";
 import { composeRenewalSurface } from "../living/renewal.js";
+import { composeInvestigation, loadInvestigation, resolveClient } from "../living/investigate.js";
 import { validateSurface } from "../living/validate.js";
 import type { Env } from "../placement/service.js";
 import { loadDefinitions } from "../spaces/validate.js";
@@ -81,6 +82,57 @@ export function livingRoutes(deps: { logger: Logger; aiAvailable: boolean; provi
    * a typed focus from the record's own names: rules first, the model through the gateway only when
    * the rules find nothing. It writes nothing; the browser moves to the focused address.
    */
+  /**
+   * `POST /living/:workItemId/proposals` — keep what is being explored as a numbered, hypothetical
+   * proposal (D-167). It records which insurers and which answer revisions, never a figure, and is
+   * never the client's instruction. The database checks job/edit, the renewal and the quotation.
+   */
+  app.post("/living/:workItemId/proposals", async (c: Context) => {
+    const env = await envOf(c);
+    const body = proposalSaveRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new HttpError(400, "invalid_request", "Say which insurers the proposal explores.");
+    const ids = body.data.explore.split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+    const blocked = (status: 403 | 409 | 422, reason: string) => c.json(proposalSaveResponseSchema.parse({ outcome: "blocked", reason }), status);
+    if (!hasPermission(env.ctx, "job", "edit")) {
+      await env.audit({ action: "renewal.proposal_save", objectType: "work_item", objectId: c.req.param("workItemId") ?? null, result: "denied", failureReason: "permission_denied" });
+      return blocked(403, "Your role can view this renewal but not save proposals. Nothing was saved.");
+    }
+    const { data, error } = await env.db.rpc("renewal_proposal_save", { p_work_item_id: c.req.param("workItemId"), p_opportunity_insurer_ids: ids, p_note: body.data.note ?? null });
+    if (error) {
+      const m = error.message ?? "";
+      if (m.includes("not_an_open_renewal")) return blocked(409, "Proposals are saved on an open renewal. Nothing was saved.");
+      if (m.includes("no_quotation")) return blocked(409, "This renewal has no quotation yet, so there is nothing to propose. Nothing was saved.");
+      if (m.includes("not_on_this_quotation") || m.includes("proposal_size")) return blocked(422, "A proposal explores one to three insurers on this renewal's own quotation. Nothing was saved.");
+      if (m.includes("permission_denied")) return blocked(403, "Your role can view this renewal but not save proposals. Nothing was saved.");
+      throw mapDatabaseError(error);
+    }
+    return c.json(proposalSaveResponseSchema.parse({ outcome: "applied", version: (data as { version: number }).version }));
+  });
+
+  /**
+   * `GET /living/client/:clientId` — a client investigation (D-167): everything on file for one
+   * client, composed and validated like every Living surface. It offers no command.
+   */
+  app.get("/living/client/:clientId", async (c: Context) => {
+    const env = await envOf(c);
+    const surface = composeInvestigation(await loadInvestigation(env, c.req.param("clientId") ?? ""), { now: new Date(), aiAvailable: deps.aiAvailable });
+    const definitions = await loadDefinitions(env.db, surface.blocks.map((b) => ({ component: b.component, version: b.version })));
+    const result = validateSurface({ surface, definitions, permissions: env.ctx.permissions });
+    if (!result.ok) {
+      deps.logger.error({ clientId: c.req.param("clientId"), failures: result.failures }, "investigation surface rejected by the validator");
+      throw new HttpError(422, "surface_invalid", "This investigation could not be composed");
+    }
+    return c.json(livingSurfaceSchema.parse(result.surface));
+  });
+
+  /** `POST /living/investigate` — which client a request names, from the brokerage's own names. */
+  app.post("/living/investigate", async (c: Context) => {
+    const env = await envOf(c);
+    const body = investigateRequestSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new HttpError(400, "invalid_request", "Say which client to look across.");
+    return c.json(investigateResponseSchema.parse(await resolveClient(env, body.data.text)));
+  });
+
   app.post("/living/:workItemId/interpret", async (c: Context) => {
     const env = await envOf(c);
     const body = workspaceInterpretRequestSchema.safeParse(await c.req.json().catch(() => null));
