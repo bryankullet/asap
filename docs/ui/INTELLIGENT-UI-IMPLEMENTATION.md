@@ -1,28 +1,32 @@
-# Intelligent UI & Living Interface — implementation map (D-156)
+# Intelligent UI & Living Interface — implementation map
 
 Tracks the "Intelligent UI Engine & Living Brokerage Interface" brief (12 Oct 2026) against the
 code. Each item is marked **built**, **partial** or **not built**. Nothing is marked built unless
-it is in the code and covered by a test that was run.
+it is in the code and covered by a test that was run. Decisions: D-156 to D-163.
 
-Branch: `claude/living-interface`. Base: `main` at the adaptive shell (D-155, PR #17).
+Branch: `claude/living-interface`. Base: `main` at the adaptive shell (D-155, PR #17). Not merged,
+not deployed. Hosted migrations 0079–0084 are not applied.
+
+**Overall status: the Intelligent UI is not complete.** The renewal journey, the portfolio, claims
+and policy changes run on the Living architecture with governed actions, plain-language refinement,
+exploration, continuity and hardening. Section 4 lists what remains.
 
 ---
 
 ## 1. What already existed, and stays
 
-| Area | Where | Status under D-156 |
+| Area | Where | Status |
 |---|---|---|
-| Adaptive shell: Home, Work, Automations, Activity, Search, New, conversations, Spaces, split, drawer | `apps/web/src/asap/shell/` (D-155) | Kept. Living surfaces open inside it as a Space (`/s/living?workItemId=`) |
-| Approved interface logic + Space renderers | `asap/logic.js`, `asap/views/space-views.js` (D-115) | Kept. Restyled with the new tokens (M1) |
-| Live / demo engines | `asap/live.js`, `asap/demo.js` | Kept. Live mode adds `living()`; demo mode has none and opens the renewal steps |
-| Space plan contract + registry | `component_definitions` (0031), `apps/api/src/spaces/` (D-059) | Kept and reused. Living blocks register in the same table (0079) with `allowed_spaces = {living}` |
-| Business authority: runs, quotation, placement, issuance, cover check, approvals, audit | `apps/api/src/workflows`, `routes/opportunities.ts`, `placement/*` | Unchanged. The Living surface only reads them, through their own loaders |
-| RLS, permissions, tenancy | migrations, `context.ts` | Unchanged. The surface is read under the viewer's own session |
+| Adaptive shell: Home, Work, Automations, Activity, Search, New, conversations, Spaces, split, drawer | `apps/web/src/asap/shell/` (D-155) | Kept. Living surfaces open inside it as Spaces (`/s/living?workItemId=`, `/s/portfolio?q=`) |
+| Approved interface logic and Space renderers | `asap/logic.js`, `asap/views/space-views.js` (D-115) | Kept, restyled with the new tokens |
+| Live and demo engines | `asap/live.js`, `asap/demo.js` | Kept. Live mode adds `living`, `portfolio`, `homeChanges`, `surfacePrefs`. Demo mode has none: a renewal opens its steps, other work its Work-item page, the portfolio says "not connected" |
+| Space plan contract and registry | `component_definitions` (0031), `apps/api/src/spaces/` (D-059) | Kept and reused. Living blocks register in the same table with `allowed_spaces = {living}` |
+| Business authority: runs, quotation, placement, issuance, claims, endorsements, approvals, audit | `apps/api/src/workflows`, `routes/*`, `placement/*`, `servicing.ts` | Unchanged. Living surfaces read through the owning loaders and act only through the owning endpoints |
+| RLS, permissions, tenancy | migrations, `context.ts` | Unchanged. Surfaces are read under the viewer's own session |
 
-**Superseded presentation decisions** (recorded in D-156): CLAUDE.md's "a card at rest is a
-hairline border and an 18px radius, never a drop shadow" and the 18/12/99 radius set. Cards now
-carry the `--shadow-1` resting elevation and the radius scale below. Status colours and their
-meanings are unchanged.
+**Superseded presentation decisions:**
+- D-156 replaced CLAUDE.md's "a card at rest is a hairline border, never a drop shadow" and the old radius set.
+- D-163 darkened `--color-ink-muted` to `#5f6861` and `--color-ink-faint` to `#636c64` so muted text reaches 4.5:1 on every Living background.
 
 ---
 
@@ -30,70 +34,57 @@ meanings are unchanged.
 
 ```
 authorized records (viewer's session, RLS)
-  └─ living/facts.ts         loads one renewal: work item, client, period, run (loadWorkflowDetail),
-                              quotation (loadOpportunity), revisions, placement (placement.load),
-                              issuance (loadIssuance, read-only), audit (only with audit:view)
-  └─ living/renewal.ts       pure, deterministic composition: stage, progress opportunities,
-                              obligations, changes, consequences, cover, evidence, timeline
-  └─ living/validate.ts      registry + stored JSON Schema + Zod, allowed actions, required
-                              evidence, banned derived keys; blocks the viewer may not see removed
-  └─ GET /living/:workItemId  → LivingSurface (packages/schema/src/living.ts)
-       └─ web: asap/living/LivingSurface.tsx renders registered blocks (asap/living/blocks.tsx)
+  └─ living/facts.ts · living/servicing.ts · living/portfolio.ts
+        load through the owning loaders; every unreadable source is a recorded gap (D-157)
+  └─ living/renewal.ts · servicing.ts · portfolio.ts · explore.ts · commands.ts
+        pure, deterministic composition — no model in the path
+  └─ living/validate.ts
+        registry row at that version · stored JSON Schema · Zod source · allowed spaces ·
+        closed command set with exact payloads · required evidence · banned derived keys ·
+        blocks the viewer may not see removed before sending
+  └─ GET /living/:workItemId[?explore=]   renewal | claim | endorsement
+     POST /living/portfolio {query, text}  the renewal portfolio, refined in words
+     GET /home/changes                     what changed since you last looked
+     GET|PUT /surface-preferences/:key     personal arrangement (0080)
+       └─ web: asap/living/{LivingSurface,blocks,panes,commands,prefs}.tsx
 ```
 
-- **Contract**: `packages/schema/src/living.ts`. One strict Zod schema per block; the surface is
-  versioned (`version: 1`), fingerprinted, and every block has a stable id, a component version and
-  a content hash.
-- **Registry**: migration `0079_living_blocks.sql` seeds 11 components. `test/living-registry.test.ts`
-  fails if a stored JSON Schema drifts from Zod.
-- **No model in the path.** Composition is deterministic. `ai.available` only tells the browser
-  whether model-assisted parts (Ask) can run.
-- **Actions never write.** A block can only *open* a governed place (`renewal`, `quote`, `document`,
-  `workitem`, `client`, `policy`) or *ask*. Approval, sending, recording and applying happen where
-  they already happen, under their existing guards.
-- **Values come from records.** A premium is the stored amount; cover is the placement or issuance
-  cover reading, verbatim; a consequence is `confirmed` (from records), `potential` (from a
-  relationship) or `missing` (a fact is absent).
+- **Contract:** `packages/schema/src/living.ts`. Every block has one strict schema. The surface is versioned and fingerprinted. Each block carries a stable id, a component version and a content hash. Purposes are renewal, portfolio, claim and endorsement.
+- **Values come from records.** Premiums are the stored amounts. Cover is the server's cover reading, verbatim. Consequences are typed as confirmed, potential or missing. No model writes a value, a status or an approval.
+- **Actions:**
+  - `open` a governed place, or `ask`.
+  - `command`, from a closed set that the browser maps to the endpoint that already owns it (D-157, §7). The surface can never name a path.
 
-### Registered Living components
+### Registered Living components (0079, 0081–0084)
 
-| Component | Purpose | Requires evidence |
-|---|---|---|
-| ContextHeader | Record, client, status, owner, key facts | no |
-| RenewalJourney | Eight stages, done / now / next, from records | no |
-| ProgressOpportunity | What moves the work forward, why, who holds it, what blocks it, whether it needs approval | no |
-| ObligationTracker | Who holds the next step and since when (outside party, colleague, ASAP) | no |
-| ChangeComparison | Earlier and revised values side by side, and what the revision affects | yes |
-| ConsequencePanel | Confirmed / potential / unknown consequences | no |
-| CoverageEffectiveState | Expiring period, days left, renewed cover as the server reads it | no |
-| QuoteComparison | Insurer answers as named facts, never ranked | yes |
-| PlacementProgress | Instruction → approval → sent → confirmation → issuance and check | no |
-| EvidenceInspector | Every source behind the surface; documents open | no |
-| Timeline | Recent changes on this work (audit, with permission) | no |
-
-### Stage derivation (renewal)
-
-`stopped` if the run is in exception (and no placement exists) · `verified` if the issuance was
-applied · `issuing` once an issuance request exists · `placing` once a placement exists ·
-`deciding` at hand-over with quotes · `comparing` at the compare step or with a quote ·
-`awaiting_terms` while terms are open or with an insurer · `preparing` at pack, communications or
-approval · otherwise `attention`.
+| Component | Purpose |
+|---|---|
+| ContextHeader | The record, client, status, owner and key facts |
+| RenewalJourney | Eight renewal stages, derived from the records |
+| WorkJourney | Any run's own steps (claims, policy changes) |
+| ProgressOpportunity | What moves the work forward, why, who holds it, what blocks it |
+| ObligationTracker | Who holds the next step and since when |
+| ChangeComparison | Earlier and revised values side by side, and what the revision affects (needs evidence) |
+| ConsequencePanel | Confirmed, potential and unknown consequences |
+| CoverageEffectiveState | The expiring period and renewed cover as the server reads it |
+| QuoteComparison | Insurer answers as named facts, never ranked (needs evidence) |
+| PlacementProgress | Instruction → approval → sent → confirmation → issuance |
+| ApprovalBundle | Exactly what will leave the brokerage, in full, with approve and return commands |
+| ExplorationPanel | "If the client chose …", hypothetical, from records |
+| WorkChecklist | Documents, item decisions, and separately recorded facts |
+| QueryInterpretation | The portfolio view in words, each part removable |
+| PortfolioGroups | Renewals selected by the query, grouped and totalled |
+| EvidenceInspector | The sources behind the surface |
+| Timeline | Recent changes, notes, this cover in earlier years |
 
 ---
 
-## 3. Visual system (M1)
+## 3. Visual system
 
-`packages/ui/src/styles.css` remains the single source. Figtree for body text, Outfit for headings.
-
-- Radius scale: surface 28 · panel 24 · card 22 · nested 18 · control 15 · input 14 · compact 12 ·
-  chip 10 · tight 8 · pill 999.
-- Elevation: `--shadow-1` (cards at rest) · `--shadow-2` (raised, command box) · `--shadow-3` ·
-  `--shadow-4` (floating: palette, sheets).
-- Wash `#f4f6f3`. Pill buttons and tabs, hover lift on cards, visible focus rings, reduced motion
-  honoured.
-
-Applied to the shell (`shell/shell.css`), the Space renderers (`views/space-views.js`) and the
-Living surface (`living/living.css`).
+`packages/ui/src/styles.css` remains the single source: Figtree body, Outfit headings, the
+radius scale (surface 28 … pill 999) and the elevation scale (`--shadow-1` … `--shadow-4`).
+Exploration is drawn dashed in purple, never framed in a status colour. Focus rings are visible on
+every control, and reduced motion is honoured.
 
 ---
 
@@ -101,94 +92,73 @@ Living surface (`living/living.css`).
 
 | Milestone | Status | Notes |
 |---|---|---|
-| M0 Audit & compatibility | **built** | This document; D-156 |
-| M1 Visual foundation | **built** | Tokens, radius and elevation scales, Figtree, shell + Spaces + Living restyled |
-| M2 Contracts & renderer | **built** | Surface spec, registry, validator, registered React renderers, loading/error states, compatibility with existing Spaces |
-| M3 Context & progress intelligence | **built** for renewals | Viewer-authorized facts, progress opportunities, obligations, evidence. A general semantic graph over every entity is **not built** |
-| M4 Intelligent Home | **built** | Attention, ASAP's running work, waiting parties and Recent (D-155); **What changed since you last looked** from semantic events, linked to the work, refreshed every minute and on focus (D-159); portfolio requests open the portfolio (D-158) |
-| M5 Living Renewal Journey | **built** to the limits of existing capabilities | One workspace from attention through quotation, comparison, revision, decision, placement, issuance and verified cover. Since D-157 the governed actions run **in place** (§7). Stage 9 (continuing relationship) is **not built** |
-| M6 Ask ASAP directing the interface | **built** for the renewal portfolio (D-158) | A request in words refines a typed query — window, grouping, filters, insurer comparison — said back as removable chips; unclear words are said, ambiguous insurers ask; Home opens the portfolio for portfolio requests. Deterministic interpreter only; a model-assisted reading is **not built** (needs an evaluation run). Refinement of other surfaces is **not built** |
-| M7 Reactive composition & continuity | **built** | 20 s polling and refresh on focus; unchanged fingerprint → no re-render; blocks keyed by stable id and reconciled in place; Updated/New marks; pin, collapse and selections on the server (D-157/159); open forms keep their command and typed text through updates; deep links, refresh, Back/Forward |
-| M8 Insurance-native intelligence | **partial** | Built: time & cover; obligation & responsibility (renewals, claims, policy changes); change & contradiction (revisions, revision after instruction, quotation over a lagging run); communication (every prepared message and its true state, D-162); decision memory (earlier years of this cover, D-162); portfolio consequence (premium changes across the portfolio, D-158); collaboration (owner, colleague-held steps, Home's colleague activity, D-159). **Not built:** inbound email → proposed action inside the workspace (the inbound router exists; its proposals are not composed here yet), structured handoff notes, operational learning beyond records (no model-learned patterns) |
-| M9 Exploration & multi-context | **partial** | Client decisions explored before they are made, up to three side by side, from records, in the address (D-160; `living-actions.e2e.mjs` checks figures, no write, Back). Portfolio rows open their workspace (D-158). Saved, versioned proposals beyond the address are **not built** |
-| M10 Hardening | **partial** | e2e in a real browser at 1440/1360/900/390, tenant isolation, permission filtering. Visual regression baselines, an accessibility audit and performance measurement are **not built** |
-| Secondary workspaces | **partial** | **Claims** and **policy changes** built (D-161; connected + `living-servicing.e2e.mjs`); **renewal portfolio** built (D-158). **Commission reconciliation** and **investigations** **not built** — no reconciliation records exist to compose from |
-| UI Lab | **built** (dev only) | `apps/web/e2e/lab.html`: the composer's own output at every stage. Never bundled |
+| M0 Audit and compatibility | **built** | This document; D-156 to D-163 |
+| M1 Visual foundation | **built** | Tokens, radius and elevation, Figtree, the shell, Spaces and Living restyled; contrast fixed (D-163) |
+| M2 Contracts and renderer | **built** | Surface spec, registry, validator, registered renderers, loading, error, unavailable and empty states |
+| M3 Context and progress | **built** for renewals, claims and policy changes | A general semantic graph over every entity is **not built** |
+| M4 Intelligent Home | **built** | Attention, ASAP's running work, waiting parties, Recent; *What changed since you last looked* from semantic events (D-159); portfolio requests open the portfolio |
+| M5 Living Renewal Journey | **built** to the limits of existing capabilities | Attention → terms → comparison and revision → exploration → decision → placement → issuance → verified cover, with governed actions in place. Stage 9 (continuing relationship) is **not built** |
+| M6 Ask ASAP directing the interface | **partial** | The renewal portfolio is refined in words (window, grouping, filters, comparison) with removable chips, unclear words stated, ambiguous names asked about (D-158). The interpreter is deterministic only. A model-assisted reading needs an evaluation run first and is **not built**. Refining the renewal, claim and policy-change workspaces in words is **not built** |
+| M7 Reactive composition and continuity | **built** | Polling and refresh on focus; in-place reconciliation by stable id; Updated and New marks; pin, collapse and selections kept on the server; open forms keep their command and typed text; deep links, refresh, Back and Forward |
+| M8 Insurance-native intelligence | **partial** | Built: time and cover, obligation, change and contradiction, communication (D-162), decision memory (D-162), portfolio consequence (D-158), colleague activity (D-159). **Not built:** inbound email turned into proposed actions inside the workspace, structured handoff notes, learned patterns |
+| M9 Exploration and multi-context | **partial** | Client decisions explored before they are made, from records, kept in the address (D-160); portfolio rows open their workspace. Saved, versioned proposals beyond the address are **not built** |
+| M10 Hardening | **built** for Living surfaces | axe-core with zero serious or critical violations; keyboard focus rings; visual regression baselines at 1440 and 390 px; render and composition timing; security tests (tenant, role, tampered commands, markup as text). Shell screens outside Living surfaces are **not** axe-audited |
+| Secondary workspaces | **partial** | Claims and policy changes (D-161) and the renewal portfolio (D-158) are built. **Commission reconciliation** and **investigations** are **not built**: no reconciliation records exist to compose from |
+| UI Lab | **built** (development only) | `apps/web/e2e/lab.html`, the composer's own output at every stage; never bundled |
 
 ## 5. Scenarios
 
 | Scenario | Status | Where it is tested |
 |---|---|---|
-| A Find meaningful work | **built** | `shell.e2e.mjs` living-renewal-from-work: a Work row opens the Living workspace |
-| B Restore interrupted work | **built** | `living-actions.e2e.mjs`: the insurer in focus and the open sources survive an update, leaving for Home and returning, and a refresh |
-| C Insurer response arrives | **built** | `living-actions.e2e.mjs`: an answer recorded through the quotation workflow while the broker types; the surface reconciles in place (no remount), marks changes and keeps the unsent text |
-| D Quotation revision | **built** | Earlier/revised side by side and flagged after instruction (`living-surface.test.ts`, UI Lab "comparing" and "placing") |
-| E Missing evidence | **built** for renewals | Missing period, missing premium and missing renewed cover are stated, not filled (`living-renewal` e2e) |
-| F Natural-language refinement | **built** | `living-portfolio.e2e.mjs`: Home request → portfolio; "group by insurer", "only premium increases" (recorded figures exactly), Back/Forward undo and redo, an unclear request changes nothing, chip removal, "compare CIC and Jubilee", refresh keeps the view, a row opens its workspace |
-| G Approval requirement | **built** | The bundle is shown in full and approved in place through the existing endpoint with its frozen hash; a role that cannot approve is offered nothing and refused if it posts (connected) |
-| H Cross-tenant isolation | **built** | Connected test (404 for the other brokerage) and `living-never-leaks` in the browser |
-| I Role-specific view | **built** | Blocks needing a permission are removed before sending (unit); audit history only with `audit:view` (connected) |
-| J AI outage | **built** | Composition needs no model; the surface renders with `ai.available: false` |
-| K Workflow interruption | **built** | Exception → stopped stage, the run's message and what is needed (UI Lab "stopped") |
-| L Coverage verification | **built** | A request is never cover (`living-surface.test.ts`; e2e "Not confirmed") |
-| M Mobile | **built** | 390 px e2e and UI Lab; the surface scrolls and never runs past the screen |
-| N Returning from history | **built** | The address is the surface (D-155); `/s/living?workItemId=` reloads to the same surface |
-| O Event burst | **partial** | Two inbound revisions in a row reconcile without remount or losing typed text, and an open form never changes command (browser + unit). Not load-tested at volume |
-
-## 7. Governed actions in the workspace (D-157)
-
-A block may carry a `command` action from a closed set. The browser maps each command to the
-endpoint that already owns it (`apps/web/src/asap/living/commands.ts`); the surface can name a
-command and its target, never a path. Each endpoint re-checks permission, frozen payloads and
-state, and audits — nothing new decides an outcome.
-
-| Command | Existing endpoint | Offered when |
-|---|---|---|
-| `workflow_approval.decide` (approve / return with reason) | `POST /workflow-approvals/:id/decide` with the frozen `bundleSha256` | the run waits for approval and the viewer may approve; the bundle is shown in full (`ApprovalBundle`, 0081) |
-| `quotation.record_delivery` | `POST /opportunities/:id/actions` `record_delivery` | an insurer request is approved and not delivered, and the viewer may edit the quotation |
-| `quotation.record_response` | `POST /opportunities/:id/actions` `record_response` | the request was delivered and no answer is on file; the source is required |
-| `run.follow_up_now`, `run.move_follow_up`, `run.escalate`, `run.pause`, `run.resume` | `POST /workflows/runs/:id/…` | the run's own intervention list says available, and the viewer holds `policy:edit` |
-| `placement.approve_request`, `placement.record_submission` | `POST /placements/:id/actions` | the placement's own permissions allow it; the request text is shown in full before approval |
-| `issuance.approve_request`, `issuance.record_submission` | `POST /placements/:id/issuance/actions` | the issuance's own permissions allow it |
-
-The validator rejects any command whose fixed payload or inputs differ from that command's (a
-tampered `action`, an extra field). Inputs are never pre-filled with chosen values. Submissions
-carry an idempotency key per intent. A result is the endpoint's own answer — done, already done, or
-refused with its reason — and a receipt at the top of the surface outlives a block that leaves.
-
-Tested: unit (composer and validator), web (command form: required inputs, owning path, refusal
-shown, no false success), connected on real Postgres (approve through the surface's command; a
-reader is offered nothing and refused if they post anyway; idempotent re-approval), and in a real
-browser (`living-actions.e2e.mjs`: approve, record delivery and escalate in place).
-
-## 8. Personal arrangement and unreadable sources (D-157)
-
-- Pinned and collapsed blocks, selections and "last seen" live in `surface_preferences` (0080),
-  scoped by RLS to brokerage, person and surface — never browser storage. Demo mode and the UI Lab
-  keep them for the visit only.
-- Every source read by `living/facts.ts` records a gap (`restricted` or `failed`) instead of
-  becoming null. The composer never presents a gap as an absent period, placement or cover, and
-  the surface names the gaps in a notice.
-
-## 9. The renewal portfolio (D-158)
-
-`POST /living/portfolio` with `{ query, text }`. `living/interpret.ts` turns the text into a new
-query on top of the current one; `living/portfolio.ts` reads renewals for the window under the
-viewer's session (policy periods, renewal Work items, quotations, placements, confirmed premiums),
-filters, groups and totals them, and composes `ContextHeader`, `QueryInterpretation` and
-`PortfolioGroups`. The browser keeps the query in the address and reuses the answer once for the
-arrival at the refined address.
-
-Understood today: windows (a month, next/this month, next N days, this/next quarter, Qn, end of
-year), grouping (insurer, class, owner, client, month, status), premium change (increase, decrease,
-changed, none yet), status (needs me, waiting on others, not started, done), "mine", an insurer or
-class by the brokerage's own names, "compare A and B", "clear filters".
+| A Find meaningful work | **built** | `shell.e2e.mjs`: a Work row opens the Living workspace; Home's changes open their work (`living-actions`) |
+| B Restore interrupted work | **built** | `living-actions`: the insurer in focus and the open sources survive an update, a trip to Home and back, and a refresh |
+| C Insurer response arrives | **built** | `living-actions`: a colleague records the answer while the broker types; the surface reconciles in place and keeps the text |
+| D Quotation revision | **built** | Earlier and revised shown side by side, and flagged when after the instruction (unit, `living-actions`) |
+| E Missing evidence | **built** | Missing period, premium and cover are stated; unreadable sources are named, never shown as missing (D-157) |
+| F Natural-language refinement | **built** for the portfolio | `living-portfolio.e2e.mjs` |
+| G Approval requirement | **built** | The bundle is shown in full and approved in place with its frozen hash; a role that may not approve is offered nothing and refused (connected) |
+| H Cross-tenant isolation | **built** | Connected tests for workspace, portfolio, Home changes, preferences and claims; browser `living-never-leaks` |
+| I Role-specific view | **built** | Blocks removed before sending; audit history only with `audit:view`; commands only for roles that may use them |
+| J AI outage | **built** | Composition needs no model; surfaces render with `ai.available: false` |
+| K Workflow interruption | **built** | Exception → stopped, the message and what is needed; resume in place when the run allows |
+| L Coverage verification | **built** | A request is never cover; no sentence decides cover on a claim (tested) |
+| M Mobile | **built** | 390 px in every Living browser suite, with no overflow and reachable scroll regions |
+| N Returning from history | **built** | Workspace, exploration and portfolio views are all in the address |
+| O Event burst | **partial** | Successive inbound answers reconcile without remount or lost text; not load-tested at volume |
 
 ## 6. Known limitations
 
-- Only renewals have a Living surface. Other work keeps its existing Space.
-- Polling, not push. A 20 s interval is enough for insurer and colleague events, and it avoids a
-  second realtime channel next to the existing one.
-- The renewal steps (`/s/renewal?runId=`) remain the place where approval, sending and recording
-  happen. The Living surface links to them; it does not duplicate them.
-- Demo mode has no server, so it has no Living surface and opens the renewal steps instead.
+- Polling, not push: every 20 s for workspaces, every 60 s for Home, and on focus.
+- Only the portfolio understands plain-language refinement, and only deterministically.
+- **Existing behaviour, not changed:** the claim and endorsement RPCs check brokerage membership only. The workspace offers their commands only to roles that can act, but a read-only member could call those endpoints directly (D-161).
+- Demo mode has no server-composed surfaces.
+- Visual baselines were generated in this environment. A different font rasteriser will need `UPDATE_BASELINES=1` after review.
+
+## 7. Governed actions in the workspace (D-157, D-161)
+
+| Command | Existing endpoint | Offered when |
+|---|---|---|
+| `workflow_approval.decide` | `POST /workflow-approvals/:id/decide` with the frozen hash | the run waits for approval and the viewer may approve; the bundle is shown in full |
+| `quotation.record_delivery`, `quotation.record_response` | `POST /opportunities/:id/actions` | the quotation says the request is at that point and the viewer may edit it |
+| `run.follow_up_now`, `move_follow_up`, `escalate`, `pause`, `resume` | `POST /workflows/runs/:id/…` | the run's own intervention list says it is available and the viewer holds `policy:edit` |
+| `placement.approve_request`, `placement.record_submission` | `POST /placements/:id/actions` | the placement's own permissions allow it |
+| `issuance.approve_request`, `issuance.record_submission` | `POST /placements/:id/issuance/actions` | the issuance's own permissions allow it |
+| `claim.receive_document` | `POST /claims/:id/actions` | a document is outstanding and the viewer can act |
+| `endorsement.decide_item` | `POST /endorsements/:id/actions` | an item waits for the insurer's written decision and the viewer can act |
+
+How commands behave:
+- **Validation:** the validator holds each command's fixed payload and inputs exactly.
+- **Inputs** are never pre-filled with chosen values.
+- **Submissions** carry an idempotency key.
+- **Results** are the endpoint's own answer. A receipt outlives the block.
+- **Open forms** are tied to their command, never to their position.
+
+## 8. Portfolio, Home, exploration
+
+- **Portfolio (D-158):** a typed query, refined by `living/interpret.ts` on top of the current view. It understands windows, grouping, premium change, status, "mine", insurers and classes by the brokerage's own names, "compare A and B" and "clear filters". The renewal premium is read one stated way.
+- **Home (D-159):** semantic events since the start of this visit, from colleagues, insurers and ASAP. The viewer's own actions are left out and no figures are shown.
+- **Exploration (D-160):** up to three alternatives, from records, labelled hypothetical, kept in the address. It disappears once the client has instructed.
+
+## 9. Verification
+
+Recorded at the end of the latest milestone; see the final report for the run.

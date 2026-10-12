@@ -82,7 +82,7 @@ function ContextHeader({ props }: P<typeof contextHeaderProps>) {
 function RenewalJourney({ props }: P<typeof renewalJourneyProps>) {
   return (
     <div className="lv-journey">
-      <ol className="lv-stages" aria-label="Renewal stages">
+      <ol className="lv-stages" aria-label="Renewal stages" tabIndex={0}>
         {props.stages.map((s, i) => (
           <li key={s.key} className={`lv-stage lv-${s.state}`} aria-current={s.state === "now" ? "step" : undefined}>
             <span className="lv-stage-mark" aria-hidden>{s.state === "done" ? "✓" : i + 1}</span>
@@ -209,7 +209,7 @@ function QuoteComparison({ props, block, env }: P<typeof quoteComparisonProps>) 
   const cls = (name: string) => (focus === name ? "lv-focus" : undefined);
   return (
     <div className="lv-quotes">
-      <div className="lv-table-wrap">
+      <div className="lv-table-wrap" role="region" aria-label="Table — scroll sideways for more" tabIndex={0}>
         <table className="lv-table">
           <thead>
             <tr>
@@ -359,7 +359,7 @@ function PortfolioGroups({ props, env }: P<typeof portfolioGroupsProps>) {
             <span className="lv-chip lv-grey">{g.count}</span>
             <span className="lv-group-totals">{g.expiringTotals.length ? <>Expiring {g.expiringTotals.join(" · ")}</> : null}{g.renewalTotals.length ? <> · Renewal {g.renewalTotals.join(" · ")}</> : null}</span>
           </header>
-          <div className="lv-table-wrap">
+          <div className="lv-table-wrap" role="region" aria-label="Table — scroll sideways for more" tabIndex={0}>
             <table className="lv-table lv-portfolio-table">
               <thead><tr><th scope="col">Client · policy</th><th scope="col">Ends</th><th scope="col">Insurer</th><th scope="col">Expiring</th><th scope="col">Renewal</th><th scope="col">Change</th><th scope="col">Status</th></tr></thead>
               <tbody>
@@ -434,7 +434,7 @@ function WorkJourney({ props }: P<typeof workJourneyProps>) {
   return (
     <div className="lv-journey">
       {props.steps.length ? (
-        <ol className="lv-stages lv-work-stages" aria-label="Steps" style={{ gridTemplateColumns: `repeat(${props.steps.length}, minmax(0, 1fr))` }}>
+        <ol className="lv-stages lv-work-stages" aria-label="Steps" tabIndex={0} style={{ gridTemplateColumns: `repeat(${props.steps.length}, minmax(0, 1fr))` }}>
           {props.steps.map((s, i) => (
             <li key={s.key} className={`lv-stage lv-${s.state === "now" || s.state === "waiting" ? "now" : s.state === "done" ? "done" : s.state === "stopped" ? "stopped" : "next"}`} aria-current={s.state === "now" || s.state === "waiting" ? "step" : undefined}>
               <span className="lv-stage-mark" aria-hidden>{STEP_MARK[s.state] || i + 1}</span>

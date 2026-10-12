@@ -89,6 +89,15 @@ describe("LivingSurface", () => {
     expect((saved.get(`renewal:${ID}`) as { collapsed: string[] }).collapsed).toEqual(["quotes"]);
   });
 
+  it("renders record text as text: markup in a title is never interpreted", async () => {
+    const evil = surface();
+    (evil.blocks[0]!.props as { title: string }).title = `<img src=x onerror="window.__pwned=1">Acme`;
+    await mount(async () => evil);
+    expect(await screen.findByText(`<img src=x onerror="window.__pwned=1">Acme`)).toBeTruthy();
+    expect(document.querySelector(".lv-root img")).toBeNull();
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+  });
+
   it("says which sources could not be read, instead of showing them as missing", async () => {
     await mount(async () => surface({ unavailable: [{ part: "The placement", reason: "restricted" }] }));
     expect(await screen.findByText(/Part of this renewal could not be read for you/)).toBeTruthy();

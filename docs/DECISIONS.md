@@ -2962,3 +2962,19 @@ instructed — the decision is then a record, not an exploration.
   premium and the change on the year before — read from policy periods under the viewer's session,
   recorded as a gap when unreadable. Memory, not a prediction: no trend is extrapolated.
 - A surface may carry up to 20 blocks (was 14), since the busiest renewal reaches the old limit.
+
+## D-163 — Hardening the Living surfaces
+
+- *Accessibility:* axe-core runs on the Living surface in the UI Lab (every stage, 1440 and 390 px)
+  and on the real renewal, portfolio and claim workspaces; any serious or critical violation fails.
+  Found and fixed: muted and faint text below 4.5:1 on soft backgrounds — `--color-ink-muted` is
+  now `#5f6861` and `--color-ink-faint` `#636c64` (single source, packages/ui) — and scrollable
+  tables and stage strips that a keyboard could not reach (now focusable regions with focus rings).
+- *Keyboard:* every visible control on the surface takes focus and shows a ring.
+- *Visual regression:* the UI Lab at 1440 and 390 px against baselines in `apps/web/e2e/baselines`;
+  more than 0.5% of pixels changed fails. Baselines are refreshed only deliberately
+  (`UPDATE_BASELINES=1`) after the new screenshots are reviewed.
+- *Performance:* render time per stage in the browser, and composition p95 on a real database in
+  the connected suite (both bounded; numbers are printed with each run).
+- *Security:* record text renders as text (markup in a title is not interpreted), in addition to the
+  tenant, role, tampered-command and preference-scope tests.

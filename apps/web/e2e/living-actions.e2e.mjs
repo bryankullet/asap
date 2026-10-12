@@ -51,6 +51,15 @@ const per = sql(`insert into policy_periods (organization_id, policy_id, period_
 const run = (await api("POST", "/workflows/renewals", { policyPeriodId: per })).run;
 const workItemId = run.workItemId;
 
+
+import { createRequire } from "node:module";
+const AXE_SRC = (await import("node:fs")).readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+/** Serious or critical accessibility violations on the Living surface (D-163). */
+async function axeSerious(page) {
+  await page.addScriptTag({ content: AXE_SRC });
+  return page.evaluate(async () => (await window.axe.run(document.querySelector(".lv-root"), { resultTypes: ["violations"] })).violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(", ")}`));
+}
+
 const results = [];
 let failures = 0;
 const browser = await chromium.launch({ executablePath: process.env.E2E_CHROMIUM ?? "/opt/pw-browsers/chromium" });
@@ -167,6 +176,8 @@ await step(page, "explore-a-choice-without-recording", async () => {
   const t = await card.innerText();
   must(t.includes("KES 2,650,000.00") && t.includes("+KES 250,000.00 against the expiring KES 2,400,000.00 (+10.4%)"), `the explored figures are not the recorded ones: ${t.slice(0, 200)}`);
   must(t.includes("Renews with the current insurer"), "the insurer change is not said");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
   must(await panel.getByText(/nothing is recorded/i).count(), "the exploration does not say nothing is recorded");
   must(sql(`select count(*) from client_instructions where opportunity_id = '${out.opportunityId}'`) === before, "exploring recorded something");
   // The unsent escalation is still being typed.

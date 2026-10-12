@@ -44,6 +44,15 @@ const endWork = (await api("POST", "/work-items", { kind: "endorsement", clientI
 const eid = sql(`select id from endorsements where work_item_id = '${endWork}'`);
 await api("POST", `/endorsements/${eid}/actions`, { action: "set_details", effectiveOn: iso(new Date(Date.now() + 3 * DAY)), items: [{ id: "veh1", label: `KDX ${TAG.slice(0, 3)}A`, before: null, after: "Toyota Hilux", sumInsuredMinor: 320000000 }] });
 
+
+import { createRequire } from "node:module";
+const AXE_SRC = (await import("node:fs")).readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+/** Serious or critical accessibility violations on the Living surface (D-163). */
+async function axeSerious(page) {
+  await page.addScriptTag({ content: AXE_SRC });
+  return page.evaluate(async () => (await window.axe.run(document.querySelector(".lv-root"), { resultTypes: ["violations"] })).violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(", ")}`));
+}
+
 const results = [];
 let failures = 0;
 const browser = await chromium.launch({ executablePath: process.env.E2E_CHROMIUM ?? "/opt/pw-browsers/chromium" });
@@ -83,6 +92,8 @@ await step(page, "claim-workspace", async () => {
   must(await page.getByText("Offer, acceptance and payment").count(), "the three claim facts are not shown");
   must(await page.getByText(/an offer is not acceptance, and acceptance is not payment/i).count(), "the facts are not kept separate in words");
   must(await page.getByText(`Police abstract ${TAG}`).count(), "the outstanding document is not listed");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
 });
 await step(page, "claim-document-received-in-place", async () => {
   const docs = page.locator('[data-block="documents"]');

@@ -34,8 +34,8 @@
    */
   --color-ink: #18231c;
   --color-ink-secondary: #4c564e;
-  --color-ink-muted: #6e776f;
-  --color-ink-faint: #8b938d;
+  --color-ink-muted: #5f6861; /* D-163: 4.5:1 on every Living background */
+  --color-ink-faint: #636c64; /* D-163: was #8b938d (2.9:1 on wash) */
   --color-ink-done: #7b867d;
 
   --color-paper: #ffffff;

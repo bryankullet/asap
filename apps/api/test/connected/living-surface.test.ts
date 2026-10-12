@@ -216,3 +216,20 @@ describe("Home: what changed since you last looked (D-159)", () => {
   });
 });
 
+describe("composition time (D-163)", () => {
+  it("composes the renewal workspace and the portfolio quickly on a real database", async () => {
+    const time = async (f: () => Promise<unknown>) => { const t = performance.now(); await f(); return performance.now() - t; };
+    const renewal: number[] = [];
+    const portfolio: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      renewal.push(await time(() => call(AMINA, "GET", `/living/${workItemId}`)));
+      portfolio.push(await time(() => call(AMINA, "POST", "/living/portfolio", { query: null, text: "renewals in the next 60 days by insurer" })));
+    }
+    const p95 = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.min(xs.length - 1, Math.floor(xs.length * 0.95))]!;
+    // eslint-disable-next-line no-console -- the measured numbers are the point of this test; they go in the implementation map
+    console.info(`living composition p95: renewal ${p95(renewal).toFixed(0)} ms, portfolio ${p95(portfolio).toFixed(0)} ms`);
+    expect(p95(renewal)).toBeLessThan(1500);
+    expect(p95(portfolio)).toBeLessThan(1500);
+  });
+});
+

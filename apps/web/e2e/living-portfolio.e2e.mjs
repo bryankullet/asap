@@ -61,6 +61,15 @@ async function renewal(code, insurer, expiring, quoted) {
 await renewal("PORTI", JUBILEE, 1200000, 1320000);
 await renewal("PORTD", CIC, 800000, 760000);
 
+
+import { createRequire } from "node:module";
+const AXE_SRC = (await import("node:fs")).readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+/** Serious or critical accessibility violations on the Living surface (D-163). */
+async function axeSerious(page) {
+  await page.addScriptTag({ content: AXE_SRC });
+  return page.evaluate(async () => (await window.axe.run(document.querySelector(".lv-root"), { resultTypes: ["violations"] })).violations.filter((v) => v.impact === "serious" || v.impact === "critical").map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).slice(0, 3).join(", ")}`));
+}
+
 const results = [];
 let failures = 0;
 const browser = await chromium.launch({ executablePath: process.env.E2E_CHROMIUM ?? "/opt/pw-browsers/chromium" });
@@ -154,6 +163,8 @@ await step(page, "compare-insurers-in-words", async () => {
   const cards = page.locator(".lv-compare-card");
   must((await cards.count()) === 2, `expected two insurers side by side, saw ${await cards.count()}`);
   must(await page.getByText(/Comparing .*CIC.* and .*Jubilee/).count(), "the comparison is not said back");
+  const a11y = await axeSerious(page);
+  must(a11y.length === 0, `accessibility: ${a11y.join(" | ")}`);
 });
 await step(page, "refresh-reopens-the-same-view", async () => {
   const at = hash(page);
