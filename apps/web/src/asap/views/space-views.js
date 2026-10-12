@@ -7,7 +7,7 @@ import { resolvePath as r, str as s, cssToStyle as st, scope as sc } from "../dc
 export function renderSpace(v) {
   return h(
               "section",
-              { style: st("min-height:0;height:100%;overflow-y:auto;padding:20px 24px 48px;background:#fbfcfa"), className: ["asap-pane"].join(" ") },
+              { style: st("min-height:0;height:100%;overflow-y:auto;padding:20px 24px 48px;background:var(--color-wash)"), className: ["asap-pane"].join(" ") },
               
               h(
                 "div",
@@ -30,7 +30,7 @@ export function renderSpace(v) {
                         s(r(v, "ws.statusBg")) +
                         ";color:" +
                         s(r(v, "ws.statusFg")) +
-                        ";border-radius:99px;padding:6px 11px;font-size:12px;font-weight:700;white-space:nowrap;font-family:var(--font-display)",
+                        ";border-radius:var(--radius-pill);padding:6px 11px;font-size:12px;font-weight:700;white-space:nowrap;font-family:var(--font-display)",
                     ),
                   },
                   r(v, "ws.statusLabel"),
@@ -60,7 +60,7 @@ export function renderSpace(v) {
                                     s(r(v, "f.bg")) +
                                     ";color:" +
                                     s(r(v, "f.fg")) +
-                                    ";border-radius:99px;padding:6px 12px;font-size:13px;font-weight:600;font-family:var(--font-display)",
+                                    ";border-radius:var(--radius-pill);padding:6px 12px;font-size:13px;font-weight:600;font-family:var(--font-display)",
                                 ),
                               },
                               r(v, "f.label"),
@@ -106,7 +106,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:#e5e9e5;border:1px solid #e5e9e5;border-radius:13px;overflow:hidden",
+                                    "display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:#edf0ec;border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:hidden;box-shadow:var(--shadow-1)",
                                   ),
                                 },
                                 (r(v, "b.items") || []).map((it, ix) => {
@@ -141,7 +141,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #e5e9e5;border-radius:13px;overflow:hidden;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:hidden;background:#fff;box-shadow:var(--shadow-1)") },
                                 (r(v, "b.rows") || []).map((it, ix) => {
                                   const v2 = sc(v, "r", it);
                                   return h(
@@ -171,7 +171,7 @@ export function renderSpace(v) {
                                                     "small",
                                                     {
                                                       style: st(
-                                                        "display:block;font-size:12px;color:#4c564e;margin-top:7px;background:#f5f7f4;border-radius:9px;padding:8px 9px;line-height:1.5",
+                                                        "display:block;font-size:12px;color:#4c564e;margin-top:7px;background:#f5f7f4;border-radius:var(--radius-compact);padding:8px 9px;line-height:1.5",
                                                       ),
                                                     },
                                                     r(v, "r.why"),
@@ -190,7 +190,7 @@ export function renderSpace(v) {
                                                     s(r(v, "r.badgeBg")) +
                                                     ";color:" +
                                                     s(r(v, "r.badgeFg")) +
-                                                    ";border-radius:99px;padding:4px 8px;font-size:11px;font-weight:700;font-family:var(--font-display)",
+                                                    ";border-radius:var(--radius-pill);padding:4px 8px;font-size:11px;font-weight:700;font-family:var(--font-display)",
                                                 ),
                                               },
                                               r(v, "r.badge"),
@@ -204,7 +204,7 @@ export function renderSpace(v) {
                                                     {
                                                       onClick: r(v, "r.toggleWhy"),
                                                       style: st(
-                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:9px;padding:5px 8px;font-size:12px;color:#4c564e",
+                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-compact);padding:5px 8px;font-size:12px;color:#4c564e",
                                                       ),
                                                       className: ["dch0"].join(" "),
                                                     },
@@ -222,7 +222,7 @@ export function renderSpace(v) {
                                                       onClick: r(v, "r.tertiaryGo"),
                                                       disabled: !!r(v, "busy"),
                                                       style: st(
-                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:9px;padding:5px 9px;font-size:12px;color:#4c564e",
+                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-compact);padding:5px 9px;font-size:12px;color:#4c564e",
                                                       ),
                                                       className: ["dch0"].join(" "),
                                                     },
@@ -240,7 +240,7 @@ export function renderSpace(v) {
                                                       onClick: r(v, "r.secondaryGo"),
                                                       disabled: !!r(v, "busy"),
                                                       style: st(
-                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:9px;padding:5px 9px;font-size:12px;color:#4c564e",
+                                                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-compact);padding:5px 9px;font-size:12px;color:#4c564e",
                                                       ),
                                                       className: ["dch0"].join(" "),
                                                     },
@@ -257,7 +257,7 @@ export function renderSpace(v) {
                                                     {
                                                       onClick: r(v, "r.go"),
                                                       style: st(
-                                                        "border:0;background:#f2f7f3;color:#1f6c49;border-radius:9px;padding:6px 10px;font-size:12px;font-weight:700;font-family:var(--font-display)",
+                                                        "border:0;background:#f2f7f3;color:#1f6c49;border-radius:var(--radius-compact);padding:6px 10px;font-size:12px;font-weight:700;font-family:var(--font-display)",
                                                       ),
                                                       className: ["dch3"].join(" "),
                                                     },
@@ -282,7 +282,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "border:1px solid #ecd6a4;background:#fff9ec;border-radius:13px;padding:12px;display:flex;flex-direction:column;gap:8px",
+                                    "border:1px solid #ecd6a4;background:#fff9ec;border-radius:var(--radius-card);padding:12px;display:flex;flex-direction:column;gap:8px",
                                   ),
                                 },
                                 (r(v, "b.items") || []).map((it, ix) => {
@@ -311,7 +311,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "border:1px solid " + s(r(v, "b.tintLine")) + ";background:" + s(r(v, "b.tintBg")) + ";border-radius:13px;padding:12px",
+                                    "border:1px solid " + s(r(v, "b.tintLine")) + ";background:" + s(r(v, "b.tintBg")) + ";border-radius:var(--radius-card);padding:12px",
                                   ),
                                 },
                                 h("strong", { style: st("display:block;font-size:13px;color:" + s(r(v, "b.tintFg"))) }, r(v, "b.title")),
@@ -325,7 +325,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #e5e9e5;border-radius:13px;overflow:hidden;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:hidden;background:#fff;box-shadow:var(--shadow-1)") },
                                 h(
                                   "div",
                                   {
@@ -384,7 +384,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #e5e9e5;border-radius:13px;overflow:auto;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:auto;background:#fff;box-shadow:var(--shadow-1)") },
                                 h(
                                   "div",
                                   {
@@ -427,7 +427,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #e5e9e5;border-radius:13px;overflow:hidden;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:hidden;background:#fff;box-shadow:var(--shadow-1)") },
                                 (r(v, "b.rows") || []).map((it, ix) => {
                                   const v2 = sc(v, "r", it);
                                   return h(
@@ -464,7 +464,7 @@ export function renderSpace(v) {
                                   "div",
                                   {
                                     style: st(
-                                      "display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e5e9e5;border-radius:12px;padding:10px 12px;margin-bottom:12px;background:#fff",
+                                      "display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e5e9e5;border-radius:var(--radius-control);padding:10px 12px;margin-bottom:12px;background:#fff",
                                     ),
                                   },
                                   h(
@@ -477,7 +477,7 @@ export function renderSpace(v) {
                                     "span",
                                     {
                                       style: st(
-                                        "background:#dff2e6;color:#1f6c49;border-radius:99px;padding:4px 9px;font-size:11px;font-weight:700;font-family:var(--font-display)",
+                                        "background:#dff2e6;color:#1f6c49;border-radius:var(--radius-pill);padding:4px 9px;font-size:11px;font-weight:700;font-family:var(--font-display)",
                                       ),
                                     },
                                     "SOURCE",
@@ -487,7 +487,7 @@ export function renderSpace(v) {
                                   "div",
                                   {
                                     style: st(
-                                      "background:#f5f5f2;border:1px solid #e0e1dc;border-radius:12px;padding:22px;font-family:Georgia,serif;color:#333",
+                                      "background:#f5f5f2;border:1px solid #e0e1dc;border-radius:var(--radius-control);padding:22px;font-family:Georgia,serif;color:#333",
                                     ),
                                   },
                                   h("h3", { style: st("font-size:15px;text-align:center;margin:0 0 16px;letter-spacing:.04em") }, r(v, "b.title")),
@@ -529,7 +529,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #e5e9e5;border-radius:13px;overflow:hidden;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);overflow:hidden;background:#fff;box-shadow:var(--shadow-1)") },
                                 h(
                                   "div",
                                   {
@@ -567,7 +567,7 @@ export function renderSpace(v) {
                                         ...((v) => [
                                           h(
                                             "span",
-                                            { style: st("border:1px solid #e5e9e5;border-radius:8px;padding:5px 8px;font-size:11px;color:#4c564e") },
+                                            { style: st("border:1px solid #e5e9e5;border-radius:var(--radius-compact);padding:5px 8px;font-size:11px;color:#4c564e") },
                                             "⎘ " + s(r(v, "a.name")),
                                           ),
                                         ])(v2),
@@ -582,7 +582,7 @@ export function renderSpace(v) {
                                       {
                                         onClick: r(v, "b.openFull"),
                                         style: st(
-                                          "border:1px solid #e5e9e5;background:#fff;border-radius:10px;padding:8px 11px;font-size:12px;font-weight:600;color:#4c564e;font-family:var(--font-display)",
+                                          "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-compact);padding:8px 11px;font-size:12px;font-weight:600;color:#4c564e;font-family:var(--font-display)",
                                         ),
                                         className: ["dch0"].join(" "),
                                       },
@@ -598,7 +598,7 @@ export function renderSpace(v) {
                                               onClick: r(v, "b.sendNow"),
                                               disabled: !!r(v, "busy"),
                                               style: st(
-                                                "border:0;background:#1f6c49;color:#fff;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:700;font-family:var(--font-display)",
+                                                "border:0;background:#1f6c49;color:#fff;border-radius:var(--radius-compact);padding:8px 12px;font-size:12px;font-weight:700;font-family:var(--font-display)",
                                               ),
                                               className: ["dch4"].join(" "),
                                             },
@@ -617,7 +617,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px dashed #c8d2ca;border-radius:13px;padding:14px;background:#fff") },
+                                { style: st("border:1px dashed #c8d2ca;border-radius:var(--radius-card);padding:14px;background:#fff") },
                                 h("strong", { style: st("display:block;font-size:13px") }, r(v, "b.label2")),
                                 h(
                                   "small",
@@ -654,7 +654,7 @@ export function renderSpace(v) {
                                                 ),
                                                 h(
                                                   "div",
-                                                  { style: st("height:5px;border-radius:99px;background:#eef1ee;margin-top:5px;overflow:hidden") },
+                                                  { style: st("height:5px;border-radius:var(--radius-pill);background:#eef1ee;margin-top:5px;overflow:hidden") },
                                                   h("i", {
                                                     style: st("display:block;height:100%;width:" + s(r(v, "p.width")) + ";background:" + s(r(v, "p.color"))),
                                                   }),
@@ -677,7 +677,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "border:1px solid #e5e9e5;border-radius:13px;padding:13px;background:#fff;display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end",
+                                    "border:1px solid #e8ebe7;border-radius:var(--radius-card);padding:13px;background:#fff;display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;box-shadow:var(--shadow-1)",
                                   ),
                                 },
                                 h(
@@ -695,7 +695,7 @@ export function renderSpace(v) {
                                     {
                                       value: r(v, "b.assigneeId"),
                                       onChange: r(v, "b.onAssignee"),
-                                      style: st("width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13px"),
+                                      style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-compact);padding:9px 10px;font-size:13px"),
                                     },
                                     (r(v, "b.users") || []).map((it, ix) => {
                                       const v2 = sc(v, "u", it);
@@ -717,7 +717,7 @@ export function renderSpace(v) {
                                     type: "date",
                                     value: r(v, "b.dueAt"),
                                     onChange: r(v, "b.onDue"),
-                                    style: st("width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13px"),
+                                    style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-compact);padding:9px 10px;font-size:13px"),
                                   }),
                                 ),
                                 h(
@@ -726,7 +726,7 @@ export function renderSpace(v) {
                                     onClick: r(v, "b.save"),
                                     disabled: !!r(v, "busy"),
                                     style: st(
-                                      "border:0;background:#1f6c49;color:#fff;border-radius:10px;padding:10px 13px;font-size:13px;font-weight:600;font-family:var(--font-display)",
+                                      "border:0;background:#1f6c49;color:#fff;border-radius:var(--radius-compact);padding:10px 13px;font-size:13px;font-weight:600;font-family:var(--font-display)",
                                     ),
                                     className: ["dch4"].join(" "),
                                   },
@@ -744,7 +744,7 @@ export function renderSpace(v) {
                                 "div",
                                 {
                                   style: st(
-                                    "border:1px solid #e5e9e5;border-radius:13px;padding:13px;background:#fff;display:flex;flex-direction:column;gap:10px",
+                                    "border:1px solid #e8ebe7;border-radius:var(--radius-card);padding:13px;background:#fff;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow-1)",
                                   ),
                                 },
                                 (r(v, "b.fields") || []).map((it, ix) => {
@@ -775,7 +775,7 @@ export function renderSpace(v) {
                                                   value: r(v, "f.value"),
                                                   onChange: r(v, "f.onChange"),
                                                   style: st(
-                                                    "width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13px;background:#fff",
+                                                    "width:100%;border:1px solid #d7ded8;border-radius:var(--radius-compact);padding:9px 10px;font-size:13px;background:#fff",
                                                   ),
                                                 },
                                                 (r(v, "f.options") || []).map((it, ix) => {
@@ -794,7 +794,7 @@ export function renderSpace(v) {
                                                 value: r(v, "f.value"),
                                                 onChange: r(v, "f.onChange"),
                                                 placeholder: r(v, "f.placeholder"),
-                                                style: st("width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13px"),
+                                                style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-compact);padding:9px 10px;font-size:13px"),
                                               }),
                                             )
                                           : null,
@@ -808,7 +808,7 @@ export function renderSpace(v) {
                                                 placeholder: r(v, "f.placeholder"),
                                                 rows: "9",
                                                 style: st(
-                                                  "width:100%;border:1px solid #d7ded8;border-radius:10px;padding:9px 10px;font-size:13px;line-height:1.5;resize:vertical",
+                                                  "width:100%;border:1px solid #d7ded8;border-radius:var(--radius-compact);padding:9px 10px;font-size:13px;line-height:1.5;resize:vertical",
                                                 ),
                                               }),
                                             )
@@ -826,7 +826,7 @@ export function renderSpace(v) {
                                       onClick: r(v, "b.save"),
                                       disabled: !!r(v, "busy"),
                                       style: st(
-                                        "border:0;background:#1f6c49;color:#fff;border-radius:10px;padding:10px 13px;font-size:13px;font-weight:600;font-family:var(--font-display)",
+                                        "border:0;background:#1f6c49;color:#fff;border-radius:var(--radius-compact);padding:10px 13px;font-size:13px;font-weight:600;font-family:var(--font-display)",
                                       ),
                                     },
                                     r(v, "b.saveLabel"),
@@ -842,7 +842,7 @@ export function renderSpace(v) {
                               null,
                               h(
                                 "div",
-                                { style: st("border:1px solid #d7ded8;border-radius:14px;padding:13px;background:#fff") },
+                                { style: st("border:1px solid #e8ebe7;border-radius:var(--radius-card);padding:13px;background:#fff;box-shadow:var(--shadow-1)") },
                                 h("strong", { style: st("display:block;font-size:13px") }, r(v, "b.gateHeading")),
                                 h("p", { style: st("margin:6px 0 11px;font-size:12px;line-height:1.55;color:#6e776f") }, r(v, "b.detail")),
                                 h(
@@ -858,7 +858,7 @@ export function renderSpace(v) {
                                           s(r(v, "b.btnBg")) +
                                           ";color:" +
                                           s(r(v, "b.btnFg")) +
-                                          ";border-radius:11px;padding:10px 14px;font-size:13px;font-weight:600;font-family:var(--font-display)",
+                                          ";border-radius:var(--radius-control);padding:10px 14px;font-size:13px;font-weight:600;font-family:var(--font-display)",
                                       ),
                                       className: ["dch5"].join(" "),
                                     },
@@ -978,7 +978,7 @@ export function renderConversation(v) {
                                         "p",
                                         {
                                           style: st(
-                                            "margin:0;background:#18231c;color:#fff;border-radius:16px 16px 4px 16px;padding:10px 13px;font-size:14px;line-height:1.5;max-width:88%",
+                                            "margin:0;background:#18231c;color:#fff;border-radius:var(--radius-card) 16px 4px 16px;padding:10px 13px;font-size:14px;line-height:1.5;max-width:88%",
                                           ),
                                         },
                                         r(v, "msg.text"),
@@ -1023,7 +1023,7 @@ export function renderConversation(v) {
                                                 "div",
                                                 {
                                                   style: st(
-                                                    "margin-top:9px;display:inline-flex;align-items:center;gap:7px;background:#f5f7f4;border:1px solid #e5e9e5;border-radius:10px;padding:6px 9px;font-size:12px;color:#4c564e",
+                                                    "margin-top:9px;display:inline-flex;align-items:center;gap:7px;background:#f5f7f4;border:1px solid #e5e9e5;border-radius:var(--radius-compact);padding:6px 9px;font-size:12px;color:#4c564e",
                                                   ),
                                                 },
                                                 h("span", { style: st("color:#1f6c49") }, "▱"),
@@ -1037,7 +1037,7 @@ export function renderConversation(v) {
                                               null,
                                               h(
                                                 "div",
-                                                { style: st("margin-top:9px;border:1px solid #b9dcc4;background:#eef8f1;border-radius:11px;padding:9px 10px") },
+                                                { style: st("margin-top:9px;border:1px solid #b9dcc4;background:#eef8f1;border-radius:var(--radius-control);padding:9px 10px") },
                                                 h("strong", { style: st("display:block;font-size:12px;color:#1f6c49") }, "RECEIPT"),
                                                 h(
                                                   "small",
@@ -1066,7 +1066,7 @@ export function renderConversation(v) {
                                                 {
                                                   role: "group",
                                                   "aria-label": r(v, "msg.pending.title"),
-                                                  style: st("margin-top:10px;border:1px solid #d7ded8;background:#fbfcfa;border-radius:13px;padding:12px 13px"),
+                                                  style: st("margin-top:10px;border:1px solid #d7ded8;background:var(--color-wash);border-radius:var(--radius-card);padding:12px 13px"),
                                                   className: ["asap-pending"].join(" "),
                                                 },
                                                 h("strong", { style: st("display:block;font-size:14px") }, r(v, "msg.pending.title")),
@@ -1125,7 +1125,7 @@ export function renderConversation(v) {
                                                           {
                                                             onClick: r(v, "msg.pending.confirm"),
                                                             style: st(
-                                                              "border:0;background:#1f6c49;color:#fff;border-radius:10px;padding:8px 13px;font-weight:600;font-family:var(--font-display)",
+                                                              "border:0;background:#1f6c49;color:#fff;border-radius:var(--radius-compact);padding:8px 13px;font-weight:600;font-family:var(--font-display)",
                                                             ),
                                                           },
                                                           r(v, "msg.pending.confirmLabel"),
@@ -1139,7 +1139,7 @@ export function renderConversation(v) {
                                                                 {
                                                                   onClick: r(v, "msg.pending.edit"),
                                                                   style: st(
-                                                                    "border:1px solid #d7ded8;background:#fff;color:#18231c;border-radius:10px;padding:8px 13px;font-weight:600;font-family:var(--font-display)",
+                                                                    "border:1px solid #d7ded8;background:#fff;color:#18231c;border-radius:var(--radius-compact);padding:8px 13px;font-weight:600;font-family:var(--font-display)",
                                                                   ),
                                                                 },
                                                                 r(v, "msg.pending.editLabel"),
@@ -1151,7 +1151,7 @@ export function renderConversation(v) {
                                                           {
                                                             onClick: r(v, "msg.pending.cancel"),
                                                             style: st(
-                                                              "border:1px solid #d7ded8;background:#fff;color:#4c564e;border-radius:10px;padding:8px 13px;font-weight:600;font-family:var(--font-display)",
+                                                              "border:1px solid #d7ded8;background:#fff;color:#4c564e;border-radius:var(--radius-compact);padding:8px 13px;font-weight:600;font-family:var(--font-display)",
                                                             ),
                                                           },
                                                           r(v, "msg.pending.cancelLabel"),
@@ -1191,7 +1191,7 @@ export function renderConversation(v) {
                                                         {
                                                           onClick: r(v, "chip.go"),
                                                           style: st(
-                                                            "border:1px solid #e5e9e5;background:#fff;border-radius:99px;padding:6px 11px;font-size:12px;color:#1f6c49;font-weight:600;font-family:var(--font-display)",
+                                                            "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-pill);padding:6px 11px;font-size:12px;color:#1f6c49;font-weight:600;font-family:var(--font-display)",
                                                           ),
                                                           className: ["dch7"].join(" "),
                                                         },
@@ -1245,7 +1245,7 @@ export function renderConversation(v) {
                                 onClick: r(v, "jumpToNew"),
                                 "aria-label": "Jump to the new response",
                                 style: st(
-                                  "border:1px solid #cfe2d6;background:#e7f5ef;color:#1f6c49;border-radius:99px;padding:5px 12px;font-size:12px;font-weight:600;font-family:var(--font-display)",
+                                  "border:1px solid #cfe2d6;background:#e7f5ef;color:#1f6c49;border-radius:var(--radius-pill);padding:5px 12px;font-size:12px;font-weight:600;font-family:var(--font-display)",
                                 ),
                               },
                               "New response ↓",
@@ -1263,7 +1263,7 @@ export function renderConversation(v) {
                           "span",
                           {
                             style: st(
-                              "display:inline-flex;align-items:center;gap:7px;background:#f5f7f4;border:1px solid #e5e9e5;border-radius:99px;padding:4px 6px 4px 8px;font-size:12px;color:#4c564e",
+                              "display:inline-flex;align-items:center;gap:7px;background:#f5f7f4;border:1px solid #e5e9e5;border-radius:var(--radius-pill);padding:4px 6px 4px 8px;font-size:12px;color:#4c564e",
                             ),
                           },
                           " " + s(r(v, "contextChip")) + " ",
@@ -1285,7 +1285,7 @@ export function renderConversation(v) {
                                 "span",
                                 {
                                   style: st(
-                                    "display:inline-flex;align-items:center;gap:7px;background:#e8f2fb;border:1px solid #cfe2f2;border-radius:99px;padding:4px 6px 4px 8px;font-size:12px;color:#275f8a",
+                                    "display:inline-flex;align-items:center;gap:7px;background:#e8f2fb;border:1px solid #cfe2f2;border-radius:var(--radius-pill);padding:4px 6px 4px 8px;font-size:12px;color:#275f8a",
                                   ),
                                 },
                                 " Selected: " + s(r(v, "selectionLabel")) + " ",
@@ -1310,7 +1310,7 @@ export function renderConversation(v) {
                           onDragOver: r(v, "chatDragOver"),
                           onDrop: r(v, "chatDrop"),
                           style: st(
-                            "display:flex;align-items:flex-end;gap:8px;border:1px solid #d7ded8;border-radius:16px;padding:8px 8px 8px 13px;background:#fff",
+                            "display:flex;align-items:flex-end;gap:8px;border:1px solid #e8ebe7;border-radius:var(--radius-card);padding:8px 8px 8px 13px;background:#fff;box-shadow:var(--shadow-1)",
                           ),
                         },
                         h("textarea", {
@@ -1337,7 +1337,7 @@ export function renderConversation(v) {
                             "aria-label": "Add files or records",
                             title: "Add documents, spreadsheets or a client",
                             style: st(
-                              "width:30px;height:30px;border:1px solid #e5e9e5;background:#fff;border-radius:9px;color:#1f6c49;flex:none;font-size:18px;font-weight:600;line-height:1;font-family:var(--font-display)",
+                              "width:30px;height:30px;border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-compact);color:#1f6c49;flex:none;font-size:18px;font-weight:600;line-height:1;font-family:var(--font-display)",
                             ),
                           },
                           "+",
@@ -1348,7 +1348,7 @@ export function renderConversation(v) {
                             onClick: r(v, "voice"),
                             "aria-label": "Voice input unavailable",
                             title: "Voice input is not available in this build",
-                            style: st("width:30px;height:30px;border:1px dashed #d7ded8;background:#fff;border-radius:9px;color:#a9b3ab;flex:none"),
+                            style: st("width:30px;height:30px;border:1px dashed #d7ded8;background:#fff;border-radius:var(--radius-compact);color:#a9b3ab;flex:none"),
                           },
                           "◉",
                         ),
@@ -1358,7 +1358,7 @@ export function renderConversation(v) {
                             onClick: r(v, "send"),
                             "aria-label": "Send",
                             disabled: !!r(v, "thinking"),
-                            style: st("width:30px;height:30px;border:0;background:#1f6c49;color:#fff;border-radius:9px;flex:none;font-size:15px"),
+                            style: st("width:30px;height:30px;border:0;background:#1f6c49;color:#fff;border-radius:var(--radius-compact);flex:none;font-size:15px"),
                             className: ["dch4"].join(" "),
                           },
                           "↑",
@@ -1378,7 +1378,7 @@ export function renderConversation(v) {
                                 {
                                   onClick: r(v, "sug.go"),
                                   style: st(
-                                    "border:1px dashed #d7ded8;background:transparent;border-radius:99px;padding:5px 10px;font-size:12px;color:#6e776f",
+                                    "border:1px dashed #d7ded8;background:transparent;border-radius:var(--radius-pill);padding:5px 10px;font-size:12px;color:#6e776f",
                                   ),
                                   className: ["dch8"].join(" "),
                                 },
@@ -1406,7 +1406,7 @@ export function renderToast(v) {
               "div",
               {
                 style: st(
-                  "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#18231c;color:#f3f6f3;border-radius:12px;padding:11px 16px;font-size:13px;z-index:80;box-shadow:0 16px 50px rgba(24,35,28,.2);animation:asapIn .2s ease;max-width:min(560px,92vw)",
+                  "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#18231c;color:#f3f6f3;border-radius:var(--radius-control);padding:11px 16px;font-size:13px;z-index:80;box-shadow:0 16px 50px rgba(24,35,28,.2);animation:asapIn .2s ease;max-width:min(560px,92vw)",
                 ),
               },
               r(v, "toast"),
@@ -1465,7 +1465,7 @@ export function renderSheet(v) {
                       ref: r(v, "sheetCloseRef"),
                       onClick: r(v, "closeSheet"),
                       "aria-label": "Close",
-                      style: st("border:1px solid #e5e9e5;background:#fff;width:34px;height:34px;border-radius:10px;font-size:20px;flex:none"),
+                      style: st("border:1px solid #e5e9e5;background:#fff;width:34px;height:34px;border-radius:var(--radius-compact);font-size:20px;flex:none"),
                     },
                     "×",
                   ),
@@ -1491,7 +1491,7 @@ export function renderSheet(v) {
                                   s(r(v, "sheet.stateLine")) +
                                   ";background:" +
                                   s(r(v, "sheet.stateBg")) +
-                                  ";border-radius:13px;padding:11px 12px;display:flex;gap:9px;margin-bottom:15px",
+                                  ";border-radius:var(--radius-card);padding:11px 12px;display:flex;gap:9px;margin-bottom:15px",
                               ),
                             },
                             h("span", { style: st("color:" + s(r(v, "sheet.stateFg"))) }, r(v, "sheet.stateMark")),
@@ -1513,7 +1513,7 @@ export function renderSheet(v) {
                             h("input", {
                               value: r(v, "sheet.to"),
                               onChange: r(v, "sheet.onTo"),
-                              style: st("width:100%;border:1px solid #d7ded8;border-radius:11px;padding:10px 11px;outline:0;font-size:13px"),
+                              style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-control);padding:10px 11px;outline:0;font-size:13px"),
                             }),
                           ),
                           h(
@@ -1527,7 +1527,7 @@ export function renderSheet(v) {
                             h("input", {
                               value: r(v, "sheet.subject"),
                               onChange: r(v, "sheet.onSubject"),
-                              style: st("width:100%;border:1px solid #d7ded8;border-radius:11px;padding:10px 11px;outline:0;font-size:13px"),
+                              style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-control);padding:10px 11px;outline:0;font-size:13px"),
                             }),
                           ),
                           h(
@@ -1542,7 +1542,7 @@ export function renderSheet(v) {
                               value: r(v, "sheet.body"),
                               onChange: r(v, "sheet.onBody"),
                               style: st(
-                                "width:100%;min-height:200px;border:1px solid #d7ded8;border-radius:11px;padding:11px;outline:0;font-size:13px;line-height:1.6;resize:vertical",
+                                "width:100%;min-height:200px;border:1px solid #d7ded8;border-radius:var(--radius-control);padding:11px;outline:0;font-size:13px;line-height:1.6;resize:vertical",
                               ),
                             }),
                           ),
@@ -1557,7 +1557,7 @@ export function renderSheet(v) {
                                 ...((v) => [
                                   h(
                                     "span",
-                                    { style: st("border:1px solid #e5e9e5;border-radius:9px;padding:6px 9px;font-size:12px;color:#4c564e") },
+                                    { style: st("border:1px solid #e5e9e5;border-radius:var(--radius-compact);padding:6px 9px;font-size:12px;color:#4c564e") },
                                     "⎘ " + s(r(v, "a.name")),
                                   ),
                                 ])(v2),
@@ -1586,13 +1586,13 @@ export function renderSheet(v) {
                                   {
                                     onClick: r(v, "o.go"),
                                     style: st(
-                                      "border:1px solid #e5e9e5;background:#fff;border-radius:13px;padding:12px;text-align:left;display:flex;gap:11px;align-items:center",
+                                      "border:1px solid #e8ebe7;background:#fff;border-radius:var(--radius-card);padding:12px;text-align:left;display:flex;gap:11px;align-items:center;box-shadow:var(--shadow-1)",
                                     ),
                                     className: ["dch9"].join(" "),
                                   },
                                   h(
                                     "span",
-                                    { style: st("width:34px;height:34px;border-radius:10px;background:#eaf0eb;display:grid;place-items:center;flex:none") },
+                                    { style: st("width:34px;height:34px;border-radius:var(--radius-compact);background:#eaf0eb;display:grid;place-items:center;flex:none") },
                                     r(v, "o.icon"),
                                   ),
                                   h(
@@ -1621,7 +1621,7 @@ export function renderSheet(v) {
                             value: r(v, "sheet.query"),
                             onChange: r(v, "onSearchInput"),
                             placeholder: "Client, policy number, registration, claim reference or a phrase from an email",
-                            style: st("width:100%;border:1px solid #d7ded8;border-radius:12px;padding:12px;outline:0;font-size:14px;margin-bottom:12px"),
+                            style: st("width:100%;border:1px solid #d7ded8;border-radius:var(--radius-control);padding:12px;outline:0;font-size:14px;margin-bottom:12px"),
                           }),
                           h("div", { style: st("font-size:11px;color:#6e776f;margin-bottom:10px") }, r(v, "sheet.resultCount")),
                           h(
@@ -1638,7 +1638,7 @@ export function renderSheet(v) {
                                     {
                                       onClick: r(v, "r.go"),
                                       style: st(
-                                        "border:1px solid #e5e9e5;background:#fff;border-radius:12px;padding:11px;text-align:left;display:flex;justify-content:space-between;gap:10px;align-items:center",
+                                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-control);padding:11px;text-align:left;display:flex;justify-content:space-between;gap:10px;align-items:center",
                                       ),
                                       className: ["dch9"].join(" "),
                                     },
@@ -1652,7 +1652,7 @@ export function renderSheet(v) {
                                       "span",
                                       {
                                         style: st(
-                                          "background:#f5f7f4;border-radius:99px;padding:4px 8px;font-size:11px;font-weight:700;color:#4c564e;flex:none;font-family:var(--font-display)",
+                                          "background:#f5f7f4;border-radius:var(--radius-pill);padding:4px 8px;font-size:11px;font-weight:700;color:#4c564e;flex:none;font-family:var(--font-display)",
                                         ),
                                       },
                                       r(v, "r.kind"),
@@ -1674,7 +1674,7 @@ export function renderSheet(v) {
                           {},
                           h(
                             "div",
-                            { style: st("border:1px solid #eec6bf;background:#fdeae7;border-radius:13px;padding:12px") },
+                            { style: st("border:1px solid #eec6bf;background:#fdeae7;border-radius:var(--radius-card);padding:12px") },
                             h("strong", { style: st("display:block;font-size:13px;color:#a43b32") }, "Not permitted for your role"),
                             h("p", { style: st("margin:6px 0 0;font-size:13px;color:#4c564e;line-height:1.6") }, r(v, "sheet.deniedReason")),
                           ),
@@ -1703,7 +1703,7 @@ export function renderSheet(v) {
                                     style: st(
                                       "border:1px solid #e5e9e5;background:" +
                                         s(r(v, "r.bg")) +
-                                        ";border-radius:12px;padding:11px;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px",
+                                        ";border-radius:var(--radius-control);padding:11px;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px",
                                     ),
                                     className: ["dch10"].join(" "),
                                   },
@@ -1739,7 +1739,7 @@ export function renderSheet(v) {
                                   {
                                     onClick: r(v, "s.go"),
                                     style: st(
-                                      "display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #e5e9e5;background:#fff;border-radius:12px;padding:11px;text-align:left",
+                                      "display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-control);padding:11px;text-align:left",
                                     ),
                                     className: ["dch10"].join(" "),
                                   },
@@ -1753,7 +1753,7 @@ export function renderSheet(v) {
                                     "span",
                                     {
                                       style: st(
-                                        "background:#f5f7f4;border-radius:99px;padding:4px 8px;font-size:11px;font-weight:700;color:#4c564e;font-family:var(--font-display)",
+                                        "background:#f5f7f4;border-radius:var(--radius-pill);padding:4px 8px;font-size:11px;font-weight:700;color:#4c564e;font-family:var(--font-display)",
                                       ),
                                     },
                                     "Open",
@@ -1774,13 +1774,13 @@ export function renderSheet(v) {
                           {},
                           h(
                             "div",
-                            { style: st("border:1px solid #eec6bf;background:#fdeae7;border-radius:13px;padding:12px") },
+                            { style: st("border:1px solid #eec6bf;background:#fdeae7;border-radius:var(--radius-card);padding:12px") },
                             h("strong", { style: st("display:block;font-size:13px;color:#a43b32") }, "This removes"),
                             h("p", { style: st("margin:6px 0 0;font-size:13px;color:#4c564e;line-height:1.6") }, r(v, "sheet.removes")),
                           ),
                           h(
                             "div",
-                            { style: st("border:1px solid #b9dcc4;background:#eef8f1;border-radius:13px;padding:12px;margin-top:10px") },
+                            { style: st("border:1px solid #b9dcc4;background:#eef8f1;border-radius:var(--radius-card);padding:12px;margin-top:10px") },
                             h("strong", { style: st("display:block;font-size:13px;color:#1f6c49") }, "This restores"),
                             h("p", { style: st("margin:6px 0 0;font-size:13px;color:#4c564e;line-height:1.6") }, r(v, "sheet.restores")),
                           ),
@@ -1804,7 +1804,7 @@ export function renderSheet(v) {
                                   "button",
                                   {
                                     onClick: r(v, "h.go"),
-                                    style: st("border:1px solid #e5e9e5;background:#fff;border-radius:12px;padding:11px;text-align:left"),
+                                    style: st("border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-control);padding:11px;text-align:left"),
                                     className: ["dch10"].join(" "),
                                   },
                                   h("strong", { style: st("display:block;font-size:13px") }, r(v, "h.title")),
@@ -1825,7 +1825,7 @@ export function renderSheet(v) {
                           {},
                           h(
                             "div",
-                            { style: st("display:flex;gap:12px;align-items:center;border:1px solid #e5e9e5;border-radius:13px;padding:13px") },
+                            { style: st("display:flex;gap:12px;align-items:center;border:1px solid #e5e9e5;border-radius:var(--radius-card);padding:13px") },
                             h(
                               "span",
                               {
@@ -1860,7 +1860,7 @@ export function renderSheet(v) {
                                     {
                                       onClick: r(v, "l.go"),
                                       style: st(
-                                        "border:1px solid #e5e9e5;background:#fff;border-radius:12px;padding:11px;text-align:left;display:flex;justify-content:space-between;align-items:center",
+                                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-control);padding:11px;text-align:left;display:flex;justify-content:space-between;align-items:center",
                                       ),
                                       className: ["dch10"].join(" "),
                                     },
@@ -1888,7 +1888,7 @@ export function renderSheet(v) {
                     {
                       onClick: r(v, "closeSheet"),
                       style: st(
-                        "border:1px solid #e5e9e5;background:#fff;border-radius:11px;padding:10px 14px;font-size:13px;font-weight:600;color:#4c564e;font-family:var(--font-display)",
+                        "border:1px solid #e5e9e5;background:#fff;border-radius:var(--radius-control);padding:10px 14px;font-size:13px;font-weight:600;color:#4c564e;font-family:var(--font-display)",
                       ),
                       className: ["dch0"].join(" "),
                     },
@@ -1906,7 +1906,7 @@ export function renderSheet(v) {
                             style: st(
                               "border:0;background:" +
                                 s(r(v, "sheet.primaryBg")) +
-                                ";color:#fff;border-radius:11px;padding:10px 15px;font-size:13px;font-weight:600;font-family:var(--font-display)",
+                                ";color:#fff;border-radius:var(--radius-control);padding:10px 15px;font-size:13px;font-weight:600;font-family:var(--font-display)",
                             ),
                             className: ["dch5"].join(" "),
                           },
