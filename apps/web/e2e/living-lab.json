@@ -16,7 +16,7 @@
     "label": "Preparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "f11d48387712bf68",
+   "fingerprint": "cd9b0a49f2e73ced",
    "blocks": [
     {
      "id": "header",
@@ -41,8 +41,8 @@
         "value": "31 Oct 2026 · 20 days"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Waiting for approval"
        }
       ],
       "status": {
@@ -81,7 +81,7 @@
        "primary": false
       }
      ],
-     "hash": "85cb4c2460aac9a2"
+     "hash": "ec078ecfe817b9da"
     },
     {
      "id": "journey",
@@ -137,11 +137,11 @@
         "state": "next"
        }
       ],
-      "summary": "Awaiting insurer terms. Pack sent"
+      "summary": "Approve the renewal pack and letters. The policy is checked and the pack and letters are prepared"
      },
      "evidence": [],
      "actions": [],
-     "hash": "fa7783967083049d"
+     "hash": "4082dee5a8dd8b55"
     },
     {
      "id": "next",
@@ -261,15 +261,7 @@
      "role": "side",
      "title": "Who holds the next step",
      "props": {
-      "items": [
-       {
-        "party": "CIC",
-        "what": "Awaiting insurer terms",
-        "since": "2026-10-01",
-        "due": "2026-10-14",
-        "kind": "outside"
-       }
-      ]
+      "items": []
      },
      "evidence": [],
      "actions": [
@@ -331,7 +323,7 @@
        "tone": "default"
       }
      ],
-     "hash": "9a0ce8ca9b9bc660"
+     "hash": "7ad15a1c2d5bbdf0"
     },
     {
      "id": "cover",
@@ -409,7 +401,7 @@
     "label": "Insurer terms"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "75261fb437d9f122",
+   "fingerprint": "00de3357f4735727",
    "blocks": [
     {
      "id": "header",
@@ -438,7 +430,7 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
+        "label": "Workflow status (recorded)",
         "value": "Waiting on insurers"
        }
       ],
@@ -478,7 +470,7 @@
        "primary": false
       }
      ],
-     "hash": "5681f8157b2994a2"
+     "hash": "32bd7be27315c4c2"
     },
     {
      "id": "journey",
@@ -904,7 +896,7 @@
     "label": "Comparing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "fcd95c7c91341c69",
+   "fingerprint": "c85c6f019ee09cd3",
    "blocks": [
     {
      "id": "header",
@@ -933,8 +925,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Answers in — comparison ready"
        }
       ],
       "status": {
@@ -973,7 +965,7 @@
        "primary": false
       }
      ],
-     "hash": "a29d44d707646ac3"
+     "hash": "2a27b5bec238c2fa"
     },
     {
      "id": "journey",
@@ -1029,11 +1021,11 @@
         "state": "next"
        }
       ],
-      "summary": "CIC has answered. Pack sent"
+      "summary": "Compare the answers for the client. Pack sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "dc421c6301b0e65a"
+     "hash": "7a06d817dbcf4465"
     },
     {
      "id": "changes",
@@ -1213,9 +1205,9 @@
       "items": [
        {
         "party": "ASAP",
-        "what": "Awaiting insurer terms",
+        "what": "Compare the answers for the client",
         "since": null,
-        "due": "2026-10-14",
+        "due": null,
         "kind": "asap"
        }
       ]
@@ -1280,7 +1272,7 @@
        "tone": "default"
       }
      ],
-     "hash": "2808815d575373b1"
+     "hash": "140b3e5c465bbb09"
     },
     {
      "id": "cover",
@@ -1365,7 +1357,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "85fe4ea9751037ee",
+   "fingerprint": "9efc82df0d3b938a",
    "blocks": [
     {
      "id": "header",
@@ -1394,8 +1386,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
        }
       ],
       "status": {
@@ -1434,7 +1426,7 @@
        "primary": false
       }
      ],
-     "hash": "5db9c1212d54b57d"
+     "hash": "f37d3bede025aa69"
     },
     {
      "id": "journey",
@@ -1490,11 +1482,11 @@
         "state": "next"
        }
       ],
-      "summary": "Send the approved request. Requested from Jubilee — not confirmed."
+      "summary": "Next step: Send the approved request. Requested from Jubilee — not confirmed."
      },
      "evidence": [],
      "actions": [],
-     "hash": "fcc97feb49675483"
+     "hash": "3c443eafcc05604b"
     },
     {
      "id": "next",
@@ -1797,7 +1789,7 @@
     "label": "Placement"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "520212c60feffc14",
+   "fingerprint": "edc6619f5e21cedd",
    "blocks": [
     {
      "id": "header",
@@ -1826,8 +1818,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
        }
       ],
       "status": {
@@ -1866,7 +1858,7 @@
        "primary": false
       }
      ],
-     "hash": "5db9c1212d54b57d"
+     "hash": "f37d3bede025aa69"
     },
     {
      "id": "journey",
@@ -1922,11 +1914,11 @@
         "state": "next"
        }
       ],
-      "summary": "Send the approved request. Requested from Jubilee — not confirmed."
+      "summary": "Next step: Approve the placement request. Requested from Jubilee — not confirmed."
      },
      "evidence": [],
      "actions": [],
-     "hash": "fcc97feb49675483"
+     "hash": "c03df8001b1c6245"
     },
     {
      "id": "next",
@@ -1938,12 +1930,12 @@
       "items": [
        {
         "id": "placement-next",
-        "title": "Send the approved request",
+        "title": "Approve the placement request",
         "why": "Requested from Jubilee — not confirmed.",
         "responsible": null,
         "deadline": "2026-11-01",
         "actionableNow": true,
-        "requiresApproval": false,
+        "requiresApproval": true,
         "blockedBy": [],
         "tone": "green"
        }
@@ -1961,7 +1953,7 @@
        "primary": true
       }
      ],
-     "hash": "69de29a15909212c"
+     "hash": "a5a33ccba1b8a7b1"
     },
     {
      "id": "approval-placement",
@@ -2169,7 +2161,7 @@
     "label": "Issuance"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "6411526e2a460f23",
+   "fingerprint": "66c4667db123ef38",
    "blocks": [
     {
      "id": "header",
@@ -2198,8 +2190,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
        }
       ],
       "status": {
@@ -2238,7 +2230,7 @@
        "primary": false
       }
      ],
-     "hash": "a3f539190539162b"
+     "hash": "7a27948a7823221f"
     },
     {
      "id": "journey",
@@ -2294,11 +2286,11 @@
         "state": "next"
        }
       ],
-      "summary": "Resolve the differences between the issued policy and what was agreed. Confirmed by Jubilee in writing from 1 Nov 2026."
+      "summary": "Next step: Resolve the differences between the issued policy and what was agreed. Confirmed by Jubilee in writing from 1 Nov 2026."
      },
      "evidence": [],
      "actions": [],
-     "hash": "6a48970794eb842e"
+     "hash": "3053562b93d1fb9d"
     },
     {
      "id": "next",
@@ -2524,7 +2516,7 @@
     "label": "Verified"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "fb445c1a7735d92e",
+   "fingerprint": "dbf7c57299fe4770",
    "blocks": [
     {
      "id": "header",
@@ -2553,8 +2545,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
        }
       ],
       "status": {
@@ -2593,7 +2585,7 @@
        "primary": false
       }
      ],
-     "hash": "aea053b38fc50057"
+     "hash": "d92f210932a2ab93"
     },
     {
      "id": "journey",
@@ -2649,11 +2641,11 @@
         "state": "next"
        }
       ],
-      "summary": "Continue the issuance. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+      "summary": "The issued policy is checked and applied. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
      },
      "evidence": [],
      "actions": [],
-     "hash": "942fb568626710dc"
+     "hash": "b84c70c6303667cb"
     },
     {
      "id": "placement",
@@ -2706,27 +2698,6 @@
       }
      ],
      "hash": "509fcb868c8124e6"
-    },
-    {
-     "id": "obligations",
-     "component": "ObligationTracker",
-     "version": 1,
-     "role": "side",
-     "title": "Who holds the next step",
-     "props": {
-      "items": [
-       {
-        "party": "Jubilee",
-        "what": "Continue the issuance",
-        "since": "2026-10-08",
-        "due": null,
-        "kind": "outside"
-       }
-      ]
-     },
-     "evidence": [],
-     "actions": [],
-     "hash": "568864047ee2ff5c"
     },
     {
      "id": "cover",
@@ -2826,7 +2797,7 @@
     "label": "Continuing"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "429df64b4212ed76",
+   "fingerprint": "7be13ffdc691295f",
    "blocks": [
     {
      "id": "header",
@@ -2855,8 +2826,8 @@
         "value": "2"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
        }
       ],
       "status": {
@@ -2895,7 +2866,7 @@
        "primary": false
       }
      ],
-     "hash": "08bab1c0f4ad8535"
+     "hash": "fd44864ad7f4559e"
     },
     {
      "id": "journey",
@@ -2951,11 +2922,11 @@
         "state": "now"
        }
       ],
-      "summary": "Continue the issuance. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+      "summary": "The renewed cover is in force. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
      },
      "evidence": [],
      "actions": [],
-     "hash": "207715a56ef0140b"
+     "hash": "262bfc5b647eccf9"
     },
     {
      "id": "continuing",
@@ -3047,27 +3018,6 @@
       }
      ],
      "hash": "509fcb868c8124e6"
-    },
-    {
-     "id": "obligations",
-     "component": "ObligationTracker",
-     "version": 1,
-     "role": "side",
-     "title": "Who holds the next step",
-     "props": {
-      "items": [
-       {
-        "party": "Jubilee",
-        "what": "Continue the issuance",
-        "since": "2026-10-08",
-        "due": null,
-        "kind": "outside"
-       }
-      ]
-     },
-     "evidence": [],
-     "actions": [],
-     "hash": "568864047ee2ff5c"
     },
     {
      "id": "cover",
@@ -3167,7 +3117,7 @@
     "label": "Stopped"
    },
    "generatedAt": "2026-10-12T09:00:00.000Z",
-   "fingerprint": "968e87ef9ddb5563",
+   "fingerprint": "92ce3196e6def8cc",
    "blocks": [
     {
      "id": "header",
@@ -3192,8 +3142,8 @@
         "value": "31 Oct 2026 · 20 days"
        },
        {
-        "label": "ASAP",
-        "value": "Waiting on insurers"
+        "label": "Workflow status (recorded)",
+        "value": "Stopped — needs a person"
        }
       ],
       "status": {
@@ -3232,7 +3182,7 @@
        "primary": false
       }
      ],
-     "hash": "462f5fd167c809ee"
+     "hash": "20648d69233c154c"
     },
     {
      "id": "journey",
@@ -3288,11 +3238,11 @@
         "state": "next"
        }
       ],
-      "summary": "Awaiting insurer terms. Pack sent"
+      "summary": "Add the client's email address. The policy is checked; nothing has been sent"
      },
      "evidence": [],
      "actions": [],
-     "hash": "2508de48a5fa6678"
+     "hash": "a03d1f151c1d61d3"
     },
     {
      "id": "next",
@@ -3354,15 +3304,7 @@
      "role": "side",
      "title": "Who holds the next step",
      "props": {
-      "items": [
-       {
-        "party": "CIC",
-        "what": "Awaiting insurer terms",
-        "since": "2026-10-01",
-        "due": "2026-10-14",
-        "kind": "outside"
-       }
-      ]
+      "items": []
      },
      "evidence": [],
      "actions": [
@@ -3437,7 +3379,7 @@
        "tone": "default"
       }
      ],
-     "hash": "44dd694e124b9a34"
+     "hash": "810212564eb05780"
     },
     {
      "id": "cover",

@@ -140,18 +140,21 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   // A composed surface names itself once it loads; until then the previous record's name must not
   // stand in the header or be recorded in Recent under the new address.
   const surfaceIdentity = spaceRef ? `${spaceRef.ws}:${String(spaceRef["workItemId"] ?? spaceRef["clientId"] ?? "")}` : "";
-  useEffect(() => setLivingTitle(""), [surfaceIdentity]);
+  // A title naming a condition ("Not available") is shown but never recorded as the record's name.
+  const [titleIsState, setTitleIsState] = useState(false);
+  useEffect(() => { setLivingTitle(""); setTitleIsState(false); }, [surfaceIdentity]);
+  const nameSurface = useCallback((t: string, purpose?: string) => { setLivingTitle(t); setTitleIsState(purpose === "state"); }, []);
   const spaceTitle = living || portfolio || investigation ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
-    if (!ready || !A?.shell || !spaceRef || !spaceTitle || /^(Loading|Opening)/.test(spaceTitle)) return;
+    if (!ready || !A?.shell || !spaceRef || !spaceTitle || titleIsState || /^(Loading|Opening)/.test(spaceTitle)) return;
     if (["newclient", "newcontact", "nothing"].includes(spaceRef.ws)) return;
     // A portfolio view's whole query lives in its address; Recent keeps the portfolio itself.
     const entry = spaceRef.ws === "portfolio" ? { ref: { ws: "portfolio" }, title: "Renewal portfolio" } : { ref: spaceRef, title: spaceTitle.slice(0, 160) };
     const t = setTimeout(() => void A.shell.recordOpen(entry).then(refreshLists), 400);
     return () => clearTimeout(t);
     // spaceKey stands for spaceRef: the same record, not the same object, decides.
-  }, [ready, A, spaceKey, spaceTitle, refreshLists]);
+  }, [ready, A, spaceKey, spaceTitle, titleIsState, refreshLists]);
 
   // ---------------------------------------------------------------- the controller the logic calls
   controller.open = (ref: Ref) => {
@@ -296,7 +299,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
         void logic.ask(text);
       }}
-      onTitle={setLivingTitle}
+      onTitle={nameSurface}
     />
   ) : portfolio && spaceRef ? (
     <PortfolioPane
@@ -305,7 +308,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
       prefsStore={A?.surfacePrefs}
       onOpen={(ref) => controller.open(ref)}
       onNavigate={(ref, replace) => (surface.mode === "conversation" ? go({ mode: "conversation", conversationId: surface.conversationId, space: ref }, { replace }) : go({ mode: "space", ref, drawer: null }, { replace }))}
-      onTitle={setLivingTitle}
+      onTitle={nameSurface}
     />
   ) : living && spaceRef ? (
     <LivingRenewalPane
@@ -321,7 +324,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
         void logic.ask(text);
       }}
-      onTitle={(t, purpose) => { setLivingTitle(t); setLivingKind(purpose === "claim" ? "Claim" : purpose === "endorsement" ? "Policy change" : "Renewal"); }}
+      onTitle={(t, purpose) => { nameSurface(t, purpose); if (purpose !== "state") setLivingKind(purpose === "claim" ? "Claim" : purpose === "endorsement" ? "Policy change" : "Renewal"); }}
     />
   ) : renderSpace(v);
 

@@ -19,10 +19,19 @@ export function useSurfacePrefs(store: PrefsStore | undefined, surfaceKey: strin
   // just did wins over the late read, instead of being silently undone by it.
   const touched = useRef(false);
 
+  // The key arrives with the surface. Only a change from one surface to another starts afresh; the
+  // first key keeps whatever the person already arranged in the moment before it arrived (D-170 —
+  // resetting here was a rare race that undid a collapse made in that moment).
+  const previousKey = useRef<string | null>(null);
   useEffect(() => {
-    setPrefs(EMPTY_PREFS);
+    const switched = previousKey.current !== null && previousKey.current !== surfaceKey;
+    previousKey.current = surfaceKey;
+    if (switched || !surfaceKey) {
+      setPrefs(EMPTY_PREFS);
+      latest.current = EMPTY_PREFS;
+      touched.current = false;
+    }
     setLoaded(false);
-    touched.current = false;
     if (!surfaceKey) return;
     let live = true;
     const seen = new Date().toISOString();

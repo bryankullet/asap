@@ -104,6 +104,15 @@ describe("LivingSurface", () => {
     expect(screen.getByText(/The placement \(not available to your role\)/)).toBeTruthy();
   });
 
+  it("names the failure in the shell's header as a state, never as the record, so Recent does not keep it", async () => {
+    const { ApiRequestError } = await import("../../lib/api.js");
+    const { LivingSurface } = await import("./LivingSurface.js");
+    const onTitle = vi.fn();
+    render(<LivingSurface identity={ID} load={async () => { throw new ApiRequestError(422, "surface_invalid"); }} onOpen={() => {}} onAsk={() => {}} onTitle={onTitle} />);
+    expect(await screen.findByText("This workspace could not be composed")).toBeTruthy();
+    expect(onTitle).toHaveBeenCalledWith("Could not be composed", "state");
+  });
+
   it("says when it is not available, and never shows an example instead", async () => {
     const { ApiRequestError } = await import("../../lib/api.js");
     await mount(async () => { throw new ApiRequestError(404, "not_found"); });

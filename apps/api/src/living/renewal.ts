@@ -128,6 +128,7 @@ function issuanceWords(stage: string): string {
     review_required: "Review what ASAP read from the issued policy",
     differences_to_resolve: "Resolve the differences between the issued policy and what was agreed",
     ready_to_apply: "Apply the checked policy to the record",
+    applied: "The issued policy is checked and applied",
   } as Record<string, string>)[stage] ?? "Continue the issuance";
 }
 
@@ -249,7 +250,8 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
     facts: [
       ...(f.period ? [{ label: "Expiring insurer", value: f.period.insurerName }, { label: "Cover ends", value: fmtDate(f.period.periodEnd)! + (days !== null && days >= 0 ? ` · ${days} days` : "") }] : []),
       ...(f.opportunity ? [{ label: "Insurers approached", value: String(f.opportunity.insurers.filter((i) => i.stage !== "removed").length) }] : []),
-      ...(op ? [{ label: "ASAP", value: op.status }] : []),
+      // The run's own status as last recorded; the journey below states the suggested next step (D-170).
+      ...(op ? [{ label: "Workflow status (recorded)", value: `${op.status}${op.waitingFor && answered(f, op.waitingFor.party) ? " — answers have been recorded since" : ""}`.slice(0, 500) }] : []),
     ].slice(0, 6),
     status: { label: stageLabel, tone: statusTone },
     owner: f.ownerName,
@@ -257,11 +259,14 @@ export function composeRenewalSurface(f: RenewalLivingFacts, opts: { now: Date; 
 
   blocks.push(block("journey", "RenewalJourney", "lead", null, {
     stages: RENEWAL_STAGES.map((s, i) => ({ key: s.key, label: s.label, state: stage === "stopped" ? (i < 1 ? "done" : "next") : i < stageIndex ? "done" : i === stageIndex ? "now" : "next" })),
-    summary: (f.placement
-      ? `${f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction}. ${f.issuance?.cover.line ?? f.placement.cover.line}`
+    // "Next step:" marks a suggestion read from the records, apart from the run's recorded status above.
+    summary: (stage === "continuing"
+      ? `The renewed cover is in force. ${f.issuance?.cover.line ?? f.placement?.cover.line ?? ""}`.trim()
+      : f.placement
+      ? `${f.issuance?.stage === "applied" ? issuanceWords("applied") : `Next step: ${f.issuance && f.issuance.stage !== "not_ready" ? issuanceWords(f.issuance.stage) : f.placement.nextAction}`}. ${f.issuance?.cover.line ?? f.placement.cover.line}`
       : op
         ? // A run still "waiting" on an insurer whose answer is on the quotation has not caught up.
-          `${op.waitingFor && answered(f, op.waitingFor.party) ? f.opportunity?.next?.what ?? `${op.waitingFor.party} has answered` : op.currentWork.title}. ${op.completed}`
+          `${op.waitingFor && answered(f, op.waitingFor.party) ? `Next step: ${f.opportunity?.next?.what ?? `${op.waitingFor.party} has answered`}` : op.currentWork.title}. ${op.completed}`
         : gap(f, "run")
           ? "The renewal run could not be read, so its progress is not shown."
           : f.item.required_action ?? "No renewal run is attached to this work yet."

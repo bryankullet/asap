@@ -115,6 +115,13 @@ export function LivingSurface({ identity, noun = "renewal", runId = null, load, 
 
   const steps = runId ? () => onOpen({ ws: "renewal", runId }) : null;
 
+  // A surface that cannot be shown says so in the shell's header too, instead of "Opening…" (D-170).
+  // Purpose "state" tells the shell this names a condition, not the record, so Recent never keeps it.
+  const errorTitle = error ? (error.status === 404 || error.status === 403 ? "Not available" : error.status === 0 ? "Not connected yet" : "Could not be composed") : null;
+  useEffect(() => {
+    if (errorTitle && titleTo.current) titleTo.current(errorTitle, "state");
+  }, [errorTitle]);
+
   if (error) {
     const unreachable = error.status === 0;
     const gone = error.status === 404 || error.status === 403;

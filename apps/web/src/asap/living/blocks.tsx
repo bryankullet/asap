@@ -108,8 +108,7 @@ function ProgressOpportunity({ props }: P<typeof progressOpportunityProps>) {
       {props.items.map((o) => (
         <li key={o.id} className={`lv-opp lv-tone-${o.tone}`}>
           <div className="lv-opp-head">
-            <span className={`lv-dot lv-${o.tone}`} aria-hidden />
-            <strong>{o.title}</strong>
+            <span className="lv-opp-title"><span className={`lv-dot lv-${o.tone}`} aria-hidden /><strong>{o.title}</strong></span>
             {o.requiresApproval ? <span className="lv-chip lv-gold">Needs approval</span> : null}
             {o.actionableNow ? <span className="lv-chip lv-green">You can act now</span> : <span className="lv-chip lv-grey">Not yours yet</span>}
           </div>

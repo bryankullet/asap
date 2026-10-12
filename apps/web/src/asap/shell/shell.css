@@ -228,3 +228,10 @@
    even where an inline style removed it. */
 .sh-command-box:focus-within { border-color: var(--color-accent-green-line); box-shadow: 0 0 0 3px var(--color-accent-green-tint); }
 .sh-root :is(textarea, input, select):focus-visible:not(.sh-command-box *):not(.lv-refine *) { outline: 2px solid var(--color-accent-green) !important; outline-offset: 2px; }
+
+/* Work views on a phone (D-170): one compact row that scrolls sideways, never a wrapped cluster. */
+@media (max-width: 900px) {
+  .sh-tabs[role="tablist"] { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; scroll-padding-inline: 4px; }
+  .sh-tabs[role="tablist"]::-webkit-scrollbar { display: none; }
+  .sh-tabs[role="tablist"] .sh-tab { flex: none; white-space: nowrap; padding: 7px 12px; }
+}

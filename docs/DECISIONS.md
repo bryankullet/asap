@@ -3128,3 +3128,22 @@ absent. **Not built:** behavioural interface learning (re-ordering by what peopl
   The 1.5 s budgets are unchanged.
 - **Visual acceptance package** (`apps/web/e2e/visual-acceptance.e2e.mjs`): 78 screenshots of every
   major experience and state at 1440 and 390 px, captured over the real API; reviewed, nothing restyled.
+
+## D-170 — Final visual polish from the acceptance review
+
+No new design; the approved identity is unchanged. From the D-169 screenshot review:
+- **Work views on a phone** are one compact row that scrolls sideways, the chosen view kept in sight,
+  instead of a wrapped pill cluster.
+- **A surface that cannot be shown names the condition in the shell header** ("Not available",
+  "Not connected yet", "Could not be composed") instead of "Opening…"; a state title is never recorded
+  in Recent as the record's name.
+- **A status dot stays beside its label** when the label wraps.
+- **Recorded workflow status and suggested next step are distinguished:** the renewal header's fact is
+  "Workflow status (recorded)" and says when answers have been recorded since; the journey states its
+  suggestion as "Next step: …". Verified cover reads "The issued policy is checked and applied"
+  (it read "Continue the issuance"); stage nine reads "The renewed cover is in force".
+- **UI Lab fixtures** carry each stage's real run state (awaiting approval, comparison ready, handed over
+  to placement, stopped) and an applied placement no longer waits on the insurer.
+- **Found while testing:** the intermittent web test was a real race in `useSurfacePrefs` — the first
+  surface key reset an arrangement made in the moment before it arrived. Only a change between
+  surfaces resets now; a deterministic test (`prefs.test.tsx`) fails on the old code and passes now.

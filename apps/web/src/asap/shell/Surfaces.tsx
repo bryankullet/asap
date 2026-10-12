@@ -198,9 +198,12 @@ export function WorkSurface({ logic, A, view, onView, onOpen }: { logic: Logic; 
   void logic.state.tick;
   const { views } = workInbox({ supervision: sup(A), meId: meId(A) });
   const current = views.find((x) => x.key === view) ?? views[0]!;
+  // On a phone the views scroll sideways; the chosen one is kept in sight.
+  const tabs = useRef<HTMLDivElement>(null);
+  useEffect(() => { tabs.current?.querySelector<HTMLElement>(".sh-on")?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [current.key]);
   return (
     <div className="sh-surface sh-wide">
-      <div className="sh-tabs" role="tablist" aria-label="Work views">
+      <div className="sh-tabs" role="tablist" aria-label="Work views" ref={tabs}>
         {views.map((x) => (
           <button key={x.key} type="button" role="tab" aria-selected={x.key === current.key} className={x.key === current.key ? "sh-tab sh-on" : "sh-tab"} onClick={() => onView(x.key)}>
             {x.label} <span className="sh-count">{x.rows.length}</span>

@@ -66,7 +66,7 @@ export function InvestigationPane({ viewRef, investigation, resolveClient, prefs
   investigation: (clientId: string) => Promise<Surface>;
   resolveClient?: ((text: string) => Promise<InvestigateResponse>) | undefined;
   prefsStore?: PrefsStore | undefined;
-  onOpen: (ref: Ref) => void; onNavigate: (ref: Ref, replace: boolean) => void; onAsk: (text: string) => void; onTitle: (t: string) => void;
+  onOpen: (ref: Ref) => void; onNavigate: (ref: Ref, replace: boolean) => void; onAsk: (text: string) => void; onTitle: (t: string, purpose?: string) => void;
 }) {
   const clientId = typeof viewRef["clientId"] === "string" ? (viewRef["clientId"] as string) : "";
   const text = typeof viewRef["t"] === "string" ? (viewRef["t"] as string) : "";
@@ -138,7 +138,7 @@ export function queryOf(ref: Ref): PortfolioQuery | null {
  */
 export function PortfolioPane({ viewRef, portfolio, prefsStore, onOpen, onNavigate, onTitle }: {
   viewRef: Ref; portfolio: PortfolioApi; prefsStore?: PrefsStore | undefined;
-  onOpen: (ref: Ref) => void; onNavigate: (ref: Ref, replace: boolean) => void; onTitle: (t: string) => void;
+  onOpen: (ref: Ref) => void; onNavigate: (ref: Ref, replace: boolean) => void; onTitle: (t: string, purpose?: string) => void;
 }) {
   const qRaw = typeof viewRef["q"] === "string" ? (viewRef["q"] as string) : "";
   const query = useMemo(() => queryOf({ ws: "portfolio", q: qRaw }), [qRaw]);
