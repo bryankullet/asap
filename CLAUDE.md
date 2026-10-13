@@ -293,8 +293,8 @@ endpoint that already owns it, under that endpoint's permissions, frozen payload
 (D-157). Asking inside a workspace recomposes it around a typed focus (rules first; the model through
 the gateway only when no rule matches, D-165). Implementation map:
 `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`; release audit and plan for 0079–0091:
-`docs/release/RELEASE-0079-0091.md`. **Hosted database: through 0078; 0079–0091 are on the feature
-branch and not applied** until the owner approves.
+`docs/release/RELEASE-0079-0091.md`. **Hosted database: through 0091** (0079–0091 applied 13 Oct 2026
+with the owner's approval; execution log in the release document).
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 
