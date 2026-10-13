@@ -123,6 +123,10 @@ describe("Experience B — explore expiring policies", () => {
     const mine = t.rows.find((x) => x.ref.id === periodId);
     expect(mine?.cells["policy"]).toBe(`EXP-${TAG}`);
     expect(mine?.cells["premium"]).toBe("KES 1,850,000.00");
+    // "motor" names every motor class of the brokerage's own; it is not a class it does not use.
+    const chips = (s.components.find((c) => c.component === "FilterBar")!.props as { chips: { label: string }[]; unclear: string | null });
+    expect(chips.chips.map((c) => c.label)).toContain("Motor classes");
+    expect(chips.unclear).toBeNull();
   });
 
   it("opens a selected row's detail beside the table, and keeps the filters", async () => {
@@ -174,19 +178,22 @@ describe("Experience C — renew an existing policy", () => {
     }
     expect(components(s)).toEqual(expect.arrayContaining(["ContextSummary", "GovernedAction"]));
     const start = s.actions.find((a) => a.payload.kind === "renewal.start")!;
-    expect(start.payload).toEqual({ kind: "renewal.start", policyId });
+    expect(start.payload).toEqual({ kind: "renewal.start", policyPeriodId: periodId });
     expect(start.confirm?.effects.length).toBeGreaterThan(0);
   });
 
   it("starts through the existing endpoint and becomes the evolving working context", async () => {
-    const started = await call(AMINA, "POST", `/policies/${policyId}/renewal`);
+    const started = await call(AMINA, "POST", "/workflows/renewals", { policyPeriodId: periodId });
     expect(["done", "already"]).toContain(started.body.outcome);
-    workItemId = started.body.workItemId;
+    workItemId = started.body.run.workItemId;
     const s = spec((await call(AMINA, "POST", `/experiences/${id}/events`, { kind: "action_result", action: "start", ref: { type: "work_item", id: workItemId, label: null }, outcome: "done" })).body);
     expect(components(s)).toEqual(expect.arrayContaining(["ContextSummary", "Milestones", "NextSteps"]));
     expect(s.context.primary?.id).toBe(workItemId);
-    const header = s.components.find((c) => c.component === "ContextSummary")!.props as { heading: string };
+    const header = s.components.find((c) => c.component === "ContextSummary")!.props as { heading: string; facts: { label: string; value: string }[] };
     expect(header.heading).toContain("Acme Motors");
+    // The workflow start links the period and the run: the cover's end and the run's work are known.
+    expect(header.facts.find((f) => f.label === "Cover ends")?.value).not.toBe("No period linked");
+    expect(s.withdrawn).toEqual([]);
   });
 
   it("recomposes around a request, goes back, and refuses to decide for the client", async () => {

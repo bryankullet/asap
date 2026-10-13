@@ -31,7 +31,15 @@ const toQuery = (p: ExploreParams): PortfolioQuery => ({
 export function defaultExplore(now: Date): ExploreParams {
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
-  return { from: ymd(from), to: ymd(to), windowLabel: `in ${from.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}`, classOfBusiness: null, overdueOnly: false, insurer: null };
+  return { from: ymd(from), to: ymd(to), windowLabel: `in ${from.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}`, classOfBusiness: null, classWord: null, overdueOnly: false, insurer: null };
+}
+
+const COVER = ["motor", "medical", "fire", "marine", "travel", "liability", "engineering", "property", "life", "wiba", "domestic", "burglary", "indemnity", "accident", "health"];
+/** A cover word that names part of the brokerage's own class names — never a class it does not use. */
+function coverWord(text: string, classes: string[]): string | null {
+  const t = text.toLowerCase();
+  for (const w of COVER) if (new RegExp(`\\b${w}\\b`).test(t) && classes.some((c) => c.toLowerCase().includes(w))) return w;
+  return null;
 }
 
 /**
@@ -51,7 +59,19 @@ export function refineExplore(base: ExploreParams, text: string, now: Date, voca
   };
   take(/\b(include|show|with)\b[^.]*\bnot (yet )?overdue\b|\bnot only overdue\b|\bstop showing only overdue\b/i, () => (p.overdueOnly = false), "Overdue and not yet overdue");
   take(/\b(only|just)?\s*(show\s+)?(the\s+)?overdue( renewals| ones| policies)?\b/i, () => (p.overdueOnly = true), "Only overdue: ended and not renewed");
-  take(/\b(all|any|every) class(es)?\b|\ball (kinds of )?cover\b/i, () => (p.classOfBusiness = null), "Every class");
+  take(/\b(all|any|every) class(es)?\b|\ball (kinds of )?cover\b/i, () => {
+    p.classOfBusiness = null;
+    p.classWord = null;
+  }, "Every class");
+  // "motor" when the book has "Commercial motor" and "Private motor": every class containing the word.
+  const exact = vocab.classes.find((cl) => new RegExp(`\\b${cl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(rest));
+  const word = exact ? null : coverWord(rest, vocab.classes);
+  if (word) {
+    p.classWord = word;
+    p.classOfBusiness = null;
+    understood.push(`Every ${word} class`);
+    rest = rest.replace(new RegExp(`\\b${word}\\b`, "ig"), " ");
+  }
   take(/\b(all|any|every) insurers?\b/i, () => (p.insurer = null), "Every insurer");
   const leftover = rest.replace(/\b(show|me|only|just|the|policies|policy|renewals?|please|and|also|now|that|are|with|those|ones)\b/gi, " ").trim();
   if (leftover) {
@@ -68,13 +88,14 @@ export async function composeExplore(env: Env, s: ExploreState, now: Date): Prom
   const facts = await loadPortfolio(env, toQuery(s.params));
   const today = ymd(now);
   const isOverdue = (r: { ends: string; taskStatus: string | null }) => r.ends < today && r.taskStatus !== "done";
-  const rows = facts.rows.filter((r) => !s.params.overdueOnly || isOverdue(r)).sort((a, b) => a.ends.localeCompare(b.ends) || a.client.localeCompare(b.client));
+  const word = s.params.classWord;
+  const rows = facts.rows.filter((r) => (!s.params.overdueOnly || isOverdue(r)) && (!word || r.classOfBusiness.toLowerCase().includes(word))).sort((a, b) => a.ends.localeCompare(b.ends) || a.client.localeCompare(b.client));
   const statusWords = (r: (typeof rows)[number]) =>
     r.taskStatus === "done" ? "Renewed" : r.workItemId ? ({ needs_you: "Needs someone", with_party: "Waiting on others", in_progress: "ASAP is handling" } as Record<string, string>)[r.taskStatus ?? ""] ?? "Renewal open" : "No renewal open";
 
   const insurerName = s.params.insurer ? facts.vocab.insurers.find((i) => i.id === s.params.insurer)?.name ?? "One insurer" : null;
   const chips: { label: string; removeAction: string | null }[] = [{ label: `Ending ${s.params.windowLabel}`, removeAction: null }];
-  if (s.params.classOfBusiness) chips.push({ label: s.params.classOfBusiness, removeAction: c.action("rm-class", "Every class", { kind: "experience.refine", text: "all classes" }) });
+  if (s.params.classOfBusiness || word) chips.push({ label: s.params.classOfBusiness ?? `${word![0]!.toUpperCase()}${word!.slice(1)} classes`, removeAction: c.action("rm-class", "Every class", { kind: "experience.refine", text: "all classes" }) });
   if (insurerName) chips.push({ label: insurerName, removeAction: c.action("rm-insurer", "Every insurer", { kind: "experience.refine", text: "all insurers" }) });
   if (s.params.overdueOnly) chips.push({ label: "Overdue only", removeAction: c.action("rm-overdue", "Include not overdue", { kind: "experience.refine", text: "include not overdue" }) });
   const filters = c.put("filters", "FilterBar", {
@@ -93,7 +114,7 @@ export async function composeExplore(env: Env, s: ExploreState, now: Date): Prom
       tone: isOverdue(r) ? ("red" as const) : new Date(`${r.ends}T00:00:00Z`).getTime() - now.getTime() < 14 * DAY && r.taskStatus !== "done" ? ("gold" as const) : null,
     };
   });
-  const what = [s.params.classOfBusiness, s.params.overdueOnly ? "overdue" : null].filter(Boolean).join(", ");
+  const what = [s.params.classOfBusiness ?? (word ? `${word} classes` : null), s.params.overdueOnly ? "overdue" : null].filter(Boolean).join(", ");
   const table = c.put("policies", "RecordTable", {
     caption: `Policies ending ${s.params.windowLabel}${what ? ` · ${what}` : ""}`,
     columns: [
@@ -111,7 +132,7 @@ export async function composeExplore(env: Env, s: ExploreState, now: Date): Prom
       ? "Part of the book could not be read for you, so this list may be incomplete."
       : `No policy period ${s.params.classOfBusiness ? `of ${s.params.classOfBusiness} ` : ""}${s.params.overdueOnly ? "that is overdue " : ""}ends ${s.params.windowLabel} in this brokerage's records.`,
     truncated: facts.truncated || rows.length > 200,
-  }, { continuity: ["selection", "scroll", "sort"] });
+  }, { continuity: ["selection", "scroll", "sort"], actions: [c.action("select", "Open the details", { kind: "ui.select", target: "policies", ref: null })] });
 
   let detail = null;
   const sel = s.selected ? rows.find((r) => r.periodId === s.selected) ?? null : null;
@@ -140,7 +161,7 @@ export async function composeExplore(env: Env, s: ExploreState, now: Date): Prom
   }
 
   return {
-    title: cut(`Policies ending ${s.params.windowLabel}${s.params.classOfBusiness ? ` · ${s.params.classOfBusiness}` : ""}`, 200),
+    title: cut(`Policies ending ${s.params.windowLabel}${what ? ` · ${what}` : ""}`, 200),
     progress: "working",
     primary: null,
     layout: L.table("root", L.stack("list", [filters, table], "tight"), detail),

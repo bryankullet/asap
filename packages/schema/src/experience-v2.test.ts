@@ -99,7 +99,7 @@ describe("experience contract v2", () => {
     const s = base({
       actions: [
         { id: "save", label: "Add client", class: "mutate", payload: { kind: "client.create", form: "form" }, primary: true, confirm: null, disabledReason: null },
-        { id: "renew", label: "Start", class: "mutate", payload: { kind: "renewal.start", policyId: CLIENT }, primary: false, confirm: null, disabledReason: null },
+        { id: "renew", label: "Start", class: "mutate", payload: { kind: "renewal.start", policyPeriodId: CLIENT }, primary: false, confirm: null, disabledReason: null },
       ],
     });
     const v = validateExperienceSpec(s);

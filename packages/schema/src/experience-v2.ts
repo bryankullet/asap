@@ -156,7 +156,8 @@ export function layoutChildren(n: LayoutNode): LayoutNode[] {
 export const ActionClass = z.enum(["interface", "explore", "propose", "mutate"]);
 export const actionPayloadSchema = z.discriminatedUnion("kind", [
   /* Interface only: changes what is shown, never a record. */
-  z.strictObject({ kind: z.literal("ui.select"), target: nodeId, ref: subjectRefSchema }),
+  /* `ref` null: the component supplies the record from its own rows (a table); the server re-reads it. */
+  z.strictObject({ kind: z.literal("ui.select"), target: nodeId, ref: subjectRefSchema.nullable() }),
   z.strictObject({ kind: z.literal("ui.reveal"), node: nodeId }),
   z.strictObject({ kind: z.literal("ui.dismiss"), node: nodeId }),
   /* Exploration: recomposes the experience; writes nothing to business records. */
@@ -166,7 +167,7 @@ export const actionPayloadSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("document.open"), documentId: uuidSchema }),
   /* Business mutations, each owned by an existing endpoint that checks permission again. */
   z.strictObject({ kind: z.literal("client.create"), form: nodeId }),
-  z.strictObject({ kind: z.literal("renewal.start"), policyId: uuidSchema }),
+  z.strictObject({ kind: z.literal("renewal.start"), policyPeriodId: uuidSchema }),
   /* The exact bundle the person saw: the endpoint refuses a decision on any other version. */
   z.strictObject({ kind: z.literal("approval.decide"), approvalId: uuidSchema, bundleSha256: z.string().regex(/^[0-9a-f]{64}$/), decision: z.enum(["approve", "reject"]) }),
 ]);
@@ -426,7 +427,7 @@ export function validateExperienceSpec(input: unknown, opts: { authorizedRefs?: 
   for (const a of spec.actions) {
     if (ACTION_CLASS[a.payload.kind] !== a.class) issues.push({ path: `actions.${a.id}`, message: `${a.payload.kind} is a ${ACTION_CLASS[a.payload.kind]} action` });
     if (a.class === "mutate" && !a.confirm && a.payload.kind !== "client.create") issues.push({ path: `actions.${a.id}`, message: "a business mutation must carry its confirmation" });
-    if (a.payload.kind === "ui.select" && opts.authorizedRefs && !opts.authorizedRefs.has(subjectKey(a.payload.ref))) issues.push({ path: `actions.${a.id}`, message: "references a record outside the authorized context" });
+    if (a.payload.kind === "ui.select" && a.payload.ref && opts.authorizedRefs && !opts.authorizedRefs.has(subjectKey(a.payload.ref))) issues.push({ path: `actions.${a.id}`, message: "references a record outside the authorized context" });
   }
 
   const instances = new Set<string>();
@@ -541,6 +542,8 @@ export const exploreParamsSchema = z.strictObject({
   to: day,
   windowLabel: short,
   classOfBusiness: z.string().max(100).nullable().default(null),
+  /** A word naming a kind of cover ("motor"): every class of the brokerage's own whose name contains it. */
+  classWord: z.string().max(40).nullable().default(null),
   overdueOnly: z.boolean().default(false),
   insurer: uuidSchema.nullable().default(null),
 });

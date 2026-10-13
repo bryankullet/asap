@@ -58,9 +58,9 @@ fi
 setsid bash -c "cd apps/api && exec npx tsx test/connected/serve.ts" > "$WORK/api.log" 2>&1 & PIDS="$PIDS $!"
 VITE_PUBLIC_SUPABASE_URL="http://127.0.0.1:9" VITE_PUBLIC_SUPABASE_ANON_KEY="e2e-anon" \
   VITE_PUBLIC_API_BASE_URL="http://127.0.0.1:$API_PORT" VITE_PUBLIC_APP_ENV="local" \
-  setsid bash -c "cd apps/web && exec npx vite --host 127.0.0.1 --port $WEB_PORT --strictPort" > "$WORK/web.log" 2>&1 & PIDS="$PIDS $!"
-for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" && curl -s -o /dev/null "http://127.0.0.1:$WEB_PORT/e2e/live.html" && break; sleep 0.3; done
+  setsid bash -c "cd ${E2E_APP:-apps/web} && exec npx vite --host 127.0.0.1 --port $WEB_PORT --strictPort" > "$WORK/web.log" 2>&1 & PIDS="$PIDS $!"
+for _ in $(seq 1 100); do curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" && curl -s -o /dev/null "http://127.0.0.1:$WEB_PORT${E2E_READY_PATH:-/e2e/live.html}" && break; sleep 0.3; done
 curl -s -o /dev/null "http://127.0.0.1:$API_PORT/health" || { cat "$WORK/api.log" >&2; exit 1; }
 trap 'cp "$WORK"/*.log /tmp/ 2>/dev/null || true; cleanup' EXIT
 
-E2E_URL="http://127.0.0.1:$WEB_PORT/e2e/live.html${E2E_HASH:-#/ask}" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"
+E2E_URL="${E2E_URL_OVERRIDE:-http://127.0.0.1:$WEB_PORT/e2e/live.html${E2E_HASH:-#/ask}}" CONNECTED_API_URL="http://127.0.0.1:$API_PORT" node "${E2E_SCRIPT:-apps/web/e2e/journey.e2e.mjs}"

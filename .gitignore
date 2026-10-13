@@ -49,3 +49,4 @@ apps/extractor/.venv/
 
 # Browser end-to-end captures (scripts/test-e2e.sh): regenerable, and they show records.
 apps/web/.e2e-shots/
+apps/web-next/.e2e-shots/

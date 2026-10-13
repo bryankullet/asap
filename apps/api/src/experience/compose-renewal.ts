@@ -168,10 +168,13 @@ export async function composeRenewal(env: Env, s0: RenewState, now: Date): Promi
         ],
       }, { sources: periodSource ? [periodSource] : [] });
       const allowed = v.permissions.canStartWork && hasPermission(env.ctx, "policy", "edit");
-      const start = c.action("start", "Start the renewal", { kind: "renewal.start", policyId: v.policy.id }, {
+      const startPeriod = v.selectedPeriodId ?? period?.id ?? null;
+      if (startPeriod) c.allow({ type: "policy_period", id: startPeriod });
+      // POST /workflows/renewals: opens the renewal Work for this period and starts ASAP's renewal run.
+      const start = c.action("start", "Start the renewal", { kind: "renewal.start", policyPeriodId: startPeriod ?? v.policy.id }, {
         primary: true,
         confirm: { heading: `Start the renewal of ${cut(v.title, 150)}?`, effects: [`A renewal is opened as Work for ${v.client.name}, and ASAP prepares it.`, "Nothing is sent to the client or any insurer until a person approves it.", "Starting twice opens the same work; nothing is duplicated."] },
-        disabledReason: allowed ? null : "Your role cannot start renewal work. A colleague with policy access can.",
+        disabledReason: !startPeriod ? "No policy period is on file for this policy, so there is nothing to renew yet." : allowed ? null : "Your role cannot start renewal work. A colleague with policy access can.",
       });
       const governed = c.put("start", "GovernedAction", {
         heading: "No renewal is open for this policy",

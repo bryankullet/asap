@@ -1,0 +1,82 @@
+/*
+ * Design tokens for the progressive interface (D-172).
+ *
+ * Colours, radii and shadows come from packages/ui/src/styles.css — the single source (CLAUDE.md).
+ * This file declares only *semantic aliases* over those values (what a surface, a line or a status
+ * means here) and the interface's spacing and motion scale. No generated composition carries a
+ * style of its own: layout primitives and components read these names, nothing else.
+ */
+@import "@fontsource/outfit/500.css";
+@import "@fontsource/outfit/600.css";
+@import "@fontsource/outfit/700.css";
+@import "@fontsource/figtree/400.css";
+@import "@fontsource/figtree/500.css";
+@import "@fontsource/figtree/600.css";
+@import "tailwindcss";
+@import "@asap/ui/styles.css";
+
+:root {
+  /* Surfaces */
+  --x-page: var(--color-wash);
+  --x-paper: var(--color-paper);
+  --x-sunken: var(--color-surface-sunken);
+  --x-line: var(--color-line);
+  --x-line-soft: var(--color-line-soft);
+  --x-line-strong: var(--color-line-strong);
+  /* Ink */
+  --x-ink: var(--color-ink);
+  --x-ink-2: var(--color-ink-secondary);
+  --x-ink-3: var(--color-ink-muted);
+  /* Status — semantic and fixed: green active, gold waiting, red needs review, grey done. */
+  --x-green: var(--color-accent-green);
+  --x-green-soft: var(--color-accent-green-soft);
+  --x-green-tint: var(--color-accent-green-tint);
+  --x-gold: var(--color-accent-gold-ink);
+  --x-gold-soft: var(--color-accent-gold-soft);
+  --x-red: var(--color-accent-red);
+  --x-red-soft: var(--color-accent-red-soft);
+  --x-grey: var(--color-ink-done);
+  --x-grey-soft: var(--color-line-soft);
+  --x-focus: var(--color-accent-green);
+  /* Shape */
+  --x-r-surface: var(--radius-surface);
+  --x-r-card: var(--radius-card);
+  --x-r-nested: var(--radius-nested);
+  --x-r-control: var(--radius-control);
+  --x-r-input: var(--radius-input);
+  --x-r-chip: var(--radius-chip);
+  --x-r-pill: var(--radius-pill);
+  --x-shadow-rest: var(--shadow-1);
+  --x-shadow-raised: var(--shadow-2);
+  --x-shadow-float: var(--shadow-4);
+  /* Spacing scale (4px base) */
+  --x-1: 4px;
+  --x-2: 8px;
+  --x-3: 12px;
+  --x-4: 16px;
+  --x-5: 20px;
+  --x-6: 24px;
+  --x-8: 32px;
+  --x-10: 40px;
+  /* Motion: restrained, and off under reduced motion */
+  --x-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --x-quick: 160ms;
+  --x-settle: 260ms;
+  /* Geometry */
+  --x-content: 1240px;
+  --x-reading: 720px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --x-quick: 0ms;
+    --x-settle: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -102,10 +102,11 @@ function composeUnsupported(reason: string): Composed {
   return { title: "Not set up yet", progress: "waiting_input", primary: null, layout: L.stack("root", [ask]), composition: c, missing: [], resolution: "unsupported" };
 }
 
-function buildSpec(row: Row, st: Stored, composed: Composed, revision: number, now: Date, logger: Logger): ASAPExperienceSpec {
+function buildSpec(row: Row, st: Stored, composed: Composed, revision: number, now: Date, logger: Logger, reportWithdrawn: boolean): ASAPExperienceSpec {
   const c = composed.composition;
   const offered = new Set(c.actions.filter((a) => !a.disabledReason).map((a) => a.id));
-  const withdrawn = st.lastActions
+  // Said only when the records changed under the person (a re-read), never after their own step.
+  const withdrawn = (reportWithdrawn ? st.lastActions : [])
     .filter((id) => !offered.has(id) && !c.actions.some((a) => a.id === id))
     .filter((id) => !/^(pick-|try-|rm-|doc-)/.test(id))
     .slice(0, 8)
@@ -156,7 +157,7 @@ function uiOf(raw: unknown): ExperienceUiState {
 async function persistAndRespond(env: Env, row: Row, st: Stored, opts: { bump: boolean; now: Date; logger: Logger; redirect?: string | null; uiPatch?: (ui: ExperienceUiState) => ExperienceUiState }): Promise<ExperienceResponse> {
   const { composed, st: resolved } = await compose(env, row.kind, st, opts.now);
   const revision = opts.bump ? row.revision + 1 : row.revision;
-  const spec = buildSpec(row, resolved, composed, revision, opts.now, opts.logger);
+  const spec = buildSpec(row, resolved, composed, revision, opts.now, opts.logger, !opts.bump);
   let ui = uiOf(row.ui_state);
   let uiVersion = row.ui_version;
   if (composed.prefill && Object.keys(ui.drafts).length === 0) ui = { ...ui, drafts: composed.prefill };
@@ -254,9 +255,11 @@ export async function askExperience(env: Env, deps: Deps, id: string, text: stri
 
 async function focusRenewal(env: Env, deps: Deps, r: RenewState, text: string): Promise<RenewState> {
   if (BACK.test(text)) {
+    // Back from a focus returns to the one before it, or to the whole renewal.
+    if (!r.focus && !r.approvalsOnly) return { ...r, question: text, said: { text: "This is already the whole renewal.", refused: false } };
     const stack = [...r.focusStack];
     const prev = stack.pop() ?? null;
-    return { ...r, focus: prev, focusStack: stack, approvalsOnly: false, question: text, said: prev ? null : { text: "That was the first view of this renewal.", refused: false } };
+    return { ...r, focus: prev, focusStack: stack, approvalsOnly: false, question: null, said: null };
   }
   if (RESET.test(text)) return { ...r, focus: null, focusStack: r.focus ? [...r.focusStack, r.focus].slice(-8) : r.focusStack, approvalsOnly: false, question: null, said: null };
   if (APPROVALS_ONLY.test(text)) return { ...r, approvalsOnly: true, question: text, said: null, focusStack: r.focus ? [...r.focusStack, r.focus].slice(-8) : r.focusStack };
