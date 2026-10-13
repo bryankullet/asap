@@ -23,6 +23,7 @@ import { comparisonRoutes } from "./routes/comparisons.js";
 import { opportunityRoutes } from "./routes/opportunities.js";
 import { placementRoutes } from "./routes/placement.js";
 import { livingRoutes } from "./routes/living.js";
+import { experienceRoutes } from "./routes/experiences.js";
 import { policyRoutes } from "./routes/policy.js";
 import { quotationReadingRoutes } from "./routes/quotation-reading.js";
 import { ruleRoutes } from "./routes/rules.js";
@@ -251,6 +252,9 @@ export function createApp(deps: AppDeps) {
     "/chaser-templates/*",
     /* A colleague acknowledging work handed to them (D-166). */
     "/work-handovers/*",
+    /* The progressive experience pipeline (D-172). */
+    "/experiences",
+    "/experiences/*",
   ]) {
     app.use(path, guard);
   }
@@ -294,6 +298,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", quotationReadingRoutes({ logger }));
   app.route("/", placementRoutes({ logger }));
   app.route("/", livingRoutes({ logger, aiAvailable: !!deps.aiProvider, provider: deps.aiProvider ?? null }));
+  app.route("/", experienceRoutes({ logger, provider: deps.aiProvider ?? null }));
   app.route("/", policyRoutes({ logger }));
   app.route(
     "/",

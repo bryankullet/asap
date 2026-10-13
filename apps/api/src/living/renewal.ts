@@ -213,7 +213,7 @@ export function consequences(f: RenewalLivingFacts, now: Date) {
   return out.slice(0, 6);
 }
 
-function evidenceOf(f: RenewalLivingFacts): LivingEvidence[] {
+export function evidenceOf(f: RenewalLivingFacts): LivingEvidence[] {
   const out: LivingEvidence[] = [];
   for (const i of f.opportunity?.insurers ?? []) {
     const s = i.response?.source;
