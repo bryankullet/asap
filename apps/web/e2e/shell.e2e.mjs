@@ -191,6 +191,49 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1360, height: 900
     await page.getByRole("heading", { level: 1, name: /Acme Motors/ }).waitFor();
   });
 
+  // The Living renewal (D-156): composed and validated by the server, rendered as registered blocks.
+  const LIVING_ITEM = "30000000-0000-4000-8000-000000000001";
+  await step(page, "living-renewal-from-work", async () => {
+    await page.goto(BASE + "#/work?view=waiting");
+    await settle(page, 1000);
+    await page.locator(".sh-work-row", { hasText: "Acme Motors — renewal terms from Jubilee" }).first().getByRole("button").click();
+    await settle(page, 1500);
+    must(hash(page).startsWith("#/s/living"), `a renewal row opened ${hash(page)}, not its Living workspace`);
+    await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 15000 });
+    await noChat(page);
+  }, { shot: false });
+  await step(page, "living-renewal", async () => {
+    await page.goto(BASE + `#/s/living?workItemId=${LIVING_ITEM}`);
+    await settle(page, 1500);
+    await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 15000 });
+    for (const c of ["RenewalJourney", "ConsequencePanel", "CoverageEffectiveState"]) must(await page.locator(`.lv-root [data-component="${c}"]`).count(), `the surface lacks ${c}`);
+    must(await page.getByRole("heading", { level: 1, name: "Acme Motors — renewal terms from Jubilee" }).count(), "the header does not name the renewal");
+    must(await page.getByText("No policy period is linked to this renewal").count(), "a missing period is not said");
+    must(await page.getByText("Not confirmed").count(), "renewed cover is not stated as unconfirmed");
+    const text = await page.locator(".lv-root").innerText();
+    must(!UUID.test(text), "the surface shows an internal id");
+    must(!/\b(S[0-9]|M[0-9])\b|economic state/i.test(text), "economic state codes on screen");
+    const api = await apiAs(AMINA, "GET", `/living/${LIVING_ITEM}`);
+    must(api.status === 200 && api.body.blocks.every((b) => b.version >= 1), "the API surface is not valid");
+  });
+  await step(page, "living-collapse-persists", async () => {
+    await page.locator('.lv-col-side [data-component="ConsequencePanel"] button[title="Collapse"]').click();
+    await page.reload(); await settle(page, 1800);
+    await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 15000 });
+    must((await page.locator('[data-component="ConsequencePanel"] .lv-consequences').count()) === 0, "the collapsed block reopened after a refresh");
+    await page.locator('[data-component="ConsequencePanel"] button[title="Expand"]').click();
+  }, { shot: false });
+  await step(page, "living-ask-about-this", async () => {
+    await page.getByRole("button", { name: /Ask about this/ }).click();
+    await settle(page, 1000);
+    must(await page.locator(".sh-drawer .asap-ask").count(), "Ask about this did not open the drawer beside the Living surface");
+    must(await page.locator(".lv-root").count(), "the Living surface closed when the drawer opened");
+    await page.getByRole("button", { name: "Close the conversation" }).click();
+    await settle(page, 600);
+    await page.goto(BASE + `#/s/client?clientId=${ACME}`);
+    await settle(page, 1800);
+  });
+
   await step(page, "pin-persists", async () => {
     await page.getByRole("button", { name: "Pin", exact: true }).click();
     await settle(page, 800);
@@ -315,6 +358,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1360, height: 900
     must(!r.body.items.some((i) => JSON.stringify(i).includes(ACME)), "Recent leaked across brokerages");
     must((await apiAs(BETA, "GET", `/sessions/${renewalId}`)).status === 404, "a conversation crossed brokerages");
   });
+  await step(beta, "living-never-leaks", async () => {
+    const r = await apiAs(BETA, "GET", "/living/30000000-0000-4000-8000-000000000001");
+    must(r.status === 404, `another brokerage read the Living surface (${r.status})`);
+    await beta.goto(BASE + "#/s/living?workItemId=30000000-0000-4000-8000-000000000001");
+    await settle(beta, 1800);
+    await beta.getByText("This work is not available to you").waitFor({ timeout: 10000 });
+    must(!/Acme Motors/.test(await beta.locator(".sh-main").innerText()), "another brokerage's renewal is visible");
+    beta.errors = beta.errors.filter((e) => !/404 GET \/living\//.test(e));
+  });
   await beta.context().close();
 
   // Permissions: a read-only member cannot pause an automation or create a client, whatever the UI shows.
@@ -382,6 +434,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1360, height: 900
     await page.goBack(); await settle(page, 800);
     must(await page.locator(".asap-ask").count(), "browser Back did not return to the conversation");
   }, { shot: false });
+  await step(page, "mobile-living", async () => {
+    await page.goto(BASE + "#/s/living?workItemId=30000000-0000-4000-8000-000000000001");
+    await settle(page, 1800);
+    await page.locator('.lv-root [data-component="ContextHeader"]').waitFor({ timeout: 15000 });
+    must(await page.locator('.lv-root [data-component="CoverageEffectiveState"]').count(), "cover state missing on a phone");
+    const clipped = await page.evaluate(() => { const r = document.querySelector(".lv-root"); const f = document.querySelector(".lv-scroll"); return r && f ? r.scrollWidth - f.clientWidth : 0; });
+    must(clipped <= 1, `the Living surface is ${clipped}px wider than a phone`);
+    await page.locator('[data-component="CoverageEffectiveState"]').scrollIntoViewIfNeeded();
+  });
   await page.context().close();
 }
 

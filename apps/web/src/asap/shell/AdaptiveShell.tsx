@@ -1,5 +1,7 @@
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ApiRequestError } from "../../lib/api.js";
+import { InvestigationPane, LivingRenewalPane, looksLikeInvestigation, looksLikePortfolio, PortfolioPane } from "../living/panes.js";
 import { renderConversation, renderSheet, renderSpace, renderToast } from "../views/space-views.js";
 import { parse, sameRef, surfaceForRef, toPath, type Ref, type Surface } from "./routes.js";
 import { ActivitySurface, AutomationsSurface, HomeSurface, WorkSurface } from "./Surfaces.js";
@@ -98,7 +100,9 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   useEffect(() => {
     if (!ready) return;
     const ref = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
-    logic.setSurface(ref);
+    // A Living renewal (D-156) is rendered by the shell; without a server (demo mode) it opens the steps.
+    // Without a server (demo mode) a renewal opens its steps and other work its Work item page.
+    logic.setSurface(ref && ref.ws === "living" && !A?.living ? (typeof ref["runId"] === "string" ? { ws: "renewal", runId: ref["runId"] } : typeof ref["workItemId"] === "string" ? { ws: "workitem", workItemId: ref["workItemId"] } : { ws: "renewal" }) : ref);
     const cid = surface.mode === "conversation" ? surface.conversationId : surface.mode === "space" && surface.drawer && surface.drawer !== "new" ? surface.drawer : null;
     const wantsChat = surface.mode === "conversation" || (surface.mode === "space" && surface.drawer);
     if (wantsChat && (cid || null) !== (logic.state.conversationId || null)) void logic.openConversation(cid);
@@ -123,20 +127,34 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     if (conversation?.id === surface.conversationId && conversation.spaceRef && sameRef(conversation.spaceRef, surface.space)) return;
     const space = surface.space as Ref;
     void A.shell.update(surface.conversationId, { spaceRef: space }).then((c) => setConversation({ id: c.id, title: c.title, statusLabel: c.statusLabel, spaceRef: (c.spaceRef as Ref | null) ?? null })).catch(() => {});
-  }, [splitKey, conversation?.id]); // eslint-disable-line
+  }, [splitKey, conversation?.id]);
 
   // A Space opened is a Space in Recent, named as the Space names itself.
   const ws = v["ws"] as { kind?: string; title?: string; statusLabel?: string } | undefined;
   const spaceRef = surface.mode === "space" ? surface.ref : surface.mode === "conversation" ? surface.space : null;
-  const spaceTitle = ws?.title || "";
+  const living = !!(spaceRef && spaceRef.ws === "living" && A?.living && typeof spaceRef["workItemId"] === "string");
+  const portfolio = !!(spaceRef && spaceRef.ws === "portfolio");
+  const investigation = !!(spaceRef && spaceRef.ws === "investigation" && A?.investigation);
+  const [livingTitle, setLivingTitle] = useState("");
+  const [livingKind, setLivingKind] = useState("Renewal");
+  // A composed surface names itself once it loads; until then the previous record's name must not
+  // stand in the header or be recorded in Recent under the new address.
+  const surfaceIdentity = spaceRef ? `${spaceRef.ws}:${String(spaceRef["workItemId"] ?? spaceRef["clientId"] ?? "")}` : "";
+  // A title naming a condition ("Not available") is shown but never recorded as the record's name.
+  const [titleIsState, setTitleIsState] = useState(false);
+  useEffect(() => { setLivingTitle(""); setTitleIsState(false); }, [surfaceIdentity]);
+  const nameSurface = useCallback((t: string, purpose?: string) => { setLivingTitle(t); setTitleIsState(purpose === "state"); }, []);
+  const spaceTitle = living || portfolio || investigation ? livingTitle : ws?.title || "";
   const spaceKey = spaceRef ? JSON.stringify(spaceRef) : "";
   useEffect(() => {
-    if (!ready || !A?.shell || !spaceRef || !spaceTitle || /^(Loading|Opening)/.test(spaceTitle)) return;
+    if (!ready || !A?.shell || !spaceRef || !spaceTitle || titleIsState || /^(Loading|Opening)/.test(spaceTitle)) return;
     if (["newclient", "newcontact", "nothing"].includes(spaceRef.ws)) return;
-    const t = setTimeout(() => void A.shell.recordOpen({ ref: spaceRef, title: spaceTitle.slice(0, 160) }).then(refreshLists), 400);
+    // A portfolio view's whole query lives in its address; Recent keeps the portfolio itself.
+    const entry = spaceRef.ws === "portfolio" ? { ref: { ws: "portfolio" }, title: "Renewal portfolio" } : { ref: spaceRef, title: spaceTitle.slice(0, 160) };
+    const t = setTimeout(() => void A.shell.recordOpen(entry).then(refreshLists), 400);
     return () => clearTimeout(t);
     // spaceKey stands for spaceRef: the same record, not the same object, decides.
-  }, [ready, A, spaceKey, spaceTitle, refreshLists]);
+  }, [ready, A, spaceKey, spaceTitle, titleIsState, refreshLists]);
 
   // ---------------------------------------------------------------- the controller the logic calls
   controller.open = (ref: Ref) => {
@@ -218,7 +236,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
   const [palette, setPalette] = useState<null | "search" | "new" | "more">(null);
   const [splitWidth, setSplitWidth] = useState(460);
 
-  const pinTarget = surface.mode === "conversation" && surface.conversationId && !surface.space ? { conversationId: surface.conversationId } : spaceRef ? { ref: spaceRef, title: spaceTitle || spaceRef.ws } : null;
+  const pinTarget = surface.mode === "conversation" && surface.conversationId && !surface.space ? { conversationId: surface.conversationId } : spaceRef ? (spaceRef.ws === "portfolio" ? { ref: { ws: "portfolio" }, title: "Renewal portfolio" } : { ref: spaceRef, title: spaceTitle || spaceRef.ws }) : null;
   const pinKey = useMemo(() => {
     if (!pinTarget) return null;
     if ("conversationId" in pinTarget) return `conversation:${pinTarget.conversationId}`;
@@ -267,14 +285,53 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
     }
   };
 
-  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: ws?.kind });
+  const meta = headerFor(surface, { conversation, spaceTitle, wsKind: living ? livingKind : portfolio ? "Portfolio" : investigation ? "Client" : ws?.kind });
   const conversationEl = ready ? renderConversation(v) : null;
-  const spaceEl = ready ? renderSpace(v) : null;
+  const spaceEl = !ready ? null : investigation && spaceRef ? (
+    <InvestigationPane
+      viewRef={spaceRef}
+      investigation={A!.investigation!}
+      resolveClient={A?.resolveClient}
+      prefsStore={A?.surfacePrefs}
+      onOpen={(ref) => controller.open(ref)}
+      onNavigate={(ref, replace) => go({ mode: "space", ref, drawer: null }, { replace })}
+      onAsk={(text) => {
+        if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
+        void logic.ask(text);
+      }}
+      onTitle={nameSurface}
+    />
+  ) : portfolio && spaceRef ? (
+    <PortfolioPane
+      viewRef={spaceRef}
+      portfolio={A?.portfolio ?? notConnected}
+      prefsStore={A?.surfacePrefs}
+      onOpen={(ref) => controller.open(ref)}
+      onNavigate={(ref, replace) => (surface.mode === "conversation" ? go({ mode: "conversation", conversationId: surface.conversationId, space: ref }, { replace }) : go({ mode: "space", ref, drawer: null }, { replace }))}
+      onTitle={nameSurface}
+    />
+  ) : living && spaceRef ? (
+    <LivingRenewalPane
+      key={spaceRef["workItemId"] as string}
+      workItemId={spaceRef["workItemId"] as string}
+      runId={typeof spaceRef["runId"] === "string" ? spaceRef["runId"] : null}
+      viewRef={spaceRef}
+      living={A!.living!}
+      interpret={A?.interpretWorkspace}
+      prefsStore={A!.surfacePrefs}
+      onOpen={(ref) => controller.open(ref)}
+      onAsk={(text) => {
+        if (surface.mode === "space" && !surface.drawer) go({ mode: "space", ref: surface.ref, drawer: "new" });
+        void logic.ask(text);
+      }}
+      onTitle={(t, purpose) => { nameSurface(t, purpose); if (purpose !== "state") setLivingKind(purpose === "claim" ? "Claim" : purpose === "endorsement" ? "Policy change" : "Renewal"); }}
+    />
+  ) : renderSpace(v);
 
   let main: ReactNode;
   if (!ready) main = <div className="sh-loading" role="status">Opening your brokerage…</div>;
   else if (surface.mode === "home")
-    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => void logic.ask(text)} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
+    main = <HomeSurface logic={logic} A={A} recent={recent} onOpenRecent={openItem} onOpen={(ref) => go(surfaceForRef(ref))} onAsk={(text) => (A?.portfolio && looksLikePortfolio(text) ? go({ mode: "space", ref: { ws: "portfolio", t: text }, drawer: null }) : A?.investigation && looksLikeInvestigation(text) ? go({ mode: "space", ref: { ws: "investigation", t: text }, drawer: null }) : void logic.ask(text))} onFiles={(files) => void startWithFiles(files)} onNew={() => setPalette("new")} />;
   else if (surface.mode === "work") main = <WorkSurface logic={logic} A={A} view={surface.view} onView={(view) => go({ mode: "work", view }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "automations") main = <AutomationsSurface logic={logic} A={A} onOpen={(ref) => go(surfaceForRef(ref))} />;
   else if (surface.mode === "activity") main = <ActivitySurface logic={logic} filter={surface.filter} onFilter={(filter) => go({ mode: "activity", filter }, { replace: true })} onOpen={(ref) => go(surfaceForRef(ref))} />;
@@ -299,7 +356,7 @@ export function AdaptiveShell({ logic, v, controller, orgKey }: { logic: Logic; 
         <Resizer width={splitWidth} onWidth={setSplitWidth} />
         <div className="sh-split-space">
           <div className="sh-pane-bar">
-            <span className="sh-pane-label">{ws?.kind || "Space"}</span>
+            <span className="sh-pane-label">{living ? livingKind : ws?.kind || "Space"}</span>
             <span className="sh-pane-actions">
               <button type="button" onClick={() => go({ mode: "space", ref: surface.space!, drawer: surface.conversationId })}>Expand</button>
               <button type="button" onClick={closeSpaceKeepChat} aria-label="Close the Space and centre the conversation">Close Space</button>
@@ -666,6 +723,7 @@ function NewSheet({ onClose, go, onFiles }: { onClose: () => void; go: (s: Surfa
     ["▦", "Import spreadsheet", "Clients and policies from Excel or CSV", space({ ws: "import" })],
     ["◎", "Add client", "A client by name, then their people and policies", space({ ws: "newclient" })],
     ["↻", "Prepare renewal", "Every renewal ASAP is preparing, and starting one", space({ ws: "renewal" })],
+    ["▤", "Explore renewals", "The renewal portfolio — ask to group, filter or compare", space({ ws: "portfolio" })],
     ["▱", "Start quotation", "New business from a client request", space({ ws: "quote" })],
     ["⚑", "Report claim", "A loss against a policy", space({ ws: "claim" })],
     ["⌘", "Create automation", "Teach ASAP what to prepare, and when", space({ ws: "automation", create: "1" })],
@@ -713,3 +771,6 @@ function MoreSheet({ onClose, go, recent, onOpen, onSearch, onNew, onProfile }: 
     </Sheet>
   );
 }
+
+/** Demo mode has no server: the portfolio says so instead of drawing example rows. */
+const notConnected = async (): Promise<never> => { throw new ApiRequestError(0, "api_unreachable"); };

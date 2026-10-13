@@ -1,4 +1,4 @@
-import type { ConversationSummary, RecentItem as Recent, RecordOpenRequest, SurfaceRef } from "@asap/schema";
+import type { ConversationSummary, HomeChangesResponse, WorkspaceInterpretation, LivingSurface, PortfolioQuery, PortfolioResponse, SurfacePreferences, RecentItem as Recent, RecordOpenRequest, SurfaceRef, InvestigateResponse } from "@asap/schema";
 import type { Ref } from "./routes.js";
 
 export type RecentItem = Recent;
@@ -29,10 +29,28 @@ export type ShellApi = {
   unpin(key: string): Promise<unknown>;
 };
 
+/** What the address says to compose: alternatives explored and a focus asked for — ids and names only. */
+export type LivingView = { explore?: string[]; focus?: string | null; target?: string | null; fq?: string | null; fsrc?: string | null };
+
+export type PrefsStore = { get(key: string): Promise<SurfacePreferences>; put(key: string, prefs: SurfacePreferences): Promise<void> };
+
 export type ShellAdapters = {
   shell: ShellApi;
   supervision?: () => unknown;
   waitingDocuments?: () => string[];
+  /** Live mode only: the Living surface for a renewal. Demo mode has none and opens the steps. */
+  living?: (workItemId: string, view?: LivingView) => Promise<LivingSurface>;
+  /** Live mode only: a request inside a workspace, read into a typed focus (D-165). */
+  interpretWorkspace?: (workItemId: string, text: string) => Promise<WorkspaceInterpretation>;
+  /** Live mode only: everything on file for one client (D-167). */
+  investigation?: (clientId: string) => Promise<LivingSurface>;
+  resolveClient?: (text: string) => Promise<InvestigateResponse>;
+  /** Live mode only: personal surface arrangement, on the server (D-157). */
+  surfacePrefs?: PrefsStore;
+  /** Live mode only: the renewal portfolio, refined in plain language (D-158). */
+  /** Live mode only: what changed since this person last looked (D-159). */
+  homeChanges?: () => Promise<HomeChangesResponse>;
+  portfolio?: (body: { query: PortfolioQuery | null; text: string | null }) => Promise<PortfolioResponse>;
   records: { actor(): { id: string; name: string }; act(a: string, p: unknown, id: string): Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string }; sel: Record<string, (...a: never[]) => unknown> };
 };
 

@@ -1,0 +1,757 @@
+import type {
+  approvalBundleProps,
+  arrivedMailProps,
+  decisionTrailProps,
+  focusPanelProps,
+  handoverNoteProps,
+  proposalVersionsProps,
+  relatedWorkProps,
+  responsePatternsProps,
+  workChecklistProps,
+  workJourneyProps,
+  explorationPanelProps,
+  portfolioGroupsProps,
+  queryInterpretationProps,
+  LivingAction,
+  LivingBlock,
+  LivingComponent,
+  LivingEvidence,
+  changeComparisonProps,
+  consequencePanelProps,
+  contextHeaderProps,
+  coverageEffectiveStateProps,
+  evidenceInspectorProps,
+  obligationTrackerProps,
+  placementProgressProps,
+  progressOpportunityProps,
+  quoteComparisonProps,
+  renewalJourneyProps,
+  timelineProps,
+} from "@asap/schema";
+import { useId, useRef, useState, type ReactNode } from "react";
+import type { z } from "zod";
+import type { Ref } from "../shell/routes.js";
+import { missingInputs, runCommand, type CommandAction } from "./commands.js";
+
+/**
+ * The browser half of the Living registry (D-156). One React component per registered block, typed
+ * from the same Zod schemas the server validated against — never a hand-written duplicate. A block
+ * whose component is not in this map does not render: the server would have rejected it anyway.
+ *
+ * Every value shown here arrived in the block's props, which the server read from records. These
+ * components format; they do not decide. Status colours keep their fixed meanings.
+ */
+
+/** `refresh` re-reads the surface; a receipt is said at the top, so it outlives a block that leaves. */
+export type BlockEnv = {
+  open: (ref: Ref) => void;
+  ask: (text: string) => void;
+  refresh: (receipt?: string) => void;
+  /** On a surface a person can refine (D-158): a request in words, or removing one part of the view. */
+  refine?: (text: string) => void;
+  removeChip?: (field: string) => void;
+  /** The person's choices inside blocks, kept with their arrangement (D-157): they survive updates. */
+  selection?: Record<string, string>;
+  select?: (key: string, value: string | null) => void;
+  /** Exploring client choices without recording anything (D-160). */
+  explore?: { ids: string[]; set: (ids: string[]) => void };
+};
+type P<S extends z.ZodTypeAny> = { props: z.infer<S>; block: LivingBlock; env: BlockEnv };
+
+const day = (iso: string | null | undefined) => {
+  if (!iso) return null;
+  const d = new Date(iso.length === 10 ? `${iso}T12:00:00Z` : iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+};
+
+function ContextHeader({ props }: P<typeof contextHeaderProps>) {
+  return (
+    <header className="lv-header">
+      <div className="lv-header-main">
+        <div className="lv-eyebrow">{props.eyebrow}{props.client ? <> · <span>{props.client.name}</span></> : null}</div>
+        <h1 className="lv-title">{props.title}</h1>
+        <div className="lv-header-meta">
+          <span className={`lv-pill lv-${props.status.tone}`}><span className="lv-pill-dot" aria-hidden />{props.status.label}</span>
+          {props.owner ? <span className="lv-owner"><span className="lv-avatar" aria-hidden>{props.owner.slice(0, 1).toUpperCase()}</span>{props.owner}</span> : null}
+        </div>
+      </div>
+      {props.facts.length ? (
+        <dl className="lv-facts">
+          {props.facts.map((f) => (
+            <div key={f.label} className="lv-fact"><dt>{f.label}</dt><dd>{f.value}</dd></div>
+          ))}
+        </dl>
+      ) : null}
+    </header>
+  );
+}
+
+function RenewalJourney({ props }: P<typeof renewalJourneyProps>) {
+  return (
+    <div className="lv-journey">
+      <ol className="lv-stages" aria-label="Renewal stages" tabIndex={0}>
+        {props.stages.map((s, i) => (
+          <li key={s.key} className={`lv-stage lv-${s.state}`} aria-current={s.state === "now" ? "step" : undefined}>
+            <span className="lv-stage-mark" aria-hidden>{s.state === "done" ? "✓" : i + 1}</span>
+            <span className="lv-stage-label">{s.label}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="lv-journey-summary">{props.summary}</p>
+    </div>
+  );
+}
+
+function ProgressOpportunity({ props }: P<typeof progressOpportunityProps>) {
+  return (
+    <ul className="lv-opps">
+      {props.items.map((o) => (
+        <li key={o.id} className={`lv-opp lv-tone-${o.tone}`}>
+          <div className="lv-opp-head">
+            <span className="lv-opp-title"><span className={`lv-dot lv-${o.tone}`} aria-hidden /><strong>{o.title}</strong></span>
+            {o.requiresApproval ? <span className="lv-chip lv-gold">Needs approval</span> : null}
+            {o.actionableNow ? <span className="lv-chip lv-green">You can act now</span> : <span className="lv-chip lv-grey">Not yours yet</span>}
+          </div>
+          <p className="lv-why">{o.why}</p>
+          <div className="lv-opp-meta">
+            {o.responsible ? <span>Held by <b>{o.responsible}</b></span> : null}
+            {o.deadline ? <span>By <b>{day(o.deadline)}</b></span> : null}
+          </div>
+          {o.blockedBy.length ? (
+            <ul className="lv-blockers" aria-label="What blocks it">
+              {o.blockedBy.map((b, i) => <li key={i}>{b}</li>)}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const KIND_MARK = { outside: "↗", brokerage: "◎", asap: "✦" } as const;
+function ObligationTracker({ props }: P<typeof obligationTrackerProps>) {
+  return (
+    <ul className="lv-obligations">
+      {props.items.map((o, i) => (
+        <li key={`${o.party}-${i}`} className={`lv-ob lv-ob-${o.kind}`}>
+          <span className="lv-ob-mark" aria-hidden>{KIND_MARK[o.kind]}</span>
+          <div>
+            <strong>{o.kind === "asap" ? "ASAP is handling" : o.since ? `With ${o.party} since ${day(o.since)}` : `With ${o.party}`}</strong>
+            <p>{o.what}</p>
+            {o.due ? <small>Next check {day(o.due)}</small> : null}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ChangeComparison({ props }: P<typeof changeComparisonProps>) {
+  return (
+    <ul className="lv-changes">
+      {props.items.map((c, i) => (
+        <li key={i} className="lv-change">
+          <div className="lv-change-head">
+            <strong>{c.subject} · {c.field}</strong>
+            <span className="lv-chip lv-gold">Revision {c.revision}</span>
+            {c.receivedAt ? <small>{day(c.receivedAt)}</small> : null}
+          </div>
+          <div className="lv-change-values">
+            <span className="lv-earlier"><small>Earlier</small><s>{c.earlier ?? "Not recorded"}</s></span>
+            <span className="lv-arrow" aria-hidden>→</span>
+            <span className="lv-revised"><small>Revised</small><b>{c.revised ?? "Not recorded"}</b></span>
+          </div>
+          {c.affects.length ? <ul className="lv-affects">{c.affects.map((a, j) => <li key={j}>{a}</li>)}</ul> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const CERTAINTY = { confirmed: ["Confirmed", "red"], potential: ["Potential", "gold"], missing: ["Unknown", "grey"] } as const;
+function ConsequencePanel({ props }: P<typeof consequencePanelProps>) {
+  return (
+    <ul className="lv-consequences">
+      {props.items.map((c, i) => (
+        <li key={i}>
+          <span className={`lv-chip lv-${CERTAINTY[c.certainty][1]}`}>{CERTAINTY[c.certainty][0]}</span>
+          <p>{c.text}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CoverageEffectiveState({ props }: P<typeof coverageEffectiveStateProps>) {
+  const urgent = props.daysToExpiry !== null && props.daysToExpiry <= 14;
+  return (
+    <div className="lv-cover">
+      {props.expiring ? (
+        <div className="lv-cover-row">
+          <small>Current cover</small>
+          <strong>{props.expiring.insurerName}{props.expiring.policyNumber ? ` · ${props.expiring.policyNumber}` : ""}</strong>
+          <span>{day(props.expiring.periodStart)} – {day(props.expiring.periodEnd)}</span>
+          {props.daysToExpiry !== null ? (
+            <span className={`lv-countdown ${urgent ? "lv-red" : props.daysToExpiry <= 30 ? "lv-gold" : "lv-green"}`}>
+              {props.daysToExpiry >= 0 ? `${props.daysToExpiry} day${props.daysToExpiry === 1 ? "" : "s"} left` : `Ended ${-props.daysToExpiry} day${props.daysToExpiry === -1 ? "" : "s"} ago`}
+            </span>
+          ) : null}
+        </div>
+      ) : <p className="lv-missing">No policy period is linked, so the expiry is not known.</p>}
+      <div className="lv-cover-row">
+        <small>Renewed cover</small>
+        {props.renewed ? <strong className={props.renewed.state === "confirmed" || props.renewed.state === "active" ? "lv-ok" : ""}>{props.renewed.line}</strong> : <strong className="lv-missing">Not confirmed</strong>}
+      </div>
+      <p className="lv-note">{props.statement}</p>
+    </div>
+  );
+}
+
+function QuoteComparison({ props, block, env }: P<typeof quoteComparisonProps>) {
+  const labels = [...new Set(props.insurers.flatMap((i) => i.terms.map((t) => t.label)))].slice(0, 12);
+  // The insurer a person is looking at stays in focus through updates and visits — a reading aid,
+  // never a recommendation: ASAP does not pick a quote.
+  const focus = env.selection?.[block.id] ?? null;
+  const cls = (name: string) => (focus === name ? "lv-focus" : undefined);
+  return (
+    <div className="lv-quotes">
+      <div className="lv-table-wrap" role="region" aria-label="Table — scroll sideways for more" tabIndex={0}>
+        <table className="lv-table">
+          <thead>
+            <tr>
+              <th scope="col"><span className="lv-sr">Term</span></th>
+              {props.insurers.map((i) => (
+                <th key={i.name} scope="col" className={cls(i.name)}>
+                  {env.select ? <button type="button" className="lv-focus-btn" aria-pressed={focus === i.name} onClick={() => env.select!(block.id, focus === i.name ? null : i.name)} title={focus === i.name ? "Stop focusing this insurer" : "Keep this insurer in focus"}>{i.name}</button> : i.name}
+                  <small>{i.stage}</small>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Premium</th>{props.insurers.map((i) => <td key={i.name} className={`lv-num ${cls(i.name) ?? ""}`}>{i.premium ?? (i.declineReason ? <span className="lv-missing">Declined</span> : <span className="lv-missing">Awaited</span>)}</td>)}</tr>
+            <tr><th scope="row">Valid until</th>{props.insurers.map((i) => <td key={i.name} className={cls(i.name)}>{day(i.validUntil) ?? "—"}</td>)}</tr>
+            <tr><th scope="row">Revision</th>{props.insurers.map((i) => <td key={i.name} className={cls(i.name)}>{i.revision && i.revision > 1 ? <span className="lv-chip lv-gold">Revised · {i.revision}</span> : i.revision ? "Original" : "—"}</td>)}</tr>
+            {labels.map((l) => (
+              <tr key={l}><th scope="row">{l}</th>{props.insurers.map((i) => { const t = i.terms.find((x) => x.label === l); return <td key={i.name} className={cls(i.name)}>{t ? <>{t.value ?? "—"}{t.unclear ? <span className="lv-chip lv-gold" title="ASAP could not read this clearly">Check</span> : null}</> : <span className="lv-missing">Not stated</span>}</td>; })}</tr>
+            ))}
+            {props.insurers.some((i) => i.declineReason) ? <tr><th scope="row">Declined because</th>{props.insurers.map((i) => <td key={i.name}>{i.declineReason ?? ""}</td>)}</tr> : null}
+          </tbody>
+        </table>
+      </div>
+      {props.note ? <p className="lv-note">{props.note}</p> : null}
+    </div>
+  );
+}
+
+function PlacementProgress({ props }: P<typeof placementProgressProps>) {
+  return (
+    <div className="lv-placement">
+      <ol className="lv-vsteps">
+        {props.steps.map((s, i) => (
+          <li key={i} className={`lv-vstep lv-${s.state}`}>
+            <span className="lv-vstep-mark" aria-hidden>{s.state === "done" ? "✓" : s.state === "blocked" ? "!" : ""}</span>
+            <div><strong>{s.label}</strong>{s.note ? <small>{s.note}</small> : null}</div>
+          </li>
+        ))}
+      </ol>
+      <p className="lv-cover-line"><b>{props.insurerName}</b> · {props.coverLine}</p>
+      {props.blockers.length ? <ul className="lv-blockers">{props.blockers.map((b, i) => <li key={i}>{b}</li>)}</ul> : null}
+    </div>
+  );
+}
+
+function EvidenceList({ items, env }: { items: LivingEvidence[]; env: BlockEnv }) {
+  return (
+    <ul className="lv-evidence">
+      {items.map((e, i) => (
+        <li key={i}>
+          {e.documentId ? (
+            <button type="button" className="lv-evidence-link" onClick={() => env.open({ ws: "document", documentId: e.documentId })}>
+              <span aria-hidden>▧</span><span><strong>{e.label}</strong><small>{e.reference}{e.recordedAt ? ` · ${day(e.recordedAt)}` : ""}</small></span>
+            </button>
+          ) : (
+            <span className="lv-evidence-ref"><span aria-hidden>•</span><span><strong>{e.label}</strong><small>{e.reference}{e.recordedAt ? ` · ${day(e.recordedAt)}` : ""}</small></span></span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function EvidenceInspector({ props, env }: P<typeof evidenceInspectorProps>) {
+  return <EvidenceList items={props.items} env={env} />;
+}
+
+function Timeline({ props }: P<typeof timelineProps>) {
+  return (
+    <ol className="lv-timeline">
+      {props.events.map((e, i) => (
+        <li key={i}>
+          <time dateTime={e.at}>{day(e.at)}</time>
+          <span>{e.text}{e.actor ? <small> · {e.actor}</small> : null}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ApprovalBundle({ props }: P<typeof approvalBundleProps>) {
+  return (
+    <div className="lv-approval">
+      <div className="lv-approval-head"><strong>{props.title}</strong><span className="lv-chip lv-gold">Waiting for approval</span></div>
+      <p className="lv-why">{props.why}</p>
+      <ol className="lv-approval-items">
+        {props.items.map((it, i) => (
+          <li key={i} className="lv-approval-item">
+            <div className="lv-approval-meta"><b>{it.heading}</b>{it.to ? <span>To {it.to}</span> : null}</div>
+            <div className="lv-approval-subject">{it.subject}</div>
+            <pre className="lv-approval-body" tabIndex={0} aria-label={`${it.heading}: full text`}>{it.body}</pre>
+          </li>
+        ))}
+      </ol>
+      {props.approverNote ? <p className="lv-note">{props.approverNote}</p> : null}
+    </div>
+  );
+}
+
+function QueryInterpretation({ props, env }: P<typeof queryInterpretationProps>) {
+  return (
+    <div className="lv-query">
+      <ul className="lv-chips" aria-label="The view">
+        {props.chips.map((c) => (
+          <li key={`${c.field}-${c.text}`} className={`lv-qchip lv-qchip-${c.kind}`}>
+            <span>{c.text}</span>
+            {c.removable && env.removeChip ? <button type="button" aria-label={`Remove: ${c.text}`} onClick={() => env.removeChip!(c.field)}>×</button> : null}
+          </li>
+        ))}
+      </ul>
+      {props.unclear ? <p className="lv-unclear" role="status">{props.unclear} Nothing was changed for it.</p> : null}
+      {props.clarify ? (
+        <div className="lv-clarify" role="group" aria-label={props.clarify.question}>
+          <strong>{props.clarify.question}</strong>
+          <div className="lv-actions">{props.clarify.options.map((o) => <button key={o.label} type="button" className="lv-btn" onClick={() => env.refine?.(o.text)}>{o.label}</button>)}</div>
+        </div>
+      ) : null}
+      <p className="lv-note">{props.basis}</p>
+    </div>
+  );
+}
+
+const DIR_MARK = { increase: "▲", decrease: "▼", same: "＝", unknown: "" } as const;
+function PortfolioGroups({ props, env }: P<typeof portfolioGroupsProps>) {
+  if (props.selected === 0) return <p className="lv-empty">No renewal matches this view. Remove a part of it above, or ask for a different window.</p>;
+  return (
+    <div className={`lv-groups${props.comparing ? " lv-comparing" : ""}`}>
+      {props.comparing ? (
+        <div className="lv-compare-cards">
+          {props.groups.map((g) => (
+            <div key={g.key} className="lv-compare-card">
+              <strong>{g.label}</strong>
+              <dl>
+                <div><dt>Renewals</dt><dd>{g.count}</dd></div>
+                <div><dt>Expiring premium</dt><dd>{g.expiringTotals.join(" · ") || "—"}</dd></div>
+                <div><dt>Renewal premium</dt><dd>{g.renewalTotals.join(" · ") || "None yet"}</dd></div>
+                <div><dt>Up · down · unknown</dt><dd>{g.increases} · {g.decreases} · {g.unknown}</dd></div>
+              </dl>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {props.groups.map((g) => (
+        <section key={g.key} className="lv-group" aria-label={g.label}>
+          <header className="lv-group-head">
+            <h3>{g.label}</h3>
+            <span className="lv-chip lv-grey">{g.count}</span>
+            <span className="lv-group-totals">{g.expiringTotals.length ? <>Expiring {g.expiringTotals.join(" · ")}</> : null}{g.renewalTotals.length ? <> · Renewal {g.renewalTotals.join(" · ")}</> : null}</span>
+          </header>
+          <div className="lv-table-wrap" role="region" aria-label="Table — scroll sideways for more" tabIndex={0}>
+            <table className="lv-table lv-portfolio-table">
+              <thead><tr><th scope="col">Client · policy</th><th scope="col">Ends</th><th scope="col">Insurer</th><th scope="col">Expiring</th><th scope="col">Renewal</th><th scope="col">Change</th><th scope="col">Status</th></tr></thead>
+              <tbody>
+                {g.rows.map((r) => (
+                  <tr key={r.periodId}>
+                    <th scope="row">
+                      {r.workItemId ? <button type="button" className="lv-rowlink" onClick={() => env.open({ ws: "living", workItemId: r.workItemId! })}>{r.client}</button> : <span>{r.client}</span>}
+                      <small>{r.policy} · {r.classOfBusiness}</small>
+                    </th>
+                    <td>{day(r.ends)}</td>
+                    <td>{r.insurer}</td>
+                    <td className="lv-num">{r.expiring ?? <span className="lv-missing">Not recorded</span>}</td>
+                    <td className="lv-num">{r.renewal ?? <span className="lv-missing">None yet</span>}{r.renewalBasis === "placed" ? <small>Confirmed on placement</small> : r.renewalBasis === "expiring_insurer_quote" ? <small>Expiring insurer's quote</small> : null}</td>
+                    <td className={`lv-change-cell lv-dir-${r.direction}`}>{r.change ? <><span aria-hidden>{DIR_MARK[r.direction]}</span> {r.change}</> : <span className="lv-missing">—</span>}</td>
+                    <td><span className={`lv-chip lv-${r.statusTone}`}>{r.status}</span>{r.owner ? <small>{r.owner}</small> : null}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {g.more ? <p className="lv-note">{g.more} more in this group are not listed. Narrow the view to see them.</p> : null}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function ExplorationPanel({ props, env }: P<typeof explorationPanelProps>) {
+  const ids = env.explore?.ids ?? props.alternatives.map((a) => a.id);
+  const toggle = (id: string) => env.explore?.set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id].slice(-3));
+  return (
+    <div className="lv-explore">
+      <p className="lv-explore-notice" role="note"><span aria-hidden>◇</span> {props.notice}</p>
+      <div className="lv-explore-choices" role="group" aria-label="Explore if the client chose">
+        <span>If the client chose</span>
+        {props.choices.map((c) => (
+          <button key={c.id} type="button" className={c.exploring ? "lv-qchip lv-qchip-compare lv-explore-on" : "lv-qchip"} aria-pressed={c.exploring} disabled={!c.answered || !env.explore} onClick={() => toggle(c.id)} title={c.answered ? undefined : "No answer on file yet"}>
+            {c.insurer}{c.exploring ? " ×" : ""}
+          </button>
+        ))}
+        {ids.length ? <button type="button" className="lv-btn lv-btn-quiet" onClick={() => env.explore?.set([])}>Stop exploring</button> : null}
+      </div>
+      {props.alternatives.length ? (
+        <div className="lv-explore-grid">
+          {props.alternatives.map((a) => (
+            <article key={a.id} className={`lv-explore-card${a.available ? "" : " lv-explore-unavailable"}`} aria-label={`If the client chose ${a.insurer}`}>
+              <header><small>If the client chose</small><strong>{a.insurer}</strong></header>
+              {a.available ? (
+                <>
+                  <div className="lv-explore-premium"><b>{a.premium}</b><span className={`lv-dir-${a.direction}`}>{a.versusExpiring}</span></div>
+                  <p className={`lv-explore-validity lv-text-${a.validity.tone}`}>{a.validity.note}</p>
+                  <p className="lv-explore-change">{a.insurerChange ? "Changes insurer." : "Renews with the current insurer."}</p>
+                  {a.termDifferences.length ? (
+                    <table className="lv-table lv-explore-terms">
+                      <thead><tr><th scope="col">Term</th><th scope="col">Today's insurer quoted</th><th scope="col">{a.insurer}</th></tr></thead>
+                      <tbody>{a.termDifferences.map((d) => <tr key={d.label}><th scope="row">{d.label}</th><td>{d.current ?? <span className="lv-missing">Not stated</span>}</td><td>{d.alternative ?? <span className="lv-missing">Not stated</span>}{d.unclear ? <span className="lv-chip lv-gold">Check</span> : null}</td></tr>)}</tbody>
+                    </table>
+                  ) : null}
+                  <ol className="lv-explore-steps">{a.nextSteps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+                </>
+              ) : <p className="lv-missing">{a.unavailableReason}</p>}
+            </article>
+          ))}
+        </div>
+      ) : <p className="lv-note">Choose an insurer above to see what that choice would mean — premium, validity, terms and what happens next. Nothing is recorded.</p>}
+    </div>
+  );
+}
+
+const STEP_MARK = { done: "✓", now: "•", waiting: "…", stopped: "!", skipped: "–", next: "" } as const;
+function WorkJourney({ props }: P<typeof workJourneyProps>) {
+  return (
+    <div className="lv-journey">
+      {props.steps.length ? (
+        <ol className="lv-stages lv-work-stages" aria-label="Steps" tabIndex={0} style={{ gridTemplateColumns: `repeat(${props.steps.length}, minmax(0, 1fr))` }}>
+          {props.steps.map((s, i) => (
+            <li key={s.key} className={`lv-stage lv-${s.state === "now" || s.state === "waiting" ? "now" : s.state === "done" ? "done" : s.state === "stopped" ? "stopped" : "next"}`} aria-current={s.state === "now" || s.state === "waiting" ? "step" : undefined}>
+              <span className="lv-stage-mark" aria-hidden>{STEP_MARK[s.state] || i + 1}</span>
+              <span className="lv-stage-label">{s.label}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <p className="lv-journey-summary">{props.summary}</p>
+    </div>
+  );
+}
+
+const CHECK_MARK = { done: "✓", outstanding: "○", rejected: "×", pending: "…" } as const;
+const CHECK_WORDS = { done: "Done", outstanding: "Outstanding", rejected: "Rejected", pending: "Waiting" } as const;
+function WorkChecklist({ props }: P<typeof workChecklistProps>) {
+  return (
+    <div className="lv-checklist">
+      <ul>
+        {props.items.map((i) => (
+          <li key={i.key} className={`lv-check lv-check-${i.state}`}>
+            <span className="lv-check-mark" aria-hidden>{CHECK_MARK[i.state]}</span>
+            <div>
+              <strong>{i.label}</strong> <span className="lv-sr">— {CHECK_WORDS[i.state]}</span>
+              {i.detail ? <p>{i.detail}</p> : null}
+              {i.party || i.since ? <small>{[i.party, i.since ? (i.state === "done" ? `on ${day(i.since)}` : `since ${day(i.since)}`) : null].filter(Boolean).join(" · ")}</small> : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {props.note ? <p className="lv-note">{props.note}</p> : null}
+    </div>
+  );
+}
+
+function FocusPanel({ props, env }: P<typeof focusPanelProps>) {
+  return (
+    <div className="lv-focus">
+      <p className="lv-focus-q">“{props.question}”</p>
+      <p className="lv-focus-understood">
+        <strong>{props.understood}</strong>
+        {props.source === "model" ? <span className="lv-chip lv-grey" title="Read by the model through the AI gateway, checked against the workspace's own names">read by the model</span> : null}
+      </p>
+      {props.items.length ? (
+        <ul className="lv-focus-items">
+          {props.items.map((i, n) => (
+            <li key={n} className={`lv-focus-item lv-tone-${i.tone}`}>
+              <span className={`lv-dot lv-${i.tone}`} aria-hidden />
+              <div>
+                {i.ref ? <button type="button" className="lv-rowlink" onClick={() => env.open(i.ref as Ref)}>{i.label}</button> : <strong>{i.label}</strong>}
+                {i.detail ? <p>{i.detail}</p> : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {props.empty && !props.items.length ? <p className="lv-missing">{props.empty}</p> : null}
+      {env.removeChip ? <div className="lv-actions"><button type="button" className="lv-btn lv-btn-quiet" onClick={() => env.removeChip!("focus")}>Show the whole workspace</button></div> : null}
+    </div>
+  );
+}
+
+function ArrivedMail({ props }: P<typeof arrivedMailProps>) {
+  return (
+    <div className="lv-arrived">
+      <ul>
+        {props.items.map((m) => (
+          <li key={m.id} className="lv-arrived-item">
+            <div className="lv-arrived-head">
+              <strong>{m.party ?? m.from}</strong>
+              <small>{m.party ? `${m.from} · ` : ""}{day(m.at)}</small>
+            </div>
+            <p className="lv-arrived-subject">{m.subject}</p>
+            {m.reading ? <p className="lv-arrived-reading"><span className="lv-chip lv-grey">Not a fact</span> {m.reading}</p> : null}
+            {m.proposal ? (
+              <p className="lv-arrived-proposal">
+                Read from the email: <strong>{m.proposal.summary}</strong>
+                {m.proposal.words ? <q>{m.proposal.words}</q> : null}
+              </p>
+            ) : null}
+            <p className="lv-arrived-next">{m.proposed}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
+function HandoverNote({ props }: P<typeof handoverNoteProps>) {
+  if (!props.from || !props.done)
+    return <p className="lv-note">Not handed over. If a colleague takes this on, hand it over with what is done and what is still open — they will see it first.</p>;
+  return (
+    <div className={`lv-handover${props.forViewer && !props.acknowledgedAt ? " lv-handover-new" : ""}`}>
+      <p className="lv-handover-who">
+        <strong>{props.from}</strong> handed this to <strong>{props.forViewer ? "you" : props.to}</strong>{props.at ? ` on ${day(props.at)}` : ""}
+        {props.acknowledgedAt ? <span className="lv-chip lv-green">Acknowledged {day(props.acknowledgedAt)}</span> : <span className="lv-chip lv-gold">Not acknowledged yet</span>}
+      </p>
+      <dl className="lv-handover-notes">
+        <dt>Done</dt><dd>{props.done}</dd>
+        <dt>Still open</dt><dd>{props.open}</dd>
+        {props.watch ? <><dt>Watch</dt><dd>{props.watch}</dd></> : null}
+      </dl>
+      {props.earlier ? <small>{props.earlier} earlier handover{props.earlier === 1 ? "" : "s"} on this work.</small> : null}
+    </div>
+  );
+}
+
+function RelatedWork({ props, env }: P<typeof relatedWorkProps>) {
+  return (
+    <ul className="lv-related">
+      {props.items.map((r, i) => (
+        <li key={i}>
+          <div className="lv-related-head">
+            <span className="lv-chip lv-grey">{r.kind}</span>
+            <button type="button" className="lv-rowlink" onClick={() => env.open(r.ref as Ref)}>{r.title}</button>
+          </div>
+          <small>{r.status}</small>
+          <p>{r.certainty === "potential" ? <span className={`lv-chip lv-${CERTAINTY.potential[1]}`}>{CERTAINTY.potential[0]}</span> : r.certainty === "context" ? <span className="lv-chip lv-grey">Same client</span> : null} {r.why}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ResponsePatterns({ props }: P<typeof responsePatternsProps>) {
+  return (
+    <div className="lv-patterns">
+      <ul>
+        {props.items.map((p) => (
+          <li key={p.party}>
+            <strong>{p.party}</strong>
+            <p className={p.enough ? undefined : "lv-missing"}>{p.measure}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.basis}</p>
+    </div>
+  );
+}
+
+function DecisionTrail({ props, env }: P<typeof decisionTrailProps>) {
+  return (
+    <div className="lv-trail">
+      <p className="lv-trail-round">{props.round}</p>
+      <ol className="lv-timeline">
+        {props.items.map((i, n) => (
+          <li key={n}>
+            <span className={`lv-dot lv-${i.tone}`} aria-hidden />
+            <div>
+              <p>{i.text}</p>
+              <small>{[i.at ? day(i.at) : null, i.by].filter(Boolean).join(" · ")}</small>
+              {i.ref ? <button type="button" className="lv-rowlink lv-trail-link" onClick={() => env.open(i.ref as Ref)}>Open the evidence</button> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
+function ProposalVersions({ props, env }: P<typeof proposalVersionsProps>) {
+  return (
+    <div className="lv-proposals">
+      {props.committed ? <p className="lv-proposals-committed">{props.committed}</p> : null}
+      <ul>
+        {props.items.map((p) => (
+          <li key={p.version} className="lv-proposal">
+            <div className="lv-proposal-head">
+              <span className="lv-chip lv-purple">Proposal v{p.version} · hypothetical</span>
+              {p.latest ? <span className="lv-chip lv-grey">Latest</span> : null}
+            </div>
+            <button type="button" className="lv-rowlink" onClick={() => env.open(p.ref as Ref)}>{p.insurers.length ? `If the client chose ${p.insurers.join(" or ")}` : "The insurers in it are no longer on the quotation"}</button>
+            {p.note ? <p>{p.note}</p> : null}
+            {p.revisedSince.length ? <p className="lv-proposal-revised"><span className="lv-chip lv-gold">Revised since</span> {p.revisedSince.join(", ")} revised their answer after this was saved.</p> : null}
+            <small>{[`Saved ${day(p.savedAt)}`, p.by].filter(Boolean).join(" · ")}</small>
+          </li>
+        ))}
+      </ul>
+      <p className="lv-note">{props.note}</p>
+    </div>
+  );
+}
+
+/** Component id → renderer. The registry's browser half; anything absent does not render. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- props are validated per component on the server and typed per renderer above
+export const LIVING_RENDERERS: Record<LivingComponent, (p: { props: any; block: LivingBlock; env: BlockEnv }) => ReactNode> = {
+  ContextHeader,
+  RenewalJourney,
+  ProgressOpportunity,
+  ObligationTracker,
+  ChangeComparison,
+  ConsequencePanel,
+  CoverageEffectiveState,
+  QuoteComparison,
+  PlacementProgress,
+  EvidenceInspector,
+  Timeline,
+  ApprovalBundle,
+  QueryInterpretation,
+  PortfolioGroups,
+  ExplorationPanel,
+  WorkJourney,
+  WorkChecklist,
+  FocusPanel,
+  ArrivedMail,
+  HandoverNote,
+  RelatedWork,
+  ResponsePatterns,
+  DecisionTrail,
+  ProposalVersions,
+};
+
+/**
+ * An open command form is tied to the command it was opened for — its name, target and fixed
+ * fields — never to a position. When an update reorders or removes commands, the form stays with
+ * its own command, or closes saying so; it can never quietly become a different command holding
+ * what the person typed for the first.
+ */
+const commandKey = (a: CommandAction) => `${a.command}:${a.target}:${JSON.stringify(a.payload)}`;
+
+export function BlockActions({ actions, env }: { actions: LivingAction[]; env: BlockEnv }) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [gone, setGone] = useState<string | null>(null);
+  const active = openKey ? actions.find((a): a is CommandAction => a.kind === "command" && commandKey(a) === openKey) ?? null : null;
+  const lastLabel = useRef<string | null>(null);
+  // A command the person just completed leaves the surface because it is done — that is not news.
+  const succeeded = useRef<string | null>(null);
+  if (active) lastLabel.current = active.label;
+  if (openKey && !active) {
+    // The command left the surface: close; if the person had not completed it, say so.
+    if (succeeded.current !== openKey) setGone(lastLabel.current);
+    setOpenKey(null);
+  }
+  if (!actions.length && !gone) return null;
+  return (
+    <>
+      {gone ? <p className="lv-command-error" role="status">“{gone}” is no longer offered here — the record moved on. Nothing was done.</p> : null}
+      <div className="lv-actions">
+        {actions.map((a, i) =>
+          a.kind === "command" ? (
+            <button key={commandKey(a)} type="button" className={a.tone === "primary" ? "lv-btn lv-btn-primary" : a.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn"} aria-expanded={openKey === commandKey(a)} onClick={() => { setGone(null); setOpenKey(openKey === commandKey(a) ? null : commandKey(a)); }}>
+              {a.label}
+            </button>
+          ) : (
+            <button key={i} type="button" className={a.kind === "open" && a.primary ? "lv-btn lv-btn-primary" : "lv-btn"} onClick={() => (a.kind === "open" ? env.open(a.ref as Ref) : env.ask(a.text))}>
+              {a.label}
+            </button>
+          ),
+        )}
+      </div>
+      {active ? <CommandForm key={openKey} action={active} env={env} onDone={() => { succeeded.current = openKey; }} onClose={() => setOpenKey(null)} /> : null}
+    </>
+  );
+}
+
+/**
+ * One governed command, in place: what it needs, what it will do, then the owning endpoint's own
+ * answer — done, already done, or refused with its reason. Nothing is shown as done before the
+ * server says so.
+ */
+function CommandForm({ action, env, onDone, onClose }: { action: CommandAction; env: BlockEnv; onDone: () => void; onClose: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [missing, setMissing] = useState<string[]>([]);
+  // One intent, one key: a double submit or a retry after a dropped connection records once.
+  const key = useRef(typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k-${Date.now()}-${Math.random()}`);
+  const id = useId();
+  const submit = async () => {
+    const m = missingInputs(action, values);
+    setMissing(m);
+    if (m.length) return;
+    setBusy(true);
+    const r = await runCommand(action, values, key.current);
+    setBusy(false);
+    setResult(r);
+    if (r.ok) {
+      onDone();
+      env.refresh(`${action.label} — ${r.message === "Done." ? "done" : r.message}`);
+    }
+  };
+  return (
+    <div className="lv-command" role="group" aria-labelledby={`${id}-t`}>
+      <strong id={`${id}-t`}>{action.confirm?.title ?? action.label}</strong>
+      {action.confirm ? <p className="lv-why">{action.confirm.body}</p> : null}
+      {action.inputs.map((i) => (
+        <label key={i.name} className="lv-field">
+          <span>{i.label}</span>
+          {i.kind === "select" ? (
+            <select value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required}>
+              <option value="">Choose…</option>
+              {i.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          ) : i.kind === "textarea" ? (
+            <textarea rows={3} value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required} />
+          ) : (
+            <input type={i.kind === "datetime" ? "datetime-local" : i.kind === "date" ? "date" : "text"} value={values[i.name] ?? ""} onChange={(e) => setValues({ ...values, [i.name]: e.target.value })} required={i.required} />
+          )}
+          {i.hint ? <small>{i.hint}</small> : null}
+        </label>
+      ))}
+      {missing.length ? <p className="lv-command-error" role="alert">Still needed: {missing.join(", ")}.</p> : null}
+      {result ? <p className={result.ok ? "lv-command-ok" : "lv-command-error"} role="status">{result.message}</p> : null}
+      <div className="lv-actions">
+        {!result?.ok ? <button type="button" className={action.tone === "danger" ? "lv-btn lv-btn-danger" : "lv-btn lv-btn-primary"} onClick={() => void submit()} disabled={busy}>{busy ? "Working…" : action.label}</button> : null}
+        <button type="button" className="lv-btn" onClick={onClose}>{result?.ok ? "Close" : "Cancel"}</button>
+      </div>
+    </div>
+  );
+}
+
+export { EvidenceList };

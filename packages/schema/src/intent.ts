@@ -102,6 +102,31 @@ const SHARED_STATES = [
   "PermissionNotice",
   "ErrorRecovery",
 ] as const;
+/** The Living Interface's own blocks (D-156), composed server-side from authorized records. */
+const LIVING = [
+  "ContextHeader",
+  "RenewalJourney",
+  "ProgressOpportunity",
+  "ObligationTracker",
+  "ChangeComparison",
+  "ConsequencePanel",
+  "CoverageEffectiveState",
+  "PlacementProgress",
+  "EvidenceInspector",
+  "ApprovalBundle",
+  "QueryInterpretation",
+  "ExplorationPanel",
+  "WorkJourney",
+  "FocusPanel",
+  "ArrivedMail",
+  "HandoverNote",
+  "RelatedWork",
+  "ResponsePatterns",
+  "DecisionTrail",
+  "ProposalVersions",
+  "WorkChecklist",
+  "PortfolioGroups",
+] as const;
 /** Screen Map v3 surfaces: X08, K01–K03, G01–G02, T01–T02, N01–N04. */
 const V3_SURFACES = [
   "PremiumBreakdown",
@@ -130,6 +155,7 @@ export const ComponentId = z.enum([
   ...AI_RULES,
   ...SHARED_STATES,
   ...V3_SURFACES,
+  ...LIVING,
 ]);
 export type ComponentId = z.infer<typeof ComponentId>;
 

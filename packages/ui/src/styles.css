@@ -20,7 +20,8 @@
 @theme {
   /* Defined once; nothing else names a font. */
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* D-156: a softer reading face for the Living Interface; Outfit stays for headings and controls. */
+  --font-body: "Figtree", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* Older names, kept as aliases so existing utilities resolve to the same two faces. */
   --font-sans: var(--font-body);
@@ -33,12 +34,12 @@
    */
   --color-ink: #18231c;
   --color-ink-secondary: #4c564e;
-  --color-ink-muted: #6e776f;
-  --color-ink-faint: #8b938d;
+  --color-ink-muted: #5f6861; /* D-163: 4.5:1 on every Living background */
+  --color-ink-faint: #636c64; /* D-163: was #8b938d (2.9:1 on wash) */
   --color-ink-done: #7b867d;
 
   --color-paper: #ffffff;
-  --color-wash: #fbfcfa;
+  --color-wash: #f4f6f3;
   /* A sunken surface inside a card, distinct from the page background. */
   --color-surface-sunken: #f5f7f4;
 
@@ -135,15 +136,31 @@
    * Radii, as counted. 13px is the card — twenty uses, more than any other value — and the
    * gradient down to 9px is how the prototype distinguishes a card from a control from a chip.
    */
-  --radius-card: 13px;
-  --radius-panel: 16px;
-  --radius-control: 11px;
-  --radius-compact: 10px;
-  --radius-chip: 9px;
+  /*
+   * D-156 — the Living Interface's softer geometry (supersedes the measured 13px of D-115/D-056).
+   * One scale, used everywhere: a surface holds cards, a card holds nested cards, and nothing nests
+   * the same heavy radius inside itself.
+   */
+  --radius-surface: 28px;
+  --radius-panel: 24px;
+  --radius-card: 22px;
+  --radius-nested: 18px;
+  --radius-control: 15px;
+  --radius-input: 14px;
+  --radius-compact: 12px;
+  --radius-chip: 10px;
   --radius-tight: 8px;
-  --radius-pill: 99px;
+  --radius-pill: 999px;
 
-  /* Only two things float in the prototype: a modal and a sheet. Nothing at rest has a shadow. */
+  /*
+   * D-156 — a controlled elevation scale (supersedes "nothing at rest has a shadow"). Soft and
+   * diffused, never black: level 1 for a card at rest, 2 for an active or hovered surface, 3 for a
+   * floating panel, 4 for a modal. Nested content stays flat (level 0).
+   */
+  --shadow-1: 0 1px 2px rgba(24, 35, 28, 0.04), 0 6px 18px rgba(24, 35, 28, 0.05);
+  --shadow-2: 0 2px 6px rgba(24, 35, 28, 0.05), 0 14px 34px rgba(24, 35, 28, 0.08);
+  --shadow-3: 0 10px 24px rgba(24, 35, 28, 0.08), 0 28px 60px rgba(24, 35, 28, 0.12);
+  --shadow-4: 0 24px 70px rgba(24, 35, 28, 0.22);
   --shadow-modal: 0 16px 50px rgba(24, 35, 28, 0.2);
   --shadow-sheet: -20px 0 60px rgba(12, 22, 15, 0.16);
   /*

@@ -2824,3 +2824,334 @@ keeps D-115's substance (the approved interface's logic, Spaces and sheets) and 
   in N minutes" figure for Renewal Autopilot (the worker's schedule is not exposed to the browser,
   and the card does not invent one); pausing a whole workflow engine from its card (it is governed by
   the autonomy rule, opened from its Space).
+
+## D-156 — The Living Interface: server-composed, registered, calm surfaces; a softer visual system
+
+**Context.** The Intelligent UI brief (12 Oct 2026) asks for a premium, rounded visual language and
+for workspaces that compose themselves from what is happening, without giving a model authority
+over values, status, approvals or cover.
+
+**Decision.**
+- *Visual system.* `packages/ui/src/styles.css` stays the single source. Figtree body, Outfit
+  headings; radius scale surface 28 · panel 24 · card 22 · nested 18 · control 15 · input 14 ·
+  compact 12 · chip 10 · tight 8 · pill 999; elevation `--shadow-1`…`--shadow-4`, with
+  `--shadow-1` on cards at rest. This **supersedes** CLAUDE.md's "a card at rest is a hairline
+  border and an 18px radius, never a drop shadow" and the 18/12/99 radius set. Status colours and
+  their meanings do not change.
+- *Living surface.* A `LivingSurface` (`packages/schema/src/living.ts`) is composed on the server,
+  deterministically, from records the viewer may read (`apps/api/src/living/`). It is validated
+  against `component_definitions` (11 blocks, migration 0079, `allowed_spaces = {living}`), the
+  stored JSON Schema and the Zod source. Blocks needing a permission the viewer lacks are removed
+  before sending. The same contract as the Space plan (D-059) applies: no unregistered component,
+  no value from model text, no authored status.
+- *Actions never write.* A block can only open a governed place or ask a question. Approval,
+  sending, recording and applying stay where they are, under their guards.
+- *Consequences are typed by certainty.* Confirmed from records, potential from a relationship,
+  unknown when a fact is missing. A request, quote or draft is never shown as cover.
+- *Calm updates.* Polling every 20 s and on focus; an unchanged fingerprint is ignored; blocks keep
+  their ids and reconcile in place; changed blocks are marked Updated and new ones New for a few
+  seconds. Pinned and collapsed blocks are a per-person convenience in browser storage (CLAUDE.md
+  allows it for conveniences only).
+- *Renewals first.* Renewal runs and renewal Work items open `/s/living?workItemId=`. The renewal
+  steps stay one click away and remain where actions happen. Demo mode has no server and opens the
+  steps instead.
+- *UI Lab.* `apps/web/e2e/lab.html`, development only and never bundled, renders the composer's own
+  output for one fictional renewal at every stage. `apps/api/test/living-lab.test.ts` keeps the
+  snapshot equal to the composer. Fictional records stay confined to tests and demo mode (D-115).
+
+**Simplest choices where the brief is silent.** Polling instead of a second realtime channel. One
+composition purpose (`renewal`), as an enum so others are additive. The implementation map and
+milestone status are in `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`.
+
+## D-157 — Living surfaces act in place, keep personal arrangement on the server, and say what they could not read
+
+**Context.** D-156's surfaces opened the older workflow screens for every action, kept pinned and
+collapsed blocks in browser storage, and could present a failed read as missing information.
+
+**Decision.**
+- *Governed commands.* A block may carry a `command` from a closed set (approve or return a frozen
+  bundle, record a quotation delivery or an insurer's answer, the run's follow-up, escalate, pause
+  and resume controls, the placement's and the issuance's approve and record-submission steps).
+  The browser maps each to the endpoint that already owns it; the surface can never name a path.
+  The validator holds each command's fixed payload and inputs exactly. Commands are offered only
+  where the owning record already says they are available to this viewer, and every endpoint checks
+  again and audits. Approving shows the frozen payload in full (`ApprovalBundle`, 0081).
+- *The quotation record wins over a lagging run.* An insurer whose answer is on the quotation no
+  longer holds the next step, and is not chased, whatever the run's last reading says.
+- *Personal arrangement* (pinned, collapsed, selections, last seen) is kept in `surface_preferences`
+  (0080), scoped by RLS to brokerage, person and surface. Browser storage is no longer used for it.
+  An arrangement made before the saved one arrives wins over the late read.
+- *Unreadable sources* are recorded by the facts loader as `restricted` or `failed` and named on the
+  surface. The composer never shows such a gap as an absent period, placement or cover.
+
+## D-158 — The renewal portfolio, refined in plain language
+
+**Context.** The brief asks for Ask ASAP to control the interface — filter, group, compare — without
+fake values and without a parallel system.
+
+**Decision.**
+- A portfolio surface is selected by a typed query (`portfolioQuerySchema`: window, grouping,
+  filters, insurer comparison). The address carries the query (`/s/portfolio?q=…`), so refresh
+  reopens the view and Back undoes a refinement. Recent keeps the portfolio itself, not each view.
+- A request in words changes only the query, applied on top of the current view, by a
+  deterministic interpreter over the brokerage's own insurer and class names (`living/interpret.ts`).
+  Each refinement is said back as a removable chip; words it cannot use are said and change nothing;
+  a word naming two insurers asks which. No model runs in this path: a model-assisted reading may
+  be added later behind the same schema and an evaluation run (§45 rule 11).
+- Home sends a request about "renewals" or "portfolio" (with no instruction to act on a record) to
+  the portfolio; everything else still opens a conversation.
+- The renewal premium is read one stated way: confirmed on a placement, else the expiring insurer's
+  latest quote, else none. Changes compare amounts in the same currency only. ASAP never picks a quote.
+- Blocks `QueryInterpretation` and `PortfolioGroups` are registered in 0082.
+
+## D-159 — Home follows the brokerage; selections and open forms survive updates
+
+- *What changed* on Home is read from the brokerage's semantic events (§29) under the viewer's
+  session: insurer answers, deliveries, instructions, cover, issuance, claims, policy changes,
+  documents, and work ASAP stopped on. Each line says what happened, by whom, on which work, and
+  opens it; no figure appears on Home. A person's own actions are left out. "Since you last looked"
+  is the start of the current visit (kept stable for 30 minutes) and lives in `surface_preferences`
+  under the key `home`. Home re-reads every minute and on focus.
+- *Selections* inside blocks (the insurer in focus on the quote comparison, which sources are open)
+  are part of the person's arrangement (D-157) and survive updates, leaving and returning, and refresh.
+- *An open command form belongs to its command* (name, target, fixed fields), never to its position.
+  An update that reorders commands leaves the form and its typed text on the same command; one that
+  removes the command closes the form and says so. Found in the browser: by position, a half-typed
+  escalation became a "Pause" form when an earlier command dropped out.
+- *The quotation record wins over a lagging run* also in the journey summary and the obligations.
+
+## D-160 — Exploring a client decision before it is made
+
+Before a client decides, the renewal workspace offers "if the client chose …" for any insurer with
+an answer on the quotation, up to three side by side (`ExplorationPanel`, 0083). Each alternative
+shows, from records only: the premium against the expiring premium (same currency only), whether it
+changes insurer, the answer's validity against the cover end, term differences against the current
+insurer's quote, and the governed steps choosing it would set in motion. Declined or unpriced
+answers say why they cannot be chosen. It is drawn dashed and labelled hypothetical; nothing is
+recorded, nothing is recommended. The alternatives live in the address (`explore=`), so an
+exploration can be shared and restored, and Back undoes it. It disappears once the client has
+instructed — the decision is then a record, not an exploration.
+
+## D-161 — Claims and policy changes get Living workspaces on the same contract
+
+- `GET /living/:workItemId` composes by the work's own kind: renewal, claim or endorsement — one
+  route, one surface contract, one registry, one validator, one renderer. Other kinds answer 404
+  and keep their existing pages.
+- Claims are composed from `loadClaimDetail` and the run; policy changes from
+  `loadEndorsementDetail`, the run and `endorsement_premium_adjustments`. New registered blocks:
+  `WorkJourney` (any run's own steps) and `WorkChecklist` (0084). The older `Checklist` (0031) is a
+  different component and is left alone.
+- §45 rule 12 on screen: an unreviewed claim says cover has not been reviewed and that ASAP does
+  not decide it; no sentence decides cover (tested). The claim's offer, acceptance and payment are
+  three separate facts, each done only with its own reference.
+- Commands `claim.receive_document` and `endorsement.decide_item` run through
+  `POST /claims/:id/actions` and `POST /endorsements/:id/actions`. They are offered to roles that
+  can act (`space:create`). **Observed, not changed here:** the underlying RPCs check brokerage
+  membership only, so a read-only member calling the endpoint directly could record a document
+  or a decision; tightening that is a separate change to those RPCs.
+- A command the person just completed leaves without a "no longer offered" notice.
+- Commission reconciliation and investigations are **not built**: no reconciliation records exist
+  to compose from, and inventing tables for it would be building a later phase early.
+
+## D-162 — Communication and decision memory in the renewal workspace
+
+- *Messages for this renewal*: every message prepared by the run, with its state — prepared and
+  waiting for approval, approved but not sent, or sent/delivered with its proof. Approved is never
+  shown as sent.
+- *This cover before*: the client's earlier periods of the same class, newest first, with insurer,
+  premium and the change on the year before — read from policy periods under the viewer's session,
+  recorded as a gap when unreadable. Memory, not a prediction: no trend is extrapolated.
+- A surface may carry up to 20 blocks (was 14), since the busiest renewal reaches the old limit.
+
+## D-163 — Hardening the Living surfaces
+
+- *Accessibility:* axe-core runs on the Living surface in the UI Lab (every stage, 1440 and 390 px)
+  and on the real renewal, portfolio and claim workspaces; any serious or critical violation fails.
+  Found and fixed: muted and faint text below 4.5:1 on soft backgrounds — `--color-ink-muted` is
+  now `#5f6861` and `--color-ink-faint` `#636c64` (single source, packages/ui) — and scrollable
+  tables and stage strips that a keyboard could not reach (now focusable regions with focus rings).
+- *Keyboard:* every visible control on the surface takes focus and shows a ring.
+- *Visual regression:* the UI Lab at 1440 and 390 px against baselines in `apps/web/e2e/baselines`;
+  more than 0.5% of pixels changed fails. Baselines are refreshed only deliberately
+  (`UPDATE_BASELINES=1`) after the new screenshots are reviewed.
+- *Performance:* render time per stage in the browser (printed: p50 about 50 ms, p95 under 0.8 s
+  locally, first load included), and composition p95 on a real database in the connected suite,
+  held under 1.5 s for the renewal workspace and the portfolio.
+- *Security:* record text renders as text (markup in a title is not interpreted), in addition to the
+  tenant, role, tampered-command and preference-scope tests.
+
+## D-164 — Claim and policy-change mutations require the business permission (0085)
+
+- **Defect corrected.** Every claim and endorsement mutation checked brokerage membership only, so a
+  read-only member could record a claim document, a call note, an insurer reference, a claim fact
+  or amount, the insurer's decision on an endorsement item, a premium adjustment, or apply an
+  endorsement, by calling the API directly. Browsers' own direct calls to the database functions
+  were already refused (`app.require_api_caller`).
+- **Fix, in the database (0085):** `app.claim_for_write` requires `claim:edit`;
+  `app.endorsement_for_write` requires `policy:edit`; `claim_create` requires `claim:create`;
+  `endorsement_create` requires `policy:edit`. All fourteen mutation functions funnel through the
+  two helpers, so one change covers them. Membership is still checked first, so another brokerage
+  is still "not a member". The permissions are the existing matrix (0005/0014): read-only holds
+  only `view`; operational roles, managers and administrators keep the same abilities.
+- **And at the API:** `POST /claims/:id/actions` requires `claim:edit` and
+  `POST /endorsements/:id/actions` requires `policy:edit`, refusing with 403 and a denied audit row
+  before any write. Creation was already checked there.
+- **The workspace** offers claim commands on `claim:edit` and policy-change commands on `policy:edit`.
+- **Unchanged:** the workflow engine's own service-role function (`claim_set_cover_review_by_run`).
+- **Tested:** pgTAP 0353 (read-only refused for nine mutations, other brokerage refused, authorized
+  still allowed); connected (read-only refused through the API for every claim and endorsement
+  action and for opening claim or policy work, refused calling the database functions directly,
+  denied rows audited, nothing recorded; authorized members still succeed).
+- **Found while testing:** a connected test that started its renewal with the global workflow sweep
+  advanced other test files' runs and made `mailbox-delivery` count extra sends; it now starts its
+  renewal for its own period only.
+
+## D-165 — Ask ASAP inside a Living workspace recomposes it (0086)
+
+- **What it does.** Renewal, claim and policy-change workspaces have an "Ask about this" box. A
+  request ("Compare the revised terms", "Show what is blocking this claim", "Bring up the document
+  behind this exclusion") becomes a typed *focus* — one of eleven intents and, where the request
+  names one, a target taken from the record's own names (insurers, terms, documents). The browser
+  moves to that address (`focus`, `target`, `fq`, `fsrc`), and the server recomposes the same
+  workspace: a registered `FocusPanel` answer after the header, the blocks it concerns brought
+  forward and marked. It is not a chat reply and nothing is written.
+- **Answers come from records** (`living/focus.ts`): revisions, quotes, blockers, documents,
+  obligations, messages, notes, consequences. When nothing is on file the panel says so and shows
+  nothing in its place; "nothing on file" is never said beside a list.
+- **Rules first, model second** (`living/ask-workspace.ts`, `POST /living/:id/interpret`). The
+  model is consulted through the AI gateway only when no rule matches. It is given the intent list
+  and the record's names, never the records; its reply must match a schema, its target must be one
+  of the names, and anything else is no answer. Refusals never reach the model.
+- **Refused, with the reason:** requests to act (acting happens through the workspace's governed
+  controls), to decide cover or liability (§45 rule 12), and to choose an insurer for the client.
+- **Explore** ("what if they chose CIC") opens the existing exploration (D-160) rather than a focus.
+- **Evaluated** (§45 rule 11): `docs/evaluation/workspace-requests.json`, 35 readable and 7 refusal
+  cases; rules offline at 100% (threshold 95%), the model with `WORKSPACE_EVAL_LIVE=1`.
+- **Permissions:** asking is reading, so read-only members may ask; another brokerage's work is 404.
+  Item links in the panel are limited to the places a surface may open.
+
+## D-166 — Insurance-native intelligence in every Living workspace (0087, 0088)
+
+Five blocks, each from records the viewer may read, none a status, none written by a model:
+
+- **Arrived email** (`ArrivedMail`). Email the inbound router filed to this work's runs (D-144) on
+  the step the run is on and nobody has dealt with. ASAP's reading is labelled "Not a fact". When
+  the email's own words were read into a proposal (D-152), the workspace offers
+  `quotation.confirm_reading`: the existing `record_response` action with `fromProposalId`, its
+  confirmation showing the values and the words. Otherwise it says which governed step the email
+  belongs to (record a claim document, an insurer's decision, an answer). Filing records nothing.
+- **Handover** (`HandoverNote`, table `work_handovers`, 0087). Responsibility moves to a colleague
+  with what is done, what is still open and what to watch; the owner changes in the same
+  transaction under `job:edit`, to an active member, at the version seen, never on done work. The
+  receiver sees it first and acknowledges it ("I have it"); only they can. Everyone who can see the
+  work can read how it changed hands. `POST /work-items/:id/hand-over`,
+  `POST /work-handovers/:id/acknowledge` (the latter added to the session guard after the connected
+  test found it reachable without one).
+- **Related work** (`RelatedWork`). Other open work for the same client; on the same policy it says
+  why it may bear on this work (an open claim on a policy being renewed, an open change on a
+  claimed policy), marked *potential*; other policies are marked *same client*. No cover wording.
+- **What usually happens** (`ResponsePatterns`). For insurers a renewal waits on: delivered requests
+  and recorded answers over 12 months, the typical first-answer time, stated only with 5 or more
+  requests and always as an estimate with its basis. The minimum is a display rule, said on screen.
+- **Decided last time** (`DecisionTrail`). The client's previous quotation round for the same class:
+  answers, declines with their reasons, and the client's instruction with its evidence — "a starting
+  point, not this year's decision".
+
+Unreadable parts are named on the surface (e.g. "Colleagues could not be read"), never shown as
+absent. **Not built:** behavioural interface learning (re-ordering by what people click); the only
+"learning" is outcomes measured from records, and personal arrangement (0080).
+
+## D-167 — Stage nine, saved proposals and client investigations (0089, 0090, 0091)
+
+- **Stage nine, "Continuing"** (`RenewalJourney` v2, 0089). A renewal reaches it once the renewed
+  cover is verified (issuance applied) and the following period on the same policy is on file and
+  has begun, or the renewal work is done. The workspace then shows the year ahead from records: the
+  cover now in force, when the next renewal opens (the brokerage's `renewal.window` rule, or ASAP's
+  stated default), and that this round's decisions carry into next year's "Decided last time".
+  A later period without verified issuance is not stage nine (tested). Version 1 stays registered.
+- **Saved, versioned proposals** (`renewal_proposals`, `renewal_proposal_save`, `ProposalVersions`,
+  0090). What is being explored (D-160) can be saved as the next numbered proposal through the
+  `proposal.save` command (`POST /living/:id/proposals`). A proposal holds the quotation-insurer ids
+  and each answer's revision at the time, never a figure; opening one re-explores it with today's
+  figures, and an answer revised since is said. It is labelled hypothetical everywhere, is never the
+  client's instruction, is never sent, and once the client instructs, the block says the proposals
+  are history. `job:edit`, open renewals, insurers on that renewal's own quotation only; audited.
+- **Client investigations** (`GET /living/client/:clientId`, purpose `investigation`). One
+  workspace across everything on file for a client: open work (most pressing first, `RelatedWork`
+  v2 with no marker, 0091), cover on file per policy, claims, email waiting across the client's runs,
+  recent changes. It offers no command; each row opens the governed place. Reached from "Everything
+  for this client" on every workspace header and from Home ("everything about Acme Motors"):
+  `POST /living/investigate` matches the brokerage's own client names and picks one only when its
+  name carries every distinctive word asked; otherwise it offers the candidates. Never a guess.
+- **Reconciliation workspaces are not built.** There are no commission statements, receipts or
+  premium payments recorded in ASAP to compose from; building the surface would mean fabricating
+  financial records. It waits for the money slice.
+- **Found while testing:** the shell header kept the previous record's title while a new composed
+  surface loaded, which could also have recorded the new address in Recent under the old name; the
+  title now resets whenever the open record changes.
+
+## D-168 — Final hardening of the Intelligent UI
+
+- **Accessibility across the whole authenticated shell** (`apps/web/e2e/shell-a11y.e2e.mjs`):
+  Home, the five Work views, Automations, Activity, Settings, Connections, a client Space, an
+  investigation, the portfolio, a conversation, Search, New and (on phones) More, at 1440 and
+  390 px — axe-core WCAG 2.1 A/AA with no serious or critical violation; keyboard focus visibly
+  drawn (on the control or its box: compared focused and unfocused, so a permanent shadow does not
+  count); no animation running under reduced motion. Fixed on the way: greys below 4.5:1 in the
+  shell and the Space renderers (now tokens), an `aria-label` on a role-less element, an unlabelled
+  file input, composer fields with no drawn focus.
+- **Bursts and volume** (`living-volume.test.ts`): ten concurrent proposal saves number 1–10 once
+  each; two simultaneous handovers — one applies, one is refused as stale; forty filed emails show
+  as eight; fifty concurrent reads compose identically; a client with 150 policies and 250 open
+  items composes within limits and under 1.5 s. Found: investigation counts taken from loaded rows
+  (now exact database counts, "at least" where only part was read) and period queries filtered
+  through an embedded policy join, seconds slow under RLS (now by policy id — also the renewal's
+  "This cover before").
+
+## D-169 — Final acceptance: release audit, model-path evaluation, visual package
+
+- **Release audit of 0079–0091** (`docs/release/RELEASE-0079-0091.md`, `scripts/release/`). The hosted
+  history (0001–0078) matches the repository. On an isolated server, a 0078 database filled by the
+  0078-era application was upgraded one migration per transaction: every existing table unchanged
+  (fingerprinted), `component_definitions` gained 26 rows with the original 9 identical. pgTAP 1,261/1,261
+  on an upgraded seed database; zero cross-tenant rows across 103 tables for every fixture person on
+  the populated one; the 0078-era API passes 188/188 on the 0091 schema, so the database deploys first.
+  The rollback script restores the 0078 schema and data exactly (rehearsed), and the release's own
+  rows can be backed up and restored. Not applied to hosted.
+- **Model-path evaluation** (`docs/evaluation/workspace-model-fallback.json`, `pnpm eval:workspace:live`):
+  natural, indirect and ambiguous requests, injection, model-only refusals and missing evidence; the
+  offline run proves each model case bypasses the rules; the live run measures intent and target
+  accuracy, safe abstention, latency and failures on real calls and writes its own report. It has
+  **not** been run: there is no provider key in the development environment.
+- **Timing budgets run isolated** (`pnpm test:connected:perf`): inside the parallel connected suite
+  the renewal p95 reached 2.1 s from database contention; alone it is about 0.2 s (portfolio 0.1 s).
+  The 1.5 s budgets are unchanged.
+- **Visual acceptance package** (`apps/web/e2e/visual-acceptance.e2e.mjs`): 78 screenshots of every
+  major experience and state at 1440 and 390 px, captured over the real API; reviewed, nothing restyled.
+
+## D-170 — Final visual polish from the acceptance review
+
+No new design; the approved identity is unchanged. From the D-169 screenshot review:
+- **Work views on a phone** are one compact row that scrolls sideways, the chosen view kept in sight,
+  instead of a wrapped pill cluster.
+- **A surface that cannot be shown names the condition in the shell header** ("Not available",
+  "Not connected yet", "Could not be composed") instead of "Opening…"; a state title is never recorded
+  in Recent as the record's name.
+- **A status dot stays beside its label** when the label wraps.
+- **Recorded workflow status and suggested next step are distinguished:** the renewal header's fact is
+  "Workflow status (recorded)" and says when answers have been recorded since; the journey states its
+  suggestion as "Next step: …". Verified cover reads "The issued policy is checked and applied"
+  (it read "Continue the issuance"); stage nine reads "The renewed cover is in force".
+- **UI Lab fixtures** carry each stage's real run state (awaiting approval, comparison ready, handed over
+  to placement, stopped) and an applied placement no longer waits on the insurer.
+- **Found while testing:** the intermittent web test was a real race in `useSurfacePrefs` — the first
+  surface key reset an arrangement made in the moment before it arrived. Only a change between
+  surfaces resets now; a deterministic test (`prefs.test.tsx`) fails on the old code and passes now.
+- **Release rehearsal on the hosted Postgres build.** The D-169 rehearsal ran on Postgres 16 with the
+  repository shim. It was repeated on `supabase/postgres:17.6.1.166`, the hosted build, applying as the
+  non-superuser `postgres` (`scripts/release/rehearse-supabase17.sh`): all checks pass (pgTAP 1,261/1,261,
+  connected 251 + 1 skipped, 0078-era 188/188, 0 leaks, rollback identical). The image needed two hosted
+  dashboard settings that no migration creates — `postgres`'s default privileges in `public` and the
+  `ensure_rls` event trigger — read from the hosted catalogue and recorded in
+  `scripts/release/supabase17-services.sql`. The release still recommends a Supabase branch before
+  production (`docs/release/RELEASE-0079-0091.md` §2a, §3).

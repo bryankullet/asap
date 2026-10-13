@@ -129,6 +129,14 @@ import {
   type CreateContactRequest,
   type UpdateContactRequest,
   spacePlanResponseSchema,
+  livingSurfaceSchema,
+  workspaceInterpretationSchema,
+  investigateResponseSchema,
+  homeChangesResponseSchema,
+  portfolioResponseSchema,
+  type PortfolioQuery,
+  surfacePreferencesResponseSchema,
+  type SurfacePreferences,
   workListResponseSchema,
   type WorkView,
   documentSummarySchema,
@@ -245,6 +253,36 @@ export const api = {
   /** Today. Ranked, capped and reasoned server-side, against the server's clock (D-058, §27). */
   attention: () => request("GET", "/attention", attentionResponseSchema),
   /** A validated Space plan for one record (D-059). Renewals only, so far. */
+  /** The Living renewal surface (D-156): composed and validated server-side, rendered as registered blocks. */
+  /** One person's arrangement of one surface in the active brokerage (0080, D-157). */
+  surfacePreferences: (surfaceKey: string) => request("GET", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema),
+  saveSurfacePreferences: (surfaceKey: string, prefs: SurfacePreferences) => request("PUT", `/surface-preferences/${encodeURIComponent(surfaceKey)}`, surfacePreferencesResponseSchema, prefs),
+  /**
+   * Runs one governed command from a Living surface against the endpoint that owns it (D-157). The
+   * path comes from the fixed table in asap/living/commands.ts, never from the surface. A refusal
+   * the endpoint explains (403/409/422 with an outcome) is returned, not thrown.
+   */
+  livingCommand: (path: string, body: unknown) =>
+    request("POST", path, z.object({ outcome: z.enum(["done", "already", "blocked", "applied", "already_done"]).optional(), reason: z.string().nullable().optional() }).passthrough(), body, { auth: true, allow: [403, 409, 422] }),
+  /** The renewal portfolio: the current view as a typed query, refined by a request in words (D-158). */
+  portfolio: (body: { query: PortfolioQuery | null; text: string | null }) => request("POST", "/living/portfolio", portfolioResponseSchema, body),
+  /** What changed since this person last looked, from the brokerage's semantic events (D-159). */
+  homeChanges: () => request("GET", "/home/changes", homeChangesResponseSchema),
+  livingSurface: (workItemId: string, view: { explore?: string[]; focus?: string | null; target?: string | null; fq?: string | null; fsrc?: string | null } = {}) => {
+    const q = new URLSearchParams();
+    if (view.explore?.length) q.set("explore", view.explore.join(","));
+    if (view.focus) q.set("focus", view.focus);
+    if (view.target) q.set("target", view.target);
+    if (view.fq) q.set("fq", view.fq);
+    if (view.fsrc) q.set("fsrc", view.fsrc);
+    return request("GET", `/living/${workItemId}${q.toString() ? `?${q}` : ""}`, livingSurfaceSchema);
+  },
+  /** Ask ASAP inside a workspace (D-165): words → a typed focus. Writes nothing. */
+  interpretWorkspace: (workItemId: string, text: string) => request("POST", `/living/${workItemId}/interpret`, workspaceInterpretationSchema, { text }),
+  /** Everything on file for one client, as a Living workspace (D-167). */
+  investigation: (clientId: string) => request("GET", `/living/client/${clientId}`, livingSurfaceSchema),
+  /** Which client a request names, from the brokerage's own names; never a guess (D-167). */
+  resolveClient: (text: string) => request("POST", "/living/investigate", investigateResponseSchema, { text }),
   space: (recordId: string, view: string) =>
     request("GET", `/spaces/${recordId}?view=${view}`, spacePlanResponseSchema),
   /**

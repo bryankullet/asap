@@ -48,12 +48,16 @@ import {
   runEventsResponseSchema,
   workItemResponseSchema,
   manageWorkRequestSchema,
+  handOverRequestSchema,
+  handOverResponseSchema,
+  acknowledgeHandoverResponseSchema,
   draftProblems,
   manageWorkResponseSchema,
   type ActResponse,
   type ManageWorkResponse,
 } from "@asap/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Logger } from "pino";
@@ -126,6 +130,15 @@ async function loadEvents(db: SupabaseClient, runId: string, afterSeq: number) {
 /** The engine's HTTP surface (UI Build Spec v1 Parts 5, 7, 8). Writes go through 0023's functions only. */
 export function workRoutes(deps: WorkDeps) {
   const app = new Hono();
+
+  /** Refuses, audited, a caller whose role lacks the business permission (D-164). */
+  async function requirePermission(c: Context, db: SupabaseClient, userId: string, object: string, verb: string, action: string, objectType: string, objectId: string, message: string) {
+    const ctx = await resolveContext(db, userId);
+    const org = requireActiveOrganization(ctx);
+    if (hasPermission(ctx, object, verb)) return;
+    await recordAudit(db, deps.logger, c, { organizationId: org.id, actorUserId: userId, action, objectType, objectId, result: "denied", failureReason: "permission_denied" });
+    throw new HttpError(403, "not_permitted", message);
+  }
 
   /**
    * Create a renewal. The client is matched by normalised name (one match proceeds, several ask
@@ -435,6 +448,9 @@ export function workRoutes(deps: WorkDeps) {
     const { db, user } = c.get("auth");
     const id = c.req.param("id");
     const input = await parseBody(c, claimActionSchema);
+    // Every change to a claim is claim:edit (D-164). The database enforces it again (0085), so a
+    // call that skips this route is refused there too.
+    await requirePermission(c, db, user.id, "claim", "edit", `claim.${input.action}`, "claim", id, "Your role cannot change claims. Nothing was recorded.");
     let r: { error: { code?: string; message?: string } | null };
     switch (input.action) {
       case "set_clock":
@@ -497,6 +513,8 @@ export function workRoutes(deps: WorkDeps) {
     const { db, user } = c.get("auth");
     const id = c.req.param("id");
     const input = await parseBody(c, endorsementActionSchema);
+    // A policy change is policy:edit (D-164); enforced again in the database (0085).
+    await requirePermission(c, db, user.id, "policy", "edit", `endorsement.${input.action}`, "endorsement", id, "Your role cannot change policies. Nothing was recorded.");
     let r: { error: { code?: string; message?: string } | null };
     switch (input.action) {
       case "classify":
@@ -1412,6 +1430,47 @@ export function workRoutes(deps: WorkDeps) {
     if (!res.changed) return c.json(manageWorkResponseSchema.parse({ outcome: "already_done", item: fresh, changes: [] }));
     const auditAction = changes.length === 1 && changes[0]!.field === "owner" ? "work_item.assigned" : changes.length === 1 && changes[0]!.field === "due" ? "work_item.due_changed" : "work_item.managed";
     return c.json(manageWorkResponseSchema.parse({ outcome: "applied", item: fresh, changes, auditAction }));
+  });
+
+  /**
+   * `POST /work-items/:id/hand-over` — a structured handover (D-166): the new owner, what is done,
+   * what is open, what to watch. The database checks job/edit, the member, the version and done
+   * work again; this route turns its refusals into words.
+   */
+  app.post("/work-items/:id/hand-over", async (c) => {
+    const { db, user } = c.get("auth");
+    const id = c.req.param("id");
+    const req = await parseBody(c, handOverRequestSchema);
+    const item = await loadItem(db, id);
+    const ctx = await resolveContext(db, user.id);
+    const blocked = (status: 403 | 409 | 422, guard: string, reason: string) => c.json(handOverResponseSchema.parse({ outcome: "blocked", guard, reason }), status);
+    if (!hasPermission(ctx, "job", "edit")) {
+      await recordAudit(db, deps.logger, c, { organizationId: item.organization_id, actorUserId: user.id, action: "work_item.hand_over", objectType: "work_item", objectId: item.id, result: "denied", failureReason: "permission_denied" });
+      return blocked(403, "permission", "Your role can view Work but not hand it over. Nothing was changed.");
+    }
+    const { data, error } = await db.rpc("work_item_hand_over", { p_work_item_id: id, p_expected_version: req.version, p_to_user: req.toUserId, p_done: req.done, p_open: req.open, p_watch: req.watch ?? null });
+    if (error) {
+      const m = error.message ?? "";
+      if (m.includes("version_stale")) return blocked(409, "version_current", "This work changed since you looked at it. Nothing was changed; reload to see the current version.");
+      if (m.includes("work_item_done")) return blocked(409, "done", "This work is done; it is no longer handed over. Nothing was changed.");
+      if (m.includes("handover_to_self")) return blocked(422, "to_self", "Choose a colleague other than yourself. Nothing was changed.");
+      if (m.includes("owner_not_member")) return blocked(422, "owner_not_member", "That person is not an active member of this brokerage. Nothing was changed.");
+      if (m.includes("handover_incomplete")) return blocked(422, "incomplete", "Say what is done and what is still open. Nothing was changed.");
+      if (m.includes("permission_denied")) return blocked(403, "permission", "Your role can view Work but not hand it over. Nothing was changed.");
+      return sendError(c, mapDatabaseError(error));
+    }
+    return c.json(handOverResponseSchema.parse({ outcome: "applied", handoverId: (data as { id: string }).id, item: await loadItem(db, id) }));
+  });
+
+  /** `POST /work-handovers/:id/acknowledge` — the receiver says they have it (D-166). */
+  app.post("/work-handovers/:id/acknowledge", async (c) => {
+    const { db } = c.get("auth");
+    const { data, error } = await db.rpc("work_handover_acknowledge", { p_handover_id: c.req.param("id") });
+    if (error) {
+      if ((error.message ?? "").includes("permission_denied")) throw new HttpError(403, "not_permitted", "Only the person it was handed to can acknowledge it.");
+      return sendError(c, mapDatabaseError(error));
+    }
+    return c.json(acknowledgeHandoverResponseSchema.parse({ outcome: (data as { changed: boolean }).changed ? "applied" : "already_done" }));
   });
 
   /** Copying is a fact about the draft. It advances nothing (Part 7). */

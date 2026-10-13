@@ -1,4 +1,5 @@
-import { useRef, useState, type DragEvent } from "react";
+import type { HomeChangesResponse } from "@asap/schema";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { activityLog, automationsBoard, homeSurface, workInbox } from "../surfaces.js";
 import type { Ref } from "./routes.js";
 import { KIND_ICON, type Logic, type RecentItem, type ShellAdapters } from "./types.js";
@@ -50,6 +51,7 @@ export function HomeSurface({ logic, A, recent, onOpenRecent, onOpen, onAsk, onF
   const quick: [string, () => void][] = [
     ["Add records", () => onOpen({ ws: "import" })],
     ["Prepare a renewal", () => onOpen({ ws: "renewal" })],
+    ...(A?.portfolio ? ([["Explore renewals", () => onOpen({ ws: "portfolio" })]] as [string, () => void][]) : []),
     ["Start a quotation", () => onOpen({ ws: "quote" })],
     ["Report a claim", () => onOpen({ ws: "claim" })],
     ["Upload documents", () => fileRef.current?.click()],
@@ -143,6 +145,7 @@ export function HomeSurface({ logic, A, recent, onOpenRecent, onOpen, onAsk, onF
             )}
             {data.more ? <button type="button" className="sh-link" onClick={() => onOpen({ ws: "work" })}>{data.more} more in Work →</button> : null}
           </section>
+          {A?.homeChanges ? <HomeChanges load={A.homeChanges} onOpen={onOpen} /> : null}
           <section className="sh-card" aria-labelledby="h-handling">
             <h2 id="h-handling">ASAP is handling</h2>
             {data.handling.length === 0 ? (
@@ -195,9 +198,12 @@ export function WorkSurface({ logic, A, view, onView, onOpen }: { logic: Logic; 
   void logic.state.tick;
   const { views } = workInbox({ supervision: sup(A), meId: meId(A) });
   const current = views.find((x) => x.key === view) ?? views[0]!;
+  // On a phone the views scroll sideways; the chosen one is kept in sight.
+  const tabs = useRef<HTMLDivElement>(null);
+  useEffect(() => { tabs.current?.querySelector<HTMLElement>(".sh-on")?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); }, [current.key]);
   return (
     <div className="sh-surface sh-wide">
-      <div className="sh-tabs" role="tablist" aria-label="Work views">
+      <div className="sh-tabs" role="tablist" aria-label="Work views" ref={tabs}>
         {views.map((x) => (
           <button key={x.key} type="button" role="tab" aria-selected={x.key === current.key} className={x.key === current.key ? "sh-tab sh-on" : "sh-tab"} onClick={() => onView(x.key)}>
             {x.label} <span className="sh-count">{x.rows.length}</span>
@@ -210,7 +216,7 @@ export function WorkSurface({ logic, A, view, onView, onOpen }: { logic: Logic; 
         <ul className="sh-work" aria-label={current.label}>
           {current.rows.map((r) => (
             <li key={r.id} className="sh-work-row">
-              <span className={`sh-urgency sh-u-${r.urgency}`} aria-label={`Urgency ${r.urgency}`} />
+              <span className={`sh-urgency sh-u-${r.urgency}`} role="img" aria-label={`Urgency ${r.urgency}`} />
               <div className="sh-row-main">
                 <strong>{r.title}</strong>
                 <p>{[r.client?.name, r.statusText, r.owner, r.when].filter(Boolean).join(" · ")}</p>
@@ -306,5 +312,55 @@ export function ActivitySurface({ logic, filter, onFilter, onOpen }: { logic: Lo
         </ol>
       )}
     </div>
+  );
+}
+
+const CHANGE_POLL_MS = 60_000;
+/**
+ * What changed since you last looked (D-159): insurer answers, instructions, cover, issuance, claims
+ * and stopped work, from the brokerage's semantic events. Each line says what happened and opens
+ * the work; no figure is shown here. Re-read every minute and when the window regains focus, so
+ * Home follows the brokerage without a reload. A person's own actions are not listed.
+ */
+function HomeChanges({ load, onOpen }: { load: () => Promise<HomeChangesResponse>; onOpen: Open }) {
+  const [data, setData] = useState<HomeChangesResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useEffect(() => {
+    let live = true;
+    const read = () => loadRef.current().then((d) => { if (live) { setData(d); setFailed(false); } }, () => live && setFailed(true));
+    void read();
+    const t = setInterval(() => { if (document.visibilityState === "visible") void read(); }, CHANGE_POLL_MS);
+    const onFocus = () => void read();
+    window.addEventListener("focus", onFocus);
+    return () => { live = false; clearInterval(t); window.removeEventListener("focus", onFocus); };
+  }, []);
+  const since = data ? new Date(data.since) : null;
+  return (
+    <section className="sh-card sh-changes" aria-labelledby="h-changes">
+      <div className="sh-card-head">
+        <h2 id="h-changes">What changed</h2>
+        {since ? <small>since {since.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small> : null}
+      </div>
+      {failed && !data ? <p className="sh-empty">What changed could not be read just now. It will be tried again.</p>
+        : !data ? <p className="sh-empty" aria-busy="true">Reading what changed…</p>
+        : data.changes.length === 0 ? <p className="sh-empty">Nothing new from colleagues, insurers or ASAP since you last looked.</p>
+        : (
+          <ul className="sh-list">
+            {data.changes.map((c) => (
+              <li key={c.key} className="sh-row sh-row-compact">
+                <span className={`sh-dot sh-${c.tone}`} aria-hidden />
+                <div className="sh-row-main">
+                  <strong>{c.text}{c.count > 1 ? ` · ${c.count} times` : ""}</strong>
+                  <p>{[c.subject, c.actor, new Date(c.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })].filter(Boolean).join(" · ")}</p>
+                </div>
+                {c.ref ? <button type="button" onClick={() => onOpen(c.ref as Ref)}>Open</button> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      {data?.more ? <p className="sh-empty">{data.more} more changes are not listed.</p> : null}
+    </section>
   );
 }

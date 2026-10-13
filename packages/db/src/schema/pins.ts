@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { check, index, jsonb, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
-import { createdAt, timestamptz } from "./_shared.js";
+import { check, index, integer, jsonb, pgTable, primaryKey, text, unique, uuid } from "drizzle-orm/pg-core";
+import { createdAt, timestamptz, updatedAt } from "./_shared.js";
 import { conversations } from "./conversations.js";
 import { organizations } from "./organizations.js";
+import { opportunities } from "./quotations.js";
 import { users } from "./users.js";
 import { workItems } from "./work.js";
 
@@ -76,5 +77,68 @@ export const spacePins = pgTable(
     index("space_pins_person_idx").on(t.organizationId, t.userId, t.createdAt.desc()),
     index("space_pins_user_id_idx").on(t.userId),
     index("space_pins_conversation_id_idx").on(t.conversationId),
+  ],
+);
+
+/** One person's arrangement of one composed surface in one brokerage (0080, D-157). Interface state only. */
+export const surfacePreferences = pgTable(
+  "surface_preferences",
+  {
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    surfaceKey: text("surface_key").notNull(),
+    prefs: jsonb("prefs").notNull().default(sql`'{}'::jsonb`),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.organizationId, t.userId, t.surfaceKey] }),
+    index("surface_preferences_user_id_idx").on(t.userId),
+  ],
+);
+
+/** Responsibility for a Work item moving between colleagues (0087, D-166). Written only by its functions. */
+export const workHandovers = pgTable(
+  "work_handovers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+    workItemId: uuid("work_item_id").notNull().references(() => workItems.id),
+    fromUserId: uuid("from_user_id").notNull().references(() => users.id),
+    toUserId: uuid("to_user_id").notNull().references(() => users.id),
+    doneText: text("done_text").notNull(),
+    openText: text("open_text").notNull(),
+    watchText: text("watch_text"),
+    createdAt: createdAt(),
+    acknowledgedAt: timestamptz("acknowledged_at"),
+  },
+  (t) => [
+    index("work_handovers_work_item_idx").on(t.workItemId, t.createdAt.desc()),
+    index("work_handovers_organization_id_idx").on(t.organizationId),
+    index("work_handovers_from_user_id_idx").on(t.fromUserId),
+    index("work_handovers_to_user_id_idx").on(t.toUserId),
+    check("work_handovers_check", sql`from_user_id <> to_user_id`),
+  ],
+);
+
+/** A hypothetical saved from the exploration: insurers and answer revisions, never figures (0090, D-167). */
+export const renewalProposals = pgTable(
+  "renewal_proposals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+    workItemId: uuid("work_item_id").notNull().references(() => workItems.id),
+    opportunityId: uuid("opportunity_id").notNull().references(() => opportunities.id),
+    version: integer("version").notNull(),
+    opportunityInsurerIds: uuid("opportunity_insurer_ids").array().notNull(),
+    revisions: jsonb("revisions").notNull().default(sql`'{}'::jsonb`),
+    note: text("note"),
+    createdBy: uuid("created_by").notNull().references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    unique("renewal_proposals_work_item_id_version_key").on(t.workItemId, t.version),
+    index("renewal_proposals_organization_id_idx").on(t.organizationId),
+    index("renewal_proposals_opportunity_id_idx").on(t.opportunityId),
+    index("renewal_proposals_created_by_idx").on(t.createdBy),
   ],
 );

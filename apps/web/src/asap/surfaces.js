@@ -34,13 +34,19 @@ function personName(id) {
 }
 
 function refForItem(w) {
+  // A renewal opens its Living workspace (D-156); the steps stay one click away inside it.
+  if (w.recordKind === "renewal" && !w.opportunityId) return { ws: "living", workItemId: w.id };
+  // Claims and policy changes have Living workspaces too (D-161).
+  if (w.recordKind === "claim" || w.recordKind === "endorsement") return { ws: "living", workItemId: w.id };
   if (w.opportunityId) return { ws: "quote", opportunityId: w.opportunityId, clientId: w.clientId || undefined };
   return { ws: "workitem", workItemId: w.id };
 }
 
-/** Where a run opens: a renewal's own Space, otherwise the Work item it drives. */
+/** Where a run opens: a renewal's Living workspace (D-156), otherwise the Work item it drives. */
 export function runRef(r) {
+  if (r.workflow === "renewal" && r.workItemId) return { ws: "living", workItemId: r.workItemId, runId: r.id };
   if (r.workflow === "renewal") return { ws: "renewal", runId: r.id };
+  if ((r.workflow === "claim" || r.workflow === "endorsement") && r.workItemId) return { ws: "living", workItemId: r.workItemId };
   if (r.workItemId) return { ws: "workitem", workItemId: r.workItemId };
   return { ws: "renewal" };
 }

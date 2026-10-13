@@ -332,6 +332,8 @@ async function hydrate(me) {
         id: it.id,
         clientId: it.client_id,
         kind: kindWords(it.kind),
+        // The record's own kind, for routing: a renewal opens its Living workspace (D-156).
+        recordKind: it.kind,
         taskStatus: it.task_status,
         statusLabel: it.task_status === "with_party" ? null : STATUS_LABEL[it.task_status] ?? null,
         // The server's next action (D-120) — the same object Today, Ask and the Space read.
@@ -3249,6 +3251,18 @@ export async function loadLiveAdapters({ me, switchToDemo }) {
   return {
     supervision: () => state.supervision,
     waitingDocuments,
+    /** The Living renewal surface (D-156), composed and validated by the server. Live mode only. */
+    living: (workItemId, view) => api.livingSurface(workItemId, view ?? {}),
+    interpretWorkspace: (workItemId, text) => api.interpretWorkspace(workItemId, text),
+    investigation: (clientId) => api.investigation(clientId),
+    resolveClient: (text) => api.resolveClient(text),
+    portfolio: (body) => api.portfolio(body),
+    homeChanges: () => api.homeChanges(),
+    /** A person's arrangement of a surface, kept on the server per brokerage and person (D-157). */
+    surfacePrefs: {
+      get: (key) => api.surfacePreferences(key).then((r) => r.prefs),
+      put: (key, prefs) => api.saveSurfacePreferences(key, prefs).then(() => undefined),
+    },
     /**
      * The adaptive shell's server-backed state (D-155): named sessions, Recent and Pins. Every call
      * is the API's; nothing here is kept in browser storage.

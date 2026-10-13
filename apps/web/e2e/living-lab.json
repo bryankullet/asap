@@ -1,0 +1,3412 @@
+[
+ {
+  "key": "preparing",
+  "label": "Preparing",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "preparing",
+    "label": "Preparing"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "cd9b0a49f2e73ced",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Waiting for approval"
+       }
+      ],
+      "status": {
+       "label": "Preparing",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "ec078ecfe817b9da"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "now"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "next"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "next"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "next"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "next"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Approve the renewal pack and letters. The policy is checked and the pack and letters are prepared"
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "4082dee5a8dd8b55"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "run-approval",
+        "title": "Renewal pack and letters for Acme Logistics",
+        "why": "Nothing leaves the brokerage until a person approves its exact content.",
+        "responsible": "Wanjiru",
+        "deadline": "2026-10-31",
+        "actionableNow": true,
+        "requiresApproval": true,
+        "blockedBy": [],
+        "tone": "gold"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "17e7bb41b10d4701"
+    },
+    {
+     "id": "approval-run",
+     "component": "ApprovalBundle",
+     "version": 1,
+     "role": "main",
+     "title": "For your approval",
+     "props": {
+      "title": "Renewal pack and letters for Acme Logistics",
+      "why": "Nothing leaves the brokerage until a person approves this exact content. Approving sends it; returning sends nothing.",
+      "items": [
+       {
+        "heading": "Letter to Acme Logistics",
+        "to": "wanjiru@acme.test",
+        "subject": "Your motor fleet renewal",
+        "body": "Dear Wanjiru,\n\nYour motor fleet cover with CIC ends on 31 October 2026. We are asking insurers for renewal terms and will come back to you with them.\n\nKind regards"
+       },
+       {
+        "heading": "Terms request to Jubilee",
+        "to": "underwriting@jubilee.test",
+        "subject": "Renewal terms — Acme Logistics motor fleet",
+        "body": "Please provide renewal terms for the attached schedule, effective 1 November 2026."
+       }
+      ],
+      "approverNote": null
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Approve and send",
+       "command": "workflow_approval.decide",
+       "target": "88888888-8888-4888-8888-888888888888",
+       "payload": {
+        "decision": "approve",
+        "bundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "inputs": [],
+       "confirm": {
+        "title": "Approve and send?",
+        "body": "2 messages will leave the brokerage exactly as shown."
+       },
+       "tone": "primary"
+      },
+      {
+       "kind": "command",
+       "label": "Return with a reason",
+       "command": "workflow_approval.decide",
+       "target": "88888888-8888-4888-8888-888888888888",
+       "payload": {
+        "decision": "reject",
+        "bundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "inputs": [
+        {
+         "name": "note",
+         "label": "What needs to change",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "19c788e4f6b52f67"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "18a4631bd0a2c3d7"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "7ad15a1c2d5bbdf0"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": null,
+      "daysToExpiry": 20,
+      "statement": "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "d4ed4f7c58445a77"
+    },
+    {
+     "id": "messages",
+     "component": "WorkChecklist",
+     "version": 1,
+     "role": "main",
+     "title": "Messages for this renewal",
+     "props": {
+      "items": [
+       {
+        "key": "99999999-9999-4999-8999-999999999991",
+        "label": "Letter to Acme Logistics",
+        "detail": "Your motor fleet renewal",
+        "state": "pending",
+        "party": "Prepared — waiting for approval",
+        "since": null
+       },
+       {
+        "key": "99999999-9999-4999-8999-999999999992",
+        "label": "Terms request to Jubilee",
+        "detail": "Renewal terms — Acme Logistics motor fleet",
+        "state": "pending",
+        "party": "Prepared — waiting for approval",
+        "since": null
+       }
+      ],
+      "note": "Approved is not sent: a message counts as sent only with its delivery on record."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "6472bfe75e790ec8"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "awaiting_terms",
+  "label": "Insurer terms",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "awaiting_terms",
+    "label": "Insurer terms"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "00de3357f4735727",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Waiting on insurers"
+       }
+      ],
+      "status": {
+       "label": "Insurer terms",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "32bd7be27315c4c2"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "now"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "next"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "next"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "next"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Awaiting insurer terms. Pack sent"
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "5d5c7b45f60a092d"
+    },
+    {
+     "id": "quotes",
+     "component": "QuoteComparison",
+     "version": 1,
+     "role": "main",
+     "title": "Insurer answers",
+     "props": {
+      "insurers": [
+       {
+        "name": "CIC",
+        "stage": "with_insurer",
+        "premium": null,
+        "validUntil": null,
+        "revision": null,
+        "terms": [],
+        "declineReason": null
+       },
+       {
+        "name": "Jubilee",
+        "stage": "with_insurer",
+        "premium": null,
+        "validUntil": null,
+        "revision": null,
+        "terms": [],
+        "declineReason": null
+       }
+      ],
+      "note": "Named facts from each insurer's own answer. ASAP does not pick a winner; the client decides."
+     },
+     "evidence": [
+      {
+       "label": "Quotation",
+       "reference": "Insurer answers as recorded on the quotation “Acme motor renewal”",
+       "documentId": null,
+       "recordedAt": null
+      }
+     ],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Record CIC's answer",
+       "command": "quotation.record_response",
+       "target": "55555555-5555-4555-8555-555555555555",
+       "payload": {
+        "action": "record_response",
+        "opportunityInsurerId": "00000003-0000-4000-8000-000000000003"
+       },
+       "inputs": [
+        {
+         "name": "outcome",
+         "label": "Their answer",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "quoted",
+           "label": "Quoted"
+          },
+          {
+           "value": "declined",
+           "label": "Declined"
+          },
+          {
+           "value": "no_response",
+           "label": "Will not respond"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "premiumAmount",
+         "label": "Premium (if quoted)",
+         "kind": "text",
+         "required": false,
+         "options": [],
+         "hint": "As written by the insurer, e.g. 2510000.00"
+        },
+        {
+         "name": "premiumCurrency",
+         "label": "Currency",
+         "kind": "select",
+         "required": false,
+         "options": [
+          {
+           "value": "KES",
+           "label": "KES"
+          },
+          {
+           "value": "USD",
+           "label": "USD"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "validUntil",
+         "label": "Valid until",
+         "kind": "date",
+         "required": false,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "sourceNote",
+         "label": "Where the answer came from",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "e.g. Jubilee's email of 12 Oct from underwriting."
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
+       "kind": "command",
+       "label": "Record Jubilee's answer",
+       "command": "quotation.record_response",
+       "target": "55555555-5555-4555-8555-555555555555",
+       "payload": {
+        "action": "record_response",
+        "opportunityInsurerId": "00000007-0000-4000-8000-000000000007"
+       },
+       "inputs": [
+        {
+         "name": "outcome",
+         "label": "Their answer",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "quoted",
+           "label": "Quoted"
+          },
+          {
+           "value": "declined",
+           "label": "Declined"
+          },
+          {
+           "value": "no_response",
+           "label": "Will not respond"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "premiumAmount",
+         "label": "Premium (if quoted)",
+         "kind": "text",
+         "required": false,
+         "options": [],
+         "hint": "As written by the insurer, e.g. 2510000.00"
+        },
+        {
+         "name": "premiumCurrency",
+         "label": "Currency",
+         "kind": "select",
+         "required": false,
+         "options": [
+          {
+           "value": "KES",
+           "label": "KES"
+          },
+          {
+           "value": "USD",
+           "label": "USD"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "validUntil",
+         "label": "Valid until",
+         "kind": "date",
+         "required": false,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "sourceNote",
+         "label": "Where the answer came from",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "e.g. Jubilee's email of 12 Oct from underwriting."
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "4d3b15030b1a9264"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "18a4631bd0a2c3d7"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": [
+       {
+        "party": "CIC",
+        "what": "Awaiting insurer terms",
+        "since": "2026-10-01",
+        "due": "2026-10-14",
+        "kind": "outside"
+       },
+       {
+        "party": "Jubilee",
+        "what": "Terms for the renewal",
+        "since": "2026-09-25T08:00:00Z",
+        "due": null,
+        "kind": "outside"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Follow up now",
+       "command": "run.follow_up_now",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [],
+       "confirm": {
+        "title": "Follow up now?",
+        "body": "ASAP raises the follow-up to the insurer today, as the approved request allows."
+       },
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "1729b470db164185"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": null,
+      "daysToExpiry": 20,
+      "statement": "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "d4ed4f7c58445a77"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "comparing",
+  "label": "Comparing, with a revision",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "comparing",
+    "label": "Comparing"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "c85c6f019ee09cd3",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Answers in — comparison ready"
+       }
+      ],
+      "status": {
+       "label": "Comparing",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "2a27b5bec238c2fa"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "now"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "next"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "next"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Compare the answers for the client. Pack sent"
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "7a06d817dbcf4465"
+    },
+    {
+     "id": "changes",
+     "component": "ChangeComparison",
+     "version": 1,
+     "role": "main",
+     "title": "Revised since first recorded",
+     "props": {
+      "items": [
+       {
+        "subject": "Jubilee",
+        "field": "Premium",
+        "earlier": "KES 175,500.00",
+        "revised": "KES 189,000.00",
+        "revision": 2,
+        "receivedAt": "2026-10-07T10:00:00Z",
+        "affects": [
+         "The comparison shown to the client must be reviewed against this revision."
+        ]
+       }
+      ]
+     },
+     "evidence": [
+      {
+       "label": "Jubilee revision 2",
+       "reference": "Revised answer document",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": "2026-10-07T10:00:00Z"
+      }
+     ],
+     "actions": [],
+     "hash": "0c31621bf34aca62"
+    },
+    {
+     "id": "quotes",
+     "component": "QuoteComparison",
+     "version": 1,
+     "role": "main",
+     "title": "Quotes side by side",
+     "props": {
+      "insurers": [
+       {
+        "name": "CIC",
+        "stage": "quoted",
+        "premium": "KES 182,000.00",
+        "validUntil": "2026-11-01",
+        "revision": 1,
+        "terms": [
+         {
+          "label": "Excess",
+          "value": "10%",
+          "unclear": false
+         }
+        ],
+        "declineReason": null
+       },
+       {
+        "name": "Jubilee",
+        "stage": "quoted",
+        "premium": "KES 189,000.00",
+        "validUntil": "2026-11-01",
+        "revision": 2,
+        "terms": [
+         {
+          "label": "Excess",
+          "value": "10%",
+          "unclear": false
+         }
+        ],
+        "declineReason": null
+       }
+      ],
+      "note": "Named facts from each insurer's own answer. ASAP does not pick a winner; the client decides."
+     },
+     "evidence": [
+      {
+       "label": "CIC's answer",
+       "reference": "CIC quote.pdf",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": "2026-10-01T10:00:00Z"
+      },
+      {
+       "label": "CIC — Excess",
+       "reference": "page 2",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": null
+      },
+      {
+       "label": "Jubilee's answer",
+       "reference": "Jubilee quote.pdf",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": "2026-10-01T10:00:00Z"
+      },
+      {
+       "label": "Jubilee — Excess",
+       "reference": "page 2",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": null
+      },
+      {
+       "label": "Quotation",
+       "reference": "Insurer answers as recorded on the quotation “Acme motor renewal”",
+       "documentId": null,
+       "recordedAt": null
+      }
+     ],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "2599c6ac4a627582"
+    },
+    {
+     "id": "explore",
+     "component": "ExplorationPanel",
+     "version": 1,
+     "role": "main",
+     "title": "Explore a choice",
+     "props": {
+      "choices": [
+       {
+        "id": "00000003-0000-4000-8000-000000000003",
+        "insurer": "CIC",
+        "exploring": false,
+        "answered": true
+       },
+       {
+        "id": "00000007-0000-4000-8000-000000000007",
+        "insurer": "Jubilee",
+        "exploring": false,
+        "answered": true
+       }
+      ],
+      "alternatives": [],
+      "notice": "Exploring only: nothing is recorded, nothing is sent, and ASAP does not recommend a choice. The client decides; recording their instruction is a separate, evidenced step."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "76cf90435c07dc75"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       },
+       {
+        "certainty": "confirmed",
+        "text": "Jubilee revised its premium from KES 175,500.00 to KES 189,000.00 (revision 2)."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "f96628ba105026bb"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": [
+       {
+        "party": "ASAP",
+        "what": "Compare the answers for the client",
+        "since": null,
+        "due": null,
+        "kind": "asap"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "140b3e5c465bbb09"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": null,
+      "daysToExpiry": 20,
+      "statement": "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "d4ed4f7c58445a77"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c458339c82001da0"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "placing",
+  "label": "Placement, revised after instruction",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "placing",
+    "label": "Placement"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "9efc82df0d3b938a",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
+       }
+      ],
+      "status": {
+       "label": "Placement",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "f37d3bede025aa69"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "now"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Next step: Send the approved request. Requested from Jubilee — not confirmed."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "3c443eafcc05604b"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "placement-next",
+        "title": "Send the approved request",
+        "why": "Requested from Jubilee — not confirmed.",
+        "responsible": null,
+        "deadline": "2026-11-01",
+        "actionableNow": true,
+        "requiresApproval": false,
+        "blockedBy": [],
+        "tone": "green"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": true
+      }
+     ],
+     "hash": "69de29a15909212c"
+    },
+    {
+     "id": "changes",
+     "component": "ChangeComparison",
+     "version": 1,
+     "role": "main",
+     "title": "Revised since first recorded",
+     "props": {
+      "items": [
+       {
+        "subject": "Jubilee",
+        "field": "Premium",
+        "earlier": "KES 175,500.00",
+        "revised": "KES 189,000.00",
+        "revision": 2,
+        "receivedAt": "2026-10-07T10:00:00Z",
+        "affects": [
+         "The comparison shown to the client must be reviewed against this revision.",
+         "It arrived after the client's instruction: the instruction was given on the earlier figures."
+        ]
+       }
+      ]
+     },
+     "evidence": [
+      {
+       "label": "Jubilee revision 2",
+       "reference": "Revised answer document",
+       "documentId": "22222222-2222-4222-8222-222222222222",
+       "recordedAt": "2026-10-07T10:00:00Z"
+      }
+     ],
+     "actions": [],
+     "hash": "16699532a7b5a7c1"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "done",
+        "note": "6 Oct 2026"
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "now",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "next",
+        "note": null
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "next",
+        "note": null
+       }
+      ],
+      "coverLine": "Requested from Jubilee — not confirmed.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Record how the request was sent",
+       "command": "placement.record_submission",
+       "target": "66666666-6666-4666-8666-666666666666",
+       "payload": {
+        "action": "record_submission",
+        "placementRequestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+       },
+       "inputs": [
+        {
+         "name": "method",
+         "label": "How it was sent",
+         "kind": "select",
+         "required": true,
+         "options": [
+          {
+           "value": "recorded_manual_email",
+           "label": "Sent by email from our own mailbox"
+          },
+          {
+           "value": "recorded_portal",
+           "label": "Submitted on the insurer's portal"
+          },
+          {
+           "value": "recorded_post",
+           "label": "Sent by post or courier"
+          },
+          {
+           "value": "recorded_in_person",
+           "label": "Handed over in person"
+          }
+         ],
+         "hint": null
+        },
+        {
+         "name": "recipient",
+         "label": "Who at Jubilee received it",
+         "kind": "text",
+         "required": true,
+         "options": [],
+         "hint": "An address, portal reference or name — what proves where it went."
+        },
+        {
+         "name": "sentAt",
+         "label": "When it was sent",
+         "kind": "datetime",
+         "required": true,
+         "options": [],
+         "hint": null
+        },
+        {
+         "name": "evidenceNote",
+         "label": "Note (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "primary"
+      },
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "a1aefcd08c7d9501"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       },
+       {
+        "certainty": "confirmed",
+        "text": "Jubilee revised its premium from KES 175,500.00 to KES 189,000.00 (revision 2)."
+       },
+       {
+        "certainty": "confirmed",
+        "text": "Placement is requested, not confirmed: cover counts only from the insurer's written confirmation."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "a0a3f2666b9ed15e"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "requested",
+       "line": "Requested from Jubilee — not confirmed."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "dc9a540b2955da94"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c34ab9e1f58d9ff0"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "placement_approval",
+  "label": "Placement request for approval",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "placing",
+    "label": "Placement"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "edc6619f5e21cedd",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
+       }
+      ],
+      "status": {
+       "label": "Placement",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "f37d3bede025aa69"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "now"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Next step: Approve the placement request. Requested from Jubilee — not confirmed."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c03df8001b1c6245"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "placement-next",
+        "title": "Approve the placement request",
+        "why": "Requested from Jubilee — not confirmed.",
+        "responsible": null,
+        "deadline": "2026-11-01",
+        "actionableNow": true,
+        "requiresApproval": true,
+        "blockedBy": [],
+        "tone": "green"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": true
+      }
+     ],
+     "hash": "a5a33ccba1b8a7b1"
+    },
+    {
+     "id": "approval-placement",
+     "component": "ApprovalBundle",
+     "version": 1,
+     "role": "main",
+     "title": "For your approval",
+     "props": {
+      "title": "Placement request to Jubilee",
+      "why": "The request to bind cover leaves only once a person approves this exact version.",
+      "items": [
+       {
+        "heading": "Placement request · version 1",
+        "to": null,
+        "subject": "Placement instruction — Acme Logistics motor fleet",
+        "body": "Please bind cover on the terms of your quotation revision 2, effective 1 November 2026."
+       }
+      ],
+      "approverNote": null
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Approve the request",
+       "command": "placement.approve_request",
+       "target": "66666666-6666-4666-8666-666666666666",
+       "payload": {
+        "action": "approve_request",
+        "placementRequestId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+       },
+       "inputs": [],
+       "confirm": {
+        "title": "Approve the placement request?",
+        "body": "This version may then be sent to Jubilee. Approving does not send it and does not create cover."
+       },
+       "tone": "primary"
+      }
+     ],
+     "hash": "393154e49f1f274a"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "now",
+        "note": null
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "next",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "next",
+        "note": null
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "next",
+        "note": null
+       }
+      ],
+      "coverLine": "Requested from Jubilee — not confirmed.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "b3331b8a546219c8"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       },
+       {
+        "certainty": "confirmed",
+        "text": "Placement is requested, not confirmed: cover counts only from the insurer's written confirmation."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "5de5bb886fa3bab9"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "requested",
+       "line": "Requested from Jubilee — not confirmed."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "dc9a540b2955da94"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c34ab9e1f58d9ff0"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "issuing",
+  "label": "Issuance, differences to resolve",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "issuing",
+    "label": "Issuance"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "66c4667db123ef38",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
+       }
+      ],
+      "status": {
+       "label": "Issuance",
+       "tone": "gold"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "7a27948a7823221f"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "done"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "now"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Next step: Resolve the differences between the issued policy and what was agreed. Confirmed by Jubilee in writing from 1 Nov 2026."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "3053562b93d1fb9d"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "placement-next",
+        "title": "Resolve the differences between the issued policy and what was agreed",
+        "why": "Confirmed by Jubilee in writing from 1 Nov 2026.",
+        "responsible": "Jubilee",
+        "deadline": "2026-11-01",
+        "actionableNow": false,
+        "requiresApproval": false,
+        "blockedBy": [],
+        "tone": "green"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": true
+      }
+     ],
+     "hash": "90553b6a4b1d39b1"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "done",
+        "note": "6 Oct 2026"
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "done",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "done",
+        "note": "8 Oct 2026"
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "blocked",
+        "note": "2 unresolved differences"
+       }
+      ],
+      "coverLine": "Confirmed by Jubilee in writing from 1 Nov 2026.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "661841dc3c14dfb5"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "confirmed",
+        "text": "The issued policy differs from what was agreed in 2 places still to resolve."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "6c9045a47f12fa2a"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": [
+       {
+        "party": "Jubilee",
+        "what": "Resolve the differences between the issued policy and what was agreed",
+        "since": "2026-10-08",
+        "due": null,
+        "kind": "outside"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "ec79f1d41d5411fc"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "confirmed",
+       "line": "Confirmed by Jubilee in writing from 1 Nov 2026."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "b673c33f54f39ca0"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       },
+       {
+        "label": "Issued policy document",
+        "reference": "Jubilee policy schedule 2026.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-10T08:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c0b9c16bd055fc45"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "verified",
+  "label": "Verified",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "verified",
+    "label": "Verified"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "dbf7c57299fe4770",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
+       }
+      ],
+      "status": {
+       "label": "Verified",
+       "tone": "green"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "d92f210932a2ab93"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "done"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "done"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "now"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "The issued policy is checked and applied. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "b84c70c6303667cb"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "done",
+        "note": "6 Oct 2026"
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "done",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "done",
+        "note": "8 Oct 2026"
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "done",
+        "note": "0 unresolved differences"
+       }
+      ],
+      "coverLine": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "509fcb868c8124e6"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "active",
+       "line": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "1f1c850cd78b5647"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       },
+       {
+        "label": "Issued policy document",
+        "reference": "Jubilee policy schedule 2026.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-10T08:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c0b9c16bd055fc45"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "continuing",
+  "label": "Continuing",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "continuing",
+    "label": "Continuing"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "7be13ffdc691295f",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Insurers approached",
+        "value": "2"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Handed over to placement"
+       }
+      ],
+      "status": {
+       "label": "Continuing",
+       "tone": "green"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "fd44864ad7f4559e"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "done"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "done"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "done"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "done"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "done"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "done"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "done"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "now"
+       }
+      ],
+      "summary": "The renewed cover is in force. Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "262bfc5b647eccf9"
+    },
+    {
+     "id": "continuing",
+     "component": "WorkChecklist",
+     "version": 1,
+     "role": "main",
+     "title": "The year ahead",
+     "props": {
+      "items": [
+       {
+        "key": "in_force",
+        "label": "Renewed cover on file with Jubilee",
+        "detail": "1 Nov 2026 – 31 Oct 2027",
+        "state": "done",
+        "party": null,
+        "since": "2026-11-01"
+       },
+       {
+        "key": "next_renewal",
+        "label": "Next renewal work opens",
+        "detail": "Around 1 Sept 2027, 60 days before this cover ends. ASAP's default — 60 days before expiry — because this brokerage has not set a renewal rule.",
+        "state": "pending",
+        "party": null,
+        "since": null
+       },
+       {
+        "key": "memory",
+        "label": "This round's decisions are kept for next year",
+        "detail": "The insurers' answers and the client's instruction are on the quotation; next year's workspace shows them as \"Decided last time\".",
+        "state": "done",
+        "party": null,
+        "since": null
+       }
+      ],
+      "note": "Changes, claims and certificates during the year are their own work, shown under Related work. Nothing here is a status of the cover beyond what is on file."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "3e5a5159f3462d92"
+    },
+    {
+     "id": "placement",
+     "component": "PlacementProgress",
+     "version": 1,
+     "role": "main",
+     "title": "Placement and issuance",
+     "props": {
+      "insurerName": "Jubilee",
+      "steps": [
+       {
+        "label": "Client instruction recorded",
+        "state": "done",
+        "note": "5 Oct 2026"
+       },
+       {
+        "label": "Placement request approved",
+        "state": "done",
+        "note": "6 Oct 2026"
+       },
+       {
+        "label": "Request sent to the insurer",
+        "state": "done",
+        "note": null
+       },
+       {
+        "label": "Insurer confirmation",
+        "state": "done",
+        "note": "8 Oct 2026"
+       },
+       {
+        "label": "Policy document issued and checked",
+        "state": "done",
+        "note": "0 unresolved differences"
+       }
+      ],
+      "coverLine": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied.",
+      "blockers": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the quotation",
+       "ref": {
+        "ws": "quote",
+        "opportunityId": "55555555-5555-4555-8555-555555555555"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "509fcb868c8124e6"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": {
+       "state": "active",
+       "line": "Active with Jubilee from 1 Nov 2026 — confirmed in writing and policy applied."
+      },
+      "daysToExpiry": 20,
+      "statement": "The renewed cover is stated exactly as the placement's cover check reads it. A request, a quote or a draft is never cover."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "1f1c850cd78b5647"
+    },
+    {
+     "id": "evidence",
+     "component": "EvidenceInspector",
+     "version": 1,
+     "role": "side",
+     "title": "Evidence",
+     "props": {
+      "items": [
+       {
+        "label": "CIC's answer",
+        "reference": "CIC quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "CIC — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Jubilee's answer",
+        "reference": "Jubilee quote.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-01T10:00:00Z"
+       },
+       {
+        "label": "Jubilee — Excess",
+        "reference": "page 2",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": null
+       },
+       {
+        "label": "Client instruction",
+        "reference": "Client email",
+        "documentId": "77777777-7777-4777-8777-777777777777",
+        "recordedAt": "2026-10-05T09:00:00Z"
+       },
+       {
+        "label": "Issued policy document",
+        "reference": "Jubilee policy schedule 2026.pdf",
+        "documentId": "22222222-2222-4222-8222-222222222222",
+        "recordedAt": "2026-10-10T08:00:00Z"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "c0b9c16bd055fc45"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ },
+ {
+  "key": "stopped",
+  "label": "Stopped",
+  "surface": {
+   "version": 1,
+   "surfaceId": "renewal:11111111-1111-4111-8111-111111111111",
+   "purpose": "renewal",
+   "subject": {
+    "kind": "work_item",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "title": "Renew Acme motor fleet"
+   },
+   "stage": {
+    "key": "stopped",
+    "label": "Stopped"
+   },
+   "generatedAt": "2026-10-12T09:00:00.000Z",
+   "fingerprint": "92ce3196e6def8cc",
+   "blocks": [
+    {
+     "id": "header",
+     "component": "ContextHeader",
+     "version": 1,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "eyebrow": "Renewal",
+      "title": "Acme Logistics — Motor fleet P-4471",
+      "client": {
+       "id": "33333333-3333-4333-8333-333333333333",
+       "name": "Acme Logistics"
+      },
+      "facts": [
+       {
+        "label": "Expiring insurer",
+        "value": "CIC"
+       },
+       {
+        "label": "Cover ends",
+        "value": "31 Oct 2026 · 20 days"
+       },
+       {
+        "label": "Workflow status (recorded)",
+        "value": "Stopped — needs a person"
+       }
+      ],
+      "status": {
+       "label": "Stopped",
+       "tone": "red"
+      },
+      "owner": "Wanjiru"
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Open the client",
+       "ref": {
+        "ws": "client",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Everything for this client",
+       "ref": {
+        "ws": "investigation",
+        "clientId": "33333333-3333-4333-8333-333333333333"
+       },
+       "primary": false
+      },
+      {
+       "kind": "open",
+       "label": "Open the renewal steps",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": false
+      }
+     ],
+     "hash": "20648d69233c154c"
+    },
+    {
+     "id": "journey",
+     "component": "RenewalJourney",
+     "version": 2,
+     "role": "lead",
+     "title": null,
+     "props": {
+      "stages": [
+       {
+        "key": "attention",
+        "label": "Needs attention",
+        "state": "done"
+       },
+       {
+        "key": "preparing",
+        "label": "Preparing",
+        "state": "next"
+       },
+       {
+        "key": "awaiting_terms",
+        "label": "Insurer terms",
+        "state": "next"
+       },
+       {
+        "key": "comparing",
+        "label": "Comparing",
+        "state": "next"
+       },
+       {
+        "key": "deciding",
+        "label": "Client decision",
+        "state": "next"
+       },
+       {
+        "key": "placing",
+        "label": "Placement",
+        "state": "next"
+       },
+       {
+        "key": "issuing",
+        "label": "Issuance",
+        "state": "next"
+       },
+       {
+        "key": "verified",
+        "label": "Verified",
+        "state": "next"
+       },
+       {
+        "key": "continuing",
+        "label": "Continuing",
+        "state": "next"
+       }
+      ],
+      "summary": "Add the client's email address. The policy is checked; nothing has been sent"
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "a03d1f151c1d61d3"
+    },
+    {
+     "id": "next",
+     "component": "ProgressOpportunity",
+     "version": 1,
+     "role": "main",
+     "title": "What moves this forward",
+     "props": {
+      "items": [
+       {
+        "id": "run-exception",
+        "title": "The client has no email address on file",
+        "why": "Add the client's email so the renewal letter can be prepared.",
+        "responsible": "Wanjiru",
+        "deadline": "2026-10-31",
+        "actionableNow": true,
+        "requiresApproval": false,
+        "blockedBy": [],
+        "tone": "red"
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "open",
+       "label": "Resolve it",
+       "ref": {
+        "ws": "renewal",
+        "runId": "44444444-4444-4444-8444-444444444444"
+       },
+       "primary": true
+      }
+     ],
+     "hash": "9766b620a07b7fd9"
+    },
+    {
+     "id": "consequences",
+     "component": "ConsequencePanel",
+     "version": 1,
+     "role": "side",
+     "title": "What this means",
+     "props": {
+      "items": [
+       {
+        "certainty": "potential",
+        "text": "The current cover ends on 31 Oct 2026 (20 days). Nothing on file yet confirms cover from that date."
+       }
+      ]
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "18a4631bd0a2c3d7"
+    },
+    {
+     "id": "obligations",
+     "component": "ObligationTracker",
+     "version": 1,
+     "role": "side",
+     "title": "Who holds the next step",
+     "props": {
+      "items": []
+     },
+     "evidence": [],
+     "actions": [
+      {
+       "kind": "command",
+       "label": "Follow up now",
+       "command": "run.follow_up_now",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [],
+       "confirm": {
+        "title": "Follow up now?",
+        "body": "ASAP raises the follow-up to the insurer today, as the approved request allows."
+       },
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Move the next follow-up",
+       "command": "run.move_follow_up",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "on",
+         "label": "Next follow-up on",
+         "kind": "date",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Escalate",
+       "command": "run.escalate",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why it is escalated",
+         "kind": "textarea",
+         "required": true,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      },
+      {
+       "kind": "command",
+       "label": "Pause ASAP",
+       "command": "run.pause",
+       "target": "44444444-4444-4444-8444-444444444444",
+       "payload": {},
+       "inputs": [
+        {
+         "name": "reason",
+         "label": "Why (optional)",
+         "kind": "textarea",
+         "required": false,
+         "options": [],
+         "hint": null
+        }
+       ],
+       "confirm": null,
+       "tone": "default"
+      }
+     ],
+     "hash": "810212564eb05780"
+    },
+    {
+     "id": "cover",
+     "component": "CoverageEffectiveState",
+     "version": 1,
+     "role": "side",
+     "title": "Cover",
+     "props": {
+      "expiring": {
+       "periodStart": "2025-11-01",
+       "periodEnd": "2026-10-31",
+       "insurerName": "CIC",
+       "policyNumber": "P-4471"
+      },
+      "renewed": null,
+      "daysToExpiry": 20,
+      "statement": "No renewed cover is on file. A quotation or a request does not create cover; only the insurer's written confirmation does."
+     },
+     "evidence": [],
+     "actions": [],
+     "hash": "d4ed4f7c58445a77"
+    }
+   ],
+   "ai": {
+    "available": false
+   },
+   "unavailable": []
+  }
+ }
+]

@@ -18,6 +18,7 @@
     "test": "turbo run test",
     "test:rls": "bash scripts/test-rls.sh",
     "test:connected": "bash scripts/test-connected.sh",
+    "test:connected:perf": "CONNECTED_PERF=1 CONNECTED_FILES='test/connected/living-surface.test.ts test/connected/living-volume.test.ts' bash scripts/test-connected.sh",
     "db:reset": "supabase db reset",
     "db:verify:local": "bash scripts/db-verify-local.sh",
     "db:drift": "pnpm --filter @asap/db run drift",
@@ -29,7 +30,8 @@
     "verify:live": "bash scripts/verify-live.sh",
     "eval:ask": "pnpm --filter @asap/api eval:ask",
     "test:extractor": "cd apps/extractor && python3 -m pytest tests -q",
-    "test:e2e": "bash scripts/test-e2e.sh"
+    "test:e2e": "bash scripts/test-e2e.sh",
+    "eval:workspace:live": "WORKSPACE_MODEL_EVAL_LIVE=1 WORKSPACE_EVAL_LIVE=1 pnpm --filter @asap/api exec vitest run test/evaluation/workspace-model-fallback.test.ts test/evaluation/workspace-requests.test.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

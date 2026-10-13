@@ -22,6 +22,7 @@ import { clientRoutes } from "./routes/clients.js";
 import { comparisonRoutes } from "./routes/comparisons.js";
 import { opportunityRoutes } from "./routes/opportunities.js";
 import { placementRoutes } from "./routes/placement.js";
+import { livingRoutes } from "./routes/living.js";
 import { policyRoutes } from "./routes/policy.js";
 import { quotationReadingRoutes } from "./routes/quotation-reading.js";
 import { ruleRoutes } from "./routes/rules.js";
@@ -204,6 +205,9 @@ export function createApp(deps: AppDeps) {
     "/space-pins",
     "/conversations/*",
     "/spaces/*",
+    "/living/*",
+    "/surface-preferences/*",
+    "/home/changes",
     "/work",
     "/work-items",
     "/work-items/*",
@@ -245,6 +249,8 @@ export function createApp(deps: AppDeps) {
     "/exception-suggestions/*",
     "/chaser-templates",
     "/chaser-templates/*",
+    /* A colleague acknowledging work handed to them (D-166). */
+    "/work-handovers/*",
   ]) {
     app.use(path, guard);
   }
@@ -287,6 +293,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", ruleRoutes({ logger }));
   app.route("/", quotationReadingRoutes({ logger }));
   app.route("/", placementRoutes({ logger }));
+  app.route("/", livingRoutes({ logger, aiAvailable: !!deps.aiProvider, provider: deps.aiProvider ?? null }));
   app.route("/", policyRoutes({ logger }));
   app.route(
     "/",
