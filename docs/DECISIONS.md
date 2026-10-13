@@ -3155,3 +3155,12 @@ No new design; the approved identity is unchanged. From the D-169 screenshot rev
   `ensure_rls` event trigger — read from the hosted catalogue and recorded in
   `scripts/release/supabase17-services.sql`. The release still recommends a Supabase branch before
   production (`docs/release/RELEASE-0079-0091.md` §2a, §3).
+
+## D-171 — The live site is production
+
+At the owner's instruction (13 Oct 2026) the Render services that serve the live site carry
+`APP_ENV=production` (API, worker, extractor) and `VITE_PUBLIC_APP_ENV=production` (web); they had been
+labelled `staging` since they were created. Staging and production share the same configuration checks,
+so behaviour is unchanged; `scripts/seed-set-passwords.mjs` now refuses to run against them, as D-052
+intends. There is no separate staging environment: main-browser acceptance happens on the live site in
+the owner's brokerage (`docs/release/MAIN-BROWSER-ACCEPTANCE.md`).
