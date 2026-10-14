@@ -127,6 +127,7 @@ describe("Drizzle schema conventions", () => {
       "event_deliveries",
       "events",
       "exception_suggestions",
+      "experience_sessions",
       "import_batches",
       "import_rows",
       "inbound_classifications",

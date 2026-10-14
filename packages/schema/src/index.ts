@@ -32,3 +32,4 @@ export * from "./views/boards.js";
 export * from "./draft-safety.js";
 export * from "./shell.js";
 export * from "./living.js";
+export * from "./experience-v2.js";

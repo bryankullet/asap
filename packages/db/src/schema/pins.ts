@@ -142,3 +142,30 @@ export const renewalProposals = pgTable(
     index("renewal_proposals_created_by_idx").on(t.createdBy),
   ],
 );
+
+/** One person's continuing working context in one brokerage (0092, D-172). Interface state and record references only. */
+export const experienceSessions = pgTable(
+  "experience_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    kind: text("kind").notNull(),
+    expression: text("expression").notNull(),
+    intent: jsonb("intent").notNull().default(sql`'{}'::jsonb`),
+    subjects: jsonb("subjects").notNull().default(sql`'[]'::jsonb`),
+    progress: text("progress").notNull().default("started"),
+    revision: integer("revision").notNull().default(1),
+    uiState: jsonb("ui_state").notNull().default(sql`'{}'::jsonb`),
+    uiVersion: integer("ui_version").notNull().default(0),
+    archivedAt: timestamptz("archived_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("experience_sessions_owner_idx").on(t.organizationId, t.userId, t.updatedAt),
+    index("experience_sessions_user_id_idx").on(t.userId),
+    check("experience_sessions_kind_check", sql`kind in ('create_client', 'explore_policies', 'renew_policy', 'clarify', 'unsupported')`),
+  ],
+);

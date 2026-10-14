@@ -128,6 +128,8 @@ pnpm test:connected:perf           # composition-time budgets, run alone (they m
 pnpm test:e2e                      # real browser over the real API (E2E_SCRIPT picks the suite)
 pnpm eval:ask                      # Ask and workspace-request evaluations, offline (§45 rule 11)
 pnpm eval:workspace:live           # the same, plus the model path, through the configured AI gateway
+pnpm dev:next                      # the progressive interface (apps/web-next, D-172), port 5174
+pnpm test:e2e:next                 # its supporting headless run over the real API and a disposable database
 ```
 
 If a command above does not exist yet, create it in the root `package.json` rather than inventing a different one.
@@ -295,6 +297,12 @@ the gateway only when no rule matches, D-165). Implementation map:
 `docs/ui/INTELLIGENT-UI-IMPLEMENTATION.md`; release audit and plan for 0079–0091:
 `docs/release/RELEASE-0079-0091.md`. **Hosted database: through 0091** (0079–0091 applied 13 Oct 2026
 with the owner's approval; execution log in the release document).
+
+**The progressive interface** (D-172, branch work, not deployed). `apps/web-next` is a new frontend
+beside `apps/web`: Home, then experiences composed on the server around the person's intention
+(`packages/schema/src/experience-v2.ts`, `apps/api/src/experience/`), rendered by a generic layout
+renderer and a component registry, with business changes only through existing governed endpoints.
+It imports nothing from `apps/web`. Map and status: `docs/ui/PROGRESSIVE-INTERFACE.md`.
 
 If you find yourself building a list page for an entity type, stop. That is the old product leaking back in.
 

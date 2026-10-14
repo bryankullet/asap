@@ -3164,3 +3164,20 @@ labelled `staging` since they were created. Staging and production share the sam
 so behaviour is unchanged; `scripts/seed-set-passwords.mjs` now refuses to run against them, as D-052
 intends. There is no separate staging environment: main-browser acceptance happens on the live site in
 the owner's brokerage (`docs/release/MAIN-BROWSER-ACCEPTANCE.md`).
+
+## D-172 — The progressive Living Brokerage Interface (apps/web-next)
+
+A new frontend, `apps/web-next`, beside `apps/web`, builds the interface around the person's intention
+instead of fixed screens. The server composes an `ASAPExperienceSpec` (packages/schema
+`experience-v2.ts`): intent, authorized context, a bounded layout grammar (stack, grid, split, flow,
+table, tabs, overlay, dock, focus), 20 registered components by interaction purpose, a closed set of
+governed actions, continuity and revisions, validated in full before rendering (including that every
+record reference was loaded under the viewer's session). Intent is read by rules first and by the AI
+gateway only when no rule matches, as a schema-checked reading of words the person typed. Business
+changes go through the endpoints that already own them (`POST /clients`, `POST /workflows/renewals`,
+`POST /workflow-approvals/:id/decide`) through a closed browser-side map. Experience sessions
+(migration 0092) hold interface state and record references per person and brokerage under RLS —
+never business values. The three first experiences (add a client, explore expiring policies, renew a
+policy) compose three different structures. Details and status: `docs/ui/PROGRESSIVE-INTERFACE.md`.
+Main-browser acceptance is blocked in the cloud environment; 0092 is not applied to the hosted
+database; nothing is deployed.

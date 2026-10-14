@@ -40,6 +40,7 @@ export default tseslint.config(
       "**/scripts/**/*.mjs",
       "**/scripts/**/*.ts",
       "**/parity/**/*.mjs",
+      "apps/web-next/e2e/**/*.mjs",
     ],
     rules: { "no-console": "off" },
   },
