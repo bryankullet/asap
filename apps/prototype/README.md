@@ -2,7 +2,7 @@
 
 The "hire an assistant" prototype: landing page, hiring and naming an assistant, a guided first visit, and the workspace (Today / Everything), with file import (Excel, CSV, PDF), real sending through WhatsApp or email links, and work saved in the browser.
 
-It is a single built page (`index.html`) plus `audio/` (pre-recorded voice lines), `img/` (portraits) and `samples/` (test files for the importer). It talks to no ASAP backend.
+It is a single built page (`index.html`) plus `audio/` (pre-recorded voice lines), `img/` (portraits) and the brand icons and link-preview image. Every broker starts with an empty workspace and their own data. It talks to no ASAP backend.
 
 Publish it on Render's `asap-web` service by setting `ASAP_FRONTEND=prototype` (see `apps/web/scripts/build-for-render.mjs`). Roll back with `ASAP_FRONTEND=next` or `legacy`.
 
