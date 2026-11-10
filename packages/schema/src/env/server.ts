@@ -85,6 +85,13 @@ export const serverEnvSchema = z
     MAILBOX_SYNC_ATTACHMENT_TYPES: z
       .string()
       .default("application/pdf,image/jpeg,image/png,image/tiff"),
+    /**
+     * Website intake (D-173). The secret the brokerage's public website presents, server to
+     * server, and the brokerage its enquiries belong to. Both or neither: absent, the route is not
+     * mounted and the API says so at boot. Never a VITE_ value — no browser ever holds the key.
+     */
+    WEBSITE_INTAKE_KEY: z.string().min(32).optional(),
+    WEBSITE_INTAKE_ORGANIZATION_ID: z.string().uuid().optional(),
     EXTRACTOR_URL: optionalNonEmpty,
     EXTRACTOR_SHARED_SECRET: optionalNonEmpty,
     /**
@@ -111,6 +118,10 @@ export const serverEnvSchema = z
   // Email and Sentry are optional everywhere (D-046): absence disables the feature at boot with a
   // log line. What stays required in deployed environments is what the API cannot run without.
   .superRefine(requireInDeployedEnvironments([]))
+  .refine((v) => (v.WEBSITE_INTAKE_KEY === undefined) === (v.WEBSITE_INTAKE_ORGANIZATION_ID === undefined), {
+    message: "WEBSITE_INTAKE_KEY and WEBSITE_INTAKE_ORGANIZATION_ID must be set together",
+    path: ["WEBSITE_INTAKE_ORGANIZATION_ID"],
+  })
   .refine((v) => (v.RESEND_API_KEY === undefined) === (v.RESEND_FROM_EMAIL === undefined), {
     message: "RESEND_API_KEY and RESEND_FROM_EMAIL must be set together",
     path: ["RESEND_FROM_EMAIL"],

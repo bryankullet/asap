@@ -30,6 +30,7 @@ import { ruleRoutes } from "./routes/rules.js";
 import type { MailboxProvider, SyncLimits } from "./mailbox/types.js";
 import { importRoutes } from "./routes/imports.js";
 import { internalRoutes } from "./routes/internal.js";
+import { websiteIntakeRoutes } from "./routes/website-intake.js";
 import { documentRoutes } from "./routes/documents.js";
 import { healthRoutes } from "./routes/health.js";
 import { invitationPublicRoutes, invitationRoutes } from "./routes/invitations.js";
@@ -59,6 +60,11 @@ export type AppDeps = {
    * case the internal surface is not mounted at all rather than mounted with an empty key.
    */
   apiInternalKey?: string | undefined;
+  /**
+   * Website intake (D-173): the website's shared secret and the brokerage its enquiries belong to.
+   * Absent, the route is not mounted — a 404, not a 401 that invites guessing.
+   */
+  websiteIntake?: { key: string; organizationId: string } | undefined;
   /** Reads filed documents. Absent on a deployment with none: documents say they are unread. */
   extractor?: Extractor | null | undefined;
   /** Identifies this process on every run it starts; recovery on boot ends runs from other tokens. */
@@ -173,6 +179,21 @@ export function createApp(deps: AppDeps) {
     );
   }
   app.route("/", invitationPublicRoutes({ supabase }));
+  /*
+   * The brokerage's website, server to server. No session and no CORS: it carries its own secret,
+   * and the brokerage is this deployment's configuration, never the caller's choice.
+   */
+  if (deps.websiteIntake) {
+    app.route(
+      "/",
+      websiteIntakeRoutes({
+        logger,
+        service: () => supabase.service(),
+        intakeKey: deps.websiteIntake.key,
+        organizationId: deps.websiteIntake.organizationId,
+      }),
+    );
+  }
 
   // Signed-in. The middleware is bound to the authenticated path prefixes only, so an unknown
   // path is a 404 rather than a 401, and GET /invitations/:token stays public.

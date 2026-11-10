@@ -3181,3 +3181,9 @@ never business values. The three first experiences (add a client, explore expiri
 policy) compose three different structures. Details and status: `docs/ui/PROGRESSIVE-INTERFACE.md`.
 Main-browser acceptance is blocked in the cloud environment; 0092 is not applied to the hosted
 database; nothing is deployed.
+
+## D-173 · 2026-11-10 · Website intake: the public website forwards enquiries server to server
+
+**Decision.** `POST /intake/website` accepts an enquiry the brokerage's website has already saved, authenticated by `WEBSITE_INTAKE_KEY` and filed into the brokerage named by `WEBSITE_INTAKE_ORGANIZATION_ID` — configuration, never the caller's choice (§45 rule 5). Without both settings the route is not mounted. It finds the visitor's client by email, then phone, or files a new one (landing `not_started`, so the due-diligence gate applies), and opens one `kind: inbound` Work item per website reference (`source_type = website_enquiry`, unique per 0055). No migration: the shape is the Unsorted email's (D-144). No CORS change: it is never called from a browser. KRA PIN and ID numbers stay on the website.
+
+**Reason.** Video traffic lands on the website; the team works in ASAP. The simplest bridge that keeps tenancy and audit intact. **Staging holds synthetic data only (D-003)**, so the website's forwarding stays off for real visitors until production exists or the owner decides otherwise.

@@ -42,6 +42,8 @@ if (mailer instanceof LogMailer)
     { app_env: env.APP_ENV },
     "email disabled: RESEND_API_KEY not set; invitation links are logged, not sent",
   );
+if (!env.WEBSITE_INTAKE_KEY)
+  logger.warn({ app_env: env.APP_ENV }, "website intake disabled: WEBSITE_INTAKE_KEY not set");
 if (!env.SENTRY_DSN)
   logger.warn({ app_env: env.APP_ENV }, "error reporting disabled: SENTRY_DSN not set");
 
@@ -104,6 +106,10 @@ const app = createApp({
   exposeAcceptUrl: env.APP_ENV === "local",
   executor: createExecutor({ logger, delayMs: 400 }),
   apiInternalKey: env.API_INTERNAL_KEY,
+  websiteIntake:
+    env.WEBSITE_INTAKE_KEY && env.WEBSITE_INTAKE_ORGANIZATION_ID
+      ? { key: env.WEBSITE_INTAKE_KEY, organizationId: env.WEBSITE_INTAKE_ORGANIZATION_ID }
+      : undefined,
   /*
    * The service that reads documents. Absent is a valid deployment: files are still filed, and
    * say plainly that nothing has read them — which is better than a queue that never drains.
